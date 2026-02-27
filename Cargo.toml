@@ -1,14 +1,24 @@
 [package]
-name = "des"
+name = "cryptography"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "des"
+name = "cryptography"
 path = "src/lib.rs"
 
 [[bin]]
-name = "des"
+name = "cryptography"
 path = "src/main.rs"
+
+# Benchmarks: `cargo bench`
+# Requires libsodium: brew install libsodium
+[[bench]]
+name = "aes_bench"
+harness = false
+
+[dev-dependencies]
+criterion   = { version = "0.5", features = ["html_reports"] }
+sodiumoxide = "0.2"
 
 [dependencies]
