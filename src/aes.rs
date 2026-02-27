@@ -484,6 +484,30 @@ impl Aes256 {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BlockCipher trait implementations
+// ─────────────────────────────────────────────────────────────────────────────
+
+macro_rules! impl_block_cipher_aes {
+    ($Name:ident) => {
+        impl crate::BlockCipher for $Name {
+            const BLOCK_LEN: usize = 16;
+            fn encrypt(&self, block: &mut [u8]) {
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                block.copy_from_slice(&self.encrypt_block(arr));
+            }
+            fn decrypt(&self, block: &mut [u8]) {
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                block.copy_from_slice(&self.decrypt_block(arr));
+            }
+        }
+    };
+}
+
+impl_block_cipher_aes!(Aes128);
+impl_block_cipher_aes!(Aes192);
+impl_block_cipher_aes!(Aes256);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests — NIST CAVP KAT_AES vectors (CAVS 11.1, csrc.nist.gov)
 // ─────────────────────────────────────────────────────────────────────────────
 

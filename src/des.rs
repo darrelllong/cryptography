@@ -158,7 +158,119 @@ const SBOXES: [[u8; 64]; 8] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Bit-manipulation helpers
+// Byte-level precomputed permutation tables
+//
+// Replace the bit-by-bit permutation loops in the hot path (des_block + f)
+// with 8- or 4-lookup OR-trees.
+//
+// For a permutation perm of width W bits:
+//   table[b][v]  =  contribution to the W-bit output
+//                   when input byte b (big-endian, b=0 is MSB byte)
+//                   has value v.
+//
+// The original loop:
+//   for (i, &src) in perm.iter().enumerate() { out |= bit(input, src) << (W-1-i) }
+// becomes:
+//   out = table[0][byte0] | table[1][byte1] | … | table[B-1][byteB-1]
+//
+// Tables are computed entirely at compile time via const fns.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
+    let mut table = [[0u64; 256]; 8];
+    let mut i = 0usize;
+    while i < 64 {
+        let src      = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of u64)
+        let src_byte = src / 8;
+        let src_bit  = src % 8;                 // 0 = MSB of that byte
+        let out_bit  = 63 - i;
+        let mut v = 0usize;
+        while v < 256 {
+            if (v >> (7 - src_bit)) & 1 == 1 {
+                table[src_byte][v] |= 1u64 << out_bit;
+            }
+            v += 1;
+        }
+        i += 1;
+    }
+    table
+}
+
+const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
+    let mut table = [[0u64; 256]; 4];
+    let mut i = 0usize;
+    while i < 48 {
+        let src      = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of 32-bit R)
+        let src_byte = src / 8;
+        let src_bit  = src % 8;
+        let out_bit  = 47 - i;
+        let mut v = 0usize;
+        while v < 256 {
+            if (v >> (7 - src_bit)) & 1 == 1 {
+                table[src_byte][v] |= 1u64 << out_bit;
+            }
+            v += 1;
+        }
+        i += 1;
+    }
+    table
+}
+
+const fn build_perm_p(perm: &[u8; 32]) -> [[u32; 256]; 4] {
+    let mut table = [[0u32; 256]; 4];
+    let mut i = 0usize;
+    while i < 32 {
+        let src      = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of 32-bit S-output)
+        let src_byte = src / 8;
+        let src_bit  = src % 8;
+        let out_bit  = 31 - i;
+        let mut v = 0usize;
+        while v < 256 {
+            if (v >> (7 - src_bit)) & 1 == 1 {
+                table[src_byte][v] |= 1u32 << out_bit;
+            }
+            v += 1;
+        }
+        i += 1;
+    }
+    table
+}
+
+static IP_TABLE: [[u64; 256]; 8] = build_perm64(&IP);
+static FP_TABLE: [[u64; 256]; 8] = build_perm64(&FP);
+static  E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
+static  P_TABLE: [[u32; 256]; 4] = build_perm_p(&P);
+
+#[inline(always)]
+fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
+    t[0][(x >> 56)          as usize]
+  | t[1][((x >> 48) & 0xff) as usize]
+  | t[2][((x >> 40) & 0xff) as usize]
+  | t[3][((x >> 32) & 0xff) as usize]
+  | t[4][((x >> 24) & 0xff) as usize]
+  | t[5][((x >> 16) & 0xff) as usize]
+  | t[6][((x >>  8) & 0xff) as usize]
+  | t[7][ (x        & 0xff) as usize]
+}
+
+#[inline(always)]
+fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
+    t[0][(r >> 24)          as usize]
+  | t[1][((r >> 16) & 0xff) as usize]
+  | t[2][((r >>  8) & 0xff) as usize]
+  | t[3][ (r        & 0xff) as usize]
+}
+
+#[inline(always)]
+fn fast_perm_p(s: u32, t: &[[u32; 256]; 4]) -> u32 {
+    t[0][(s >> 24)          as usize]
+  | t[1][((s >> 16) & 0xff) as usize]
+  | t[2][((s >>  8) & 0xff) as usize]
+  | t[3][ (s        & 0xff) as usize]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bit-manipulation helpers  (used only by key_schedule — not in the hot path)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Extract bit `pos` (1-indexed, MSB = 1) from a 64-bit big-endian block.
@@ -167,11 +279,6 @@ fn bit64(block: u64, pos: u8) -> u64 {
     (block >> (64 - pos)) & 1
 }
 
-/// Extract bit `pos` (1-indexed, MSB = 1) from a 32-bit value.
-#[inline(always)]
-fn bit32(block: u32, pos: u8) -> u32 {
-    (block >> (32 - pos)) & 1
-}
 
 /// Apply a permutation table to a 64-bit block.
 /// Each entry in `table` is a 1-indexed source bit position.
@@ -193,14 +300,6 @@ fn permute64_to48(input: u64, table: &[u8; 48]) -> u64 {
     out
 }
 
-/// Apply the P permutation to a 32-bit value (S-box output → 32-bit result).
-fn permute_p(input: u32) -> u32 {
-    let mut out = 0u32;
-    for (i, &src) in P.iter().enumerate() {
-        out |= bit32(input, src) << (31 - i);
-    }
-    out
-}
 
 /// Left-rotate a `bits`-wide value by `n` positions.
 #[inline(always)]
@@ -253,13 +352,8 @@ pub fn key_schedule(key: u64) -> KeySchedule {
 
 /// The DES f-function: f(R, K) = P(S(E(R) ⊕ K))
 fn f(r: u32, subkey: u64) -> u32 {
-    // Expand R from 32 to 48 bits using E.
-    // R is a 32-bit value; represent it as u64 in the top 32 bits for permute.
-    let r64 = (r as u64) << 32;
-    let expanded = permute64_to48(r64, &E);
-
-    // XOR with the 48-bit subkey.
-    let xored = expanded ^ subkey;
+    // Expand R from 32 to 48 bits using the precomputed E byte-table.
+    let xored = fast_expand(r, &E_TABLE) ^ subkey;
 
     // Pass through 8 S-boxes.
     let mut sout = 0u32;
@@ -276,8 +370,8 @@ fn f(r: u32, subkey: u64) -> u32 {
         sout |= sval << (28 - 4 * i);
     }
 
-    // Apply permutation P.
-    permute_p(sout)
+    // Apply permutation P via the precomputed byte-table.
+    fast_perm_p(sout, &P_TABLE)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -289,8 +383,8 @@ fn f(r: u32, subkey: u64) -> u32 {
 /// For encryption, pass `schedule` from [`key_schedule`].
 /// For decryption, pass the schedule reversed: `let dec = { let mut s = ks; s.reverse(); s }`.
 fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
-    // Initial Permutation.
-    let permuted = permute64(block, &IP);
+    // Initial Permutation via precomputed byte-table.
+    let permuted = fast_perm64(block, &IP_TABLE);
 
     let mut l = (permuted >> 32) as u32;
     let mut r = permuted as u32;
@@ -302,9 +396,9 @@ fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
         l = tmp;
     }
 
-    // Pre-output: swap L and R, then apply FP.
+    // Pre-output: swap L and R, then apply FP via precomputed byte-table.
     let pre_output = ((r as u64) << 32) | (l as u64);
-    permute64(pre_output, &FP)
+    fast_perm64(pre_output, &FP_TABLE)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -432,6 +526,34 @@ impl TripleDes {
         let t2 = des_block(t1, &self.k2_enc); // E with K2
         let p  = des_block(t2, &self.k1_dec); // D with K1
         p.to_be_bytes()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BlockCipher trait implementations
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl crate::BlockCipher for Des {
+    const BLOCK_LEN: usize = 8;
+    fn encrypt(&self, block: &mut [u8]) {
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.encrypt_block(arr));
+    }
+    fn decrypt(&self, block: &mut [u8]) {
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.decrypt_block(arr));
+    }
+}
+
+impl crate::BlockCipher for TripleDes {
+    const BLOCK_LEN: usize = 8;
+    fn encrypt(&self, block: &mut [u8]) {
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.encrypt_block(arr));
+    }
+    fn decrypt(&self, block: &mut [u8]) {
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.decrypt_block(arr));
     }
 }
 

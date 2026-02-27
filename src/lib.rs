@@ -6,6 +6,19 @@ pub mod des;
 pub mod simon;
 pub mod speck;
 
+/// Common interface for block ciphers.
+///
+/// Every cipher exposes in-place `encrypt` / `decrypt` operating on a byte
+/// slice whose length must equal `Self::BLOCK_LEN`.
+pub trait BlockCipher {
+    /// Block length in bytes.
+    const BLOCK_LEN: usize;
+    /// Encrypt one block in-place.  Panics if `block.len() != BLOCK_LEN`.
+    fn encrypt(&self, block: &mut [u8]);
+    /// Decrypt one block in-place.  Panics if `block.len() != BLOCK_LEN`.
+    fn decrypt(&self, block: &mut [u8]);
+}
+
 pub use aes::{Aes128, Aes192, Aes256};
 pub use des::{Des, KeySchedule, TDesMode, TripleDes, key_schedule};
 pub use simon::{

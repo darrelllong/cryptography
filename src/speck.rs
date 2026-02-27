@@ -145,6 +145,17 @@ macro_rules! speck_variant {
                 out
             }
         }
+        impl crate::BlockCipher for $Name {
+            const BLOCK_LEN: usize = $blk_len;
+            fn encrypt(&self, block: &mut [u8]) {
+                let arr: &[u8; $blk_len] = (&*block).try_into().expect("wrong block length");
+                block.copy_from_slice(&self.encrypt_block(arr));
+            }
+            fn decrypt(&self, block: &mut [u8]) {
+                let arr: &[u8; $blk_len] = (&*block).try_into().expect("wrong block length");
+                block.copy_from_slice(&self.decrypt_block(arr));
+            }
+        }
     };
 }
 
