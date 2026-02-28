@@ -11,6 +11,10 @@ and measured throughput on Apple M4.
 
 ## References
 
+Local copies of implementation-specific papers live in `pubs/`. The
+Boyar-Peralta AES S-box circuit paper is stored at
+`pubs/boyar-peralta-2011-a-depth-16-circuit-for-the-aes-s-box.pdf`.
+
 ```bibtex
 @misc{simon-speck-2013,
   author       = {Ray Beaulieu and Douglas Shors and Jason Smith and
@@ -30,6 +34,14 @@ and measured throughput on Apple M4.
   year        = {2001},
   month       = nov,
   url         = {https://csrc.nist.gov/publications/detail/fips/197/final},
+}
+
+@misc{boyar-peralta-2011,
+  author       = {Joan Boyar and Ren{\'e} Peralta},
+  title        = {A depth-16 circuit for the {AES} {S}-box},
+  howpublished = {{IACR} Cryptology ePrint Archive, Report 2011/332},
+  year         = {2011},
+  url          = {https://eprint.iacr.org/2011/332},
 }
 
 @techreport{fips46-3,

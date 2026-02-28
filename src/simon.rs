@@ -44,21 +44,30 @@ const Z: [u64; 5] = [
 #[inline(always)]
 fn load_le(src: &[u8]) -> u64 {
     let mut v = 0u64;
-    for (i, &b) in src.iter().enumerate() { v |= (b as u64) << (8 * i); }
+    for (i, &b) in src.iter().enumerate() {
+        v |= (b as u64) << (8 * i);
+    }
     v
 }
 
 /// Store the low bytes of a u64 in little-endian order.
 #[inline(always)]
 fn store_le(mut v: u64, dst: &mut [u8]) {
-    for b in dst.iter_mut() { *b = v as u8; v >>= 8; }
+    for b in dst.iter_mut() {
+        *b = v as u8;
+        v >>= 8;
+    }
 }
 
 #[inline(always)]
-fn rotl(x: u64, r: u32, n: u32, mask: u64) -> u64 { ((x << r) | (x >> (n - r))) & mask }
+fn rotl(x: u64, r: u32, n: u32, mask: u64) -> u64 {
+    ((x << r) | (x >> (n - r))) & mask
+}
 
 #[inline(always)]
-fn rotr(x: u64, r: u32, n: u32, mask: u64) -> u64 { ((x >> r) | (x << (n - r))) & mask }
+fn rotr(x: u64, r: u32, n: u32, mask: u64) -> u64 {
+    ((x >> r) | (x << (n - r))) & mask
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Key expansion — §3
@@ -74,15 +83,16 @@ fn rotr(x: u64, r: u32, n: u32, mask: u64) -> u64 { ((x >> r) | (x << (n - r))) 
 // Note: ∼k_{i-m} ⊕ 3 = ∼3 ⊕ k_{i-m}  (XOR is associative/commutative).
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn simon_expand(key: &[u8], n: u32, m: usize, t: usize, z_idx: usize, mask: u64,
-                rk: &mut [u64]) {
+fn simon_expand(key: &[u8], n: u32, m: usize, t: usize, z_idx: usize, mask: u64, rk: &mut [u64]) {
     let wb = (n / 8) as usize;
     for i in 0..m {
         rk[i] = load_le(&key[i * wb..(i + 1) * wb]);
     }
     for i in m..t {
         let mut tmp = rotr(rk[i - 1], 3, n, mask);
-        if m == 4 { tmp ^= rk[i - 3]; }
+        if m == 4 {
+            tmp ^= rk[i - 3];
+        }
         tmp ^= rotr(tmp, 1, n, mask);
         let z_bit = (Z[z_idx] >> ((i - m) % 62)) & 1;
         rk[i] = (!rk[i - m] ^ tmp ^ z_bit ^ 3) & mask;
@@ -145,7 +155,9 @@ fn simon_dec(block: &mut [u8], rk: &[u64], n: u32, mask: u64) {
 macro_rules! simon_variant {
     ($Name:ident, $n:expr, $m:expr, $T:literal, $z:expr, $mask:expr,
      $key_len:literal, $blk_len:literal) => {
-        pub struct $Name { round_keys: [u64; $T] }
+        pub struct $Name {
+            round_keys: [u64; $T],
+        }
         impl $Name {
             pub fn new(key: &[u8; $key_len]) -> Self {
                 let mut rk = [0u64; $T];
@@ -192,16 +204,16 @@ macro_rules! simon_variant {
 }
 
 //                          n    m   T    z  mask                      key  blk
-simon_variant!(Simon32_64,   16, 4, 32,  0, 0xffff_u64,                8,  4);
-simon_variant!(Simon48_72,   24, 3, 36,  0, 0xff_ffff_u64,             9,  6);
-simon_variant!(Simon48_96,   24, 4, 36,  1, 0xff_ffff_u64,            12,  6);
-simon_variant!(Simon64_96,   32, 3, 42,  2, 0xffff_ffff_u64,          12,  8);
-simon_variant!(Simon64_128,  32, 4, 44,  3, 0xffff_ffff_u64,          16,  8);
-simon_variant!(Simon96_96,   48, 2, 52,  2, 0xffff_ffff_ffff_u64,     12, 12);
-simon_variant!(Simon96_144,  48, 3, 54,  3, 0xffff_ffff_ffff_u64,     18, 12);
-simon_variant!(Simon128_128, 64, 2, 68,  2, u64::MAX,                 16, 16);
-simon_variant!(Simon128_192, 64, 3, 69,  3, u64::MAX,                 24, 16);
-simon_variant!(Simon128_256, 64, 4, 72,  4, u64::MAX,                 32, 16);
+simon_variant!(Simon32_64, 16, 4, 32, 0, 0xffff_u64, 8, 4);
+simon_variant!(Simon48_72, 24, 3, 36, 0, 0xff_ffff_u64, 9, 6);
+simon_variant!(Simon48_96, 24, 4, 36, 1, 0xff_ffff_u64, 12, 6);
+simon_variant!(Simon64_96, 32, 3, 42, 2, 0xffff_ffff_u64, 12, 8);
+simon_variant!(Simon64_128, 32, 4, 44, 3, 0xffff_ffff_u64, 16, 8);
+simon_variant!(Simon96_96, 48, 2, 52, 2, 0xffff_ffff_ffff_u64, 12, 12);
+simon_variant!(Simon96_144, 48, 3, 54, 3, 0xffff_ffff_ffff_u64, 18, 12);
+simon_variant!(Simon128_128, 64, 2, 68, 2, u64::MAX, 16, 16);
+simon_variant!(Simon128_192, 64, 3, 69, 3, u64::MAX, 24, 16);
+simon_variant!(Simon128_256, 64, 4, 72, 4, u64::MAX, 32, 16);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests — known-answer vectors from Appendix B of the 2013 paper;
@@ -236,9 +248,9 @@ mod tests {
 
     #[test]
     fn simon32_64_kat() {
-        let key: [u8; 8]  = parse("0001080910111819");
-        let pt:  [u8; 4]  = parse("65657768");
-        let ct:  [u8; 4]  = parse("9bc6bbe9");
+        let key: [u8; 8] = parse("0001080910111819");
+        let pt: [u8; 4] = parse("65657768");
+        let ct: [u8; 4] = parse("9bc6bbe9");
         let c = Simon32_64::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -252,8 +264,8 @@ mod tests {
     #[test]
     fn simon64_128_kat() {
         let key: [u8; 16] = parse("0001020308090a0b1011121318191a1b");
-        let pt:  [u8; 8]  = parse("6c696b65756e6420");
-        let ct:  [u8; 8]  = parse("20fcc8447aa0dfb9");
+        let pt: [u8; 8] = parse("6c696b65756e6420");
+        let ct: [u8; 8] = parse("20fcc8447aa0dfb9");
         let c = Simon64_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -271,45 +283,81 @@ mod tests {
         };
     }
 
-    roundtrip!(simon48_72_roundtrip,   Simon48_72,
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,0x13],
-        [0x01,0x23,0x45,0x67,0x89,0xab]);
+    roundtrip!(
+        simon48_72_roundtrip,
+        Simon48_72,
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13],
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab]
+    );
 
-    roundtrip!(simon48_96_roundtrip,   Simon48_96,
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,0x13,0x57,0x9b,0xdf],
-        [0x02,0x46,0x8a,0xce,0x13,0x57]);
+    roundtrip!(
+        simon48_96_roundtrip,
+        Simon48_96,
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
+        [0x02, 0x46, 0x8a, 0xce, 0x13, 0x57]
+    );
 
-    roundtrip!(simon64_96_roundtrip,   Simon64_96,
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,0x13,0x57,0x9b,0xdf],
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef]);
+    roundtrip!(
+        simon64_96_roundtrip,
+        Simon64_96,
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]
+    );
 
-    roundtrip!(simon96_96_roundtrip,   Simon96_96,
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,0x13,0x57,0x9b,0xdf],
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,0x13,0x57,0x9b,0xdf]);
+    roundtrip!(
+        simon96_96_roundtrip,
+        Simon96_96,
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf]
+    );
 
-    roundtrip!(simon96_144_roundtrip,  Simon96_144,
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,
-         0x13,0x57,0x9b,0xdf,0x24,0x68,0xac,0xe0,0xf1,0x35],
-        [0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef,0x13,0x57,0x9b,0xdf]);
+    roundtrip!(
+        simon96_144_roundtrip,
+        Simon96_144,
+        [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf, 0x24, 0x68,
+            0xac, 0xe0, 0xf1, 0x35
+        ],
+        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf]
+    );
 
-    roundtrip!(simon128_128_roundtrip, Simon128_128,
-        [0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
-         0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f],
-        [0x63,0x73,0x65,0x64,0x20,0x73,0x72,0x65,
-         0x6c,0x6c,0x65,0x76,0x61,0x72,0x74,0x20]);
+    roundtrip!(
+        simon128_128_roundtrip,
+        Simon128_128,
+        [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f
+        ],
+        [
+            0x63, 0x73, 0x65, 0x64, 0x20, 0x73, 0x72, 0x65, 0x6c, 0x6c, 0x65, 0x76, 0x61, 0x72,
+            0x74, 0x20
+        ]
+    );
 
-    roundtrip!(simon128_192_roundtrip, Simon128_192,
-        [0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
-         0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
-         0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17],
-        [0x20,0x6d,0x61,0x64,0x65,0x20,0x69,0x74,
-         0x20,0x65,0x71,0x75,0x69,0x76,0x61,0x6c]);
+    roundtrip!(
+        simon128_192_roundtrip,
+        Simon128_192,
+        [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17
+        ],
+        [
+            0x20, 0x6d, 0x61, 0x64, 0x65, 0x20, 0x69, 0x74, 0x20, 0x65, 0x71, 0x75, 0x69, 0x76,
+            0x61, 0x6c
+        ]
+    );
 
-    roundtrip!(simon128_256_roundtrip, Simon128_256,
-        [0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
-         0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
-         0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
-         0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f],
-        [0x6e,0x20,0x74,0x68,0x65,0x72,0x65,0x20,
-         0x72,0x69,0x62,0x65,0x20,0x77,0x68,0x65]);
+    roundtrip!(
+        simon128_256_roundtrip,
+        Simon128_256,
+        [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f
+        ],
+        [
+            0x6e, 0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x20, 0x72, 0x69, 0x62, 0x65, 0x20, 0x77,
+            0x68, 0x65
+        ]
+    );
 }

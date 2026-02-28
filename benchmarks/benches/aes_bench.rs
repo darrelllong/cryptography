@@ -14,7 +14,7 @@
 //! HTML reports land in target/criterion/.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use cryptography::{Aes128, Aes192, Aes256};
+use cryptography::{Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct};
 use std::hint::black_box;
 
 // ── Our AES implementation ────────────────────────────────────────────────────
@@ -45,6 +45,44 @@ fn bench_our_aes(c: &mut Criterion) {
 
     // ── 1 KiB (64 blocks) — shows amortised throughput ──
     let aes256 = Aes256::new(&[0u8; 32]);
+    group.throughput(Throughput::Bytes(1024));
+    group.bench_with_input(
+        BenchmarkId::new("AES-256/1KiB", "64 blocks"),
+        &[0u8; 1024usize],
+        |b, msg| {
+            b.iter(|| {
+                msg.chunks_exact(16).fold([0u8; 16], |_, chunk| {
+                    aes256.encrypt_block(<&[u8; 16]>::try_from(chunk).unwrap())
+                })
+            })
+        },
+    );
+
+    group.finish();
+
+    let mut group = c.benchmark_group("our-AESCt-software");
+
+    group.throughput(Throughput::Bytes(16));
+
+    let aes128 = Aes128Ct::new(&[0u8; 16]);
+    group.bench_function("AES-128/block", |b| {
+        let blk = black_box([0u8; 16]);
+        b.iter(|| aes128.encrypt_block(&blk))
+    });
+
+    let aes192 = Aes192Ct::new(&[0u8; 24]);
+    group.bench_function("AES-192/block", |b| {
+        let blk = black_box([0u8; 16]);
+        b.iter(|| aes192.encrypt_block(&blk))
+    });
+
+    let aes256 = Aes256Ct::new(&[0u8; 32]);
+    group.bench_function("AES-256/block", |b| {
+        let blk = black_box([0u8; 16]);
+        b.iter(|| aes256.encrypt_block(&blk))
+    });
+
+    let aes256 = Aes256Ct::new(&[0u8; 32]);
     group.throughput(Throughput::Bytes(1024));
     group.bench_with_input(
         BenchmarkId::new("AES-256/1KiB", "64 blocks"),

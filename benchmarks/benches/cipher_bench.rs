@@ -12,10 +12,11 @@
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use cryptography::{
-    Aes128, Aes192, Aes256, BlockCipher, Des, Grasshopper, Magma, Simon32_64, Simon48_72,
-    Simon48_96, Simon64_96, Simon64_128, Simon96_96, Simon96_144, Simon128_128, Simon128_192,
-    Simon128_256, Speck32_64, Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96,
-    Speck96_144, Speck128_128, Speck128_192, Speck128_256, TripleDes,
+    Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct, BlockCipher, Des, DesCt, Grasshopper,
+    GrasshopperCt, Magma, MagmaCt, Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128,
+    Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Speck32_64, Speck48_72,
+    Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128, Speck128_192,
+    Speck128_256, TripleDes,
 };
 use std::hint::black_box;
 
@@ -110,8 +111,11 @@ fn bench_aes(c: &mut Criterion) {
     let mut g = c.benchmark_group("AES");
 
     bench_one(&mut g, "AES-128", Aes128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "AES-128-ct", Aes128Ct::new(&[0u8; 16]), &src);
     bench_one(&mut g, "AES-192", Aes192::new(&[0u8; 24]), &src);
+    bench_one(&mut g, "AES-192-ct", Aes192Ct::new(&[0u8; 24]), &src);
     bench_one(&mut g, "AES-256", Aes256::new(&[0u8; 32]), &src);
+    bench_one(&mut g, "AES-256-ct", Aes256Ct::new(&[0u8; 32]), &src);
 
     g.finish();
 }
@@ -123,6 +127,7 @@ fn bench_des(c: &mut Criterion) {
     let mut g = c.benchmark_group("DES");
 
     bench_one(&mut g, "DES", Des::new(&[0u8; 8]), &src);
+    bench_one(&mut g, "DES-ct", DesCt::new(&[0u8; 8]), &src);
     bench_one(&mut g, "3DES-2key", TripleDes::new_2key(&[0u8; 16]), &src);
     bench_one(&mut g, "3DES-3key", TripleDes::new_3key(&[0u8; 24]), &src);
 
@@ -136,6 +141,7 @@ fn bench_grasshopper(c: &mut Criterion) {
     let mut g = c.benchmark_group("Grasshopper");
 
     bench_one(&mut g, "Grasshopper-256", Grasshopper::new(&[0u8; 32]), &src);
+    bench_one(&mut g, "Grasshopper-256-ct", GrasshopperCt::new(&[0u8; 32]), &src);
 
     g.finish();
 }
@@ -147,6 +153,7 @@ fn bench_magma(c: &mut Criterion) {
     let mut g = c.benchmark_group("Magma");
 
     bench_one(&mut g, "Magma-256", Magma::new(&[0u8; 32]), &src);
+    bench_one(&mut g, "Magma-256-ct", MagmaCt::new(&[0u8; 32]), &src);
 
     g.finish();
 }

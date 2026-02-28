@@ -5,6 +5,11 @@
 //! Tests use the official NIST CAVP Known Answer Test vectors downloaded
 //! directly from csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-
 //! Validation-Program/documents/des/KAT_TDES.zip.
+//!
+//! `Des` keeps the original fast byte-table and fused `SP_TABLE` software
+//! path. `DesCt` is a separate software-only path that replaces the secret
+//! indexed round function with loop-based permutations and packed ANF bitset
+//! evaluation of the DES S-boxes.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FIPS 46-3 Tables (1-indexed positions, converted to 0-indexed in code)
@@ -14,79 +19,46 @@
 /// Entry i gives the 1-indexed bit position in the 64-bit input whose value
 /// becomes bit i of the output (MSB = bit 1).
 const IP: [u8; 64] = [
-    58, 50, 42, 34, 26, 18, 10, 2,
-    60, 52, 44, 36, 28, 20, 12, 4,
-    62, 54, 46, 38, 30, 22, 14, 6,
-    64, 56, 48, 40, 32, 24, 16, 8,
-    57, 49, 41, 33, 25, 17,  9, 1,
-    59, 51, 43, 35, 27, 19, 11, 3,
-    61, 53, 45, 37, 29, 21, 13, 5,
-    63, 55, 47, 39, 31, 23, 15, 7,
+    58, 50, 42, 34, 26, 18, 10, 2, 60, 52, 44, 36, 28, 20, 12, 4, 62, 54, 46, 38, 30, 22, 14, 6,
+    64, 56, 48, 40, 32, 24, 16, 8, 57, 49, 41, 33, 25, 17, 9, 1, 59, 51, 43, 35, 27, 19, 11, 3, 61,
+    53, 45, 37, 29, 21, 13, 5, 63, 55, 47, 39, 31, 23, 15, 7,
 ];
 
 /// Final Permutation (IP⁻¹) — FIPS 46-3, Table "Inverse Initial Permutation IP⁻¹"
 const FP: [u8; 64] = [
-    40,  8, 48, 16, 56, 24, 64, 32,
-    39,  7, 47, 15, 55, 23, 63, 31,
-    38,  6, 46, 14, 54, 22, 62, 30,
-    37,  5, 45, 13, 53, 21, 61, 29,
-    36,  4, 44, 12, 52, 20, 60, 28,
-    35,  3, 43, 11, 51, 19, 59, 27,
-    34,  2, 42, 10, 50, 18, 58, 26,
-    33,  1, 41,  9, 49, 17, 57, 25,
+    40, 8, 48, 16, 56, 24, 64, 32, 39, 7, 47, 15, 55, 23, 63, 31, 38, 6, 46, 14, 54, 22, 62, 30,
+    37, 5, 45, 13, 53, 21, 61, 29, 36, 4, 44, 12, 52, 20, 60, 28, 35, 3, 43, 11, 51, 19, 59, 27,
+    34, 2, 42, 10, 50, 18, 58, 26, 33, 1, 41, 9, 49, 17, 57, 25,
 ];
 
 /// Expansion function E — FIPS 46-3, Table "Expansion Permutation E"
 /// Maps the 32-bit right half to 48 bits.
 const E: [u8; 48] = [
-    32,  1,  2,  3,  4,  5,
-     4,  5,  6,  7,  8,  9,
-     8,  9, 10, 11, 12, 13,
-    12, 13, 14, 15, 16, 17,
-    16, 17, 18, 19, 20, 21,
-    20, 21, 22, 23, 24, 25,
-    24, 25, 26, 27, 28, 29,
-    28, 29, 30, 31, 32,  1,
+    32, 1, 2, 3, 4, 5, 4, 5, 6, 7, 8, 9, 8, 9, 10, 11, 12, 13, 12, 13, 14, 15, 16, 17, 16, 17, 18,
+    19, 20, 21, 20, 21, 22, 23, 24, 25, 24, 25, 26, 27, 28, 29, 28, 29, 30, 31, 32, 1,
 ];
 
 /// Permutation P — FIPS 46-3, Table "Permutation Function P"
 /// Applied to the 32-bit output of the 8 S-boxes.
 const P: [u8; 32] = [
-    16,  7, 20, 21,
-    29, 12, 28, 17,
-     1, 15, 23, 26,
-     5, 18, 31, 10,
-     2,  8, 24, 14,
-    32, 27,  3,  9,
-    19, 13, 30,  6,
-    22, 11,  4, 25,
+    16, 7, 20, 21, 29, 12, 28, 17, 1, 15, 23, 26, 5, 18, 31, 10, 2, 8, 24, 14, 32, 27, 3, 9, 19,
+    13, 30, 6, 22, 11, 4, 25,
 ];
 
 /// Permuted Choice 1 (PC-1) — FIPS 46-3, Table "Permuted Choice 1 (PC-1)"
 /// Selects and permutes 56 bits of the 64-bit key (discards parity bits).
 /// First 28 entries select bits for C0, next 28 for D0.
 const PC1: [u8; 56] = [
-    57, 49, 41, 33, 25, 17,  9,
-     1, 58, 50, 42, 34, 26, 18,
-    10,  2, 59, 51, 43, 35, 27,
-    19, 11,  3, 60, 52, 44, 36,
-    63, 55, 47, 39, 31, 23, 15,
-     7, 62, 54, 46, 38, 30, 22,
-    14,  6, 61, 53, 45, 37, 29,
-    21, 13,  5, 28, 20, 12,  4,
+    57, 49, 41, 33, 25, 17, 9, 1, 58, 50, 42, 34, 26, 18, 10, 2, 59, 51, 43, 35, 27, 19, 11, 3, 60,
+    52, 44, 36, 63, 55, 47, 39, 31, 23, 15, 7, 62, 54, 46, 38, 30, 22, 14, 6, 61, 53, 45, 37, 29,
+    21, 13, 5, 28, 20, 12, 4,
 ];
 
 /// Permuted Choice 2 (PC-2) — FIPS 46-3, Table "Permuted Choice 2 (PC-2)"
 /// Selects 48 bits from the 56-bit shifted key halves to form each round key.
 const PC2: [u8; 48] = [
-    14, 17, 11, 24,  1,  5,
-     3, 28, 15,  6, 21, 10,
-    23, 19, 12,  4, 26,  8,
-    16,  7, 27, 20, 13,  2,
-    41, 52, 31, 37, 47, 55,
-    30, 40, 51, 45, 33, 48,
-    44, 49, 39, 56, 34, 53,
-    46, 42, 50, 36, 29, 32,
+    14, 17, 11, 24, 1, 5, 3, 28, 15, 6, 21, 10, 23, 19, 12, 4, 26, 8, 16, 7, 27, 20, 13, 2, 41, 52,
+    31, 37, 47, 55, 30, 40, 51, 45, 33, 48, 44, 49, 39, 56, 34, 53, 46, 42, 50, 36, 29, 32,
 ];
 
 /// Key schedule rotation amounts — FIPS 46-3, Table "Number of Bit Rotations"
@@ -101,68 +73,110 @@ const SHIFTS: [u8; 16] = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
 const SBOXES: [[u8; 64]; 8] = [
     // S1
     [
-        14,  4, 13,  1,  2, 15, 11,  8,  3, 10,  6, 12,  5,  9,  0,  7,
-         0, 15,  7,  4, 14,  2, 13,  1, 10,  6, 12, 11,  9,  5,  3,  8,
-         4,  1, 14,  8, 13,  6,  2, 11, 15, 12,  9,  7,  3, 10,  5,  0,
-        15, 12,  8,  2,  4,  9,  1,  7,  5, 11,  3, 14, 10,  0,  6, 13,
+        14, 4, 13, 1, 2, 15, 11, 8, 3, 10, 6, 12, 5, 9, 0, 7, 0, 15, 7, 4, 14, 2, 13, 1, 10, 6, 12,
+        11, 9, 5, 3, 8, 4, 1, 14, 8, 13, 6, 2, 11, 15, 12, 9, 7, 3, 10, 5, 0, 15, 12, 8, 2, 4, 9,
+        1, 7, 5, 11, 3, 14, 10, 0, 6, 13,
     ],
     // S2
     [
-        15,  1,  8, 14,  6, 11,  3,  4,  9,  7,  2, 13, 12,  0,  5, 10,
-         3, 13,  4,  7, 15,  2,  8, 14, 12,  0,  1, 10,  6,  9, 11,  5,
-         0, 14,  7, 11, 10,  4, 13,  1,  5,  8, 12,  6,  9,  3,  2, 15,
-        13,  8, 10,  1,  3, 15,  4,  2, 11,  6,  7, 12,  0,  5, 14,  9,
+        15, 1, 8, 14, 6, 11, 3, 4, 9, 7, 2, 13, 12, 0, 5, 10, 3, 13, 4, 7, 15, 2, 8, 14, 12, 0, 1,
+        10, 6, 9, 11, 5, 0, 14, 7, 11, 10, 4, 13, 1, 5, 8, 12, 6, 9, 3, 2, 15, 13, 8, 10, 1, 3, 15,
+        4, 2, 11, 6, 7, 12, 0, 5, 14, 9,
     ],
     // S3
     [
-        10,  0,  9, 14,  6,  3, 15,  5,  1, 13, 12,  7, 11,  4,  2,  8,
-        13,  7,  0,  9,  3,  4,  6, 10,  2,  8,  5, 14, 12, 11, 15,  1,
-        13,  6,  4,  9,  8, 15,  3,  0, 11,  1,  2, 12,  5, 10, 14,  7,
-         1, 10, 13,  0,  6,  9,  8,  7,  4, 15, 14,  3, 11,  5,  2, 12,
+        10, 0, 9, 14, 6, 3, 15, 5, 1, 13, 12, 7, 11, 4, 2, 8, 13, 7, 0, 9, 3, 4, 6, 10, 2, 8, 5,
+        14, 12, 11, 15, 1, 13, 6, 4, 9, 8, 15, 3, 0, 11, 1, 2, 12, 5, 10, 14, 7, 1, 10, 13, 0, 6,
+        9, 8, 7, 4, 15, 14, 3, 11, 5, 2, 12,
     ],
     // S4
     [
-         7, 13, 14,  3,  0,  6,  9, 10,  1,  2,  8,  5, 11, 12,  4, 15,
-        13,  8, 11,  5,  6, 15,  0,  3,  4,  7,  2, 12,  1, 10, 14,  9,
-        10,  6,  9,  0, 12, 11,  7, 13, 15,  1,  3, 14,  5,  2,  8,  4,
-         3, 15,  0,  6, 10,  1, 13,  8,  9,  4,  5, 11, 12,  7,  2, 14,
+        7, 13, 14, 3, 0, 6, 9, 10, 1, 2, 8, 5, 11, 12, 4, 15, 13, 8, 11, 5, 6, 15, 0, 3, 4, 7, 2,
+        12, 1, 10, 14, 9, 10, 6, 9, 0, 12, 11, 7, 13, 15, 1, 3, 14, 5, 2, 8, 4, 3, 15, 0, 6, 10, 1,
+        13, 8, 9, 4, 5, 11, 12, 7, 2, 14,
     ],
     // S5
     [
-         2, 12,  4,  1,  7, 10, 11,  6,  8,  5,  3, 15, 13,  0, 14,  9,
-        14, 11,  2, 12,  4,  7, 13,  1,  5,  0, 15, 10,  3,  9,  8,  6,
-         4,  2,  1, 11, 10, 13,  7,  8, 15,  9, 12,  5,  6,  3,  0, 14,
-        11,  8, 12,  7,  1, 14,  2, 13,  6, 15,  0,  9, 10,  4,  5,  3,
+        2, 12, 4, 1, 7, 10, 11, 6, 8, 5, 3, 15, 13, 0, 14, 9, 14, 11, 2, 12, 4, 7, 13, 1, 5, 0, 15,
+        10, 3, 9, 8, 6, 4, 2, 1, 11, 10, 13, 7, 8, 15, 9, 12, 5, 6, 3, 0, 14, 11, 8, 12, 7, 1, 14,
+        2, 13, 6, 15, 0, 9, 10, 4, 5, 3,
     ],
     // S6
     [
-        12,  1, 10, 15,  9,  2,  6,  8,  0, 13,  3,  4, 14,  7,  5, 11,
-        10, 15,  4,  2,  7, 12,  9,  5,  6,  1, 13, 14,  0, 11,  3,  8,
-         9, 14, 15,  5,  2,  8, 12,  3,  7,  0,  4, 10,  1, 13, 11,  6,
-         4,  3,  2, 12,  9,  5, 15, 10, 11, 14,  1,  7,  6,  0,  8, 13,
+        12, 1, 10, 15, 9, 2, 6, 8, 0, 13, 3, 4, 14, 7, 5, 11, 10, 15, 4, 2, 7, 12, 9, 5, 6, 1, 13,
+        14, 0, 11, 3, 8, 9, 14, 15, 5, 2, 8, 12, 3, 7, 0, 4, 10, 1, 13, 11, 6, 4, 3, 2, 12, 9, 5,
+        15, 10, 11, 14, 1, 7, 6, 0, 8, 13,
     ],
     // S7
     [
-         4, 11,  2, 14, 15,  0,  8, 13,  3, 12,  9,  7,  5, 10,  6,  1,
-        13,  0, 11,  7,  4,  9,  1, 10, 14,  3,  5, 12,  2, 15,  8,  6,
-         1,  4, 11, 13, 12,  3,  7, 14, 10, 15,  6,  8,  0,  5,  9,  2,
-         6, 11, 13,  8,  1,  4, 10,  7,  9,  5,  0, 15, 14,  2,  3, 12,
+        4, 11, 2, 14, 15, 0, 8, 13, 3, 12, 9, 7, 5, 10, 6, 1, 13, 0, 11, 7, 4, 9, 1, 10, 14, 3, 5,
+        12, 2, 15, 8, 6, 1, 4, 11, 13, 12, 3, 7, 14, 10, 15, 6, 8, 0, 5, 9, 2, 6, 11, 13, 8, 1, 4,
+        10, 7, 9, 5, 0, 15, 14, 2, 3, 12,
     ],
     // S8
     [
-        13,  2,  8,  4,  6, 15, 11,  1, 10,  9,  3, 14,  5,  0, 12,  7,
-         1, 15, 13,  8, 10,  3,  7,  4, 12,  5,  6, 11,  0, 14,  9,  2,
-         7, 11,  4,  1,  9, 12, 14,  2,  0,  6, 10, 13, 15,  3,  5,  8,
-         2,  1, 14,  7,  4, 10,  8, 13, 15, 12,  9,  0,  3,  5,  6, 11,
+        13, 2, 8, 4, 6, 15, 11, 1, 10, 9, 3, 14, 5, 0, 12, 7, 1, 15, 13, 8, 10, 3, 7, 4, 12, 5, 6,
+        11, 0, 14, 9, 2, 7, 11, 4, 1, 9, 12, 14, 2, 0, 6, 10, 13, 15, 3, 5, 8, 2, 1, 14, 7, 4, 10,
+        8, 13, 15, 12, 9, 0, 3, 5, 6, 11,
     ],
 ];
+
+/// Build packed ANF coefficients for `DesCt`.
+///
+/// Each 6->4 DES S-box output bit is represented as a 64-bit mask over all
+/// monomials in six variables. At runtime `DesCt` builds the active monomial
+/// mask for the input and reduces it with parity. This keeps the checked-in Ct
+/// code much smaller than hand-writing eight separate 6->4 logic networks.
+const fn build_sbox_anf() -> [[u64; 4]; 8] {
+    let mut out = [[0u64; 4]; 8];
+    let mut sbox_idx = 0usize;
+    while sbox_idx < 8 {
+        let mut bit_idx = 0usize;
+        while bit_idx < 4 {
+            let mut coeffs = [0u8; 64];
+            let mut x = 0usize;
+            while x < 64 {
+                let row = ((x & 0x20) >> 4) | (x & 0x01);
+                let col = (x >> 1) & 0x0f;
+                coeffs[x] = (SBOXES[sbox_idx][row * 16 + col] >> bit_idx) & 1;
+                x += 1;
+            }
+
+            let mut var = 0usize;
+            while var < 6 {
+                let stride = 1usize << var;
+                let mut mask = 0usize;
+                while mask < 64 {
+                    if mask & stride != 0 {
+                        coeffs[mask] ^= coeffs[mask ^ stride];
+                    }
+                    mask += 1;
+                }
+                var += 1;
+            }
+
+            let mut packed = 0u64;
+            let mut monomial = 0usize;
+            while monomial < 64 {
+                packed |= (coeffs[monomial] as u64) << monomial;
+                monomial += 1;
+            }
+            out[sbox_idx][bit_idx] = packed;
+            bit_idx += 1;
+        }
+        sbox_idx += 1;
+    }
+    out
+}
+
+const SBOX_ANF: [[u64; 4]; 8] = build_sbox_anf();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Byte-level precomputed permutation tables
 //
-// These are kept as reference material from the original table-driven version.
-// The active encrypt/decrypt path below now uses fixed bit-loops instead so the
-// runtime memory access pattern no longer depends on secret data.
+// These are the original fast software tables used by `Des`.
+// `DesCt` intentionally does not touch them; it uses loop-based permutations
+// and packed ANF S-box evaluation instead.
 //
 // For a permutation perm of width W bits:
 //   table[b][v]  =  contribution to the W-bit output
@@ -182,10 +196,10 @@ const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
     let mut table = [[0u64; 256]; 8];
     let mut i = 0usize;
     while i < 64 {
-        let src      = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of u64)
+        let src = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of u64)
         let src_byte = src / 8;
-        let src_bit  = src % 8;                 // 0 = MSB of that byte
-        let out_bit  = 63 - i;
+        let src_bit = src % 8; // 0 = MSB of that byte
+        let out_bit = 63 - i;
         let mut v = 0usize;
         while v < 256 {
             if (v >> (7 - src_bit)) & 1 == 1 {
@@ -203,10 +217,10 @@ const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
     let mut table = [[0u64; 256]; 4];
     let mut i = 0usize;
     while i < 48 {
-        let src      = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of 32-bit R)
+        let src = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of 32-bit R)
         let src_byte = src / 8;
-        let src_bit  = src % 8;
-        let out_bit  = 47 - i;
+        let src_bit = src % 8;
+        let out_bit = 47 - i;
         let mut v = 0usize;
         while v < 256 {
             if (v >> (7 - src_bit)) & 1 == 1 {
@@ -251,7 +265,7 @@ const fn build_sp() -> [[u32; 64]; 8] {
         let mut j = 0usize; // raw 6-bit input b6
         while j < 64 {
             let row = ((j & 0x20) >> 4) | (j & 0x01); // bits 5 and 0
-            let col = (j >> 1) & 0x0F;                  // bits 4..1
+            let col = (j >> 1) & 0x0F; // bits 4..1
             let sval = SBOXES[i][row * 16 + col] as u32;
             // S-box i places its 4-bit output at u32 bits [28−4i .. 31−4i].
             let partial = sval << (28 - 4 * i) as u32;
@@ -268,30 +282,30 @@ static IP_TABLE: [[u64; 256]; 8] = build_perm64(&IP);
 #[allow(dead_code)]
 static FP_TABLE: [[u64; 256]; 8] = build_perm64(&FP);
 #[allow(dead_code)]
-static  E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
+static E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
 #[allow(dead_code)]
-static SP_TABLE: [[u32;  64]; 8] = build_sp();
+static SP_TABLE: [[u32; 64]; 8] = build_sp();
 
 #[allow(dead_code)]
 #[inline(always)]
 fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
-    t[0][(x >> 56)          as usize]
-  | t[1][((x >> 48) & 0xff) as usize]
-  | t[2][((x >> 40) & 0xff) as usize]
-  | t[3][((x >> 32) & 0xff) as usize]
-  | t[4][((x >> 24) & 0xff) as usize]
-  | t[5][((x >> 16) & 0xff) as usize]
-  | t[6][((x >>  8) & 0xff) as usize]
-  | t[7][ (x        & 0xff) as usize]
+    t[0][(x >> 56) as usize]
+        | t[1][((x >> 48) & 0xff) as usize]
+        | t[2][((x >> 40) & 0xff) as usize]
+        | t[3][((x >> 32) & 0xff) as usize]
+        | t[4][((x >> 24) & 0xff) as usize]
+        | t[5][((x >> 16) & 0xff) as usize]
+        | t[6][((x >> 8) & 0xff) as usize]
+        | t[7][(x & 0xff) as usize]
 }
 
 #[allow(dead_code)]
 #[inline(always)]
 fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
-    t[0][(r >> 24)          as usize]
-  | t[1][((r >> 16) & 0xff) as usize]
-  | t[2][((r >>  8) & 0xff) as usize]
-  | t[3][ (r        & 0xff) as usize]
+    t[0][(r >> 24) as usize]
+        | t[1][((r >> 16) & 0xff) as usize]
+        | t[2][((r >> 8) & 0xff) as usize]
+        | t[3][(r & 0xff) as usize]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,7 +317,6 @@ fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
 fn bit64(block: u64, pos: u8) -> u64 {
     (block >> (64 - pos)) & 1
 }
-
 
 /// Apply a permutation table to a 64-bit block.
 /// Each entry in `table` is a 1-indexed source bit position.
@@ -324,7 +337,6 @@ fn permute64_to48(input: u64, table: &[u8; 48]) -> u64 {
     }
     out
 }
-
 
 /// Left-rotate a `bits`-wide value by `n` positions.
 #[inline(always)]
@@ -350,7 +362,7 @@ pub fn key_schedule(key: u64) -> KeySchedule {
     let pc1_out = permute64(key, &PC1);
 
     let mut c = (pc1_out >> 28) as u32 & 0x0FFF_FFFF; // bits 1-28 → C0
-    let mut d = pc1_out as u32 & 0x0FFF_FFFF;         // bits 29-56 → D0
+    let mut d = pc1_out as u32 & 0x0FFF_FFFF; // bits 29-56 → D0
 
     let mut schedule = [0u64; 16];
     for i in 0..16 {
@@ -377,8 +389,69 @@ pub fn key_schedule(key: u64) -> KeySchedule {
 
 /// The DES f-function: f(R, K) = P(S(E(R) ⊕ K))
 fn f(r: u32, subkey: u64) -> u32 {
-    // Use direct bit extraction instead of the previous byte tables so the
-    // expansion step does not depend on secret-indexed memory lookups.
+    let xored = fast_expand(r, &E_TABLE) ^ subkey;
+
+    let mut result = 0u32;
+    for i in 0..8usize {
+        let shift = 42 - 6 * i;
+        let b6 = ((xored >> shift) & 0x3F) as usize;
+        result |= SP_TABLE[i][b6];
+    }
+    result
+}
+
+#[inline(always)]
+fn subset_mask6(x: u8) -> u64 {
+    let mut mask = 1u64;
+
+    let bit0 = 0u64.wrapping_sub((x & 1) as u64);
+    mask |= (mask << 1) & bit0;
+
+    let bit1 = 0u64.wrapping_sub(((x >> 1) & 1) as u64);
+    mask |= (mask << 2) & bit1;
+
+    let bit2 = 0u64.wrapping_sub(((x >> 2) & 1) as u64);
+    mask |= (mask << 4) & bit2;
+
+    let bit3 = 0u64.wrapping_sub(((x >> 3) & 1) as u64);
+    mask |= (mask << 8) & bit3;
+
+    let bit4 = 0u64.wrapping_sub(((x >> 4) & 1) as u64);
+    mask |= (mask << 16) & bit4;
+
+    let bit5 = 0u64.wrapping_sub(((x >> 5) & 1) as u64);
+    mask |= (mask << 32) & bit5;
+
+    mask
+}
+
+#[inline(always)]
+fn parity64(mut x: u64) -> u8 {
+    x ^= x >> 32;
+    x ^= x >> 16;
+    x ^= x >> 8;
+    x ^= x >> 4;
+    x &= 0x0f;
+    ((0x6996u16 >> (x as u16)) & 1) as u8
+}
+
+/// Evaluate one DES S-box from the packed ANF representation.
+///
+/// `subset_mask6` expands the active input monomials for this 6-bit input, and
+/// each packed coefficient mask selects which monomials contribute to one
+/// output bit.
+#[inline(always)]
+fn sbox_ct(sbox_idx: usize, input: u8) -> u8 {
+    let active = subset_mask6(input);
+    let coeffs = &SBOX_ANF[sbox_idx];
+    parity64(active & coeffs[0])
+        | (parity64(active & coeffs[1]) << 1)
+        | (parity64(active & coeffs[2]) << 2)
+        | (parity64(active & coeffs[3]) << 3)
+}
+
+/// Constant-time DES f-function using fixed boolean S-box evaluation.
+fn f_ct(r: u32, subkey: u64) -> u32 {
     let mut expanded = 0u64;
     for (i, &src) in E.iter().enumerate() {
         let bit = ((r >> (32 - src)) & 1) as u64;
@@ -389,12 +462,8 @@ fn f(r: u32, subkey: u64) -> u32 {
     let mut pre_p = 0u32;
     for i in 0..8usize {
         let shift = 42 - 6 * i;
-        let b6 = ((xored >> shift) & 0x3F) as u8;
-        let row = ((b6 & 0x20) >> 4) | (b6 & 0x01);
-        let col = (b6 >> 1) & 0x0F;
-        let idx = row * 16 + col;
-        // Fixed-scan S-box selection replaces the previous SP-table lookup.
-        let sval = crate::ct::ct_lookup_u8(&SBOXES[i], idx) as u32;
+        let b6 = ((xored >> shift) & 0x3f) as u8;
+        let sval = sbox_ct(i, b6) as u32;
         pre_p |= sval << (28 - 4 * i);
     }
 
@@ -410,7 +479,7 @@ fn f(r: u32, subkey: u64) -> u32 {
 /// For encryption, pass `schedule` from [`key_schedule`].
 /// For decryption, pass the schedule reversed: `let dec = { let mut s = ks; s.reverse(); s }`.
 fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
-    let permuted = permute64(block, &IP);
+    let permuted = fast_perm64(block, &IP_TABLE);
 
     let mut l = (permuted >> 32) as u32;
     let mut r = permuted as u32;
@@ -422,7 +491,23 @@ fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
         l = tmp;
     }
 
-    // Pre-output: swap L and R, then apply FP.
+    // Pre-output: swap L and R, then apply FP via precomputed byte-table.
+    let pre_output = ((r as u64) << 32) | (l as u64);
+    fast_perm64(pre_output, &FP_TABLE)
+}
+
+fn des_block_ct(block: u64, schedule: &KeySchedule) -> u64 {
+    let permuted = permute64(block, &IP);
+
+    let mut l = (permuted >> 32) as u32;
+    let mut r = permuted as u32;
+
+    for &subkey in schedule.iter() {
+        let tmp = r;
+        r = l ^ f_ct(r, subkey);
+        l = tmp;
+    }
+
     let pre_output = ((r as u64) << 32) | (l as u64);
     permute64(pre_output, &FP)
 }
@@ -437,6 +522,16 @@ pub struct Des {
     dec_schedule: KeySchedule,
 }
 
+/// A software-only constant-time DES path.
+///
+/// `DesCt` avoids the fast path's secret-indexed permutation and S-box tables.
+/// Instead it keeps the same key schedule but evaluates IP/FP/E with fixed
+/// loops and evaluates each S-box through the packed ANF bitset form above.
+pub struct DesCt {
+    enc_schedule: KeySchedule,
+    dec_schedule: KeySchedule,
+}
+
 impl Des {
     /// Create a new DES instance from an 8-byte key.
     pub fn new(key: &[u8; 8]) -> Self {
@@ -444,7 +539,10 @@ impl Des {
         let enc_schedule = key_schedule(k);
         let mut dec_schedule = enc_schedule;
         dec_schedule.reverse();
-        Des { enc_schedule, dec_schedule }
+        Des {
+            enc_schedule,
+            dec_schedule,
+        }
     }
 
     /// Create a new DES instance and wipe the provided key buffer.
@@ -464,6 +562,39 @@ impl Des {
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let b = u64::from_be_bytes(*block);
         des_block(b, &self.dec_schedule).to_be_bytes()
+    }
+}
+
+impl DesCt {
+    /// Create a new constant-time DES instance from an 8-byte key.
+    pub fn new(key: &[u8; 8]) -> Self {
+        let k = u64::from_be_bytes(*key);
+        let enc_schedule = key_schedule(k);
+        let mut dec_schedule = enc_schedule;
+        dec_schedule.reverse();
+        DesCt {
+            enc_schedule,
+            dec_schedule,
+        }
+    }
+
+    /// Create a new constant-time DES instance and wipe the provided key buffer.
+    pub fn new_wiping(key: &mut [u8; 8]) -> Self {
+        let out = Self::new(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
+    }
+
+    /// Encrypt a single 64-bit block (ECB mode).
+    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+        let b = u64::from_be_bytes(*block);
+        des_block_ct(b, &self.enc_schedule).to_be_bytes()
+    }
+
+    /// Decrypt a single 64-bit block (ECB mode).
+    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+        let b = u64::from_be_bytes(*block);
+        des_block_ct(b, &self.dec_schedule).to_be_bytes()
     }
 }
 
@@ -561,24 +692,31 @@ impl TripleDes {
         k1_dec.reverse();
         k2_dec.reverse();
         k3_dec.reverse();
-        TripleDes { k1_enc, k1_dec, k2_enc, k2_dec, k3_enc, k3_dec }
+        TripleDes {
+            k1_enc,
+            k1_dec,
+            k2_enc,
+            k2_dec,
+            k3_enc,
+            k3_dec,
+        }
     }
 
     /// Encrypt a single 64-bit block: C = E(K3, D(K2, E(K1, P)))
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let p = u64::from_be_bytes(*block);
-        let t1 = des_block(p,  &self.k1_enc); // E with K1
+        let t1 = des_block(p, &self.k1_enc); // E with K1
         let t2 = des_block(t1, &self.k2_dec); // D with K2
-        let c  = des_block(t2, &self.k3_enc); // E with K3
+        let c = des_block(t2, &self.k3_enc); // E with K3
         c.to_be_bytes()
     }
 
     /// Decrypt a single 64-bit block: P = D(K1, E(K2, D(K3, C)))
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        let c  = u64::from_be_bytes(*block);
-        let t1 = des_block(c,  &self.k3_dec); // D with K3
+        let c = u64::from_be_bytes(*block);
+        let t1 = des_block(c, &self.k3_dec); // D with K3
         let t2 = des_block(t1, &self.k2_enc); // E with K2
-        let p  = des_block(t2, &self.k1_dec); // D with K1
+        let p = des_block(t2, &self.k1_dec); // D with K1
         p.to_be_bytes()
     }
 }
@@ -588,6 +726,18 @@ impl TripleDes {
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl crate::BlockCipher for Des {
+    const BLOCK_LEN: usize = 8;
+    fn encrypt(&self, block: &mut [u8]) {
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.encrypt_block(arr));
+    }
+    fn decrypt(&self, block: &mut [u8]) {
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.decrypt_block(arr));
+    }
+}
+
+impl crate::BlockCipher for DesCt {
     const BLOCK_LEN: usize = 8;
     fn encrypt(&self, block: &mut [u8]) {
         let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
@@ -614,6 +764,13 @@ impl crate::BlockCipher for TripleDes {
 impl Drop for Des {
     fn drop(&mut self) {
         // DES instances retain both schedules for repeated ECB calls.
+        crate::ct::zeroize_slice(self.enc_schedule.as_mut_slice());
+        crate::ct::zeroize_slice(self.dec_schedule.as_mut_slice());
+    }
+}
+
+impl Drop for DesCt {
+    fn drop(&mut self) {
         crate::ct::zeroize_slice(self.enc_schedule.as_mut_slice());
         crate::ct::zeroize_slice(self.dec_schedule.as_mut_slice());
     }
@@ -653,25 +810,60 @@ mod tests {
     /// (K1=K2=K3 per the "KEYs" notation in the .rsp files).
     fn tdes_kat(key_hex: &str, pt_hex: &str, ct_hex: &str) {
         let key = hex_to_bytes8(key_hex);
-        let pt  = hex_to_bytes8(pt_hex);
-        let ct  = hex_to_bytes8(ct_hex);
+        let pt = hex_to_bytes8(pt_hex);
+        let ct = hex_to_bytes8(ct_hex);
         let cipher = TripleDes::new_single_key(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct,
-            "encrypt mismatch: key={key_hex} pt={pt_hex}");
-        assert_eq!(cipher.decrypt_block(&ct), pt,
-            "decrypt mismatch: key={key_hex} ct={ct_hex}");
+        assert_eq!(
+            cipher.encrypt_block(&pt),
+            ct,
+            "encrypt mismatch: key={key_hex} pt={pt_hex}"
+        );
+        assert_eq!(
+            cipher.decrypt_block(&ct),
+            pt,
+            "decrypt mismatch: key={key_hex} ct={ct_hex}"
+        );
     }
 
     /// Run a DES ECB test using the single-key DES path.
     fn des_kat(key_hex: &str, pt_hex: &str, ct_hex: &str) {
         let key = hex_to_bytes8(key_hex);
-        let pt  = hex_to_bytes8(pt_hex);
-        let ct  = hex_to_bytes8(ct_hex);
+        let pt = hex_to_bytes8(pt_hex);
+        let ct = hex_to_bytes8(ct_hex);
         let cipher = Des::new(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct,
-            "encrypt mismatch: key={key_hex} pt={pt_hex}");
-        assert_eq!(cipher.decrypt_block(&ct), pt,
-            "decrypt mismatch: key={key_hex} ct={ct_hex}");
+        assert_eq!(
+            cipher.encrypt_block(&pt),
+            ct,
+            "encrypt mismatch: key={key_hex} pt={pt_hex}"
+        );
+        assert_eq!(
+            cipher.decrypt_block(&ct),
+            pt,
+            "decrypt mismatch: key={key_hex} ct={ct_hex}"
+        );
+    }
+
+    fn des_ct_kat(key_hex: &str, pt_hex: &str, ct_hex: &str) {
+        let key = hex_to_bytes8(key_hex);
+        let pt = hex_to_bytes8(pt_hex);
+        let ct = hex_to_bytes8(ct_hex);
+        let fast = Des::new(&key);
+        let slow = DesCt::new(&key);
+        assert_eq!(
+            slow.encrypt_block(&pt),
+            ct,
+            "encrypt mismatch: key={key_hex} pt={pt_hex}"
+        );
+        assert_eq!(
+            slow.decrypt_block(&ct),
+            pt,
+            "decrypt mismatch: key={key_hex} ct={ct_hex}"
+        );
+        assert_eq!(
+            slow.encrypt_block(&pt),
+            fast.encrypt_block(&pt),
+            "DesCt must match Des for key={key_hex} pt={pt_hex}"
+        );
     }
 
     // ── TECBvartext.rsp — Variable Plaintext KAT ─────────────────────────────
@@ -690,7 +882,9 @@ mod tests {
             ("0101010101010101", "0200000000000000", "6cc5defaaf04512f"),
             ("0101010101010101", "0100000000000000", "0d9f279ba5d87260"),
         ];
-        for (k, pt, ct) in cases { tdes_kat(k, pt, ct); }
+        for (k, pt, ct) in cases {
+            tdes_kat(k, pt, ct);
+        }
     }
 
     #[test]
@@ -762,7 +956,9 @@ mod tests {
             ("0101010101010101", "0000000000000002", "06e7ea22ce92708f"),
             ("0101010101010101", "0000000000000001", "166b40b44aba4bd6"),
         ];
-        for (k, pt, ct) in cases { tdes_kat(k, pt, ct); }
+        for (k, pt, ct) in cases {
+            tdes_kat(k, pt, ct);
+        }
     }
 
     // ── TECBinvperm.rsp — Inverse Permutation KAT ───────────────────────────
@@ -776,7 +972,9 @@ mod tests {
             ("0101010101010101", "dd7f121ca5015619", "4000000000000000"),
             ("0101010101010101", "166b40b44aba4bd6", "0000000000000001"),
         ];
-        for (k, pt, ct) in cases { tdes_kat(k, pt, ct); }
+        for (k, pt, ct) in cases {
+            tdes_kat(k, pt, ct);
+        }
     }
 
     // ── TECBvarkey.rsp — Variable Key KAT ───────────────────────────────────
@@ -842,7 +1040,9 @@ mod tests {
             ("0101010101010104", "0000000000000000", "fcdb3291de21f0c0"),
             ("0101010101010102", "0000000000000000", "869efd7f9f265a09"),
         ];
-        for (k, pt, ct) in cases { tdes_kat(k, pt, ct); }
+        for (k, pt, ct) in cases {
+            tdes_kat(k, pt, ct);
+        }
     }
 
     // ── TECBpermop.rsp — Permutation Operation KAT ──────────────────────────
@@ -884,7 +1084,9 @@ mod tests {
             ("1002911598100201", "0000000000000000", "e2f5728f0995013c"),
             ("1002911698100101", "0000000000000000", "1aeac39a61f0a464"),
         ];
-        for (k, pt, ct) in cases { tdes_kat(k, pt, ct); }
+        for (k, pt, ct) in cases {
+            tdes_kat(k, pt, ct);
+        }
     }
 
     // ── TECBsubtab.rsp — Substitution Table KAT ─────────────────────────────
@@ -913,7 +1115,9 @@ mod tests {
             ("018310dc409b26d6", "1d9d5c5018f728c2", "5f4c038ed12b2e41"),
             ("1c587f1c13924fef", "305532286d6f295a", "63fac0d034d9f793"),
         ];
-        for (k, pt, ct) in cases { tdes_kat(k, pt, ct); }
+        for (k, pt, ct) in cases {
+            tdes_kat(k, pt, ct);
+        }
     }
 
     // ── Des struct — direct single-key DES ───────────────────────────────────
@@ -927,7 +1131,21 @@ mod tests {
             ("0131d9619dc1376e", "5cd54ca83def57da", "7a389d10354bd271"),
             ("07a1133e4a0b2686", "0248d43806f67172", "868ebb51cab4599a"),
         ];
-        for (k, pt, ct) in cases { des_kat(k, pt, ct); }
+        for (k, pt, ct) in cases {
+            des_kat(k, pt, ct);
+        }
+    }
+
+    #[test]
+    fn des_ct_direct_subtab() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("7ca110454a1a6e57", "01a1d6d039776742", "690f5b0d9a26939b"),
+            ("0131d9619dc1376e", "5cd54ca83def57da", "7a389d10354bd271"),
+            ("07a1133e4a0b2686", "0248d43806f67172", "868ebb51cab4599a"),
+        ];
+        for (k, pt, ct) in cases {
+            des_ct_kat(k, pt, ct);
+        }
     }
 
     // ── 3TDEA — three independent keys ──────────────────────────────────────
@@ -941,11 +1159,10 @@ mod tests {
     fn tdes_3key_roundtrip() {
         // K1=0133457799BBCDFF, K2=0011223344556677, K3=8899AABBCCDDEEFF
         let key: [u8; 24] = [
-            0x01,0x33,0x45,0x77,0x99,0xBB,0xCD,0xFF,
-            0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,
-            0x88,0x99,0xAA,0xBB,0xCC,0xDD,0xEE,0xFF,
+            0x01, 0x33, 0x45, 0x77, 0x99, 0xBB, 0xCD, 0xFF, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+            0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
         ];
-        let pt: [u8; 8] = [0x01,0x23,0x45,0x67,0x89,0xAB,0xCD,0xEF];
+        let pt: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
         let cipher = TripleDes::new_3key(&key);
         let ct = cipher.encrypt_block(&pt);
         assert_eq!(cipher.decrypt_block(&ct), pt);
@@ -956,10 +1173,10 @@ mod tests {
     #[test]
     fn tdes_2key_roundtrip() {
         let key: [u8; 16] = [
-            0x01,0x33,0x45,0x77,0x99,0xBB,0xCD,0xFF,
-            0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,
+            0x01, 0x33, 0x45, 0x77, 0x99, 0xBB, 0xCD, 0xFF, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+            0x66, 0x77,
         ];
-        let pt: [u8; 8] = [0xDE,0xAD,0xBE,0xEF,0xCA,0xFE,0xBA,0xBE];
+        let pt: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE];
         let cipher = TripleDes::new_2key(&key);
         let ct = cipher.encrypt_block(&pt);
         assert_eq!(cipher.decrypt_block(&ct), pt);
@@ -969,11 +1186,14 @@ mod tests {
 
     #[test]
     fn tdes_single_key_equals_des() {
-        let key: [u8; 8] = [0x13,0x34,0x57,0x79,0x9B,0xBC,0xDF,0xF1];
-        let pt:  [u8; 8] = [0x01,0x23,0x45,0x67,0x89,0xAB,0xCD,0xEF];
-        let des   = Des::new(&key);
-        let tdes  = TripleDes::new_single_key(&key);
-        assert_eq!(des.encrypt_block(&pt), tdes.encrypt_block(&pt),
-            "TDES(K,K,K) must equal DES(K) for same key and plaintext");
+        let key: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
+        let pt: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
+        let des = Des::new(&key);
+        let tdes = TripleDes::new_single_key(&key);
+        assert_eq!(
+            des.encrypt_block(&pt),
+            tdes.encrypt_block(&pt),
+            "TDES(K,K,K) must equal DES(K) for same key and plaintext"
+        );
     }
 }
