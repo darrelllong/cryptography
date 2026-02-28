@@ -398,7 +398,7 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
 | ZUC-128 | 551.1 MiB/s | 28.3 MiB/s | 19.5x |
 
-Radar view (normalized to the fastest fast-path result):
+Radar view (log-scaled; 4 MiB/s to 560 MiB/s):
 
 ![Fast vs Ct normalized radar chart](assets/fast-vs-ct-radar.svg)
 
