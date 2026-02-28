@@ -1,7 +1,8 @@
 # cryptography
 
-Pure-Rust implementations of classical block ciphers from their NIST/NSA
-specifications: DES, Triple-DES, AES, Simon, and Speck.
+Pure-Rust implementations of classical and modern block ciphers directly
+from their specifications: DES, Triple-DES, AES, Grasshopper, Magma,
+Simon, and Speck.
 
 See [ANALYSIS.md](ANALYSIS.md) for algorithm descriptions, design decisions,
 and measured throughput on Apple M4.
@@ -60,5 +61,27 @@ and measured throughput on Apple M4.
   publisher = {Springer},
   year      = {2002},
   isbn      = {978-3-540-42580-9},
+}
+
+@techreport{rfc7801,
+  author      = {V. Dolmatov},
+  title       = {GOST R 34.12-2015: Block Cipher ``Grasshopper''},
+  type        = {{RFC}},
+  number      = {7801},
+  institution = {IETF},
+  year        = {2016},
+  month       = mar,
+  url         = {https://www.rfc-editor.org/rfc/rfc7801},
+}
+
+@techreport{rfc8891,
+  author      = {V. Dolmatov and A. Degtyarev},
+  title       = {GOST R 34.12-2015: Block Cipher ``Magma''},
+  type        = {{RFC}},
+  number      = {8891},
+  institution = {IETF},
+  year        = {2020},
+  month       = sep,
+  url         = {https://www.rfc-editor.org/rfc/rfc8891},
 }
 ```
