@@ -7,14 +7,17 @@
 //
 // Reduction: x⁸ ≡ x⁷ + x⁶ + x + 1  ⟹  modulus byte 0xC3.
 
-const fn gf_mul2(a: u8) -> u8 {
-    (a << 1) ^ if a & 0x80 != 0 { 0xC3 } else { 0 }
+#[inline(always)]
+fn gf_mul2(a: u8) -> u8 {
+    (a << 1) ^ (0xC3 & 0u8.wrapping_sub(a >> 7))
 }
 
-const fn gf_mul(mut a: u8, mut b: u8) -> u8 {
+#[inline(always)]
+fn gf_mul(mut a: u8, mut b: u8) -> u8 {
     let mut r = 0u8;
-    while b != 0 {
-        if b & 1 != 0 { r ^= a; }
+    for _ in 0..8 {
+        let mask = 0u8.wrapping_sub(b & 1);
+        r ^= a & mask;
         a = gf_mul2(a);
         b >>= 1;
     }
@@ -75,25 +78,10 @@ const PI_INV: [u8; 256] = [
 // R(block) = [l(block), block[0], …, block[14]]   ← push l to front, drop last
 // L = R¹⁶
 //
-// L_TABLES[i][v] = L_COEFF[i] ⊗ v, precomputed at compile time (4 KiB).
+// The active code computes the products directly so the linear step no longer
+// performs secret-indexed table lookups.
 
 const L_COEFF: [u8; 16] = [148, 32, 133, 16, 194, 192, 1, 251, 1, 192, 194, 16, 133, 32, 148, 1];
-
-const fn build_l_tables() -> [[u8; 256]; 16] {
-    let mut t = [[0u8; 256]; 16];
-    let mut i = 0usize;
-    while i < 16 {
-        let mut v = 0usize;
-        while v < 256 {
-            t[i][v] = gf_mul(L_COEFF[i], v as u8);
-            v += 1;
-        }
-        i += 1;
-    }
-    t
-}
-
-static L_TABLES: [[u8; 256]; 16] = build_l_tables();
 
 // ── Core transforms ───────────────────────────────────────────────────────────
 
@@ -104,19 +92,21 @@ fn xor_block(a: &mut [u8; 16], b: &[u8; 16]) {
 
 #[inline]
 fn apply_s(block: &mut [u8; 16]) {
-    for b in block.iter_mut() { *b = PI[*b as usize]; }
+    // Fixed-scan S-box selection replaces direct indexing into PI.
+    for b in block.iter_mut() { *b = crate::ct::ct_lookup_u8(&PI, *b); }
 }
 
 #[inline]
 fn apply_s_inv(block: &mut [u8; 16]) {
-    for b in block.iter_mut() { *b = PI_INV[*b as usize]; }
+    for b in block.iter_mut() { *b = crate::ct::ct_lookup_u8(&PI_INV, *b); }
 }
 
 /// l-function: linear combination of 16 bytes over GF(2⁸).
 #[inline]
 fn l_func(block: &[u8; 16]) -> u8 {
     let mut r = 0u8;
-    for i in 0..16 { r ^= L_TABLES[i][block[i] as usize]; }
+    // Multiply in-line instead of using an L-table indexed by secret bytes.
+    for i in 0..16 { r ^= gf_mul(L_COEFF[i], block[i]); }
     r
 }
 
@@ -135,7 +125,7 @@ fn r_step(block: &mut [u8; 16]) {
 #[inline]
 fn r_inv_step(block: &mut [u8; 16]) {
     // sum = L_COEFF[0..15] · block[1..16]
-    let sum: u8 = (0..15).fold(0u8, |acc, i| acc ^ L_TABLES[i][block[i + 1] as usize]);
+    let sum: u8 = (0..15).fold(0u8, |acc, i| acc ^ gf_mul(L_COEFF[i], block[i + 1]));
     let new_last = block[0] ^ sum;
     block.copy_within(1..16, 0); // block[0..=14] ← old block[1..=15]
     block[15] = new_last;
@@ -216,6 +206,13 @@ impl Grasshopper {
         Grasshopper { rk: key_schedule(key) }
     }
 
+    /// Construct from a 32-byte key and wipe the provided key buffer.
+    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+        let out = Self::new(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
+    }
+
     /// Encrypt a 128-bit block (ECB mode).
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         let mut s = *block;
@@ -250,6 +247,15 @@ impl crate::BlockCipher for Grasshopper {
     fn decrypt(&self, block: &mut [u8]) {
         let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
         block.copy_from_slice(&self.decrypt_block(arr));
+    }
+}
+
+impl Drop for Grasshopper {
+    fn drop(&mut self) {
+        // Grasshopper keeps all 10 round keys in memory for repeated use.
+        for rk in self.rk.iter_mut() {
+            crate::ct::zeroize_slice(rk.as_mut_slice());
+        }
     }
 }
 

@@ -1,6 +1,8 @@
 //! Classical and modern block ciphers implemented in pure, safe, portable Rust
 //! directly from their NIST/FIPS specifications.
 
+mod ct;
+
 pub mod aes;
 pub mod des;
 pub mod grasshopper;

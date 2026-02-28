@@ -134,6 +134,13 @@ macro_rules! speck_variant {
                 speck_expand(key, $alpha, $beta, $n, $m, $T, $mask, &mut rk);
                 Self { round_keys: rk }
             }
+            pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
+                // Mirrors `new`, but clears the caller-owned key bytes after
+                // expansion so only the internal round keys remain live.
+                let out = Self::new(key);
+                crate::ct::zeroize_slice(key.as_mut_slice());
+                out
+            }
             pub fn encrypt_block(&self, block: &[u8; $blk_len]) -> [u8; $blk_len] {
                 let mut out = *block;
                 speck_enc(&mut out, &self.round_keys, $alpha, $beta, $n, $mask);
@@ -154,6 +161,13 @@ macro_rules! speck_variant {
             fn decrypt(&self, block: &mut [u8]) {
                 let arr: &[u8; $blk_len] = (&*block).try_into().expect("wrong block length");
                 block.copy_from_slice(&self.decrypt_block(arr));
+            }
+        }
+        impl Drop for $Name {
+            fn drop(&mut self) {
+                // SPECK's round function is already ARX-only; wipe the cached
+                // round keys when the instance is released.
+                crate::ct::zeroize_slice(self.round_keys.as_mut_slice());
             }
         }
     };

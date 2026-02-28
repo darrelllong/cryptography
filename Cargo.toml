@@ -2,23 +2,13 @@
 name = "cryptography"
 version = "0.1.0"
 edition = "2021"
+autobenches = false
 
 [lib]
 name = "cryptography"
 path = "src/lib.rs"
 
-# Benchmarks: `cargo bench`
-# Requires libsodium: brew install libsodium
-[[bench]]
-name = "aes_bench"
-harness = false
-
-[[bench]]
-name = "cipher_bench"
-harness = false
-
-[dev-dependencies]
-criterion   = { version = "0.5", features = ["html_reports"] }
-sodiumoxide = "0.2"
+# Benchmark targets live in the separate `benchmarks/` crate so ordinary
+# `cargo test` on this package does not need to resolve benchmark-only crates.
 
 [dependencies]

@@ -1,30 +1,21 @@
 //! Throughput benchmarks for all cipher families.
 //!
-//! Each benchmark encrypts 1 MiB of data in ECB mode.  The buffer is
-//! prepared by `iter_batched` (setup not timed) so the random data
-//! generation and buffer allocation never appear in the measurements.
+//! Each benchmark encrypts 1 MiB of data in ECB mode. The buffer is prepared by
+//! `iter_batched` (setup not timed) so random data generation and allocation
+//! never appear in the measurements.
 //!
 //! Run:
-//!   cargo bench --bench cipher_bench
+//!   cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench
 //!
 //! HTML reports land in target/criterion/.
 
-use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use criterion::measurement::WallTime;
+use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use cryptography::{
-    BlockCipher,
-    Aes128, Aes192, Aes256,
-    Des, TripleDes,
-    Grasshopper,
-    Magma,
-    Simon32_64, Simon48_72, Simon48_96,
-    Simon64_96, Simon64_128,
-    Simon96_96, Simon96_144,
-    Simon128_128, Simon128_192, Simon128_256,
-    Speck32_64, Speck48_72, Speck48_96,
-    Speck64_96, Speck64_128,
-    Speck96_96, Speck96_144,
-    Speck128_128, Speck128_192, Speck128_256,
+    Aes128, Aes192, Aes256, BlockCipher, Des, Grasshopper, Magma, Simon32_64, Simon48_72,
+    Simon48_96, Simon64_96, Simon64_128, Simon96_96, Simon96_144, Simon128_128, Simon128_192,
+    Simon128_256, Speck32_64, Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96,
+    Speck96_144, Speck128_128, Speck128_192, Speck128_256, TripleDes,
 };
 use std::hint::black_box;
 
@@ -34,7 +25,9 @@ const MB: usize = 1 << 20; // 1 MiB
 fn fill(buf: &mut [u8]) {
     let mut s: u64 = 0x517cc1b727220a95;
     for b in buf.iter_mut() {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         *b = (s >> 33) as u8;
     }
 }
@@ -42,7 +35,7 @@ fn fill(buf: &mut [u8]) {
 // ── Generic benchmark helper ──────────────────────────────────────────────
 //
 // `iter_batched` keeps setup (buffer allocation + fill) outside the timed
-// region.  `BatchSize::LargeInput` tells Criterion to prepare one input per
+// region. `BatchSize::LargeInput` tells Criterion to prepare one input per
 // iteration, which is correct for a 1 MiB buffer.
 
 fn bench_one<C: BlockCipher>(
@@ -56,7 +49,11 @@ fn bench_one<C: BlockCipher>(
     g.throughput(Throughput::Bytes(n as u64));
     g.bench_function(name, |b| {
         b.iter_batched(
-            || { let mut buf = src[..n].to_vec(); fill(&mut buf); buf },
+            || {
+                let mut buf = src[..n].to_vec();
+                fill(&mut buf);
+                buf
+            },
             |mut buf| {
                 buf.chunks_exact_mut(blk).for_each(|ch| cipher.encrypt(ch));
                 black_box(buf)
@@ -72,16 +69,16 @@ fn bench_simon(c: &mut Criterion) {
     let src = vec![0u8; MB];
     let mut g = c.benchmark_group("Simon");
 
-    bench_one(&mut g, "Simon32/64",   Simon32_64::new(&[0u8;  8]),  &src);
-    bench_one(&mut g, "Simon48/72",   Simon48_72::new(&[0u8;  9]),  &src);
-    bench_one(&mut g, "Simon48/96",   Simon48_96::new(&[0u8; 12]),  &src);
-    bench_one(&mut g, "Simon64/96",   Simon64_96::new(&[0u8; 12]),  &src);
-    bench_one(&mut g, "Simon64/128",  Simon64_128::new(&[0u8; 16]), &src);
-    bench_one(&mut g, "Simon96/96",   Simon96_96::new(&[0u8; 12]),  &src);
-    bench_one(&mut g, "Simon96/144",  Simon96_144::new(&[0u8; 18]), &src);
-    bench_one(&mut g, "Simon128/128", Simon128_128::new(&[0u8; 16]),&src);
-    bench_one(&mut g, "Simon128/192", Simon128_192::new(&[0u8; 24]),&src);
-    bench_one(&mut g, "Simon128/256", Simon128_256::new(&[0u8; 32]),&src);
+    bench_one(&mut g, "Simon32/64", Simon32_64::new(&[0u8; 8]), &src);
+    bench_one(&mut g, "Simon48/72", Simon48_72::new(&[0u8; 9]), &src);
+    bench_one(&mut g, "Simon48/96", Simon48_96::new(&[0u8; 12]), &src);
+    bench_one(&mut g, "Simon64/96", Simon64_96::new(&[0u8; 12]), &src);
+    bench_one(&mut g, "Simon64/128", Simon64_128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Simon96/96", Simon96_96::new(&[0u8; 12]), &src);
+    bench_one(&mut g, "Simon96/144", Simon96_144::new(&[0u8; 18]), &src);
+    bench_one(&mut g, "Simon128/128", Simon128_128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Simon128/192", Simon128_192::new(&[0u8; 24]), &src);
+    bench_one(&mut g, "Simon128/256", Simon128_256::new(&[0u8; 32]), &src);
 
     g.finish();
 }
@@ -92,21 +89,21 @@ fn bench_speck(c: &mut Criterion) {
     let src = vec![0u8; MB];
     let mut g = c.benchmark_group("Speck");
 
-    bench_one(&mut g, "Speck32/64",   Speck32_64::new(&[0u8;  8]),  &src);
-    bench_one(&mut g, "Speck48/72",   Speck48_72::new(&[0u8;  9]),  &src);
-    bench_one(&mut g, "Speck48/96",   Speck48_96::new(&[0u8; 12]),  &src);
-    bench_one(&mut g, "Speck64/96",   Speck64_96::new(&[0u8; 12]),  &src);
-    bench_one(&mut g, "Speck64/128",  Speck64_128::new(&[0u8; 16]), &src);
-    bench_one(&mut g, "Speck96/96",   Speck96_96::new(&[0u8; 12]),  &src);
-    bench_one(&mut g, "Speck96/144",  Speck96_144::new(&[0u8; 18]), &src);
-    bench_one(&mut g, "Speck128/128", Speck128_128::new(&[0u8; 16]),&src);
-    bench_one(&mut g, "Speck128/192", Speck128_192::new(&[0u8; 24]),&src);
-    bench_one(&mut g, "Speck128/256", Speck128_256::new(&[0u8; 32]),&src);
+    bench_one(&mut g, "Speck32/64", Speck32_64::new(&[0u8; 8]), &src);
+    bench_one(&mut g, "Speck48/72", Speck48_72::new(&[0u8; 9]), &src);
+    bench_one(&mut g, "Speck48/96", Speck48_96::new(&[0u8; 12]), &src);
+    bench_one(&mut g, "Speck64/96", Speck64_96::new(&[0u8; 12]), &src);
+    bench_one(&mut g, "Speck64/128", Speck64_128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Speck96/96", Speck96_96::new(&[0u8; 12]), &src);
+    bench_one(&mut g, "Speck96/144", Speck96_144::new(&[0u8; 18]), &src);
+    bench_one(&mut g, "Speck128/128", Speck128_128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Speck128/192", Speck128_192::new(&[0u8; 24]), &src);
+    bench_one(&mut g, "Speck128/256", Speck128_256::new(&[0u8; 32]), &src);
 
     g.finish();
 }
 
-// ── AES (pure-Rust T-table) ───────────────────────────────────────────────
+// ── AES ───────────────────────────────────────────────────────────────────
 
 fn bench_aes(c: &mut Criterion) {
     let src = vec![0u8; MB];
@@ -125,7 +122,7 @@ fn bench_des(c: &mut Criterion) {
     let src = vec![0u8; MB];
     let mut g = c.benchmark_group("DES");
 
-    bench_one(&mut g, "DES",       Des::new(&[0u8; 8]),             &src);
+    bench_one(&mut g, "DES", Des::new(&[0u8; 8]), &src);
     bench_one(&mut g, "3DES-2key", TripleDes::new_2key(&[0u8; 16]), &src);
     bench_one(&mut g, "3DES-3key", TripleDes::new_3key(&[0u8; 24]), &src);
 
@@ -154,5 +151,13 @@ fn bench_magma(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_simon, bench_speck, bench_aes, bench_des, bench_grasshopper, bench_magma);
+criterion_group!(
+    benches,
+    bench_simon,
+    bench_speck,
+    bench_aes,
+    bench_des,
+    bench_grasshopper,
+    bench_magma
+);
 criterion_main!(benches);

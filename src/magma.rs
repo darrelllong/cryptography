@@ -27,8 +27,10 @@ const PI: [[u8; 16]; 8] = [
 fn t(v: u32) -> u32 {
     let mut r = 0u32;
     for i in 0..8usize {
-        let nibble = (v >> (4 * i)) & 0xf;
-        r |= (PI[i][nibble as usize] as u32) << (4 * i);
+        let nibble = ((v >> (4 * i)) & 0xf) as u8;
+        // Scan all 16 entries instead of indexing by a secret nibble.
+        let sub = crate::ct::ct_lookup_u8(&PI[i], nibble);
+        r |= (sub as u32) << (4 * i);
     }
     r
 }
@@ -110,6 +112,13 @@ impl Magma {
         Magma { enc_rk, dec_rk }
     }
 
+    /// Construct from a 32-byte key and wipe the provided key buffer.
+    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+        let out = Self::new(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
+    }
+
     /// Encrypt a 64-bit block (ECB mode).
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         magma_core(block, &self.enc_rk)
@@ -130,6 +139,14 @@ impl crate::BlockCipher for Magma {
     fn decrypt(&self, block: &mut [u8]) {
         let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
         block.copy_from_slice(&self.decrypt_block(arr));
+    }
+}
+
+impl Drop for Magma {
+    fn drop(&mut self) {
+        // Magma caches both round-key orders; wipe them when the instance dies.
+        crate::ct::zeroize_slice(self.enc_rk.as_mut_slice());
+        crate::ct::zeroize_slice(self.dec_rk.as_mut_slice());
     }
 }
 

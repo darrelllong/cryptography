@@ -1,14 +1,14 @@
 //! AES throughput benchmarks.
 //!
-//! Compares our pure-Rust T-table implementation against Bernstein's NaCl
+//! Compares this crate's pure-Rust AES implementation against Bernstein's NaCl
 //! library (via libsodium / sodiumoxide):
 //!
-//!   * our-AES-T-table          — AES-128/192/256 ECB, compile-time T-tables
+//!   * our-AES-software            — AES-128/192/256 ECB
 //!   * libsodium-XSalsa20-Poly1305 — NaCl secretbox (stream cipher + MAC)
-//!   * libsodium-AES256GCM      — AES-256-GCM via hardware AES (if available)
+//!   * libsodium-AES256GCM         — AES-256-GCM via hardware AES (if available)
 //!
 //! Run:
-//!   cargo bench
+//!   cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
 //!
 //! Requires libsodium (brew install libsodium on macOS).
 //! HTML reports land in target/criterion/.
@@ -17,10 +17,10 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use cryptography::{Aes128, Aes192, Aes256};
 use std::hint::black_box;
 
-// ── Our T-table AES ──────────────────────────────────────────────────────────
+// ── Our AES implementation ────────────────────────────────────────────────────
 
 fn bench_our_aes(c: &mut Criterion) {
-    let mut group = c.benchmark_group("our-AES-T-table");
+    let mut group = c.benchmark_group("our-AES-software");
 
     // ── Single 16-byte block ──
     group.throughput(Throughput::Bytes(16));
@@ -99,9 +99,9 @@ fn bench_nacl(c: &mut Criterion) {
     // ── AES-256-GCM (libsodium, hardware-accelerated) ──
     {
         use sodiumoxide::crypto::aead::aes256gcm;
-        if aes256gcm::is_available() {
-            let key   = aes256gcm::gen_key();
-            let nonce = aes256gcm::gen_nonce();
+        if let Ok(aes) = aes256gcm::Aes256Gcm::new() {
+            let key = aes.gen_key();
+            let nonce = aes.gen_initial_nonce();
             let msg16 = [0u8; 16];
             let msg1k = [0u8; 1024];
 
@@ -109,12 +109,12 @@ fn bench_nacl(c: &mut Criterion) {
 
             group.throughput(Throughput::Bytes(16));
             group.bench_function("16B", |b| {
-                b.iter(|| aes256gcm::seal(black_box(&msg16), None, &nonce, &key))
+                b.iter(|| aes.seal(black_box(&msg16), None, &nonce, &key))
             });
 
             group.throughput(Throughput::Bytes(1024));
             group.bench_function("1KiB", |b| {
-                b.iter(|| aes256gcm::seal(black_box(&msg1k), None, &nonce, &key))
+                b.iter(|| aes.seal(black_box(&msg1k), None, &nonce, &key))
             });
 
             group.finish();

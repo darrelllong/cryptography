@@ -160,8 +160,9 @@ const SBOXES: [[u8; 64]; 8] = [
 // ─────────────────────────────────────────────────────────────────────────────
 // Byte-level precomputed permutation tables
 //
-// Replace the bit-by-bit permutation loops in the hot path (des_block + f)
-// with 8- or 4-lookup OR-trees.
+// These are kept as reference material from the original table-driven version.
+// The active encrypt/decrypt path below now uses fixed bit-loops instead so the
+// runtime memory access pattern no longer depends on secret data.
 //
 // For a permutation perm of width W bits:
 //   table[b][v]  =  contribution to the W-bit output
@@ -176,6 +177,7 @@ const SBOXES: [[u8; 64]; 8] = [
 // Tables are computed entirely at compile time via const fns.
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
     let mut table = [[0u64; 256]; 8];
     let mut i = 0usize;
@@ -196,6 +198,7 @@ const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
     table
 }
 
+#[allow(dead_code)]
 const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
     let mut table = [[0u64; 256]; 4];
     let mut i = 0usize;
@@ -240,6 +243,7 @@ const fn apply_p_to_partial(s: u32) -> u32 {
 /// Since P is a linear permutation, P(s0|s1|…|s7) = P(s0)|P(s1)|…|P(s7),
 /// so OR-ing all 8 entries gives the correct f-function output.
 /// Reduces 8 S-box + 4 P byte-table lookups per round to 8 SP lookups.
+#[allow(dead_code)]
 const fn build_sp() -> [[u32; 64]; 8] {
     let mut sp = [[0u32; 64]; 8];
     let mut i = 0usize;
@@ -259,11 +263,16 @@ const fn build_sp() -> [[u32; 64]; 8] {
     sp
 }
 
+#[allow(dead_code)]
 static IP_TABLE: [[u64; 256]; 8] = build_perm64(&IP);
+#[allow(dead_code)]
 static FP_TABLE: [[u64; 256]; 8] = build_perm64(&FP);
+#[allow(dead_code)]
 static  E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
+#[allow(dead_code)]
 static SP_TABLE: [[u32;  64]; 8] = build_sp();
 
+#[allow(dead_code)]
 #[inline(always)]
 fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
     t[0][(x >> 56)          as usize]
@@ -276,6 +285,7 @@ fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
   | t[7][ (x        & 0xff) as usize]
 }
 
+#[allow(dead_code)]
 #[inline(always)]
 fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
     t[0][(r >> 24)          as usize]
@@ -367,19 +377,28 @@ pub fn key_schedule(key: u64) -> KeySchedule {
 
 /// The DES f-function: f(R, K) = P(S(E(R) ⊕ K))
 fn f(r: u32, subkey: u64) -> u32 {
-    // Expand R from 32 to 48 bits using the precomputed E byte-table.
-    let xored = fast_expand(r, &E_TABLE) ^ subkey;
-
-    // Look up each S-box's fused S+P contribution and OR them together.
-    // SP_TABLE[i][b6] already incorporates both the S-box substitution and
-    // the P permutation, so no separate P step is needed.
-    let mut result = 0u32;
-    for i in 0..8usize {
-        let shift = 42 - 6 * i; // bits [47..42], [41..36], ... [5..0]
-        let b6 = ((xored >> shift) & 0x3F) as usize;
-        result |= SP_TABLE[i][b6];
+    // Use direct bit extraction instead of the previous byte tables so the
+    // expansion step does not depend on secret-indexed memory lookups.
+    let mut expanded = 0u64;
+    for (i, &src) in E.iter().enumerate() {
+        let bit = ((r >> (32 - src)) & 1) as u64;
+        expanded |= bit << (47 - i);
     }
-    result
+    let xored = expanded ^ subkey;
+
+    let mut pre_p = 0u32;
+    for i in 0..8usize {
+        let shift = 42 - 6 * i;
+        let b6 = ((xored >> shift) & 0x3F) as u8;
+        let row = ((b6 & 0x20) >> 4) | (b6 & 0x01);
+        let col = (b6 >> 1) & 0x0F;
+        let idx = row * 16 + col;
+        // Fixed-scan S-box selection replaces the previous SP-table lookup.
+        let sval = crate::ct::ct_lookup_u8(&SBOXES[i], idx) as u32;
+        pre_p |= sval << (28 - 4 * i);
+    }
+
+    apply_p_to_partial(pre_p)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -391,8 +410,7 @@ fn f(r: u32, subkey: u64) -> u32 {
 /// For encryption, pass `schedule` from [`key_schedule`].
 /// For decryption, pass the schedule reversed: `let dec = { let mut s = ks; s.reverse(); s }`.
 fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
-    // Initial Permutation via precomputed byte-table.
-    let permuted = fast_perm64(block, &IP_TABLE);
+    let permuted = permute64(block, &IP);
 
     let mut l = (permuted >> 32) as u32;
     let mut r = permuted as u32;
@@ -404,9 +422,9 @@ fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
         l = tmp;
     }
 
-    // Pre-output: swap L and R, then apply FP via precomputed byte-table.
+    // Pre-output: swap L and R, then apply FP.
     let pre_output = ((r as u64) << 32) | (l as u64);
-    fast_perm64(pre_output, &FP_TABLE)
+    permute64(pre_output, &FP)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -427,6 +445,13 @@ impl Des {
         let mut dec_schedule = enc_schedule;
         dec_schedule.reverse();
         Des { enc_schedule, dec_schedule }
+    }
+
+    /// Create a new DES instance and wipe the provided key buffer.
+    pub fn new_wiping(key: &mut [u8; 8]) -> Self {
+        let out = Self::new(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
     }
 
     /// Encrypt a single 64-bit block (ECB mode).
@@ -491,6 +516,13 @@ impl TripleDes {
         )
     }
 
+    /// Construct a 3TDEA instance and wipe the provided key buffer.
+    pub fn new_3key_wiping(key: &mut [u8; 24]) -> Self {
+        let out = Self::new_3key(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
+    }
+
     /// Construct a 2TDEA instance from a 16-byte key K1 ∥ K2 (K3 = K1).
     pub fn new_2key(key: &[u8; 16]) -> Self {
         let k1 = u64::from_be_bytes(key[0..8].try_into().unwrap());
@@ -498,11 +530,25 @@ impl TripleDes {
         Self::from_keys(k1, k2, k1)
     }
 
+    /// Construct a 2TDEA instance and wipe the provided key buffer.
+    pub fn new_2key_wiping(key: &mut [u8; 16]) -> Self {
+        let out = Self::new_2key(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
+    }
+
     /// Construct from three 8-byte keys.  K1=K2=K3 is valid (degenerates to
     /// single DES) and is used by the NIST CAVP "KEYs" tests.
     pub fn new_single_key(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
         Self::from_keys(k, k, k)
+    }
+
+    /// Construct from one DES key used as K1 = K2 = K3 and wipe the buffer.
+    pub fn new_single_key_wiping(key: &mut [u8; 8]) -> Self {
+        let out = Self::new_single_key(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
     }
 
     fn from_keys(k1: u64, k2: u64, k3: u64) -> Self {
@@ -562,6 +608,26 @@ impl crate::BlockCipher for TripleDes {
     fn decrypt(&self, block: &mut [u8]) {
         let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
         block.copy_from_slice(&self.decrypt_block(arr));
+    }
+}
+
+impl Drop for Des {
+    fn drop(&mut self) {
+        // DES instances retain both schedules for repeated ECB calls.
+        crate::ct::zeroize_slice(self.enc_schedule.as_mut_slice());
+        crate::ct::zeroize_slice(self.dec_schedule.as_mut_slice());
+    }
+}
+
+impl Drop for TripleDes {
+    fn drop(&mut self) {
+        // TDEA keeps six schedules resident; wipe all of them on drop.
+        crate::ct::zeroize_slice(self.k1_enc.as_mut_slice());
+        crate::ct::zeroize_slice(self.k1_dec.as_mut_slice());
+        crate::ct::zeroize_slice(self.k2_enc.as_mut_slice());
+        crate::ct::zeroize_slice(self.k2_dec.as_mut_slice());
+        crate::ct::zeroize_slice(self.k3_enc.as_mut_slice());
+        crate::ct::zeroize_slice(self.k3_dec.as_mut_slice());
     }
 }
 

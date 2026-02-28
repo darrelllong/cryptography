@@ -5,13 +5,10 @@
 ///
 /// # Default path — pure, safe, portable Rust
 ///
-/// The cipher is a T-table implementation: each of the four operations per
-/// round (SubBytes, ShiftRows, MixColumns, AddRoundKey) is folded into four
-/// 256-entry u32 lookup tables computed *at compile time* from the FIPS 197
-/// S-box via `const fn`.  One round costs 16 table lookups and 12 XORs.
-/// Decryption uses an analogous set of four inverse tables; round keys are
-/// used in reverse order (direct inverse cipher, FIPS 197 § 5.3 — no key
-/// transformation required).
+/// The active encrypt/decrypt path is a bytewise software implementation:
+/// SubBytes uses fixed-scan S-box selection, and the round transforms are
+/// spelled out directly instead of using secret-indexed T-tables.  The old
+/// tables are retained below only as compile-time regression fixtures.
 ///
 /// # Tests
 /// All vectors are from NIST CAVP KAT_AES.zip (CAVS 11.1, 2011-04-22),
@@ -79,8 +76,7 @@ const RCON: [u32; 10] = [
 /// Multiply by x (the polynomial generator) — equivalent to a left shift
 /// followed by a conditional XOR to reduce modulo the irreducible polynomial.
 const fn xtime(a: u8) -> u8 {
-    // If bit 7 is set, the shift overflows degree 7 → reduce mod 0x11b.
-    (a << 1) ^ (if a & 0x80 != 0 { 0x1b } else { 0 })
+    (a << 1) ^ (0x1b & 0u8.wrapping_sub(a >> 7))
 }
 
 const fn mul2(a: u8)  -> u8 { xtime(a) }
@@ -94,6 +90,9 @@ const fn mul14(a: u8) -> u8 { mul8(a) ^ mul4(a) ^ mul2(a) }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Encryption T-tables  (computed at compile time from SBOX)
+//
+// These are no longer used by the active block path.  They are kept so the
+// existing spot-check tests still verify the GF arithmetic derivation.
 //
 // Each table folds SubBytes + one column of MixColumns into a single u32
 // lookup.  TE1–TE3 are right-rotations of TE0, so together they cover all
@@ -113,6 +112,7 @@ const fn mul14(a: u8) -> u8 { mul8(a) ^ mul4(a) ^ mul2(a) }
 //    j, j+1, j+2, j+3 mod 4 of the current state.)
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const TE0: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
@@ -127,18 +127,21 @@ const TE0: [u32; 256] = {
     t
 };
 
+#[allow(dead_code)]
 const TE1: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
     while i < 256 { t[i] = TE0[i].rotate_right(8);  i += 1; }
     t
 };
+#[allow(dead_code)]
 const TE2: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
     while i < 256 { t[i] = TE0[i].rotate_right(16); i += 1; }
     t
 };
+#[allow(dead_code)]
 const TE3: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
@@ -148,6 +151,9 @@ const TE3: [u32; 256] = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Decryption T-tables  (computed at compile time from INV_SBOX)
+//
+// Retained for the same regression checks as TE0..TE3; the runtime decryption
+// path now uses explicit inverse rounds instead of secret-indexed table loads.
 //
 // Derivation for TD0 (InvMixColumns matrix, FIPS 197, § 5.3.3):
 //
@@ -164,6 +170,7 @@ const TE3: [u32; 256] = {
 // cipher of FIPS 197 § 5.3, not the equivalent inverse cipher.
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 const TD0: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
@@ -178,18 +185,21 @@ const TD0: [u32; 256] = {
     t
 };
 
+#[allow(dead_code)]
 const TD1: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
     while i < 256 { t[i] = TD0[i].rotate_right(8);  i += 1; }
     t
 };
+#[allow(dead_code)]
 const TD2: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
     while i < 256 { t[i] = TD0[i].rotate_right(16); i += 1; }
     t
 };
+#[allow(dead_code)]
 const TD3: [u32; 256] = {
     let mut t = [0u32; 256];
     let mut i = 0usize;
@@ -211,10 +221,10 @@ const TD3: [u32; 256] = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn sub_word(w: u32) -> u32 {
-    (SBOX[(w >> 24)         as usize] as u32) << 24
-  | (SBOX[((w >> 16) & 0xff) as usize] as u32) << 16
-  | (SBOX[((w >>  8) & 0xff) as usize] as u32) <<  8
-  | (SBOX[(w         & 0xff) as usize] as u32)
+    (crate::ct::ct_lookup_u8(&SBOX, (w >> 24) as u8) as u32) << 24
+  | (crate::ct::ct_lookup_u8(&SBOX, ((w >> 16) & 0xff) as u8) as u32) << 16
+  | (crate::ct::ct_lookup_u8(&SBOX, ((w >>  8) & 0xff) as u8) as u32) <<  8
+  | (crate::ct::ct_lookup_u8(&SBOX, (w & 0xff) as u8) as u32)
 }
 
 fn expand_128(key: &[u8; 16]) -> [u32; 44] {
@@ -258,186 +268,173 @@ fn expand_256(key: &[u8; 32]) -> [u32; 60] {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Decryption key schedule — equivalent inverse cipher (FIPS 197 § 5.3.5)
-//
-// The T-table decryption path folds InvSubBytes + InvMixColumns into the TD
-// tables, exactly as the forward path folds SubBytes + MixColumns into TE.
-// This is the "equivalent inverse cipher": for it to be correct the round keys
-// must be pre-transformed.
-//
-// Given the forward expanded key w[0..4*(NR+1)]:
-//   dk[0..4]         = w[NR*4..NR*4+4]           (last enc round key first)
-//   dk[r*4..r*4+4]   = InvMixColumns(w[(NR-r)*4..])  for r = 1..NR-1
-//   dk[NR*4..NR*4+4] = w[0..4]                   (first enc round key last)
-//
-// InvMixColumns on a 32-bit column w can be computed via the existing TD
-// tables: since TD0[x] = InvMixColumns_col(InvSubBytes(x)), and
-// SubBytes = InvSubBytes⁻¹, we have
-//
-//   InvMixColumns([a,b,c,d]) =
-//       TD0[SBOX[a]] ^ TD1[SBOX[b]] ^ TD2[SBOX[c]] ^ TD3[SBOX[d]]
-//
-// because SBOX[a] = SubBytes(a) and InvSubBytes(SubBytes(a)) = a.
+// Decryption key schedule — reversed encryption round keys for the direct
+// inverse cipher (InvShiftRows, InvSubBytes, AddRoundKey, InvMixColumns).
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Apply InvMixColumns to a single 32-bit state column.
 fn inv_mix_col(w: u32) -> u32 {
-    TD0[SBOX[ (w >> 24)         as usize] as usize]
-  ^ TD1[SBOX[((w >> 16) & 0xff) as usize] as usize]
-  ^ TD2[SBOX[((w >>  8) & 0xff) as usize] as usize]
-  ^ TD3[SBOX[ (w         & 0xff) as usize] as usize]
+    let [a0, a1, a2, a3] = w.to_be_bytes();
+    u32::from_be_bytes([
+        mul14(a0) ^ mul11(a1) ^ mul13(a2) ^ mul9(a3),
+        mul9(a0)  ^ mul14(a1) ^ mul11(a2) ^ mul13(a3),
+        mul13(a0) ^ mul9(a1)  ^ mul14(a2) ^ mul11(a3),
+        mul11(a0) ^ mul13(a1) ^ mul9(a2)  ^ mul14(a3),
+    ])
 }
 
 /// Build the decryption round-key schedule from the forward expanded key.
 /// `enc_rk` and `dec_rk` must have the same length (NR+1)*4.
 fn make_dec_rk(enc_rk: &[u32], dec_rk: &mut [u32], nr: usize) {
-    // First decryption "round" uses the last encryption round key.
-    dec_rk[0..4].copy_from_slice(&enc_rk[nr * 4..nr * 4 + 4]);
-    // Middle rounds: apply InvMixColumns to reversed encryption round keys.
-    for r in 1..nr {
-        for j in 0..4 {
-            dec_rk[r * 4 + j] = inv_mix_col(enc_rk[(nr - r) * 4 + j]);
-        }
+    // The active decrypt path uses the direct inverse cipher, so reversing the
+    // round-key order is enough; no equivalent-inverse key transform is needed.
+    for r in 0..=nr {
+        let src = (nr - r) * 4;
+        let dst = r * 4;
+        dec_rk[dst..dst + 4].copy_from_slice(&enc_rk[src..src + 4]);
     }
-    // Last decryption "round" uses the first encryption round key.
-    dec_rk[nr * 4..nr * 4 + 4].copy_from_slice(&enc_rk[0..4]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cipher core — pure, safe Rust T-table implementation
-//
-// State is held as four u32 words, one per column (big-endian byte order):
-//   s0 = state[0][0]<<24 | state[1][0]<<16 | state[2][0]<<8 | state[3][0]
+// Cipher core — bytewise software implementation used by the hardening pass
 //
 // `rk`  — flat slice of forward round-key words, length (NR+1)×4.
 // `dk`  — flat slice of decryption round-key words (from make_dec_rk).
 // `nr`  — number of rounds (10 / 12 / 14).
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn aes_encrypt(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
-    // Initial AddRoundKey.
-    let mut s0 = u32::from_be_bytes(block[ 0.. 4].try_into().unwrap()) ^ rk[0];
-    let mut s1 = u32::from_be_bytes(block[ 4.. 8].try_into().unwrap()) ^ rk[1];
-    let mut s2 = u32::from_be_bytes(block[ 8..12].try_into().unwrap()) ^ rk[2];
-    let mut s3 = u32::from_be_bytes(block[12..16].try_into().unwrap()) ^ rk[3];
-
-    // Middle rounds 1 .. NR-1: SubBytes + ShiftRows + MixColumns + AddRoundKey.
-    for r in 1..nr {
-        let k = 4 * r;
-        let t0 = TE0[(s0 >> 24)         as usize]
-               ^ TE1[((s1 >> 16) & 0xff) as usize]
-               ^ TE2[((s2 >>  8) & 0xff) as usize]
-               ^ TE3[(s3         & 0xff) as usize]
-               ^ rk[k];
-        let t1 = TE0[(s1 >> 24)         as usize]
-               ^ TE1[((s2 >> 16) & 0xff) as usize]
-               ^ TE2[((s3 >>  8) & 0xff) as usize]
-               ^ TE3[(s0         & 0xff) as usize]
-               ^ rk[k + 1];
-        let t2 = TE0[(s2 >> 24)         as usize]
-               ^ TE1[((s3 >> 16) & 0xff) as usize]
-               ^ TE2[((s0 >>  8) & 0xff) as usize]
-               ^ TE3[(s1         & 0xff) as usize]
-               ^ rk[k + 2];
-        let t3 = TE0[(s3 >> 24)         as usize]
-               ^ TE1[((s0 >> 16) & 0xff) as usize]
-               ^ TE2[((s1 >>  8) & 0xff) as usize]
-               ^ TE3[(s2         & 0xff) as usize]
-               ^ rk[k + 3];
-        s0 = t0; s1 = t1; s2 = t2; s3 = t3;
+#[inline(always)]
+fn add_round_key(state: &mut [u8; 16], rk: &[u32]) {
+    for c in 0..4 {
+        let w = rk[c].to_be_bytes();
+        for r in 0..4 {
+            state[4 * c + r] ^= w[r];
+        }
     }
-
-    // Final round NR: SubBytes + ShiftRows + AddRoundKey (no MixColumns).
-    let k = 4 * nr;
-    let c0 = (SBOX[(s0 >> 24)         as usize] as u32) << 24
-           | (SBOX[((s1 >> 16) & 0xff) as usize] as u32) << 16
-           | (SBOX[((s2 >>  8) & 0xff) as usize] as u32) <<  8
-           | (SBOX[(s3         & 0xff) as usize] as u32);
-    let c1 = (SBOX[(s1 >> 24)         as usize] as u32) << 24
-           | (SBOX[((s2 >> 16) & 0xff) as usize] as u32) << 16
-           | (SBOX[((s3 >>  8) & 0xff) as usize] as u32) <<  8
-           | (SBOX[(s0         & 0xff) as usize] as u32);
-    let c2 = (SBOX[(s2 >> 24)         as usize] as u32) << 24
-           | (SBOX[((s3 >> 16) & 0xff) as usize] as u32) << 16
-           | (SBOX[((s0 >>  8) & 0xff) as usize] as u32) <<  8
-           | (SBOX[(s1         & 0xff) as usize] as u32);
-    let c3 = (SBOX[(s3 >> 24)         as usize] as u32) << 24
-           | (SBOX[((s0 >> 16) & 0xff) as usize] as u32) << 16
-           | (SBOX[((s1 >>  8) & 0xff) as usize] as u32) <<  8
-           | (SBOX[(s2         & 0xff) as usize] as u32);
-
-    let mut out = [0u8; 16];
-    out[ 0.. 4].copy_from_slice(&(c0 ^ rk[k    ]).to_be_bytes());
-    out[ 4.. 8].copy_from_slice(&(c1 ^ rk[k + 1]).to_be_bytes());
-    out[ 8..12].copy_from_slice(&(c2 ^ rk[k + 2]).to_be_bytes());
-    out[12..16].copy_from_slice(&(c3 ^ rk[k + 3]).to_be_bytes());
-    out
 }
 
-/// Decrypt using the pre-transformed decryption key schedule `dk`
-/// produced by `make_dec_rk`.  Iteration is forward (same loop structure as
-/// `aes_encrypt`) because the key transformation already reversed the order.
-fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
-    // Initial AddRoundKey — dk[0..4] is the last enc round key.
-    let mut s0 = u32::from_be_bytes(block[ 0.. 4].try_into().unwrap()) ^ dk[0];
-    let mut s1 = u32::from_be_bytes(block[ 4.. 8].try_into().unwrap()) ^ dk[1];
-    let mut s2 = u32::from_be_bytes(block[ 8..12].try_into().unwrap()) ^ dk[2];
-    let mut s3 = u32::from_be_bytes(block[12..16].try_into().unwrap()) ^ dk[3];
+#[inline(always)]
+fn sub_bytes(state: &mut [u8; 16]) {
+    // Fixed-scan lookup keeps the S-box memory access pattern independent of
+    // the secret state bytes.
+    for b in state.iter_mut() {
+        *b = crate::ct::ct_lookup_u8(&SBOX, *b);
+    }
+}
 
-    // Middle rounds 1..NR-1: InvSubBytes + InvShiftRows + InvMixColumns + AddRoundKey.
-    // InvShiftRows shifts right: column j row r samples from column j-r mod 4.
-    // (s3,s2,s1 pattern vs the forward s1,s2,s3 pattern.)
+#[inline(always)]
+fn inv_sub_bytes(state: &mut [u8; 16]) {
+    for b in state.iter_mut() {
+        *b = crate::ct::ct_lookup_u8(&INV_SBOX, *b);
+    }
+}
+
+#[inline(always)]
+fn shift_rows(state: &mut [u8; 16]) {
+    let t = *state;
+    state[0]  = t[0];
+    state[1]  = t[5];
+    state[2]  = t[10];
+    state[3]  = t[15];
+    state[4]  = t[4];
+    state[5]  = t[9];
+    state[6]  = t[14];
+    state[7]  = t[3];
+    state[8]  = t[8];
+    state[9]  = t[13];
+    state[10] = t[2];
+    state[11] = t[7];
+    state[12] = t[12];
+    state[13] = t[1];
+    state[14] = t[6];
+    state[15] = t[11];
+}
+
+#[inline(always)]
+fn inv_shift_rows(state: &mut [u8; 16]) {
+    let t = *state;
+    state[0]  = t[0];
+    state[1]  = t[13];
+    state[2]  = t[10];
+    state[3]  = t[7];
+    state[4]  = t[4];
+    state[5]  = t[1];
+    state[6]  = t[14];
+    state[7]  = t[11];
+    state[8]  = t[8];
+    state[9]  = t[5];
+    state[10] = t[2];
+    state[11] = t[15];
+    state[12] = t[12];
+    state[13] = t[9];
+    state[14] = t[6];
+    state[15] = t[3];
+}
+
+#[inline(always)]
+fn mix_columns(state: &mut [u8; 16]) {
+    for c in 0..4 {
+        let i = 4 * c;
+        let a0 = state[i];
+        let a1 = state[i + 1];
+        let a2 = state[i + 2];
+        let a3 = state[i + 3];
+        let t = a0 ^ a1 ^ a2 ^ a3;
+
+        state[i]     = a0 ^ t ^ xtime(a0 ^ a1);
+        state[i + 1] = a1 ^ t ^ xtime(a1 ^ a2);
+        state[i + 2] = a2 ^ t ^ xtime(a2 ^ a3);
+        state[i + 3] = a3 ^ t ^ xtime(a3 ^ a0);
+    }
+}
+
+#[inline(always)]
+fn inv_mix_columns(state: &mut [u8; 16]) {
+    for c in 0..4 {
+        let i = 4 * c;
+        let mixed = inv_mix_col(u32::from_be_bytes([
+            state[i],
+            state[i + 1],
+            state[i + 2],
+            state[i + 3],
+        ]));
+        state[i..i + 4].copy_from_slice(&mixed.to_be_bytes());
+    }
+}
+
+fn aes_encrypt(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
+    let mut state = *block;
+    add_round_key(&mut state, &rk[0..4]);
+
     for r in 1..nr {
-        let k = 4 * r;
-        let t0 = TD0[(s0 >> 24)         as usize]
-               ^ TD1[((s3 >> 16) & 0xff) as usize]
-               ^ TD2[((s2 >>  8) & 0xff) as usize]
-               ^ TD3[ (s1         & 0xff) as usize]
-               ^ dk[k];
-        let t1 = TD0[(s1 >> 24)         as usize]
-               ^ TD1[((s0 >> 16) & 0xff) as usize]
-               ^ TD2[((s3 >>  8) & 0xff) as usize]
-               ^ TD3[ (s2         & 0xff) as usize]
-               ^ dk[k + 1];
-        let t2 = TD0[(s2 >> 24)         as usize]
-               ^ TD1[((s1 >> 16) & 0xff) as usize]
-               ^ TD2[((s0 >>  8) & 0xff) as usize]
-               ^ TD3[ (s3         & 0xff) as usize]
-               ^ dk[k + 2];
-        let t3 = TD0[(s3 >> 24)         as usize]
-               ^ TD1[((s2 >> 16) & 0xff) as usize]
-               ^ TD2[((s1 >>  8) & 0xff) as usize]
-               ^ TD3[ (s0         & 0xff) as usize]
-               ^ dk[k + 3];
-        s0 = t0; s1 = t1; s2 = t2; s3 = t3;
+        // The round is expanded into bytewise steps to avoid secret-indexed
+        // T-table loads in the software-only implementation.
+        sub_bytes(&mut state);
+        shift_rows(&mut state);
+        mix_columns(&mut state);
+        add_round_key(&mut state, &rk[4 * r..4 * r + 4]);
     }
 
-    // Final round NR: InvSubBytes + InvShiftRows + AddRoundKey (no InvMixColumns).
-    // dk[NR*4..] is the first enc round key.
-    let k = 4 * nr;
-    let p0 = (INV_SBOX[(s0 >> 24)         as usize] as u32) << 24
-           | (INV_SBOX[((s3 >> 16) & 0xff) as usize] as u32) << 16
-           | (INV_SBOX[((s2 >>  8) & 0xff) as usize] as u32) <<  8
-           | (INV_SBOX[ (s1         & 0xff) as usize] as u32);
-    let p1 = (INV_SBOX[(s1 >> 24)         as usize] as u32) << 24
-           | (INV_SBOX[((s0 >> 16) & 0xff) as usize] as u32) << 16
-           | (INV_SBOX[((s3 >>  8) & 0xff) as usize] as u32) <<  8
-           | (INV_SBOX[ (s2         & 0xff) as usize] as u32);
-    let p2 = (INV_SBOX[(s2 >> 24)         as usize] as u32) << 24
-           | (INV_SBOX[((s1 >> 16) & 0xff) as usize] as u32) << 16
-           | (INV_SBOX[((s0 >>  8) & 0xff) as usize] as u32) <<  8
-           | (INV_SBOX[ (s3         & 0xff) as usize] as u32);
-    let p3 = (INV_SBOX[(s3 >> 24)         as usize] as u32) << 24
-           | (INV_SBOX[((s2 >> 16) & 0xff) as usize] as u32) << 16
-           | (INV_SBOX[((s1 >>  8) & 0xff) as usize] as u32) <<  8
-           | (INV_SBOX[ (s0         & 0xff) as usize] as u32);
+    sub_bytes(&mut state);
+    shift_rows(&mut state);
+    add_round_key(&mut state, &rk[4 * nr..4 * nr + 4]);
+    state
+}
 
-    let mut out = [0u8; 16];
-    out[ 0.. 4].copy_from_slice(&(p0 ^ dk[k    ]).to_be_bytes());
-    out[ 4.. 8].copy_from_slice(&(p1 ^ dk[k + 1]).to_be_bytes());
-    out[ 8..12].copy_from_slice(&(p2 ^ dk[k + 2]).to_be_bytes());
-    out[12..16].copy_from_slice(&(p3 ^ dk[k + 3]).to_be_bytes());
-    out
+fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
+    let mut state = *block;
+    add_round_key(&mut state, &dk[0..4]);
+
+    for r in 1..nr {
+        inv_shift_rows(&mut state);
+        inv_sub_bytes(&mut state);
+        add_round_key(&mut state, &dk[4 * r..4 * r + 4]);
+        inv_mix_columns(&mut state);
+    }
+
+    inv_shift_rows(&mut state);
+    inv_sub_bytes(&mut state);
+    add_round_key(&mut state, &dk[4 * nr..4 * nr + 4]);
+    state
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -453,6 +450,11 @@ impl Aes128 {
         make_dec_rk(&enc_rk, &mut dec_rk, 10);
         Self { enc_rk, dec_rk }
     }
+    pub fn new_wiping(key: &mut [u8; 16]) -> Self {
+        let out = Self::new(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
+    }
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] { aes_encrypt(block, &self.enc_rk, 10) }
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] { aes_decrypt(block, &self.dec_rk, 10) }
 }
@@ -466,6 +468,11 @@ impl Aes192 {
         make_dec_rk(&enc_rk, &mut dec_rk, 12);
         Self { enc_rk, dec_rk }
     }
+    pub fn new_wiping(key: &mut [u8; 24]) -> Self {
+        let out = Self::new(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
+    }
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] { aes_encrypt(block, &self.enc_rk, 12) }
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] { aes_decrypt(block, &self.dec_rk, 12) }
 }
@@ -478,6 +485,11 @@ impl Aes256 {
         let mut dec_rk = [0u32; 60];
         make_dec_rk(&enc_rk, &mut dec_rk, 14);
         Self { enc_rk, dec_rk }
+    }
+    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+        let out = Self::new(key);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        out
     }
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] { aes_encrypt(block, &self.enc_rk, 14) }
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] { aes_decrypt(block, &self.dec_rk, 14) }
@@ -506,6 +518,22 @@ macro_rules! impl_block_cipher_aes {
 impl_block_cipher_aes!(Aes128);
 impl_block_cipher_aes!(Aes192);
 impl_block_cipher_aes!(Aes256);
+
+macro_rules! impl_drop_aes {
+    ($Name:ident) => {
+        impl Drop for $Name {
+            fn drop(&mut self) {
+                // AES retains both forward and reverse schedules for reuse.
+                crate::ct::zeroize_slice(self.enc_rk.as_mut_slice());
+                crate::ct::zeroize_slice(self.dec_rk.as_mut_slice());
+            }
+        }
+    };
+}
+
+impl_drop_aes!(Aes128);
+impl_drop_aes!(Aes192);
+impl_drop_aes!(Aes256);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests — NIST CAVP KAT_AES vectors (CAVS 11.1, csrc.nist.gov)
