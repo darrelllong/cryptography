@@ -1,13 +1,155 @@
 # cryptography
 
-Pure-Rust implementations of classical and modern block ciphers directly
-from their specifications: DES, Triple-DES, AES, Grasshopper, Magma,
-Simon, and Speck.
+Pure, safe, portable Rust implementations of classical and modern ciphers
+written directly from the published specifications.
 
-See [ANALYSIS.md](ANALYSIS.md) for algorithm descriptions, design decisions,
-and measured throughput on Apple M4.
+Implemented families:
 
----
+- DES and Triple-DES
+- AES (`Aes128/192/256`) plus software constant-time variants (`Aes*Ct`)
+- SIMON (all 10 published variants)
+- SPECK (all 10 published variants)
+- Magma plus `MagmaCt`
+- Grasshopper plus `GrasshopperCt`
+- SM4 / SMS4 plus `Sm4Ct`
+- ZUC-128 plus `Zuc128Ct`
+
+See [ANALYSIS.md](ANALYSIS.md) for algorithm notes, coverage, and the current
+benchmark numbers for this host.
+
+## How To Use
+
+### Block ciphers
+
+All block ciphers implement the shared `BlockCipher` trait for in-place
+operation on a mutable byte slice:
+
+```rust
+use cryptography::{Aes128, BlockCipher};
+
+let cipher = Aes128::new(&[0u8; 16]);
+let mut block = [0u8; 16];
+
+cipher.encrypt(&mut block);
+cipher.decrypt(&mut block);
+```
+
+Each block cipher type also exposes typed helpers when the block size is known
+at compile time:
+
+```rust
+use cryptography::Sm4;
+
+let cipher = Sm4::new(&[0u8; 16]);
+let block = [0u8; 16];
+
+let ct = cipher.encrypt_block(&block);
+let pt = cipher.decrypt_block(&ct);
+assert_eq!(pt, block);
+```
+
+### Stream cipher
+
+ZUC produces keystream words and can fill a caller-supplied buffer:
+
+```rust
+use cryptography::Zuc128;
+
+let mut buf = [0u8; 64];
+let zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]);
+
+zuc.fill(&mut buf);
+```
+
+### Fast vs `Ct` variants
+
+For AES, DES, Magma, Grasshopper, SM4, and ZUC, the default type is the fast
+software implementation and the `Ct` type is the separate constant-time
+software path.
+
+Use the fast path when:
+
+- you want the fastest portable software implementation in this crate
+- your threat model does not require side-channel-resistant software behavior
+
+Use the `Ct` path when:
+
+- you need a software-only constant-time implementation
+- you are willing to pay the throughput penalty documented in `ANALYSIS.md`
+
+The `Ct` types are distinct on purpose; the API makes the tradeoff explicit.
+
+### Wiping caller-owned keys
+
+Cipher types that retain expanded round keys also expose `new_wiping(...)`
+constructors. These build the cipher, then erase the caller-provided key
+buffer:
+
+```rust
+use cryptography::Aes256Ct;
+
+let mut key = [0x42u8; 32];
+let _cipher = Aes256Ct::new_wiping(&mut key);
+
+assert_eq!(key, [0u8; 32]);
+```
+
+## How To Verify Correctness
+
+Run the full suite:
+
+```text
+cargo test
+```
+
+Run one family:
+
+```text
+cargo test aes::tests
+cargo test sm4::tests
+cargo test zuc::tests
+```
+
+Coverage is in-module, not in separate test scripts. Each cipher family ships
+its own known-answer vectors and fast-vs-`Ct` equivalence tests where both
+paths exist.
+
+## How To Benchmark
+
+The benchmark targets live in the separate `benchmarks/` crate so the root
+package can run `cargo test` without pulling in benchmark-only dependencies.
+
+Run the full suite throughput benchmark:
+
+```text
+cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench
+```
+
+Run the shorter host-comparison pass used in `ANALYSIS.md`:
+
+```text
+cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench -- \
+  --sample-size 10 --measurement-time 0.2 --warm-up-time 0.1
+```
+
+Run the AES-focused comparison benchmark:
+
+```text
+cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
+```
+
+`aes_bench` compares the crate's AES implementations against libsodium. It
+requires a working `libsodium` installation. The libsodium AES-256-GCM line is
+feature-detected at runtime and may be skipped if `sodiumoxide` reports that
+hardware AES is unavailable.
+
+## Design Notes
+
+- No `unsafe`.
+- No hardware AES intrinsics in the main AES implementation.
+- No heap allocation inside block encrypt/decrypt paths.
+- Benchmark and test coverage are tracked in [ANALYSIS.md](ANALYSIS.md).
+- Reference PDFs used during implementation live in `pubs/`.
 
 ## References
 

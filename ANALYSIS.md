@@ -26,6 +26,25 @@ throughput benchmarks.
 
 ---
 
+## Coverage Matrix
+
+There are no standalone correctness scripts in this repository. Correctness is
+checked by per-module unit tests (`cargo test`), and throughput is measured by
+the separate Criterion benchmark crate under `benchmarks/`.
+
+| Family | Public types | Correctness coverage | Benchmark coverage |
+|--------|--------------|----------------------|--------------------|
+| AES | `Aes128/192/256`, `Aes128/192/256Ct` | NIST KATs for fast and `Ct` paths, S-box self-checks, fast-vs-`Ct` equivalence (`cargo test aes::tests`) | `cipher_bench` for fast-vs-`Ct`; `aes_bench` for focused AES comparisons |
+| DES / 3DES | `Des`, `DesCt`, `TripleDes` | DES KATs, `DesCt` KAT, 2-key and 3-key TDES coverage (`cargo test des::tests`) | `cipher_bench` |
+| Simon | all 10 variants | Known-answer vectors for every variant (`cargo test simon::tests`) | `cipher_bench` |
+| Speck | all 10 variants | Known-answer vectors for every variant (`cargo test speck::tests`) | `cipher_bench` |
+| Magma | `Magma`, `MagmaCt` | RFC vector for fast and `Ct`, plus fast-vs-`Ct` equivalence (`cargo test magma::tests`) | `cipher_bench` |
+| Grasshopper | `Grasshopper`, `GrasshopperCt` | RFC vectors, round-trip checks, fast-vs-`Ct` equivalence (`cargo test grasshopper::tests`) | `cipher_bench` |
+| SM4 | `Sm4`, `Sm4Ct`, `Sms4`, `Sms4Ct` | Spec example, 1,000,000-encryption vector, alias checks, fast-vs-`Ct` equivalence (`cargo test sm4::tests`) | `cipher_bench` |
+| ZUC-128 | `Zuc128`, `Zuc128Ct` | Official keystream vectors, partial/fill tests, fast-vs-`Ct` equivalence (`cargo test zuc::tests`) | `cipher_bench` |
+
+---
+
 ## Simon
 
 Simon (Beaulieu et al., NSA 2013) is a Feistel cipher optimised for hardware.
@@ -270,41 +289,41 @@ round count roughly offsetting its simpler round function.
 
 ### Measurement methodology
 
-Benchmarks use Criterion 0.5 (`cargo bench --bench cipher_bench`).
-Each cipher encrypts a 1 MiB buffer in ECB mode; the buffer is prepared by
-`iter_batched` so allocation and fill are excluded from the timed region.
-The reported figure is the median throughput across 100 samples.  All
-measurements are on Apple M4, 10-core, 32 GiB, macOS 15.
+The current numbers below come from a fresh host-specific rerun on:
 
-**1 GiB time** is computed as `1024 MiB / throughput` and represents
-the projected time to encrypt 1 GiB at the measured rate.
+- Mac mini (`Mac16,11`)
+- Apple M4 Pro
+- 64 GiB RAM
+- macOS 26.3
 
-### Fast vs Ct software variants
-
-The crate now exposes separate software-only `Ct` variants for AES, DES,
-Magma, and Grasshopper. These are intentionally measured separately from the
-long-run baseline tables above: the goal here is relative cost, not an
-absolute "best possible" throughput number.
-
-The figures below come from the short Criterion sanity runs used during the
-implementation work:
+Command used:
 
 ```text
 cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench -- \
-  --sample-size 10 --measurement-time 0.2 --warm-up-time 0.1 '<group>/'
+  --sample-size 10 --measurement-time 0.2 --warm-up-time 0.1
 ```
 
-Each row reports the midpoint throughput from that short run over the same
-1 MiB ECB harness used by the main benchmark.
+Each benchmark encrypts a 1 MiB buffer in ECB mode; `iter_batched` prepares
+the buffer outside the timed region, so allocation and fill are excluded.
+The throughput shown in each table is the midpoint throughput from that
+Criterion run. `1 GiB` is computed as `1024 MiB / throughput`.
+
+### Fast vs Ct software variants
+
+The software-only `Ct` variants are measured against the default fast paths on
+the same harness and the same machine. This is the cleanest way to compare the
+cost of removing secret-indexed table reads in pure portable Rust.
 
 | Cipher | Fast path | Ct path | Slowdown |
 |--------|----------:|--------:|---------:|
-| AES-128 | 529.4 MiB/s | 61.5 MiB/s | 8.6x |
-| AES-192 | 435.4 MiB/s | 49.7 MiB/s | 8.8x |
-| AES-256 | 368.8 MiB/s | 41.9 MiB/s | 8.8x |
-| DES | 79.5 MiB/s | 8.2 MiB/s | 9.7x |
-| Magma-256 | 61.9 MiB/s | 14.1 MiB/s | 4.4x |
-| Grasshopper-256 | 25.6 MiB/s | 4.1 MiB/s | 6.3x |
+| AES-128 | 542.7 MiB/s | 60.6 MiB/s | 8.9x |
+| AES-192 | 444.4 MiB/s | 50.4 MiB/s | 8.8x |
+| AES-256 | 374.8 MiB/s | 42.9 MiB/s | 8.7x |
+| DES | 81.1 MiB/s | 8.3 MiB/s | 9.8x |
+| Magma-256 | 62.0 MiB/s | 14.3 MiB/s | 4.3x |
+| Grasshopper-256 | 26.1 MiB/s | 4.1 MiB/s | 6.3x |
+| SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
+| ZUC-128 | 551.1 MiB/s | 28.3 MiB/s | 19.5x |
 
 These ratios line up with the implementation strategy:
 
@@ -317,21 +336,23 @@ These ratios line up with the implementation strategy:
   penalty of the four.
 - `GrasshopperCt` removes both the table-driven S-box and the `L_TABLES`
   shortcuts, so it remains the slowest of the Ct variants in absolute terms.
+- `Sm4Ct` and `Zuc128Ct` both use packed ANF evaluation for 8-bit S-boxes,
+  which is substantially heavier than AES's dedicated boolean circuit.
 
 ### Simon
 
 | Variant | Block | Key | Throughput | 1 GiB |
 |---------|------:|----:|-----------:|------:|
-| Simon32/64 | 32 b | 64 b | 84 MiB/s | 12.2 s |
-| Simon48/72 | 48 b | 72 b | 109 MiB/s | 9.4 s |
-| Simon48/96 | 48 b | 96 b | 109 MiB/s | 9.4 s |
-| Simon64/96 | 64 b | 96 b | 141 MiB/s | 7.3 s |
-| Simon64/128 | 64 b | 128 b | 134 MiB/s | 7.6 s |
-| Simon96/96 | 96 b | 96 b | 140 MiB/s | 7.3 s |
-| Simon96/144 | 96 b | 144 b | 133 MiB/s | 7.7 s |
-| Simon128/128 | 128 b | 128 b | 253 MiB/s | 4.0 s |
-| Simon128/192 | 128 b | 192 b | 248 MiB/s | 4.1 s |
-| Simon128/256 | 128 b | 256 b | 235 MiB/s | 4.4 s |
+| Simon32/64 | 32 b | 64 b | 90 MiB/s | 11.4 s |
+| Simon48/72 | 48 b | 72 b | 116 MiB/s | 8.8 s |
+| Simon48/96 | 48 b | 96 b | 116 MiB/s | 8.8 s |
+| Simon64/96 | 64 b | 96 b | 149 MiB/s | 6.9 s |
+| Simon64/128 | 64 b | 128 b | 143 MiB/s | 7.2 s |
+| Simon96/96 | 96 b | 96 b | 145 MiB/s | 7.1 s |
+| Simon96/144 | 96 b | 144 b | 138 MiB/s | 7.4 s |
+| Simon128/128 | 128 b | 128 b | 265 MiB/s | 3.9 s |
+| Simon128/192 | 128 b | 192 b | 263 MiB/s | 3.9 s |
+| Simon128/256 | 128 b | 256 b | 248 MiB/s | 4.1 s |
 
 Simon throughput increases with word size, because the same three
 rotation-and-XOR operations process more bits per instruction as `n` grows
@@ -343,52 +364,87 @@ from 16 to 64.  The 128-bit variants (64-bit words) are 3× faster than the
 
 | Variant | Block | Key | Throughput | 1 GiB |
 |---------|------:|----:|-----------:|------:|
-| Speck32/64 | 32 b | 64 b | 209 MiB/s | 4.9 s |
-| Speck48/72 | 48 b | 72 b | 306 MiB/s | 3.3 s |
-| Speck48/96 | 48 b | 96 b | 269 MiB/s | 3.8 s |
-| Speck64/96 | 64 b | 96 b | 323 MiB/s | 3.2 s |
-| Speck64/128 | 64 b | 128 b | 308 MiB/s | 3.3 s |
-| Speck96/96 | 96 b | 96 b | 397 MiB/s | 2.6 s |
-| Speck96/144 | 96 b | 144 b | 378 MiB/s | 2.7 s |
-| Speck128/128 | 128 b | 128 b | 1002 MiB/s | 1.0 s |
-| Speck128/192 | 128 b | 192 b | 981 MiB/s | 1.0 s |
-| Speck128/256 | 128 b | 256 b | 945 MiB/s | 1.1 s |
+| Speck32/64 | 32 b | 64 b | 222 MiB/s | 4.6 s |
+| Speck48/72 | 48 b | 72 b | 318 MiB/s | 3.2 s |
+| Speck48/96 | 48 b | 96 b | 280 MiB/s | 3.7 s |
+| Speck64/96 | 64 b | 96 b | 329 MiB/s | 3.1 s |
+| Speck64/128 | 64 b | 128 b | 323 MiB/s | 3.2 s |
+| Speck96/96 | 96 b | 96 b | 415 MiB/s | 2.5 s |
+| Speck96/144 | 96 b | 144 b | 390 MiB/s | 2.6 s |
+| Speck128/128 | 128 b | 128 b | 1068 MiB/s | 1.0 s |
+| Speck128/192 | 128 b | 192 b | 1021 MiB/s | 1.0 s |
+| Speck128/256 | 128 b | 256 b | 974 MiB/s | 1.1 s |
 
 Speck is uniformly 2–4× faster than Simon at the same block/key size.  The
 ARX round function uses no AND operations and compiles to three instructions
 on a 64-bit target; Simon's `f` requires two extra rotations and an AND.
-Speck128/128 exceeds 1 GiB/s, reflecting that the M4's 64-bit integer
+Speck128/128 exceeds 1 GiB/s, reflecting that the M4 Pro's 64-bit integer
 pipeline can sustain roughly one ARX round per cycle at 32 rounds depth.
 
 ### AES (pure Rust, T-table)
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| AES-128 | 128 b | 128 b | 10 | 537 MiB/s | 1.9 s |
-| AES-192 | 128 b | 192 b | 12 | 441 MiB/s | 2.3 s |
+| AES-128 | 128 b | 128 b | 10 | 543 MiB/s | 1.9 s |
+| AES-192 | 128 b | 192 b | 12 | 444 MiB/s | 2.3 s |
 | AES-256 | 128 b | 256 b | 14 | 375 MiB/s | 2.7 s |
 
 AES throughput decreases linearly with round count (10/12/14): the T-table
 implementation is round-dominated, with each round costing roughly the same
 16 lookups + 12 XORs regardless of variant.  AES-128 is 43% faster than
-AES-256 (537 vs 375 MiB/s), close to the 14/10 = 1.4 ratio predicted by
+AES-256 (543 vs 375 MiB/s), close to the 14/10 = 1.4 ratio predicted by
 round-count scaling.
 
-AES-128 at 537 MiB/s is 2.1× faster than Simon128/128 (253 MiB/s) and
-2× slower than Speck128/128 (1002 MiB/s).  These relative positions reflect
+AES-128 at 543 MiB/s is 2.0× faster than Simon128/128 (265 MiB/s) and
+roughly 2× slower than Speck128/128 (1068 MiB/s).  These relative positions reflect
 the cost of the 256-entry table lookups (with potential cache pressure at 4
 tables × 1 KiB = 4 KiB): the table-driven nonlinearity costs more than Speck's
 arithmetic nonlinearity but far less than Simon's multi-rotation AND structure.
+
+### AES-focused comparison (`aes_bench`)
+
+The separate `aes_bench` target compares short-message AES throughput against
+the `Ct` path and libsodium:
+
+```text
+cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench -- \
+  --sample-size 10 --measurement-time 0.2 --warm-up-time 0.1
+```
+
+Current midpoint throughputs on this host:
+
+| Benchmark | Throughput |
+|-----------|-----------:|
+| `Aes128` (16-byte block) | 502.5 MiB/s |
+| `Aes192` (16-byte block) | 433.8 MiB/s |
+| `Aes256` (16-byte block) | 351.6 MiB/s |
+| `Aes256` (1 KiB) | 365.5 MiB/s |
+| `Aes128Ct` (16-byte block) | 63.1 MiB/s |
+| `Aes192Ct` (16-byte block) | 52.4 MiB/s |
+| `Aes256Ct` (16-byte block) | 43.6 MiB/s |
+| `Aes256Ct` (1 KiB) | 43.8 MiB/s |
+| libsodium XSalsa20-Poly1305 (16-byte message) | 84.3 MiB/s |
+| libsodium XSalsa20-Poly1305 (1 KiB message) | 685.6 MiB/s |
+
+On this run, libsodium AES-256-GCM was not available through `sodiumoxide` and
+the benchmark skipped it with:
+
+```text
+note: AES-NI/ARMv8 not detected — skipping libsodium AES-256-GCM bench
+```
+
+That skip comes from the libsodium feature probe in the benchmark target, not
+from this crate's AES implementation.
 
 ### DES / Triple-DES
 
 | Variant | Block | Effective key | Throughput | 1 GiB |
 |---------|------:|--------------:|-----------:|------:|
-| DES | 64 b | 56 b | 78 MiB/s | 13.1 s |
-| 3DES-2key (EDE) | 64 b | 80 b | 23 MiB/s | 44 s |
-| 3DES-3key (EDE) | 64 b | 112 b | 23 MiB/s | 44 s |
+| DES | 64 b | 56 b | 81 MiB/s | 12.6 s |
+| 3DES-2key (EDE) | 64 b | 80 b | 24 MiB/s | 42.2 s |
+| 3DES-3key (EDE) | 64 b | 112 b | 24 MiB/s | 42.2 s |
 
-DES at 78 MiB/s is the result of two successive compile-time table optimisations:
+DES at 81 MiB/s is the result of two successive compile-time table optimisations:
 
 1. **Byte-level permutation tables** for IP, FP, and E reduce 1408 bit-by-bit
    operations to table lookups (18 → 47 MiB/s, 2.6×).
@@ -403,35 +459,72 @@ runtime allocation or unsafe code.  The total speedup from raw bit-by-bit is
 3DES-2key and 3DES-3key run at the same throughput (23 MiB/s) because both
 perform exactly three DES block operations per plaintext block regardless of
 key option.  The 3× overhead gives approximately 1/3 the DES rate
-(78 / 3 ≈ 26 MiB/s theoretical; measured 23 MiB/s).
+(81 / 3 ≈ 27 MiB/s theoretical; measured ~24 MiB/s).
 
 ### Magma
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| Magma-256 | 64 b | 256 b | 32 | 64 MiB/s | 16.0 s |
+| Magma-256 | 64 b | 256 b | 32 | 62 MiB/s | 16.5 s |
 
-Magma achieves ~64 MiB/s — comparable to DES (78 MiB/s) despite a 256-bit key
+Magma achieves ~62 MiB/s — comparable to DES (81 MiB/s) despite a 256-bit key
 and 32 rounds.  The round function has no bit permutations: just a wrapping add,
 8 nibble-level table lookups, and a 32-bit rotate.  The 2× round count relative
 to DES is nearly offset by the simpler per-round work.
+
+### Grasshopper
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| Grasshopper-256 | 128 b | 256 b | 10 | 26 MiB/s | 39.2 s |
+
+Grasshopper is the slowest fast-path block cipher in the suite. Its round
+function mixes a byte S-box with a 16-byte linear transform over GF(2^8), and
+the software implementation leans on precomputed tables to keep that tractable.
+Even with those tables, the linear layer dominates relative to Magma or AES.
+
+### SM4
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| SM4-128 | 128 b | 128 b | 32 | 123 MiB/s | 8.3 s |
+
+SM4 sits between Simon/Speck's lightweight ARX designs and the older 64-bit
+block ciphers. Its 32 rounds are expensive, but each round is still just four
+byte S-boxes plus a linear transform on one 32-bit word, so the fast path lands
+well ahead of DES and Magma on this host.
+
+### ZUC-128
+
+| Variant | Key | IV | Throughput | 1 GiB |
+|---------|----:|---:|-----------:|------:|
+| ZUC-128 | 128 b | 128 b | 551 MiB/s | 1.9 s |
+
+ZUC is a stream cipher, so the benchmark fills a 1 MiB buffer rather than
+walking block boundaries. On this M4 Pro, the fast path is the single fastest
+non-Speck primitive in the repository. The `Ct` path is much slower because
+its nonlinear function replaces direct `S0`/`S1` table loads with packed ANF
+evaluation of two separate 8-bit S-boxes.
 
 ### Summary
 
 | Cipher | Best throughput | Worst throughput |
 |--------|----------------:|-----------------:|
-| Speck | 1002 MiB/s (128/128) | 209 MiB/s (32/64) |
-| AES | 537 MiB/s (128) | 375 MiB/s (256) |
-| Simon | 253 MiB/s (128/128) | 84 MiB/s (32/64) |
-| DES | 78 MiB/s | — |
-| Magma | 64 MiB/s | — |
-| 3DES | — | 23 MiB/s (2-key or 3-key) |
+| Speck | 1068 MiB/s (128/128) | 222 MiB/s (32/64) |
+| ZUC | 551 MiB/s | — |
+| AES | 543 MiB/s (128) | 375 MiB/s (256) |
+| Simon | 265 MiB/s (128/128) | 90 MiB/s (32/64) |
+| SM4 | 123 MiB/s | — |
+| DES | 81 MiB/s | — |
+| Magma | 62 MiB/s | — |
+| Grasshopper | 26 MiB/s | — |
+| 3DES | — | 24 MiB/s (2-key or 3-key) |
 
-Speck128/128 is the fastest cipher in the suite.  DES, Magma, and 3DES are
-13–44× slower than the best Speck variants because both DES's bit permutations
-and Magma's 32 rounds are inherently expensive in software.  For applications
-requiring 64-bit blocks and high throughput, Speck64/128 (308 MiB/s) is the
-natural choice.
+Speck128/128 remains the fastest block cipher in the suite. ZUC is the fastest
+non-block primitive, and AES-128 remains the fastest conventional standardized
+block cipher here. At the other end, Grasshopper and 3DES are expensive in pure
+software because they pair heavier round structures with comparatively modest
+word-level parallelism.
 
 ---
 
