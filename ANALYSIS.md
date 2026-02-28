@@ -45,84 +45,15 @@ the separate Criterion benchmark crate under `benchmarks/`.
 
 ---
 
-## Cipher Descriptions
+## Cipher Families
 
-### Cipher Quick Reference
-
-This section is the operator-facing summary: what each cipher is, what its
-practical security properties look like today, when it should be used (or
-avoided), and the main caveats in this repository. The detailed implementation
-notes follow in the later sections.
-
-#### AES
-
-- Reference: `fips197` (primary standard); `daemen-rijmen-2002` (design reference).
-- History: standardized by NIST as FIPS 197 in 2001 after the Rijndael competition; it is the dominant general-purpose block cipher in modern protocols and software.
-- Properties: 128-bit block cipher with 128/192/256-bit keys; the main practical choice for new designs; broad public analysis and hardware support.
-- Usage and deprecation: preferred default block cipher in this repository for general-purpose use. The `Aes128`/`Aes192`/`Aes256` types are the fast table-based software paths. `Aes128Ct`/`Aes192Ct`/`Aes256Ct` exist for software-only constant-time use. AES itself is not deprecated.
-- Known issues: the fast AES types (`Aes128`, `Aes192`, `Aes256`) use T-tables and are not constant-time; use the `Ct` variants or a separate hardware-backed implementation if side channels matter. This crate exposes the raw block primitive only, not an AEAD or block mode.
-
-#### DES and Triple-DES
-
-- Reference: `fips46-3` (DES); `sp800-67r2` (Triple-DES/TDEA).
-- History: DES was standardized in the 1970s and later reaffirmed in FIPS 46-3. It descends from IBM's Lucifer family; Triple-DES extended its life by applying DES three times in EDE form.
-- Properties: 64-bit block cipher family; DES has a 56-bit effective key and is cryptographically obsolete; 3DES raises brute-force cost but still inherits the 64-bit block size and a relatively slow software profile.
-- Usage and deprecation: included for legacy interoperability, testing, and historical reference. New designs should not use DES or 3DES. In current standards practice, both are deprecated, and 3DES is being phased out of general use.
-- Known issues: the 64-bit block size imposes birthday-bound limits for long messages; the fast DES type (`Des`) uses secret-indexed tables and is not constant-time; `DesCt` is much slower. The implementation also does not reject weak or semi-weak DES keys.
-
-#### SIMON
+### SIMON
 
 - Reference: `simon-speck-2013`.
 - History: published by the NSA in 2013 as a lightweight block cipher family optimized for hardware.
-- Properties: Feistel family with 10 variants spanning 32- to 128-bit block sizes; compact round function; software performance is respectable but trails comparable Speck variants.
-- Usage and deprecation: suitable for research, compatibility work, and environments that specifically require Simon. It is not a mainstream default for new software designs, largely because ecosystem adoption outside the lightweight-crypto niche is limited.
+- Properties: Feistel family with 10 variants spanning 32- to 128-bit block sizes; compact round function; software performance is respectable but trails comparable SPECK variants.
+- Usage and deprecation: suitable for research, compatibility work, and environments that specifically require SIMON. It is not a mainstream default for new software designs, largely because ecosystem adoption outside the lightweight-crypto niche is limited.
 - Known issues: many variants use 32-, 48-, 64-, or 96-bit blocks, so long-message limits matter sooner than they do with 128-bit block ciphers. The crate exposes only the raw primitive, so callers must choose their own safe mode of operation.
-
-#### SPECK
-
-- Reference: `simon-speck-2013`.
-- History: published alongside Simon by the NSA in 2013 as the software-oriented member of the lightweight pair.
-- Properties: ARX family with 10 variants; excellent software throughput, especially in the 128-bit block variants; simple round structure and strong performance on general-purpose CPUs.
-- Usage and deprecation: useful for interop, benchmarking, and constrained-environment experiments. Like Simon, it is not the default recommendation for new general-purpose applications because broad standards adoption is limited and policy acceptance has been uneven.
-- Known issues: smaller-block variants have the same birthday-bound concerns as Simon. The crate provides the raw block cipher only, not authenticated encryption. While the implementation is naturally closer to constant-time than the table-driven ciphers, protocol misuse remains the larger risk.
-
-#### MAGMA
-
-- Reference: `rfc8891`.
-- History: standardized as GOST R 34.12-2015 and documented in RFC 8891; it descends from the older GOST 28147-89 cipher.
-- Properties: 64-bit block, 256-bit key, 32-round Feistel design; regionally important for Russian standards and compatibility work.
-- Usage and deprecation: appropriate for GOST interoperability and historical/standards analysis. It is not the preferred choice for new general-purpose deployments outside ecosystems that require it. Magma itself is not formally deprecated within its standards family, but it is legacy-leaning relative to Grasshopper.
-- Known issues: the 64-bit block size imposes the same long-message limits as DES-class ciphers. The `Magma` type is table-driven and not constant-time; `MagmaCt` exists but is materially slower. As with the other block ciphers here, this crate provides the primitive only, not a mode.
-
-#### GRASSHOPPER
-
-- Reference: `rfc7801`.
-- History: standardized as GOST R 34.12-2015 and published for the IETF as RFC 7801; also known as Kuznyechik.
-- Properties: 128-bit block, 256-bit key; modern Russian block cipher with a byte S-box and a heavier linear layer than AES.
-- Usage and deprecation: appropriate for GOST interoperability and for comparing non-AES 128-bit block ciphers. It is the more modern Russian standard choice in this repository. It is not broadly deployed like AES, so most non-GOST applications should still prefer AES.
-- Known issues: the fast `Grasshopper` type uses table lookups and is not constant-time; `GrasshopperCt` is substantially slower. Its software implementation is comparatively slow even on the fast path because the linear layer is expensive.
-
-#### SM4
-
-- Reference: `gm-t-0002-2012` (standard); `liu-2024-sm4-linear` (local PDF currently checked in under `pubs/`).
-- History: standardized in China as GM/T 0002-2012 and GB/T 32907-2016; widely used in Chinese commercial and government cryptographic profiles.
-- Properties: 128-bit block, 128-bit key, 32 rounds; structurally simple and faster than the older 64-bit block ciphers in this crate, but slower than AES fast-path software.
-- Usage and deprecation: appropriate for SM4 interoperability, standards conformance, and comparative study. It is not deprecated, but it is primarily a regional standards cipher rather than a global default.
-- Known issues: the fast SM4 type (`Sm4`) uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. This crate exposes only the raw block cipher.
-
-#### ZUC-128
-
-- Reference: `etsi-sage-zuc-v16`.
-- History: designed by Chinese cryptographers and standardized for LTE/5G use; used in 3GPP as the basis for 128-EEA3 and 128-EIA3.
-- Properties: 128-bit stream cipher with a 128-bit key and 128-bit IV; high software throughput in the default path; not a block cipher, so it fills arbitrary buffers directly.
-- Usage and deprecation: appropriate for ZUC interoperability, radio-stack work, and standards testing. It is not deprecated in the telecom profiles that use it. In this crate it is exposed as the raw keystream generator rather than the higher-level EEA3/EIA3 constructions.
-- Known issues: the fast ZUC type (`Zuc128`) uses table-based S-boxes in the nonlinear function and is not constant-time; `Zuc128Ct` is much slower. As a stream cipher, keystream reuse with the same key/IV is catastrophic, so IV management is the caller's responsibility.
-
----
-
-## Cipher Analysis
-
-### SIMON
 
 Simon (Beaulieu et al., NSA 2013) is a Feistel cipher optimised for hardware.
 Its round function is:
@@ -136,7 +67,7 @@ intentional hardware-friendly nonlinearity.  Each encrypt round reads one
 64-bit round key and performs five rotation-and-XOR operations — cheap on any
 64-bit ALU but expensive in software relative to the equivalent circuit area.
 
-### Key schedule
+#### Key schedule
 
 The key schedule expands `m` key words into `T` round keys using the recurrence
 
@@ -152,7 +83,7 @@ The round-key array is a compile-time fixed-size `[u64; T]` stack allocation,
 avoiding any heap use.  Key expansion runs once at construction time and is not
 included in the throughput measurements.
 
-### Implementation notes
+#### Implementation notes
 
 Byte convention follows the NSA C reference: the two block words are stored
 little-endian with `x` (the word entering `f`) first; key words are stored
@@ -167,6 +98,12 @@ it selects a compile-time constant expression; no runtime dispatch occurs.
 
 ### SPECK
 
+- Reference: `simon-speck-2013`.
+- History: published alongside SIMON by the NSA in 2013 as the software-oriented member of the lightweight pair.
+- Properties: ARX family with 10 variants; excellent software throughput, especially in the 128-bit block variants; simple round structure and strong performance on general-purpose CPUs.
+- Usage and deprecation: useful for interop, benchmarking, and constrained-environment experiments. Like SIMON, it is not the default recommendation for new general-purpose applications because broad standards adoption is limited and policy acceptance has been uneven.
+- Known issues: smaller-block variants have the same birthday-bound concerns as SIMON. The crate provides the raw block cipher only, not authenticated encryption. While the implementation is naturally closer to constant-time than the table-driven ciphers, protocol misuse remains the larger risk.
+
 Speck (Beaulieu et al., NSA 2013) is an Add-Rotate-XOR (ARX) cipher whose
 round function is:
 
@@ -179,7 +116,7 @@ For Speck32/64 the rotation constants are `(α,β) = (7,2)`; for all other
 variants they are `(8,3)`.  Addition, rotation, and XOR map to exactly three
 native 64-bit instructions — the tightest possible round function.
 
-### Why Speck is faster than Simon
+#### Why Speck is faster than Simon
 
 Simon's round function requires two rotations plus an AND before the final
 XOR, and AND is not invertible, so the inverse round differs structurally
@@ -190,7 +127,7 @@ units of modern 64-bit CPUs.  At 128-bit block size (64-bit word), Speck
 exceeds 1 GiB/s on Apple M4; no other cipher in this suite reaches that rate
 without hardware acceleration.
 
-### Key schedule
+#### Key schedule
 
 The Speck key schedule uses a 40-entry stack `ℓ`-array (the theoretical
 maximum across all variants) and no heap allocation.  `ℓ` stores only the
@@ -200,10 +137,16 @@ maximum across all variants) and no heap allocation.  `ℓ` stores only the
 
 ### AES
 
+- Reference: `fips197` (primary standard); `daemen-rijmen-2002` (design reference).
+- History: standardized by NIST as FIPS 197 in 2001 after the Rijndael competition; it is the dominant general-purpose block cipher in modern protocols and software.
+- Properties: 128-bit block cipher with 128/192/256-bit keys; the main practical choice for new designs; broad public analysis and hardware support.
+- Usage and deprecation: preferred default block cipher in this repository for general-purpose use. The `Aes128`/`Aes192`/`Aes256` types are the fast table-based software paths. `Aes128Ct`/`Aes192Ct`/`Aes256Ct` exist for software-only constant-time use. AES itself is not deprecated.
+- Known issues: the fast AES types (`Aes128`, `Aes192`, `Aes256`) use T-tables and are not constant-time; use the `Ct` variants or a separate hardware-backed implementation if side channels matter. This crate exposes the raw block primitive only, not an AEAD or block mode.
+
 AES (FIPS 197) uses a byte-substitution, row-shift, column-mix, and key-add
 round structure operating in GF(2⁸).
 
-### T-table implementation
+#### T-table implementation
 
 The standard software optimisation fuses SubBytes, ShiftRows, and MixColumns
 into four 256-entry 32-bit lookup tables `TE0–TE3` (encryption) and
@@ -222,7 +165,7 @@ encryption time.
 Decryption uses the inverse tables `TD0–TD3` constructed from `INV_SBOX`
 and the inverse MixColumns coefficients `{0x0e, 0x0b, 0x0d, 0x09}`.
 
-### Key expansion
+#### Key expansion
 
 Key expansion produces round keys at construction time.  The 10/12/14-round
 schedules for AES-128/192/256 are precomputed into fixed-size arrays
@@ -230,7 +173,7 @@ schedules for AES-128/192/256 are precomputed into fixed-size arrays
 and decryption round-key arrays are stored so that neither encrypt nor
 decrypt requires runtime inversion.
 
-### No hardware intrinsics
+#### No hardware intrinsics
 
 The implementation is pure portable Rust. It deliberately avoids architecture-
 specific hardware intrinsics in the main AES path. On any processor family,
@@ -241,6 +184,12 @@ keeps the core implementation portable and safe across processors instead.
 ---
 
 ### DES and Triple-DES
+
+- Reference: `fips46-3` (DES); `sp800-67r2` (Triple-DES/TDEA).
+- History: DES was standardized in the 1970s and later reaffirmed in FIPS 46-3. It descends from IBM's Lucifer family; Triple-DES extended its life by applying DES three times in EDE form.
+- Properties: 64-bit block cipher family; DES has a 56-bit effective key and is cryptographically obsolete; 3DES raises brute-force cost but still inherits the 64-bit block size and a relatively slow software profile.
+- Usage and deprecation: included for legacy interoperability, testing, and historical reference. New designs should not use DES or 3DES. In current standards practice, both are deprecated, and 3DES is being phased out of general use.
+- Known issues: the 64-bit block size imposes birthday-bound limits for long messages; the fast DES type (`Des`) uses secret-indexed tables and is not constant-time; `DesCt` is much slower. The implementation also does not reject weak or semi-weak DES keys.
 
 DES (FIPS PUB 46-3) is a 16-round Feistel cipher operating on 64-bit blocks
 with a 56-bit effective key.  Each round applies the f-function:
@@ -270,7 +219,7 @@ whether hardware engineers could realize the corresponding logic economically;
 the final DES S-boxes were the result of that hardware-driven iteration, not a
 software-oriented table design.
 
-### Why DES is slow in software
+#### Why DES is slow in software
 
 DES was designed for efficient 1970s *hardware* implementation, not software.
 Every round includes three bit permutations:
@@ -317,11 +266,17 @@ both comfortably in L1 cache.  The 43 NIST CAVP vectors still pass unchanged.
 
 ### MAGMA
 
+- Reference: `rfc8891`.
+- History: standardized as GOST R 34.12-2015 and documented in RFC 8891; it descends from the older GOST 28147-89 cipher.
+- Properties: 64-bit block, 256-bit key, 32-round Feistel design; regionally important for Russian standards and compatibility work.
+- Usage and deprecation: appropriate for GOST interoperability and historical/standards analysis. It is not the preferred choice for new general-purpose deployments outside ecosystems that require it. MAGMA itself is not formally deprecated within its standards family, but it is legacy-leaning relative to GRASSHOPPER.
+- Known issues: the 64-bit block size imposes the same long-message limits as DES-class ciphers. The `Magma` type is table-driven and not constant-time; `MagmaCt` exists but is materially slower. As with the other block ciphers here, this crate provides the primitive only, not a mode.
+
 Magma (GOST R 34.12-2015, RFC 8891) is a 32-round Feistel cipher with a 64-bit
 block and 256-bit key.  It is standardised from the earlier GOST 28147-89 cipher,
 differing primarily in having published, fixed S-boxes rather than secret ones.
 
-### Round function
+#### Round function
 
 The round function `g[k](a)` operates on a 32-bit half-block:
 
@@ -342,7 +297,7 @@ G*[k](a₁, a₀) = (g[k](a₀) ⊕ a₁) ‖ a₀      — no swap; used for th
 Both encryption and decryption apply 31 rounds of `G` followed by one `G*`;
 the only difference is the round-key order.
 
-### Key schedule
+#### Key schedule
 
 The 256-bit key is split into eight 32-bit subkeys `k[0]..k[7]` (big-endian).
 The 32 encryption round keys repeat the subkeys in a fixed pattern:
@@ -358,13 +313,39 @@ Decryption uses the exact reverse of this sequence — equivalent to applying
 `k[0..8]` once then `k[7..0]` three times — which the implementation builds by
 reversing the encryption array.
 
-### Why Magma is slower than DES
+#### Why Magma is slower than DES
 
 Magma has 32 rounds while DES has 16.  Magma's individual round is cheaper — one
 wrapping add, 8 nibble table lookups, and one rotate — whereas DES includes the
 E-expansion and P-box bit permutations even with SP-table fusion.  The net effect
 is comparable throughput (Magma ~64 MiB/s, DES ~78 MiB/s), with Magma's 2×
 round count roughly offsetting its simpler round function.
+
+---
+
+### GRASSHOPPER
+
+- Reference: `rfc7801`.
+- History: standardized as GOST R 34.12-2015 and published for the IETF as RFC 7801; also known as Kuznyechik.
+- Properties: 128-bit block, 256-bit key; modern Russian block cipher with a byte S-box and a heavier linear layer than AES.
+- Usage and deprecation: appropriate for GOST interoperability and for comparing non-AES 128-bit block ciphers. It is the more modern Russian standard choice in this repository. It is not broadly deployed like AES, so most non-GOST applications should still prefer AES.
+- Known issues: the fast `Grasshopper` type uses table lookups and is not constant-time; `GrasshopperCt` is substantially slower. Its software implementation is comparatively slow even on the fast path because the linear layer is expensive.
+
+### SM4
+
+- Reference: `gm-t-0002-2012` (standard); `liu-2024-sm4-linear` (local PDF currently checked in under `pubs/`).
+- History: standardized in China as GM/T 0002-2012 and GB/T 32907-2016; widely used in Chinese commercial and government cryptographic profiles.
+- Properties: 128-bit block, 128-bit key, 32 rounds; structurally simple and faster than the older 64-bit block ciphers in this crate, but slower than AES fast-path software.
+- Usage and deprecation: appropriate for SM4 interoperability, standards conformance, and comparative study. It is not deprecated, but it is primarily a regional standards cipher rather than a global default.
+- Known issues: the fast SM4 type (`Sm4`) uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. This crate exposes only the raw block cipher.
+
+### ZUC-128
+
+- Reference: `etsi-sage-zuc-v16`.
+- History: designed by Chinese cryptographers and standardized for LTE/5G use; used in 3GPP as the basis for 128-EEA3 and 128-EIA3.
+- Properties: 128-bit stream cipher with a 128-bit key and 128-bit IV; high software throughput in the default path; not a block cipher, so it fills arbitrary buffers directly.
+- Usage and deprecation: appropriate for ZUC interoperability, radio-stack work, and standards testing. It is not deprecated in the telecom profiles that use it. In this crate it is exposed as the raw keystream generator rather than the higher-level EEA3/EIA3 constructions.
+- Known issues: the fast ZUC type (`Zuc128`) uses table-based S-boxes in the nonlinear function and is not constant-time; `Zuc128Ct` is much slower. As a stream cipher, keystream reuse with the same key/IV is catastrophic, so IV management is the caller's responsibility.
 
 ---
 
@@ -415,7 +396,7 @@ Radar view (log-scaled; 4 MiB/s to 560 MiB/s):
 Mermaid fallback (absolute throughput):
 
 ```mermaid
-%%{init: {'themeVariables': {'plotColorPalette': '#0f766e,#b45309'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'plotColorPalette': '#0f766e,#b45309'}}}%%
 xychart-beta
     title "Fast vs Ct throughput (MiB/s)"
     x-axis ["AES-128", "AES-192", "AES-256", "DES", "Magma", "Grasshopper", "SM4", "ZUC"]
