@@ -14,9 +14,9 @@ use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_grou
 use cryptography::{
     Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct, BlockCipher, Des, DesCt, Grasshopper,
     GrasshopperCt, Magma, MagmaCt, Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128,
-    Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Speck32_64, Speck48_72,
-    Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128, Speck128_192,
-    Speck128_256, TripleDes, Zuc128,
+    Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct, Speck32_64,
+    Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128,
+    Speck128_192, Speck128_256, TripleDes, Zuc128, Zuc128Ct,
 };
 use std::hint::black_box;
 
@@ -158,6 +158,18 @@ fn bench_magma(c: &mut Criterion) {
     g.finish();
 }
 
+// ── SM4 ───────────────────────────────────────────────────────────────────
+
+fn bench_sm4(c: &mut Criterion) {
+    let src = vec![0u8; MB];
+    let mut g = c.benchmark_group("SM4");
+
+    bench_one(&mut g, "SM4-128", Sm4::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "SM4-128-ct", Sm4Ct::new(&[0u8; 16]), &src);
+
+    g.finish();
+}
+
 // ── ZUC-128 ───────────────────────────────────────────────────────────────
 
 fn bench_zuc(c: &mut Criterion) {
@@ -168,6 +180,16 @@ fn bench_zuc(c: &mut Criterion) {
             || vec![0u8; MB],
             |mut buf| {
                 Zuc128::new(&[0u8; 16], &[0u8; 16]).fill(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.bench_function("ZUC-128-ct", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                Zuc128Ct::new(&[0u8; 16], &[0u8; 16]).fill(&mut buf);
                 black_box(buf)
             },
             BatchSize::LargeInput,
@@ -184,6 +206,7 @@ criterion_group!(
     bench_des,
     bench_grasshopper,
     bench_magma,
+    bench_sm4,
     bench_zuc
 );
 criterion_main!(benches);
