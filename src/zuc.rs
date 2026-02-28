@@ -10,6 +10,10 @@
 //!     X0, X1, X2; produces output W.  Uses composite S-box S=(S0,S1,S0,S1)
 //!     and linear transforms L1, L2.
 //!   - Keystream word: Z = W ⊕ X3  (working phase only).
+//!
+//! `Zuc128` keeps the direct S-box table lookups. `Zuc128Ct` is separate and
+//! evaluates the same two 8-bit S-boxes through packed ANF bitsets so the
+//! nonlinear function avoids secret-indexed table reads.
 
 // ── S-boxes (spec §2.2.4) ─────────────────────────────────────────────────
 //
@@ -56,14 +60,61 @@ const S1: [u8; 256] = [
     0x64, 0xBE, 0x85, 0x9B, 0x2F, 0x59, 0x8A, 0xD7, 0xB0, 0x25, 0xAC, 0xAF, 0x12, 0x03, 0xE2, 0xF2,
 ];
 
+/// Build packed ANF coefficients for a ZUC byte S-box.
+const fn build_sbox_anf(table: &[u8; 256]) -> [[u128; 2]; 8] {
+    let mut out = [[0u128; 2]; 8];
+    let mut bit_idx = 0usize;
+    while bit_idx < 8 {
+        let mut coeffs = [0u8; 256];
+        let mut x = 0usize;
+        while x < 256 {
+            coeffs[x] = (table[x] >> bit_idx) & 1;
+            x += 1;
+        }
+
+        let mut var = 0usize;
+        while var < 8 {
+            let stride = 1usize << var;
+            let mut mask = 0usize;
+            while mask < 256 {
+                if mask & stride != 0 {
+                    coeffs[mask] ^= coeffs[mask ^ stride];
+                }
+                mask += 1;
+            }
+            var += 1;
+        }
+
+        let mut lo = 0u128;
+        let mut hi = 0u128;
+        let mut monomial = 0usize;
+        while monomial < 128 {
+            lo |= (coeffs[monomial] as u128) << monomial;
+            monomial += 1;
+        }
+        while monomial < 256 {
+            hi |= (coeffs[monomial] as u128) << (monomial - 128);
+            monomial += 1;
+        }
+
+        out[bit_idx][0] = lo;
+        out[bit_idx][1] = hi;
+        bit_idx += 1;
+    }
+    out
+}
+
+const S0_ANF: [[u128; 2]; 8] = build_sbox_anf(&S0);
+const S1_ANF: [[u128; 2]; 8] = build_sbox_anf(&S1);
+
 // ── LFSR initialization constants (spec §2.2.1) ────────────────────────────
 //
 // d[i] are 15-bit constants packed into the middle of each 31-bit LFSR cell:
 //   s[i] = key[i](8b) ‖ d[i](15b) ‖ iv[i](8b)
 
 const D: [u16; 16] = [
-    0x44D7, 0x26BC, 0x626B, 0x135E, 0x5789, 0x35E2, 0x7135, 0x09AF,
-    0x4D78, 0x2F13, 0x6BC4, 0x1AF1, 0x5E26, 0x3C4D, 0x789A, 0x47AC,
+    0x44D7, 0x26BC, 0x626B, 0x135E, 0x5789, 0x35E2, 0x7135, 0x09AF, 0x4D78, 0x2F13, 0x6BC4, 0x1AF1,
+    0x5E26, 0x3C4D, 0x789A, 0x47AC,
 ];
 
 // ── GF(2³¹ − 1) arithmetic ────────────────────────────────────────────────
@@ -90,10 +141,96 @@ fn mul31(a: u32, n: u32) -> u32 {
 /// Composite 32-bit S-box S = (S0, S1, S0, S1), MSB first (spec §2.2.4).
 #[inline]
 fn sbox(x: u32) -> u32 {
-      (S0[ (x >> 24)         as usize] as u32) << 24
-    | (S1[((x >> 16) & 0xFF) as usize] as u32) << 16
-    | (S0[((x >>  8) & 0xFF) as usize] as u32) <<  8
-    | (S1[ (x        & 0xFF) as usize] as u32)
+    (S0[(x >> 24) as usize] as u32) << 24
+        | (S1[((x >> 16) & 0xFF) as usize] as u32) << 16
+        | (S0[((x >> 8) & 0xFF) as usize] as u32) << 8
+        | (S1[(x & 0xFF) as usize] as u32)
+}
+
+#[inline(always)]
+fn shl_256<const SHIFT: u32>(lo: u128, hi: u128) -> (u128, u128) {
+    (lo << SHIFT, (hi << SHIFT) | (lo >> (128 - SHIFT)))
+}
+
+#[inline(always)]
+fn subset_mask8(x: u8) -> (u128, u128) {
+    let mut lo = 1u128;
+    let mut hi = 0u128;
+
+    let mask0 = 0u128.wrapping_sub((x & 1) as u128);
+    let (add_lo, add_hi) = shl_256::<1>(lo, hi);
+    lo |= add_lo & mask0;
+    hi |= add_hi & mask0;
+
+    let mask1 = 0u128.wrapping_sub(((x >> 1) & 1) as u128);
+    let (add_lo, add_hi) = shl_256::<2>(lo, hi);
+    lo |= add_lo & mask1;
+    hi |= add_hi & mask1;
+
+    let mask2 = 0u128.wrapping_sub(((x >> 2) & 1) as u128);
+    let (add_lo, add_hi) = shl_256::<4>(lo, hi);
+    lo |= add_lo & mask2;
+    hi |= add_hi & mask2;
+
+    let mask3 = 0u128.wrapping_sub(((x >> 3) & 1) as u128);
+    let (add_lo, add_hi) = shl_256::<8>(lo, hi);
+    lo |= add_lo & mask3;
+    hi |= add_hi & mask3;
+
+    let mask4 = 0u128.wrapping_sub(((x >> 4) & 1) as u128);
+    let (add_lo, add_hi) = shl_256::<16>(lo, hi);
+    lo |= add_lo & mask4;
+    hi |= add_hi & mask4;
+
+    let mask5 = 0u128.wrapping_sub(((x >> 5) & 1) as u128);
+    let (add_lo, add_hi) = shl_256::<32>(lo, hi);
+    lo |= add_lo & mask5;
+    hi |= add_hi & mask5;
+
+    let mask6 = 0u128.wrapping_sub(((x >> 6) & 1) as u128);
+    let (add_lo, add_hi) = shl_256::<64>(lo, hi);
+    lo |= add_lo & mask6;
+    hi |= add_hi & mask6;
+
+    let mask7 = 0u128.wrapping_sub(((x >> 7) & 1) as u128);
+    hi |= lo & mask7;
+
+    (lo, hi)
+}
+
+#[inline(always)]
+fn parity128(mut x: u128) -> u8 {
+    x ^= x >> 64;
+    x ^= x >> 32;
+    x ^= x >> 16;
+    x ^= x >> 8;
+    x ^= x >> 4;
+    x &= 0x0f;
+    ((0x6996u16 >> (x as u16)) & 1) as u8
+}
+
+#[inline(always)]
+fn sbox_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
+    let (active_lo, active_hi) = subset_mask8(input);
+    let mut out = 0u8;
+    let mut bit_idx = 0usize;
+    while bit_idx < 8 {
+        let coeff_lo = coeffs[bit_idx][0];
+        let coeff_hi = coeffs[bit_idx][1];
+        let bit = parity128(active_lo & coeff_lo) ^ parity128(active_hi & coeff_hi);
+        out |= bit << bit_idx;
+        bit_idx += 1;
+    }
+    out
+}
+
+/// Constant-time composite 32-bit S-box using the packed ANF forms of S0/S1.
+#[inline]
+fn sbox_ct(x: u32) -> u32 {
+    (sbox_eval(&S0_ANF, (x >> 24) as u8) as u32) << 24
+        | (sbox_eval(&S1_ANF, ((x >> 16) & 0xFF) as u8) as u32) << 16
+        | (sbox_eval(&S0_ANF, ((x >> 8) & 0xFF) as u8) as u32) << 8
+        | (sbox_eval(&S1_ANF, (x & 0xFF) as u8) as u32)
 }
 
 /// Linear transform L1 (spec §2.2.3).
@@ -119,9 +256,20 @@ fn l2(x: u32) -> u32 {
 /// [`next_word`]: Zuc128::next_word
 /// [`fill`]: Zuc128::fill
 pub struct Zuc128 {
-    s:  [u32; 16], // LFSR: s[0] is oldest, s[15] is newest
-    r1: u32,       // nonlinear function register R1
-    r2: u32,       // nonlinear function register R2
+    s: [u32; 16], // LFSR: s[0] is oldest, s[15] is newest
+    r1: u32,      // nonlinear function register R1
+    r2: u32,      // nonlinear function register R2
+}
+
+/// ZUC-128 constant-time software path.
+///
+/// `Zuc128Ct` keeps the same LFSR, bit-reorganization, and linear transforms as
+/// `Zuc128`, but replaces the S-box table reads inside the nonlinear function
+/// with the packed ANF evaluator above.
+pub struct Zuc128Ct {
+    s: [u32; 16],
+    r1: u32,
+    r2: u32,
 }
 
 impl Zuc128 {
@@ -130,9 +278,7 @@ impl Zuc128 {
         // Load LFSR: s[i] = key[i](8b) ‖ d[i](15b) ‖ iv[i](8b) — spec §3.1
         let mut s = [0u32; 16];
         for i in 0..16 {
-            s[i] = ((key[i] as u32) << 23)
-                 | ((D[i]   as u32) <<  8)
-                 |  (iv[i]  as u32);
+            s[i] = ((key[i] as u32) << 23) | ((D[i] as u32) << 8) | (iv[i] as u32);
         }
         let mut z = Zuc128 { s, r1: 0, r2: 0 };
 
@@ -161,10 +307,10 @@ impl Zuc128 {
     #[inline]
     fn bit_reorganization(&self) -> (u32, u32, u32, u32) {
         let s = &self.s;
-        let x0 = ((s[15] <<  1) & 0xFFFF_0000) | (s[14]        & 0xFFFF);
-        let x1 = ((s[11] << 16) & 0xFFFF_0000) | ((s[ 9] >> 15) & 0xFFFF);
-        let x2 = ((s[ 7] << 16) & 0xFFFF_0000) | ((s[ 5] >> 15) & 0xFFFF);
-        let x3 = ((s[ 2] << 16) & 0xFFFF_0000) | ((s[ 0] >> 15) & 0xFFFF);
+        let x0 = ((s[15] << 1) & 0xFFFF_0000) | (s[14] & 0xFFFF);
+        let x1 = ((s[11] << 16) & 0xFFFF_0000) | ((s[9] >> 15) & 0xFFFF);
+        let x2 = ((s[7] << 16) & 0xFFFF_0000) | ((s[5] >> 15) & 0xFFFF);
+        let x3 = ((s[2] << 16) & 0xFFFF_0000) | ((s[0] >> 15) & 0xFFFF);
         (x0, x1, x2, x3)
     }
 
@@ -173,7 +319,7 @@ impl Zuc128 {
     /// Updates R1 and R2; returns W.
     #[inline]
     fn nonlinear_f(&mut self, x0: u32, x1: u32, x2: u32) -> u32 {
-        let w  = (x0 ^ self.r1).wrapping_add(self.r2);
+        let w = (x0 ^ self.r1).wrapping_add(self.r2);
         let w1 = self.r1.wrapping_add(x1);
         let w2 = self.r2 ^ x2;
         self.r1 = sbox(l1((w1 << 16) | (w2 >> 16)));
@@ -188,8 +334,8 @@ impl Zuc128 {
     fn lfsr_feedback(&self) -> u32 {
         let s = &self.s;
         let mut v = s[0];
-        v = add31(v, mul31(s[ 0],  8));
-        v = add31(v, mul31(s[ 4], 20));
+        v = add31(v, mul31(s[0], 8));
+        v = add31(v, mul31(s[4], 20));
         v = add31(v, mul31(s[10], 21));
         v = add31(v, mul31(s[13], 17));
         v = add31(v, mul31(s[15], 15));
@@ -237,6 +383,110 @@ impl Zuc128 {
     }
 }
 
+impl Zuc128Ct {
+    /// Construct and initialize ZUC-128Ct from a 128-bit key and 128-bit IV.
+    pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
+        let mut s = [0u32; 16];
+        for i in 0..16 {
+            s[i] = ((key[i] as u32) << 23) | ((D[i] as u32) << 8) | (iv[i] as u32);
+        }
+        let mut z = Zuc128Ct { s, r1: 0, r2: 0 };
+
+        for _ in 0..32 {
+            let (x0, x1, x2, _) = z.bit_reorganization();
+            let w = z.nonlinear_f(x0, x1, x2);
+            let s16 = add31(z.lfsr_feedback(), w >> 1);
+            z.lfsr_clock(s16);
+        }
+
+        let (x0, x1, x2, _) = z.bit_reorganization();
+        z.nonlinear_f(x0, x1, x2);
+        z.lfsr_clock(z.lfsr_feedback());
+
+        z
+    }
+
+    /// Construct and wipe the caller-provided key and IV buffers.
+    pub fn new_wiping(key: &mut [u8; 16], iv: &mut [u8; 16]) -> Self {
+        let out = Self::new(key, iv);
+        crate::ct::zeroize_slice(key.as_mut_slice());
+        crate::ct::zeroize_slice(iv.as_mut_slice());
+        out
+    }
+
+    #[inline]
+    fn bit_reorganization(&self) -> (u32, u32, u32, u32) {
+        let s = &self.s;
+        let x0 = ((s[15] << 1) & 0xFFFF_0000) | (s[14] & 0xFFFF);
+        let x1 = ((s[11] << 16) & 0xFFFF_0000) | ((s[9] >> 15) & 0xFFFF);
+        let x2 = ((s[7] << 16) & 0xFFFF_0000) | ((s[5] >> 15) & 0xFFFF);
+        let x3 = ((s[2] << 16) & 0xFFFF_0000) | ((s[0] >> 15) & 0xFFFF);
+        (x0, x1, x2, x3)
+    }
+
+    #[inline]
+    fn nonlinear_f(&mut self, x0: u32, x1: u32, x2: u32) -> u32 {
+        let w = (x0 ^ self.r1).wrapping_add(self.r2);
+        let w1 = self.r1.wrapping_add(x1);
+        let w2 = self.r2 ^ x2;
+        self.r1 = sbox_ct(l1((w1 << 16) | (w2 >> 16)));
+        self.r2 = sbox_ct(l2((w2 << 16) | (w1 >> 16)));
+        w
+    }
+
+    #[inline]
+    fn lfsr_feedback(&self) -> u32 {
+        let s = &self.s;
+        let mut v = s[0];
+        v = add31(v, mul31(s[0], 8));
+        v = add31(v, mul31(s[4], 20));
+        v = add31(v, mul31(s[10], 21));
+        v = add31(v, mul31(s[13], 17));
+        v = add31(v, mul31(s[15], 15));
+        v
+    }
+
+    #[inline]
+    fn lfsr_clock(&mut self, new_val: u32) {
+        self.s.copy_within(1..16, 0);
+        self.s[15] = if new_val == 0 { 0x7FFF_FFFF } else { new_val };
+    }
+
+    /// Generate the next 32-bit keystream word.
+    pub fn next_word(&mut self) -> u32 {
+        let (x0, x1, x2, x3) = self.bit_reorganization();
+        let w = self.nonlinear_f(x0, x1, x2);
+        self.lfsr_clock(self.lfsr_feedback());
+        w ^ x3
+    }
+
+    /// XOR `buf` with keystream bytes (32-bit words in big-endian byte order).
+    pub fn fill(&mut self, buf: &mut [u8]) {
+        let mut chunks = buf.chunks_exact_mut(4);
+        for ch in &mut chunks {
+            let ks = self.next_word().to_be_bytes();
+            for (b, k) in ch.iter_mut().zip(ks.iter()) {
+                *b ^= k;
+            }
+        }
+        let rem = chunks.into_remainder();
+        if !rem.is_empty() {
+            let ks = self.next_word().to_be_bytes();
+            for (b, k) in rem.iter_mut().zip(ks.iter()) {
+                *b ^= k;
+            }
+        }
+    }
+}
+
+impl Drop for Zuc128Ct {
+    fn drop(&mut self) {
+        crate::ct::zeroize_slice(self.s.as_mut_slice());
+        self.r1 = 0;
+        self.r2 = 0;
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -265,14 +515,43 @@ mod tests {
     #[test]
     fn keystream_mixed() {
         let key = [
-            0x3d, 0x4c, 0x4b, 0xe9, 0x6a, 0x82, 0xfd, 0xae,
-            0xb5, 0x8f, 0x64, 0x1d, 0xb1, 0x7b, 0x45, 0x5b,
+            0x3d, 0x4c, 0x4b, 0xe9, 0x6a, 0x82, 0xfd, 0xae, 0xb5, 0x8f, 0x64, 0x1d, 0xb1, 0x7b,
+            0x45, 0x5b,
         ];
         let iv = [
-            0x84, 0x31, 0x9a, 0xa8, 0xde, 0x69, 0x15, 0xca,
-            0x1f, 0x6b, 0xda, 0x6b, 0xfb, 0xd8, 0xc7, 0x66,
+            0x84, 0x31, 0x9a, 0xa8, 0xde, 0x69, 0x15, 0xca, 0x1f, 0x6b, 0xda, 0x6b, 0xfb, 0xd8,
+            0xc7, 0x66,
         ];
         let mut z = Zuc128::new(&key, &iv);
+        assert_eq!(z.next_word(), 0x14f1c272, "Z[0]");
+        assert_eq!(z.next_word(), 0x3279c419, "Z[1]");
+    }
+
+    #[test]
+    fn keystream_zeros_ct() {
+        let mut z = Zuc128Ct::new(&[0u8; 16], &[0u8; 16]);
+        assert_eq!(z.next_word(), 0x27bede74, "Z[0]");
+        assert_eq!(z.next_word(), 0x018082da, "Z[1]");
+    }
+
+    #[test]
+    fn keystream_ones_ct() {
+        let mut z = Zuc128Ct::new(&[0xFFu8; 16], &[0xFFu8; 16]);
+        assert_eq!(z.next_word(), 0x0657cfa0, "Z[0]");
+        assert_eq!(z.next_word(), 0x7096398b, "Z[1]");
+    }
+
+    #[test]
+    fn keystream_mixed_ct() {
+        let key = [
+            0x3d, 0x4c, 0x4b, 0xe9, 0x6a, 0x82, 0xfd, 0xae, 0xb5, 0x8f, 0x64, 0x1d, 0xb1, 0x7b,
+            0x45, 0x5b,
+        ];
+        let iv = [
+            0x84, 0x31, 0x9a, 0xa8, 0xde, 0x69, 0x15, 0xca, 0x1f, 0x6b, 0xda, 0x6b, 0xfb, 0xd8,
+            0xc7, 0x66,
+        ];
+        let mut z = Zuc128Ct::new(&key, &iv);
         assert_eq!(z.next_word(), 0x14f1c272, "Z[0]");
         assert_eq!(z.next_word(), 0x3279c419, "Z[1]");
     }
@@ -282,10 +561,21 @@ mod tests {
     fn fill_xor_roundtrip() {
         let plaintext = b"Hello, ZUC-128!!";
         let key = [0x12u8; 16];
-        let iv  = [0x34u8; 16];
+        let iv = [0x34u8; 16];
         let mut buf = *plaintext;
         Zuc128::new(&key, &iv).fill(&mut buf);
         Zuc128::new(&key, &iv).fill(&mut buf);
+        assert_eq!(&buf, plaintext);
+    }
+
+    #[test]
+    fn fill_xor_roundtrip_ct() {
+        let plaintext = b"Hello, ZUC-128!!";
+        let key = [0x12u8; 16];
+        let iv = [0x34u8; 16];
+        let mut buf = *plaintext;
+        Zuc128Ct::new(&key, &iv).fill(&mut buf);
+        Zuc128Ct::new(&key, &iv).fill(&mut buf);
         assert_eq!(&buf, plaintext);
     }
 
@@ -295,12 +585,43 @@ mod tests {
     #[test]
     fn fill_partial_word() {
         let key = [0xABu8; 16];
-        let iv  = [0xCDu8; 16];
+        let iv = [0xCDu8; 16];
         let mut buf7 = [0u8; 7];
         let mut buf8 = [0u8; 8];
         Zuc128::new(&key, &iv).fill(&mut buf7);
         Zuc128::new(&key, &iv).fill(&mut buf8);
         // A 7-byte fill must equal the first 7 bytes of an 8-byte fill.
         assert_eq!(buf7[..], buf8[..7]);
+    }
+
+    #[test]
+    fn fill_partial_word_ct() {
+        let key = [0xABu8; 16];
+        let iv = [0xCDu8; 16];
+        let mut buf7 = [0u8; 7];
+        let mut buf8 = [0u8; 8];
+        Zuc128Ct::new(&key, &iv).fill(&mut buf7);
+        Zuc128Ct::new(&key, &iv).fill(&mut buf8);
+        assert_eq!(buf7[..], buf8[..7]);
+    }
+
+    #[test]
+    fn ct_sboxes_match_tables() {
+        for x in 0u16..=255 {
+            let b = x as u8;
+            assert_eq!(sbox_eval(&S0_ANF, b), S0[x as usize], "S0 {x:02x}");
+            assert_eq!(sbox_eval(&S1_ANF, b), S1[x as usize], "S1 {x:02x}");
+        }
+    }
+
+    #[test]
+    fn zuc128_and_ct_match() {
+        let key = [0x12u8; 16];
+        let iv = [0x34u8; 16];
+        let mut fast = Zuc128::new(&key, &iv);
+        let mut slow = Zuc128Ct::new(&key, &iv);
+        for _ in 0..4 {
+            assert_eq!(fast.next_word(), slow.next_word());
+        }
     }
 }
