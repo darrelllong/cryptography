@@ -16,7 +16,7 @@ use cryptography::{
     GrasshopperCt, Magma, MagmaCt, Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128,
     Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Speck32_64, Speck48_72,
     Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128, Speck128_192,
-    Speck128_256, TripleDes,
+    Speck128_256, TripleDes, Zuc128,
 };
 use std::hint::black_box;
 
@@ -158,6 +158,24 @@ fn bench_magma(c: &mut Criterion) {
     g.finish();
 }
 
+// ── ZUC-128 ───────────────────────────────────────────────────────────────
+
+fn bench_zuc(c: &mut Criterion) {
+    let mut g = c.benchmark_group("ZUC");
+    g.throughput(Throughput::Bytes(MB as u64));
+    g.bench_function("ZUC-128", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                Zuc128::new(&[0u8; 16], &[0u8; 16]).fill(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     bench_simon,
@@ -165,6 +183,7 @@ criterion_group!(
     bench_aes,
     bench_des,
     bench_grasshopper,
-    bench_magma
+    bench_magma,
+    bench_zuc
 );
 criterion_main!(benches);

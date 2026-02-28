@@ -143,6 +143,13 @@ impl Zuc128 {
             let s16 = add31(z.lfsr_feedback(), w >> 1);
             z.lfsr_clock(s16);
         }
+
+        // Working-stage warm-up (spec §3.2 step (a)): one extra working-mode
+        // clock that updates R1/R2 but whose W output is discarded.
+        let (x0, x1, x2, _) = z.bit_reorganization();
+        z.nonlinear_f(x0, x1, x2);
+        z.lfsr_clock(z.lfsr_feedback());
+
         z
     }
 
@@ -208,16 +215,24 @@ impl Zuc128 {
         w ^ x3
     }
 
-    /// Fill `buf` with keystream bytes (32-bit words in big-endian order).
+    /// XOR `buf` with keystream bytes (32-bit words in big-endian byte order).
+    ///
+    /// Calling `fill` twice with the same key/IV and an identical buffer
+    /// recovers the original contents (stream-cipher encrypt/decrypt).
     pub fn fill(&mut self, buf: &mut [u8]) {
         let mut chunks = buf.chunks_exact_mut(4);
         for ch in &mut chunks {
-            ch.copy_from_slice(&self.next_word().to_be_bytes());
+            let ks = self.next_word().to_be_bytes();
+            for (b, k) in ch.iter_mut().zip(ks.iter()) {
+                *b ^= k;
+            }
         }
         let rem = chunks.into_remainder();
         if !rem.is_empty() {
-            let word = self.next_word().to_be_bytes();
-            rem.copy_from_slice(&word[..rem.len()]);
+            let ks = self.next_word().to_be_bytes();
+            for (b, k) in rem.iter_mut().zip(ks.iter()) {
+                *b ^= k;
+            }
         }
     }
 }
@@ -274,20 +289,18 @@ mod tests {
         assert_eq!(&buf, plaintext);
     }
 
-    // fill() with non-multiple-of-4 length.
+    // fill() with non-multiple-of-4 length produces the same bytes as an
+    // aligned fill of the next larger multiple of 4, truncated to the
+    // requested length.
     #[test]
     fn fill_partial_word() {
         let key = [0xABu8; 16];
         let iv  = [0xCDu8; 16];
         let mut buf7 = [0u8; 7];
-        let mut buf4 = [0u8; 4];
-        let mut buf3 = [0u8; 3];
+        let mut buf8 = [0u8; 8];
         Zuc128::new(&key, &iv).fill(&mut buf7);
-        Zuc128::new(&key, &iv).fill(&mut buf4);
-        Zuc128::new(&key, &iv).fill(&mut buf3);
-        // First 4 bytes of buf7 must equal buf4 (same first word).
-        assert_eq!(buf7[..4], buf4[..4]);
-        // Last 3 bytes of buf7 must equal first 3 bytes of buf3 (same second word, truncated).
-        assert_eq!(buf7[4..], buf3[..3]);
+        Zuc128::new(&key, &iv).fill(&mut buf8);
+        // A 7-byte fill must equal the first 7 bytes of an 8-byte fill.
+        assert_eq!(buf7[..], buf8[..7]);
     }
 }
