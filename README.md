@@ -17,9 +17,9 @@ Implemented families:
 See [ANALYSIS.md](ANALYSIS.md) for algorithm notes, coverage, and the current
 benchmark numbers for this host.
 
-## How To Use
+## HOWTO
 
-### Block ciphers
+### Generic block-cipher example
 
 All block ciphers implement the shared `BlockCipher` trait for in-place
 operation on a mutable byte slice:
@@ -33,6 +33,8 @@ let mut block = [0u8; 16];
 cipher.encrypt(&mut block);
 cipher.decrypt(&mut block);
 ```
+
+### Fixed-size block example
 
 Each block cipher type also exposes typed helpers when the block size is known
 at compile time:
@@ -48,7 +50,22 @@ let pt = cipher.decrypt_block(&ct);
 assert_eq!(pt, block);
 ```
 
-### Stream cipher
+### Constant-time example
+
+If you need the software constant-time path, use the dedicated `Ct` type:
+
+```rust
+use cryptography::Aes128Ct;
+
+let cipher = Aes128Ct::new(&[0u8; 16]);
+let block = [0u8; 16];
+
+let ct = cipher.encrypt_block(&block);
+let pt = cipher.decrypt_block(&ct);
+assert_eq!(pt, block);
+```
+
+### Stream-cipher example
 
 ZUC produces keystream words and can fill a caller-supplied buffer:
 
@@ -139,17 +156,36 @@ cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
 ```
 
 `aes_bench` compares the crate's AES implementations against libsodium. It
-requires a working `libsodium` installation. The libsodium AES-256-GCM line is
-feature-detected at runtime and may be skipped if `sodiumoxide` reports that
-hardware AES is unavailable.
+requires a working `libsodium` installation. This is a calibration benchmark,
+not a strict apples-to-apples comparison: the crate's rows are raw AES block
+cipher throughput, while the libsodium `secretbox` rows are a complete
+XSalsa20-Poly1305 authenticated-encryption construction. The libsodium
+AES-256-GCM row, when available, is also an AEAD and is feature-detected at
+runtime, so it may be skipped if `sodiumoxide` reports that hardware AES is
+unavailable.
 
 ## Design Notes
 
 - No `unsafe`.
-- No hardware AES intrinsics in the main AES implementation.
+- No hardware AES intrinsics in the main AES implementation; keeping the core
+  portable and safe matters on every processor family, not just the current
+  benchmark host.
 - No heap allocation inside block encrypt/decrypt paths.
 - Benchmark and test coverage are tracked in [ANALYSIS.md](ANALYSIS.md).
 - Reference PDFs used during implementation live in `pubs/`.
+
+## Local PDFs
+
+The `pubs/` directory now carries one or more local PDFs for every cipher
+family covered in this repository:
+
+- AES: `fips197.pdf`, `boyar-peralta-2011-a-depth-16-circuit-for-the-aes-s-box.pdf`
+- DES / 3DES: `fips46-3.pdf`, `nist-sp-800-67r2.pdf`
+- SIMON / SPECK: `simon_speck_2013.pdf`
+- Grasshopper: `rfc7801-kuznyechik.pdf`
+- Magma: `rfc8891-magma.pdf`
+- SM4: `sm4-linear-cryptanalysis-2024.pdf` (the official GM/T host is not reachable from this sandbox, so the checked-in local PDF is a public SM4-family paper)
+- ZUC-128: `ts-135222-zuc.pdf`
 
 ## References
 
@@ -249,6 +285,16 @@ Boyar-Peralta AES S-box circuit paper is stored at
   month       = mar,
   url         = {https://www.gmbz.org.cn/upload/2025-01-23/1737625646289030731.pdf},
   note        = {English translation of the Chinese standard},
+}
+
+@article{liu-2024-sm4-linear,
+  author  = {Qi Liu and others},
+  title   = {Linear Cryptanalysis of {SM4} based on Correlation of Binary Masks},
+  journal = {Highlights in Science, Engineering and Technology},
+  volume  = {83},
+  pages   = {17--22},
+  year    = {2024},
+  url     = {https://zenodo.org/records/10867006/files/_3_219_17-22_Liu.pdf?download=1},
 }
 
 @techreport{etsi-sage-zuc-v16,
