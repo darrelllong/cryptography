@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 460" role="img" aria-labelledby="title desc">
+  <title id="title">Fast vs Ct throughput radar chart</title>
+  <desc id="desc">Normalized radar chart comparing fast and constant-time throughput for AES, DES, Magma, Grasshopper, SM4, and ZUC families.</desc>
+  <style>
+    .bg { fill: #fbf8f1; }
+    .grid { fill: none; stroke: #c9c2b7; stroke-width: 1; }
+    .axis { stroke: #a79d90; stroke-width: 1; }
+    .label { fill: #342f29; font: 12px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .small { fill: #6b6257; font: 11px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .fast-fill { fill: #0f766e; fill-opacity: 0.20; stroke: #0f766e; stroke-width: 2; }
+    .ct-fill { fill: #b45309; fill-opacity: 0.24; stroke: #b45309; stroke-width: 2; }
+    .legend-fast { fill: #0f766e; }
+    .legend-ct { fill: #b45309; }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="500" height="460" rx="16" />
+
+  <text class="label" x="20" y="28">Fast vs Ct Throughput (normalized)</text>
+  <text class="small" x="20" y="46">Scale is normalized to the fastest fast-path result: ZUC-128 = 551.1 MiB/s</text>
+
+  <polygon class="grid" points="240.0,196.0 264.0,206.0 274.0,230.0 264.0,254.0 240.0,264.0 216.0,254.0 206.0,230.0 216.0,206.0" />
+  <polygon class="grid" points="240.0,162.0 288.1,181.9 308.0,230.0 288.1,278.1 240.0,298.0 191.9,278.1 172.0,230.0 191.9,181.9" />
+  <polygon class="grid" points="240.0,128.0 312.1,157.9 342.0,230.0 312.1,302.1 240.0,332.0 167.9,302.1 138.0,230.0 167.9,157.9" />
+  <polygon class="grid" points="240.0,94.0 336.2,133.8 376.0,230.0 336.2,326.2 240.0,366.0 143.8,326.2 104.0,230.0 143.8,133.8" />
+  <polygon class="grid" points="240.0,60.0 360.2,109.8 410.0,230.0 360.2,350.2 240.0,400.0 119.8,350.2 70.0,230.0 119.8,109.8" />
+
+  <line class="axis" x1="240" y1="230" x2="240" y2="60" />
+  <line class="axis" x1="240" y1="230" x2="360.2" y2="109.8" />
+  <line class="axis" x1="240" y1="230" x2="410" y2="230" />
+  <line class="axis" x1="240" y1="230" x2="360.2" y2="350.2" />
+  <line class="axis" x1="240" y1="230" x2="240" y2="400" />
+  <line class="axis" x1="240" y1="230" x2="119.8" y2="350.2" />
+  <line class="axis" x1="240" y1="230" x2="70" y2="230" />
+  <line class="axis" x1="240" y1="230" x2="119.8" y2="109.8" />
+
+  <polygon class="fast-fill" points="240.0,62.6 336.9,133.1 355.6,230.0 257.7,247.7 240.0,249.1 234.3,235.7 202.2,230.0 119.8,109.8" />
+  <polygon class="ct-fill" points="240.0,211.3 251.0,219.0 253.2,230.0 241.8,231.8 240.0,234.4 239.1,230.9 237.7,230.0 233.8,223.8" />
+
+  <text class="small" x="247" y="198">20%</text>
+  <text class="small" x="247" y="164">40%</text>
+  <text class="small" x="247" y="130">60%</text>
+  <text class="small" x="247" y="96">80%</text>
+  <text class="small" x="247" y="62">100%</text>
+
+  <text class="label" x="240" y="36" text-anchor="middle">AES-128</text>
+  <text class="label" x="384" y="93" text-anchor="start">AES-192</text>
+  <text class="label" x="438" y="234" text-anchor="start">AES-256</text>
+  <text class="label" x="384" y="374" text-anchor="start">DES</text>
+  <text class="label" x="240" y="442" text-anchor="middle">Magma</text>
+  <text class="label" x="96" y="374" text-anchor="end">Grasshopper</text>
+  <text class="label" x="42" y="234" text-anchor="start">SM4</text>
+  <text class="label" x="96" y="93" text-anchor="end">ZUC</text>
+
+  <rect x="330" y="24" width="14" height="14" class="legend-fast" rx="2" />
+  <text class="small" x="350" y="35">Fast path</text>
+  <rect x="330" y="46" width="14" height="14" class="legend-ct" rx="2" />
+  <text class="small" x="350" y="57">Ct path</text>
+</svg>

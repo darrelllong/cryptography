@@ -45,6 +45,79 @@ the separate Criterion benchmark crate under `benchmarks/`.
 
 ---
 
+## Cipher Quick Reference
+
+This section is the operator-facing summary: what each cipher is, what its
+practical security properties look like today, when it should be used (or
+avoided), and the main caveats in this repository. The detailed implementation
+notes follow in the later sections.
+
+### AES
+
+- Reference: `fips197` (primary standard); `daemen-rijmen-2002` (design reference).
+- History: standardized by NIST as FIPS 197 in 2001 after the Rijndael competition; it is the dominant general-purpose block cipher in modern protocols and software.
+- Properties: 128-bit block cipher with 128/192/256-bit keys; the main practical choice for new designs; broad public analysis and hardware support.
+- Usage and deprecation: preferred default block cipher in this repository for general-purpose use. `Aes128/192/256` are the fast table-based software paths. `Aes128Ct/192Ct/256Ct` exist for software-only constant-time use. AES itself is not deprecated.
+- Known issues: the fast `Aes*` types use T-tables and are not constant-time; use `Aes*Ct` or hardware-backed AES if side channels matter. This crate exposes the raw block primitive only, not an AEAD or block mode.
+
+### DES and Triple-DES
+
+- Reference: `fips46-3` (DES); `sp800-67r2` (Triple-DES/TDEA).
+- History: DES was standardized in the 1970s and later reaffirmed in FIPS 46-3; Triple-DES extended its life by applying DES three times in EDE form.
+- Properties: 64-bit block cipher family; DES has a 56-bit effective key and is cryptographically obsolete; 3DES raises brute-force cost but still inherits the 64-bit block size and a relatively slow software profile.
+- Usage and deprecation: included for legacy interoperability, testing, and historical reference. New designs should not use DES or 3DES. In current standards practice, both are deprecated, and 3DES is being phased out of general use.
+- Known issues: the 64-bit block size imposes birthday-bound limits for long messages; the fast `Des` path uses secret-indexed tables and is not constant-time; `DesCt` is much slower. The implementation also does not reject weak or semi-weak DES keys.
+
+### Simon
+
+- Reference: `simon-speck-2013`.
+- History: published by the NSA in 2013 as a lightweight block cipher family optimized for hardware.
+- Properties: Feistel family with 10 variants spanning 32- to 128-bit block sizes; compact round function; software performance is respectable but trails comparable Speck variants.
+- Usage and deprecation: suitable for research, compatibility work, and environments that specifically require Simon. It is not a mainstream default for new software designs, largely because ecosystem adoption outside the lightweight-crypto niche is limited.
+- Known issues: many variants use 32-, 48-, 64-, or 96-bit blocks, so long-message limits matter sooner than they do with 128-bit block ciphers. The crate exposes only the raw primitive, so callers must choose their own safe mode of operation.
+
+### Speck
+
+- Reference: `simon-speck-2013`.
+- History: published alongside Simon by the NSA in 2013 as the software-oriented member of the lightweight pair.
+- Properties: ARX family with 10 variants; excellent software throughput, especially in the 128-bit block variants; simple round structure and strong performance on general-purpose CPUs.
+- Usage and deprecation: useful for interop, benchmarking, and constrained-environment experiments. Like Simon, it is not the default recommendation for new general-purpose applications because broad standards adoption is limited and policy acceptance has been uneven.
+- Known issues: smaller-block variants have the same birthday-bound concerns as Simon. The crate provides the raw block cipher only, not authenticated encryption. While the implementation is naturally closer to constant-time than the table-driven ciphers, protocol misuse remains the larger risk.
+
+### Magma
+
+- Reference: `rfc8891`.
+- History: standardized as GOST R 34.12-2015 and documented in RFC 8891; it descends from the older GOST 28147-89 cipher.
+- Properties: 64-bit block, 256-bit key, 32-round Feistel design; regionally important for Russian standards and compatibility work.
+- Usage and deprecation: appropriate for GOST interoperability and historical/standards analysis. It is not the preferred choice for new general-purpose deployments outside ecosystems that require it. Magma itself is not formally deprecated within its standards family, but it is legacy-leaning relative to Grasshopper.
+- Known issues: the 64-bit block size imposes the same long-message limits as DES-class ciphers. `Magma` is table-driven and not constant-time; `MagmaCt` exists but is materially slower. As with the other block ciphers here, this crate provides the primitive only, not a mode.
+
+### Grasshopper
+
+- Reference: `rfc7801`.
+- History: standardized as GOST R 34.12-2015 and published for the IETF as RFC 7801; also known as Kuznyechik.
+- Properties: 128-bit block, 256-bit key; modern Russian block cipher with a byte S-box and a heavier linear layer than AES.
+- Usage and deprecation: appropriate for GOST interoperability and for comparing non-AES 128-bit block ciphers. It is the more modern Russian standard choice in this repository. It is not broadly deployed like AES, so most non-GOST applications should still prefer AES.
+- Known issues: the fast `Grasshopper` path uses table lookups and is not constant-time; `GrasshopperCt` is substantially slower. Its software implementation is comparatively slow even on the fast path because the linear layer is expensive.
+
+### SM4
+
+- Reference: `gm-t-0002-2012`.
+- History: standardized in China as GM/T 0002-2012 and GB/T 32907-2016; widely used in Chinese commercial and government cryptographic profiles.
+- Properties: 128-bit block, 128-bit key, 32 rounds; structurally simple and faster than the older 64-bit block ciphers in this crate, but slower than AES fast-path software.
+- Usage and deprecation: appropriate for SM4 interoperability, standards conformance, and comparative study. It is not deprecated, but it is primarily a regional standards cipher rather than a global default.
+- Known issues: the fast `Sm4` path uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. This crate exposes only the raw block cipher.
+
+### ZUC-128
+
+- Reference: `etsi-sage-zuc-v16`.
+- History: designed by Chinese cryptographers and standardized for LTE/5G use; used in 3GPP as the basis for 128-EEA3 and 128-EIA3.
+- Properties: 128-bit stream cipher with a 128-bit key and 128-bit IV; high software throughput in the default path; not a block cipher, so it fills arbitrary buffers directly.
+- Usage and deprecation: appropriate for ZUC interoperability, radio-stack work, and standards testing. It is not deprecated in the telecom profiles that use it. In this crate it is exposed as the raw keystream generator rather than the higher-level EEA3/EIA3 constructions.
+- Known issues: the fast `Zuc128` path uses table-based S-boxes in the nonlinear function and is not constant-time; `Zuc128Ct` is much slower. As a stream cipher, keystream reuse with the same key/IV is catastrophic, so IV management is the caller's responsibility.
+
+---
+
 ## Simon
 
 Simon (Beaulieu et al., NSA 2013) is a Feistel cipher optimised for hardware.
@@ -325,6 +398,21 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
 | ZUC-128 | 551.1 MiB/s | 28.3 MiB/s | 19.5x |
 
+Radar view (normalized to the fastest fast-path result):
+
+![Fast vs Ct normalized radar chart](assets/fast-vs-ct-radar.svg)
+
+Mermaid fallback (absolute throughput):
+
+```mermaid
+xychart-beta
+    title "Fast vs Ct throughput (MiB/s)"
+    x-axis ["AES-128", "AES-192", "AES-256", "DES", "Magma", "Grasshopper", "SM4", "ZUC"]
+    y-axis "MiB/s" 0 --> 560
+    bar [542.7, 444.4, 374.8, 81.1, 62.0, 26.1, 122.7, 551.1]
+    bar [60.6, 50.4, 42.9, 8.3, 14.3, 4.1, 7.6, 28.3]
+```
+
 These ratios line up with the implementation strategy:
 
 - `Aes*Ct` keeps the bytewise AES round structure, but each S-box is a
@@ -530,26 +618,112 @@ word-level parallelism.
 
 ## References
 
-- R. Beaulieu, D. Shors, J. Smith, S. Treatman-Clark, B. Weeks, and L. Wingers.
-  The SIMON and SPECK Families of Lightweight Block Ciphers.
-  *IACR Cryptology ePrint Archive*, Report 2013/404, 2013.
+The quick-reference section cites the following keys. Matching BibTeX entries
+are included here so the prose and the bibliography stay in sync.
 
-- National Institute of Standards and Technology.
-  *Advanced Encryption Standard (AES)*.
-  Federal Information Processing Standard FIPS 197, November 2001.
+```bibtex
+@misc{simon-speck-2013,
+  author       = {Ray Beaulieu and Douglas Shors and Jason Smith and
+                  Stefan Treatman-Clark and Bryan Weeks and Louis Wingers},
+  title        = {The {SIMON} and {SPECK} Families of Lightweight Block Ciphers},
+  howpublished = {{IACR} Cryptology ePrint Archive, Report 2013/404},
+  year         = {2013},
+  url          = {https://eprint.iacr.org/2013/404},
+}
 
-- National Institute of Standards and Technology.
-  *Data Encryption Standard (DES)*.
-  Federal Information Processing Standard FIPS 46-3, October 1999.
+@techreport{fips197,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Advanced Encryption Standard ({AES})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 197},
+  year        = {2001},
+  month       = nov,
+  url         = {https://csrc.nist.gov/publications/detail/fips/197/final},
+}
 
-- National Institute of Standards and Technology.
-  *Recommendation for the Triple Data Encryption Algorithm (TDEA) Block Cipher*.
-  NIST Special Publication 800-67 Revision 2, November 2017.
+@misc{boyar-peralta-2011,
+  author       = {Joan Boyar and Ren{\'e} Peralta},
+  title        = {A depth-16 circuit for the {AES} {S}-box},
+  howpublished = {{IACR} Cryptology ePrint Archive, Report 2011/332},
+  year         = {2011},
+  url          = {https://eprint.iacr.org/2011/332},
+}
 
-- N.J. Daemen and V. Rijmen.
-  *The Design of Rijndael: AES — The Advanced Encryption Standard*.
-  Springer, 2002.
+@techreport{fips46-3,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Data Encryption Standard ({DES})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 46-3},
+  year        = {1999},
+  month       = oct,
+  url         = {https://csrc.nist.gov/publications/detail/fips/46/3/archive/1999-10-25},
+}
 
-- V. Dolmatov and A. Degtyarev.
-  *GOST R 34.12-2015: Block Cipher "Magma"*.
-  RFC 8891, IETF, September 2020.
+@techreport{sp800-67r2,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Recommendation for the Triple Data Encryption Algorithm
+                 ({TDEA}) Block Cipher},
+  institution = {National Institute of Standards and Technology},
+  type        = {{NIST Special Publication}},
+  number      = {800-67 Revision 2},
+  year        = {2017},
+  month       = nov,
+  url         = {https://csrc.nist.gov/publications/detail/sp/800-67/rev-2/final},
+}
+
+@book{daemen-rijmen-2002,
+  author    = {Joan Daemen and Vincent Rijmen},
+  title     = {The Design of {Rijndael}: {AES} --- The Advanced Encryption Standard},
+  publisher = {Springer},
+  year      = {2002},
+  isbn      = {978-3-540-42580-9},
+}
+
+@techreport{rfc7801,
+  author      = {V. Dolmatov},
+  title       = {GOST R 34.12-2015: Block Cipher ``Grasshopper''},
+  type        = {{RFC}},
+  number      = {7801},
+  institution = {IETF},
+  year        = {2016},
+  month       = mar,
+  url         = {https://www.rfc-editor.org/rfc/rfc7801},
+}
+
+@techreport{rfc8891,
+  author      = {V. Dolmatov and A. Degtyarev},
+  title       = {GOST R 34.12-2015: Block Cipher ``Magma''},
+  type        = {{RFC}},
+  number      = {8891},
+  institution = {IETF},
+  year        = {2020},
+  month       = sep,
+  url         = {https://www.rfc-editor.org/rfc/rfc8891},
+}
+
+@techreport{gm-t-0002-2012,
+  author      = {{State Cryptography Administration of the People's Republic of China}},
+  title       = {{SM4} Block Cipher Algorithm},
+  institution = {{State Cryptography Administration of the People's Republic of China}},
+  type        = {{GM/T}},
+  number      = {0002-2012},
+  year        = {2012},
+  month       = mar,
+  url         = {https://www.gmbz.org.cn/upload/2025-01-23/1737625646289030731.pdf},
+  note        = {English translation of the Chinese standard},
+}
+
+@techreport{etsi-sage-zuc-v16,
+  author      = {{ETSI SAGE}},
+  title       = {Specification of the 3GPP Confidentiality and Integrity Algorithms
+                 128-{EEA3} \& 128-{EIA3}; Document 2: {ZUC} Specification},
+  institution = {{European Telecommunications Standards Institute}},
+  type        = {Specification},
+  version     = {1.6},
+  year        = {2011},
+  note        = {Referenced by 3GPP TS 35.222 / ETSI TS 135 222},
+  url         = {https://www.etsi.org/deliver/etsi_ts/135200_135299/135222/16.00.00_60/ts_135222v160000p.pdf},
+}
+```

@@ -238,4 +238,28 @@ Boyar-Peralta AES S-box circuit paper is stored at
   month       = sep,
   url         = {https://www.rfc-editor.org/rfc/rfc8891},
 }
+
+@techreport{gm-t-0002-2012,
+  author      = {{State Cryptography Administration of the People's Republic of China}},
+  title       = {{SM4} Block Cipher Algorithm},
+  institution = {{State Cryptography Administration of the People's Republic of China}},
+  type        = {{GM/T}},
+  number      = {0002-2012},
+  year        = {2012},
+  month       = mar,
+  url         = {https://www.gmbz.org.cn/upload/2025-01-23/1737625646289030731.pdf},
+  note        = {English translation of the Chinese standard},
+}
+
+@techreport{etsi-sage-zuc-v16,
+  author      = {{ETSI SAGE}},
+  title       = {Specification of the 3GPP Confidentiality and Integrity Algorithms
+                 128-{EEA3} \& 128-{EIA3}; Document 2: {ZUC} Specification},
+  institution = {{European Telecommunications Standards Institute}},
+  type        = {Specification},
+  version     = {1.6},
+  year        = {2011},
+  note        = {Referenced by 3GPP TS 35.222 / ETSI TS 135 222},
+  url         = {https://www.etsi.org/deliver/etsi_ts/135200_135299/135222/16.00.00_60/ts_135222v160000p.pdf},
+}
 ```
