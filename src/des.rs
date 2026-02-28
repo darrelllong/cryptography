@@ -127,6 +127,10 @@ const SBOXES: [[u8; 64]; 8] = [
 /// monomials in six variables. At runtime `DesCt` builds the active monomial
 /// mask for the input and reduces it with parity. This keeps the checked-in Ct
 /// code much smaller than hand-writing eight separate 6->4 logic networks.
+///
+/// Construction-wise, this is the usual truth-table to ANF conversion:
+/// enumerate the 64 S-box inputs, then apply the in-place Moebius transform to
+/// recover the ANF coefficients for each output bit.
 const fn build_sbox_anf() -> [[u64; 4]; 8] {
     let mut out = [[0u64; 4]; 8];
     let mut sbox_idx = 0usize;
@@ -402,6 +406,10 @@ fn f(r: u32, subkey: u64) -> u32 {
 
 #[inline(always)]
 fn subset_mask6(x: u8) -> u64 {
+    // Expand one 6-bit input into the set of all active monomials in
+    // {1, x0, x1, ..., x0x1, ...}. Bit i decides whether the current mask is
+    // duplicated with xi included. The final 64-bit value is indexed by the
+    // monomial bitmask itself.
     let mut mask = 1u64;
 
     let bit0 = 0u64.wrapping_sub((x & 1) as u64);
@@ -439,7 +447,8 @@ fn parity64(mut x: u64) -> u8 {
 ///
 /// `subset_mask6` expands the active input monomials for this 6-bit input, and
 /// each packed coefficient mask selects which monomials contribute to one
-/// output bit.
+/// output bit. Taking parity of the intersection is exactly "sum the selected
+/// ANF terms modulo 2".
 #[inline(always)]
 fn sbox_ct(sbox_idx: usize, input: u8) -> u8 {
     let active = subset_mask6(input);
@@ -451,6 +460,16 @@ fn sbox_ct(sbox_idx: usize, input: u8) -> u8 {
 }
 
 /// Constant-time DES f-function using fixed boolean S-box evaluation.
+///
+/// This mirrors the normal DES round function exactly:
+/// 1. expand R with the E permutation,
+/// 2. XOR the subkey,
+/// 3. run the eight S-boxes,
+/// 4. apply P.
+///
+/// The difference is only in representation: `Des` uses byte tables for
+/// throughput, while `DesCt` performs the E/P permutations with fixed loops and
+/// evaluates the S-boxes through the packed ANF form above.
 fn f_ct(r: u32, subkey: u64) -> u32 {
     let mut expanded = 0u64;
     for (i, &src) in E.iter().enumerate() {

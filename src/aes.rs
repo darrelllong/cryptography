@@ -460,8 +460,19 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
 // This path keeps the AES round structure bytewise, but replaces S-box table
 // lookups with the depth-16 Boyar-Peralta straight-line circuits from
 // "A depth-16 circuit for the AES S-box" (NIST / IACR ePrint 2011/332).
-// Each S-box evaluation is a fixed sequence of XOR, XNOR, and AND on eight
-// 0/1 bit variables; there is no table scan and no finite-field inversion.
+//
+// The key idea is to pre-synthesize the AES S-box into a fixed boolean
+// network. Instead of computing the usual "GF(2^8) inverse, then affine
+// transform" directly at runtime, the published circuit rewrites the same
+// function as a sequence of XOR, XNOR, and AND gates. That gives a
+// software-only constant-time S-box without table lookups.
+//
+// This implementation evaluates the circuit one byte at a time. Each byte is
+// treated as eight 0/1 "wires" (`u0..u7`), the published intermediate nodes
+// are transcribed as local temporaries, and the final eight output bits are
+// packed back into a byte. The temporary names intentionally mirror the paper:
+// `t*` for the first linear layer, `m*` for the nonlinear core, and `l*`/`p*`
+// for the output linear layer.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[inline(always)]
@@ -474,6 +485,9 @@ fn bit(input: u8, idx: u8) -> u8 {
     (input >> (7 - idx)) & 1
 }
 
+// The Boyar-Peralta circuit treats one AES byte as eight single-bit wires in
+// MSB-first order. `bit()` extracts those wires, and `pack_bits()` reassembles
+// the resulting output wires into the normal AES byte layout.
 #[inline(always)]
 fn pack_bits(bits: [u8; 8]) -> u8 {
     (bits[0] << 7)
@@ -486,6 +500,11 @@ fn pack_bits(bits: [u8; 8]) -> u8 {
         | bits[7]
 }
 
+/// Forward AES S-box via the published Boyar-Peralta straight-line circuit.
+///
+/// The operation is exactly the same S-box as `SBOX[input]`; it is just
+/// represented as boolean logic instead of a lookup table. The `^ 1` terms in
+/// the final output stage encode the affine constant from the AES S-box.
 #[inline(always)]
 fn sbox_bool(input: u8) -> u8 {
     let u0 = bit(input, 0);
@@ -632,6 +651,11 @@ fn sbox_bool(input: u8) -> u8 {
     ])
 }
 
+/// Inverse AES S-box via the companion Boyar-Peralta straight-line circuit.
+///
+/// As above, this computes the same mapping as `INV_SBOX[input]` without using
+/// a secret-indexed lookup. The variable names follow the published circuit so
+/// the source can be checked against the paper directly.
 #[inline(always)]
 fn inv_sbox_bool(input: u8) -> u8 {
     let u0 = bit(input, 0);
@@ -777,6 +801,8 @@ fn inv_sbox_bool(input: u8) -> u8 {
     ])
 }
 
+// `SubWord` for the Ct key schedule: identical AES key expansion logic, but
+// with the Boyar-Peralta S-box replacing the table lookup.
 fn sub_word_bool(w: u32) -> u32 {
     (sbox_bool((w >> 24) as u8) as u32) << 24
         | (sbox_bool(((w >> 16) & 0xff) as u8) as u32) << 16
@@ -831,6 +857,9 @@ fn expand_256_bool(key: &[u8; 32]) -> [u32; 60] {
     w
 }
 
+// The bytewise Ct decrypt path uses the direct inverse round functions, so it
+// only needs the encryption round keys in reverse order. Unlike the fast
+// T-table path, there is no equivalent-inverse table transform here.
 fn make_dec_rk_ct(enc_rk: &[u32], dec_rk: &mut [u32], nr: usize) {
     for r in 0..=nr {
         let src = (nr - r) * 4;

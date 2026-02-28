@@ -41,6 +41,11 @@ fn t(v: u32) -> u32 {
 
 // The Ct path uses eight tiny 4->4 circuits. For Magma these are small enough
 // to keep in source directly, unlike the larger DES and Grasshopper S-boxes.
+//
+// Each `pi*_ct` function is the ANF of one RFC S-box, written directly over
+// the four input bits. Terms like `x01` or `x123` are monomials, and a literal
+// `1` in a `b*` expression is the ANF constant term. The four `b*` wires are
+// then packed back into the substituted nibble.
 #[inline(always)]
 fn pi0_ct(nibble: u8) -> u8 {
     let x0 = nibble & 1;
@@ -256,7 +261,10 @@ fn pi_ct(box_idx: usize, nibble: u8) -> u8 {
     }
 }
 
-/// Constant-time variant of t(v) using a fixed boolean expression per nibble.
+/// Constant-time variant of `t(v)`.
+///
+/// This is the same eight-nibble substitution as `t()`, but each nibble is
+/// routed through its explicit boolean circuit instead of indexing `PI`.
 #[inline]
 fn t_ct(v: u32) -> u32 {
     let n0 = (v & 0x0000_000f) as u8;
@@ -286,6 +294,8 @@ fn g(k: u32, a: u32) -> u32 {
 
 #[inline]
 fn g_ct(k: u32, a: u32) -> u32 {
+    // Same Feistel round function as `g()`: the only change is the Ct
+    // substitution inside `t_ct`.
     t_ct(a.wrapping_add(k)).rotate_left(11)
 }
 

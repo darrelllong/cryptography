@@ -88,6 +88,10 @@ const PI_INV: [u8; 256] = [
 /// circuit would be unwieldy. `GrasshopperCt` therefore stores each output bit
 /// as two packed 128-bit monomial masks and evaluates them with parity at
 /// runtime instead of indexing the 256-byte tables.
+///
+/// As with `DesCt`, this starts from the 256-byte truth table and applies the
+/// in-place Moebius transform to recover ANF coefficients. The result is split
+/// into two `u128`s because the 8-variable monomial space has 256 entries.
 const fn build_pi_anf(table: &[u8; 256]) -> [[u128; 2]; 8] {
     let mut out = [[0u128; 2]; 8];
     let mut bit_idx = 0usize;
@@ -243,6 +247,10 @@ fn shl_256<const SHIFT: u32>(lo: u128, hi: u128) -> (u128, u128) {
 
 #[inline(always)]
 fn subset_mask8(x: u8) -> (u128, u128) {
+    // Expand one input byte into the set of all active monomials over
+    // {1, x0, x1, ..., x0x1, ...}. The 256-bit mask is split into two u128s,
+    // with monomial index `m` living in `lo[m]` for m<128 and `hi[m-128]`
+    // otherwise.
     let mut lo = 1u128;
     let mut hi = 0u128;
 
@@ -302,6 +310,7 @@ fn parity128(mut x: u128) -> u8 {
 ///
 /// The active monomials for the byte are expanded once, then each output bit
 /// is recovered by intersecting with the precomputed masks and taking parity.
+/// That parity step is the GF(2) sum of all ANF terms selected by this input.
 #[inline(always)]
 fn pi_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
     let (active_lo, active_hi) = subset_mask8(input);
@@ -317,6 +326,8 @@ fn pi_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
 
 #[inline]
 fn apply_s_ct(block: &mut [u8; 16]) {
+    // Same S layer as `apply_s()`, but each byte is evaluated through the
+    // packed ANF representation instead of indexing the 256-byte table.
     for b in block.iter_mut() {
         *b = pi_eval(&PI_ANF, *b);
     }
@@ -324,6 +335,7 @@ fn apply_s_ct(block: &mut [u8; 16]) {
 
 #[inline]
 fn apply_s_inv_ct(block: &mut [u8; 16]) {
+    // Inverse S layer using the packed ANF form of `PI_INV`.
     for b in block.iter_mut() {
         *b = pi_eval(&PI_INV_ANF, *b);
     }
@@ -331,6 +343,8 @@ fn apply_s_inv_ct(block: &mut [u8; 16]) {
 
 #[inline]
 fn l_func_ct(block: &[u8; 16]) -> u8 {
+    // Same linear map as `l_func()`. The Ct path computes the field products
+    // directly instead of indexing `L_TABLES` with secret bytes.
     let mut r = 0u8;
     for i in 0..16 {
         r ^= gf_mul(L_COEFF[i], block[i]);

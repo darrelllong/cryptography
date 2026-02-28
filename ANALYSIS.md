@@ -1,7 +1,9 @@
 # ANALYSIS — Algorithms, Design Decisions, and Performance
 
 Explains why each cipher family is structured as it is: the algorithmic
-background, key design choices, and measured throughput over 1 GiB of data.
+background, key design choices, and measured throughput, including the
+software fast-vs-constant-time tradeoff for the ciphers that expose separate
+`Ct` variants.
 
 ---
 
@@ -276,6 +278,45 @@ measurements are on Apple M4, 10-core, 32 GiB, macOS 15.
 
 **1 GiB time** is computed as `1024 MiB / throughput` and represents
 the projected time to encrypt 1 GiB at the measured rate.
+
+### Fast vs Ct software variants
+
+The crate now exposes separate software-only `Ct` variants for AES, DES,
+Magma, and Grasshopper. These are intentionally measured separately from the
+long-run baseline tables above: the goal here is relative cost, not an
+absolute "best possible" throughput number.
+
+The figures below come from the short Criterion sanity runs used during the
+implementation work:
+
+```text
+cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench -- \
+  --sample-size 10 --measurement-time 0.2 --warm-up-time 0.1 '<group>/'
+```
+
+Each row reports the midpoint throughput from that short run over the same
+1 MiB ECB harness used by the main benchmark.
+
+| Cipher | Fast path | Ct path | Slowdown |
+|--------|----------:|--------:|---------:|
+| AES-128 | 529.4 MiB/s | 61.5 MiB/s | 8.6x |
+| AES-192 | 435.4 MiB/s | 49.7 MiB/s | 8.8x |
+| AES-256 | 368.8 MiB/s | 41.9 MiB/s | 8.8x |
+| DES | 79.5 MiB/s | 8.2 MiB/s | 9.7x |
+| Magma-256 | 61.9 MiB/s | 14.1 MiB/s | 4.4x |
+| Grasshopper-256 | 25.6 MiB/s | 4.1 MiB/s | 6.3x |
+
+These ratios line up with the implementation strategy:
+
+- `Aes*Ct` keeps the bytewise AES round structure, but each S-box is a
+  Boyar-Peralta straight-line boolean circuit instead of a T-table lookup.
+- `DesCt` keeps the normal DES round function, but evaluates E/P with fixed
+  loops and the S-boxes through packed ANF bitsets instead of the byte tables
+  and fused `SP_TABLE`.
+- `MagmaCt` only changes the eight 4-bit S-boxes, so it pays the smallest
+  penalty of the four.
+- `GrasshopperCt` removes both the table-driven S-box and the `L_TABLES`
+  shortcuts, so it remains the slowest of the Ct variants in absolute terms.
 
 ### Simon
 
