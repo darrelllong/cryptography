@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 460" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 520" role="img" aria-labelledby="title desc">
   <title id="title">Fast vs Ct throughput radar chart (log scale)</title>
   <desc id="desc">Log-scaled radar chart comparing fast and constant-time throughput for AES, DES, Magma, Grasshopper, SM4, and ZUC families.</desc>
   <style>
@@ -13,10 +13,7 @@
     .legend-ct { fill: #b45309; }
   </style>
 
-  <rect class="bg" x="0" y="0" width="500" height="460" rx="16" />
-
-  <text class="label" x="20" y="28">Fast vs Ct Throughput (log scale)</text>
-  <text class="small" x="20" y="46">Radial scale is logarithmic, spanning 4 MiB/s to 560 MiB/s</text>
+  <rect class="bg" x="0" y="0" width="500" height="520" rx="16" />
 
   <polygon class="grid" points="240.0,206.2 256.9,213.1 263.8,230.0 256.9,246.9 240.0,253.8 223.1,246.9 216.2,230.0 223.1,213.1" />
   <polygon class="grid" points="240.0,182.3 273.7,196.3 287.7,230.0 273.7,263.7 240.0,277.7 206.3,263.7 192.3,230.0 206.3,196.3" />
@@ -55,8 +52,11 @@
   <text class="label" x="42" y="234" text-anchor="start">SM4</text>
   <text class="label" x="96" y="93" text-anchor="end">ZUC</text>
 
-  <rect x="330" y="24" width="14" height="14" class="legend-fast" rx="2" />
-  <text class="small" x="350" y="35">Fast path</text>
-  <rect x="330" y="46" width="14" height="14" class="legend-ct" rx="2" />
-  <text class="small" x="350" y="57">Ct path</text>
+  <text class="label" x="20" y="476">Fast vs Ct Throughput (log scale)</text>
+  <text class="small" x="20" y="494">Radial scale is logarithmic, spanning 4 MiB/s to 560 MiB/s</text>
+
+  <rect x="330" y="466" width="14" height="14" class="legend-fast" rx="2" />
+  <text class="small" x="350" y="477">Fast path</text>
+  <rect x="330" y="488" width="14" height="14" class="legend-ct" rx="2" />
+  <text class="small" x="350" y="499">Ct path</text>
 </svg>
