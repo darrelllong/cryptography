@@ -8,6 +8,7 @@ pub mod des;
 pub mod grasshopper;
 pub mod magma;
 pub mod simon;
+pub mod sm4;
 pub mod speck;
 pub mod zuc;
 
@@ -28,12 +29,13 @@ pub use aes::{Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct};
 pub use des::{key_schedule, Des, DesCt, KeySchedule, TDesMode, TripleDes};
 pub use grasshopper::{Grasshopper, GrasshopperCt};
 pub use magma::{Magma, MagmaCt};
-pub use zuc::Zuc128;
 pub use simon::{
     Simon128_128, Simon128_192, Simon128_256, Simon32_64, Simon48_72, Simon48_96, Simon64_128,
     Simon64_96, Simon96_144, Simon96_96,
 };
+pub use sm4::{Sm4, Sm4Ct, Sms4, Sms4Ct};
 pub use speck::{
     Speck128_128, Speck128_192, Speck128_256, Speck32_64, Speck48_72, Speck48_96, Speck64_128,
     Speck64_96, Speck96_144, Speck96_96,
 };
+pub use zuc::Zuc128;
