@@ -271,93 +271,121 @@ mod tests {
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
     }
 
-    // ── Roundtrip tests for remaining variants ────────────────────────────────
+    // ── Simon 48/72 — Appendix B ─────────────────────────────────────────────
+    // Key (k₂,k₁,k₀) = (0x121110, 0x0a0908, 0x020100).
+    // PT (x,y) = (0x612067, 0x6e696c).  CT (x,y) = (0xdae5ac, 0x292cac).
 
-    macro_rules! roundtrip {
-        ($test:ident, $Cipher:ident, $key:expr, $pt:expr) => {
-            #[test]
-            fn $test() {
-                let c = $Cipher::new(&$key);
-                assert_eq!(c.decrypt_block(&c.encrypt_block(&$pt)), $pt);
-            }
-        };
+    #[test]
+    fn simon48_72_kat() {
+        let key: [u8;  9] = parse("00010208090a101112");
+        let pt:  [u8;  6] = parse("6720616c696e");
+        let ct:  [u8;  6] = parse("ace5daac2c29");
+        let c = Simon48_72::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
     }
 
-    roundtrip!(
-        simon48_72_roundtrip,
-        Simon48_72,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab]
-    );
+    // ── Simon 48/96 — Appendix B ─────────────────────────────────────────────
+    // Key (k₃..k₀) = (0x1a1918, 0x121110, 0x0a0908, 0x020100).
+    // PT (x,y) = (0x726963, 0x20646e).  CT (x,y) = (0x6e06a5, 0xacf156).
 
-    roundtrip!(
-        simon48_96_roundtrip,
-        Simon48_96,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
-        [0x02, 0x46, 0x8a, 0xce, 0x13, 0x57]
-    );
+    #[test]
+    fn simon48_96_kat() {
+        let key: [u8; 12] = parse("00010208090a10111218191a");
+        let pt:  [u8;  6] = parse("6369726e6420");
+        let ct:  [u8;  6] = parse("a5066e56f1ac");
+        let c = Simon48_96::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 
-    roundtrip!(
-        simon64_96_roundtrip,
-        Simon64_96,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]
-    );
+    // ── Simon 64/96 — Appendix B ─────────────────────────────────────────────
+    // Key (k₂,k₁,k₀) = (0x13121110, 0x0b0a0908, 0x03020100).
+    // PT (x,y) = (0x6f722067, 0x6e696c63).  CT (x,y) = (0x5ca2e27f, 0x111a8fc8).
 
-    roundtrip!(
-        simon96_96_roundtrip,
-        Simon96_96,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf]
-    );
+    #[test]
+    fn simon64_96_kat() {
+        let key: [u8; 12] = parse("0001020308090a0b10111213");
+        let pt:  [u8;  8] = parse("6720726f636c696e");
+        let ct:  [u8;  8] = parse("7fe2a25cc88f1a11");
+        let c = Simon64_96::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 
-    roundtrip!(
-        simon96_144_roundtrip,
-        Simon96_144,
-        [
-            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf, 0x24, 0x68,
-            0xac, 0xe0, 0xf1, 0x35
-        ],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf]
-    );
+    // ── Simon 96/96 — Appendix B ─────────────────────────────────────────────
+    // Key (k₁,k₀) = (0x0d0c0b0a0908, 0x050403020100).
+    // PT (x,y) = (0x2072616c6c69, 0x702065687420).
+    // CT (x,y) = (0x602807a462b4, 0x69063d8ff082).
 
-    roundtrip!(
-        simon128_128_roundtrip,
-        Simon128_128,
-        [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-            0x0e, 0x0f
-        ],
-        [
-            0x63, 0x73, 0x65, 0x64, 0x20, 0x73, 0x72, 0x65, 0x6c, 0x6c, 0x65, 0x76, 0x61, 0x72,
-            0x74, 0x20
-        ]
-    );
+    #[test]
+    fn simon96_96_kat() {
+        let key: [u8; 12] = parse("00010203040508090a0b0c0d");
+        let pt:  [u8; 12] = parse("696c6c617220207468652070");
+        let ct:  [u8; 12] = parse("b462a407286082f08f3d0669");
+        let c = Simon96_96::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 
-    roundtrip!(
-        simon128_192_roundtrip,
-        Simon128_192,
-        [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17
-        ],
-        [
-            0x20, 0x6d, 0x61, 0x64, 0x65, 0x20, 0x69, 0x74, 0x20, 0x65, 0x71, 0x75, 0x69, 0x76,
-            0x61, 0x6c
-        ]
-    );
+    // ── Simon 96/144 — Appendix B ────────────────────────────────────────────
+    // Key (k₂..k₀) = (0x151413121110, 0x0d0c0b0a0908, 0x050403020100).
+    // PT (x,y) = (0x746168742074, 0x73756420666f).
+    // CT (x,y) = (0xecad1c6c451e, 0x3f59c5db1ae9).
 
-    roundtrip!(
-        simon128_256_roundtrip,
-        Simon128_256,
-        [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
-            0x1c, 0x1d, 0x1e, 0x1f
-        ],
-        [
-            0x6e, 0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x20, 0x72, 0x69, 0x62, 0x65, 0x20, 0x77,
-            0x68, 0x65
-        ]
-    );
+    #[test]
+    fn simon96_144_kat() {
+        let key: [u8; 18] = parse("00010203040508090a0b0c0d101112131415");
+        let pt:  [u8; 12] = parse("7420746861746f6620647573");
+        let ct:  [u8; 12] = parse("1e456c1cadece91adbc5593f");
+        let c = Simon96_144::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
+
+    // ── Simon 128/128 — Appendix B ───────────────────────────────────────────
+    // Key (k₁,k₀) = (0x0f0e0d0c0b0a0908, 0x0706050403020100).
+    // PT (x,y) = (0x6373656420737265, 0x6c6c657661727420).
+    // CT (x,y) = (0x49681b1e1e54fe3f, 0x65aa832af84e0bbc).
+
+    #[test]
+    fn simon128_128_kat() {
+        let key: [u8; 16] = parse("000102030405060708090a0b0c0d0e0f");
+        let pt:  [u8; 16] = parse("65727320646573632074726176656c6c");
+        let ct:  [u8; 16] = parse("3ffe541e1e1b6849bc0b4ef82a83aa65");
+        let c = Simon128_128::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
+
+    // ── Simon 128/192 — Appendix B ───────────────────────────────────────────
+    // Key (k₂..k₀) = (0x1716151413121110, 0x0f0e0d0c0b0a0908, 0x0706050403020100).
+    // PT (x,y) = (0x206572656874206e, 0x6568772065626972).
+    // CT (x,y) = (0xc4ac61effcdc0d4f, 0x6c9c8d6e2597b85b).
+
+    #[test]
+    fn simon128_192_kat() {
+        let key: [u8; 24] = parse("000102030405060708090a0b0c0d0e0f1011121314151617");
+        let pt:  [u8; 16] = parse("6e207468657265207269626520776865");
+        let ct:  [u8; 16] = parse("4f0ddcfcef61acc45bb897256e8d9c6c");
+        let c = Simon128_192::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
+
+    // ── Simon 128/256 — Appendix B ───────────────────────────────────────────
+    // Key (k₃..k₀) = (0x1f1e1d1c1b1a1918, 0x1716151413121110,
+    //                  0x0f0e0d0c0b0a0908, 0x0706050403020100).
+    // PT (x,y) = (0x74206e69206d6f6f, 0x6d69732061207369).
+    // CT (x,y) = (0x8d2b5579afc8a3a0, 0x3bf72a87efe7b868).
+
+    #[test]
+    fn simon128_256_kat() {
+        let key: [u8; 32] = parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt:  [u8; 16] = parse("6f6f6d20696e2074697320612073696d");
+        let ct:  [u8; 16] = parse("a0a3c8af79552b8d68b8e7ef872af73b");
+        let c = Simon128_256::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 }

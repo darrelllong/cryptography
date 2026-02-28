@@ -1,5 +1,5 @@
-//! Classical and modern block ciphers implemented in pure, safe, portable Rust
-//! directly from their NIST/FIPS specifications.
+//! Classical and modern block ciphers and stream ciphers implemented in pure,
+//! safe, portable Rust directly from their NIST/FIPS/RFC specifications.
 
 mod ct;
 
@@ -9,6 +9,7 @@ pub mod grasshopper;
 pub mod magma;
 pub mod simon;
 pub mod speck;
+pub mod zuc;
 
 /// Common interface for block ciphers.
 ///
@@ -27,6 +28,7 @@ pub use aes::{Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct};
 pub use des::{key_schedule, Des, DesCt, KeySchedule, TDesMode, TripleDes};
 pub use grasshopper::{Grasshopper, GrasshopperCt};
 pub use magma::{Magma, MagmaCt};
+pub use zuc::Zuc128;
 pub use simon::{
     Simon128_128, Simon128_192, Simon128_256, Simon32_64, Simon48_72, Simon48_96, Simon64_128,
     Simon64_96, Simon96_144, Simon96_96,

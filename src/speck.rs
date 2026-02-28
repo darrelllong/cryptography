@@ -245,110 +245,135 @@ mod tests {
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
     }
 
-    // ── Roundtrip tests for all 10 variants ──────────────────────────────────
+    // ── Speck 48/72 — Appendix C ─────────────────────────────────────────────
+    // Key (k₂,k₁,k₀) = (0x121110, 0x0a0908, 0x020100).
+    // PT (x,y) = (0x20796c, 0x6c6172).  CT (x,y) = (0xc049a5, 0x385adc).
 
-    macro_rules! roundtrip {
-        ($test:ident, $Cipher:ident, $key:expr, $pt:expr) => {
-            #[test]
-            fn $test() {
-                let c = $Cipher::new(&$key);
-                assert_eq!(c.decrypt_block(&c.encrypt_block(&$pt)), $pt);
-            }
-        };
+    #[test]
+    fn speck48_72_kat() {
+        let key: [u8;  9] = parse("00010208090a101112");
+        let pt:  [u8;  6] = parse("6c792072616c");
+        let ct:  [u8;  6] = parse("a549c0dc5a38");
+        let c = Speck48_72::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
     }
 
-    roundtrip!(
-        speck32_64_roundtrip,
-        Speck32_64,
-        [0x00, 0x01, 0x08, 0x09, 0x10, 0x11, 0x18, 0x19],
-        [0x74, 0x65, 0x4c, 0x69]
-    );
+    // ── Speck 48/96 — Appendix C ─────────────────────────────────────────────
+    // Key (k₃..k₀) = (0x1a1918, 0x121110, 0x0a0908, 0x020100).
+    // PT (x,y) = (0x6d2073, 0x696874).  CT (x,y) = (0x735e10, 0xb6445d).
 
-    roundtrip!(
-        speck48_72_roundtrip,
-        Speck48_72,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab]
-    );
+    #[test]
+    fn speck48_96_kat() {
+        let key: [u8; 12] = parse("00010208090a10111218191a");
+        let pt:  [u8;  6] = parse("73206d746869");
+        let ct:  [u8;  6] = parse("105e735d44b6");
+        let c = Speck48_96::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 
-    roundtrip!(
-        speck48_96_roundtrip,
-        Speck48_96,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
-        [0x02, 0x46, 0x8a, 0xce, 0x13, 0x57]
-    );
+    // ── Speck 64/96 — Appendix C ─────────────────────────────────────────────
+    // Key (k₂,k₁,k₀) = (0x13121110, 0x0b0a0908, 0x03020100).
+    // PT (x,y) = (0x74614620, 0x736e6165).  CT (x,y) = (0x9f7952ec, 0x4175946c).
 
-    roundtrip!(
-        speck64_96_roundtrip,
-        Speck64_96,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]
-    );
+    #[test]
+    fn speck64_96_kat() {
+        let key: [u8; 12] = parse("0001020308090a0b10111213");
+        let pt:  [u8;  8] = parse("2046617465616e73");
+        let ct:  [u8;  8] = parse("ec52799f6c947541");
+        let c = Speck64_96::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 
-    roundtrip!(
-        speck64_128_roundtrip,
-        Speck64_128,
-        [
-            0x00, 0x01, 0x02, 0x03, 0x08, 0x09, 0x0a, 0x0b, 0x10, 0x11, 0x12, 0x13, 0x18, 0x19,
-            0x1a, 0x1b
-        ],
-        [0x2d, 0x43, 0x75, 0x74, 0x74, 0x65, 0x72, 0x3b]
-    );
+    // ── Speck 64/128 — Appendix C ────────────────────────────────────────────
+    // Key (k₃..k₀) = (0x1b1a1918, 0x13121110, 0x0b0a0908, 0x03020100).
+    // PT (x,y) = (0x3b726574, 0x7475432d).  CT (x,y) = (0x8c6fa548, 0x454e028b).
 
-    roundtrip!(
-        speck96_96_roundtrip,
-        Speck96_96,
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf]
-    );
+    #[test]
+    fn speck64_128_kat() {
+        let key: [u8; 16] = parse("0001020308090a0b1011121318191a1b");
+        let pt:  [u8;  8] = parse("7465723b2d437574");
+        let ct:  [u8;  8] = parse("48a56f8c8b024e45");
+        let c = Speck64_128::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 
-    roundtrip!(
-        speck96_144_roundtrip,
-        Speck96_144,
-        [
-            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf, 0x24, 0x68,
-            0xac, 0xe0, 0xf1, 0x35
-        ],
-        [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x13, 0x57, 0x9b, 0xdf]
-    );
+    // ── Speck 96/96 — Appendix C ─────────────────────────────────────────────
+    // Key (k₁,k₀) = (0x0d0c0b0a0908, 0x050403020100).
+    // PT (x,y) = (0x65776f68202c, 0x656761737520).
+    // CT (x,y) = (0x9e4d09ab7178, 0x62bdde8f79aa).
 
-    roundtrip!(
-        speck128_128_roundtrip,
-        Speck128_128,
-        [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-            0x0e, 0x0f
-        ],
-        [
-            0x20, 0x65, 0x71, 0x75, 0x69, 0x76, 0x61, 0x6c, 0x20, 0x6d, 0x61, 0x64, 0x65, 0x20,
-            0x69, 0x74
-        ]
-    );
+    #[test]
+    fn speck96_96_kat() {
+        let key: [u8; 12] = parse("00010203040508090a0b0c0d");
+        let pt:  [u8; 12] = parse("2c20686f7765207573616765");
+        let ct:  [u8; 12] = parse("7871ab094d9eaa798fdebd62");
+        let c = Speck96_96::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 
-    roundtrip!(
-        speck128_192_roundtrip,
-        Speck128_192,
-        [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17
-        ],
-        [
-            0x65, 0x6e, 0x74, 0x20, 0x61, 0x6e, 0x64, 0x20, 0x67, 0x65, 0x6e, 0x74, 0x6c, 0x65,
-            0x6d, 0x65
-        ]
-    );
+    // ── Speck 96/144 — Appendix C ────────────────────────────────────────────
+    // Key (k₂..k₀) = (0x151413121110, 0x0d0c0b0a0908, 0x050403020100).
+    // PT (x,y) = (0x656d6974206e, 0x69202c726576).
+    // CT (x,y) = (0x2bf31072228a, 0x7ae440252ee6).
 
-    roundtrip!(
-        speck128_256_roundtrip,
-        Speck128_256,
-        [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
-            0x1c, 0x1d, 0x1e, 0x1f
-        ],
-        [
-            0x49, 0x6e, 0x20, 0x74, 0x68, 0x6f, 0x73, 0x65, 0x20, 0x70, 0x6f, 0x6f, 0x6e, 0x65,
-            0x72, 0x2e
-        ]
-    );
+    #[test]
+    fn speck96_144_kat() {
+        let key: [u8; 18] = parse("00010203040508090a0b0c0d101112131415");
+        let pt:  [u8; 12] = parse("6e2074696d657665722c2069");
+        let ct:  [u8; 12] = parse("8a227210f32be62e2540e47a");
+        let c = Speck96_144::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
+
+    // ── Speck 128/128 — Appendix C ───────────────────────────────────────────
+    // Key (k₁,k₀) = (0x0f0e0d0c0b0a0908, 0x0706050403020100).
+    // PT (x,y) = (0x6c61766975716520, 0x7469206564616d20).
+    // CT (x,y) = (0xa65d985179783265, 0x7860fedf5c570d18).
+
+    #[test]
+    fn speck128_128_kat() {
+        let key: [u8; 16] = parse("000102030405060708090a0b0c0d0e0f");
+        let pt:  [u8; 16] = parse("206571756976616c206d616465206974");
+        let ct:  [u8; 16] = parse("6532787951985da6180d575cdffe6078");
+        let c = Speck128_128::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
+
+    // ── Speck 128/192 — Appendix C ───────────────────────────────────────────
+    // Key (k₂..k₀) = (0x1716151413121110, 0x0f0e0d0c0b0a0908, 0x0706050403020100).
+    // PT (x,y) = (0x7261482066656968, 0x43206f7420746e65).
+    // CT (x,y) = (0x1be4cf3a13135566, 0xf9bc185de03c1886).
+
+    #[test]
+    fn speck128_192_kat() {
+        let key: [u8; 24] = parse("000102030405060708090a0b0c0d0e0f1011121314151617");
+        let pt:  [u8; 16] = parse("6869656620486172656e7420746f2043");
+        let ct:  [u8; 16] = parse("665513133acfe41b86183ce05d18bcf9");
+        let c = Speck128_192::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
+
+    // ── Speck 128/256 — Appendix C ───────────────────────────────────────────
+    // Key (k₃..k₀) = (0x1f1e1d1c1b1a1918, 0x1716151413121110,
+    //                  0x0f0e0d0c0b0a0908, 0x0706050403020100).
+    // PT (x,y) = (0x65736f6874206e49, 0x202e72656e6f6f70).
+    // CT (x,y) = (0x4109010405c0f53e, 0x4eeeb48d9c188f43).
+
+    #[test]
+    fn speck128_256_kat() {
+        let key: [u8; 32] = parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt:  [u8; 16] = parse("496e2074686f7365706f6f6e65722e20");
+        let ct:  [u8; 16] = parse("3ef5c00504010941438f189c8db4ee4e");
+        let c = Speck128_256::new(&key);
+        assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
+        assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
+    }
 }
