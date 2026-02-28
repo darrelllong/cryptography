@@ -216,30 +216,53 @@ const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
     table
 }
 
-const fn build_perm_p(perm: &[u8; 32]) -> [[u32; 256]; 4] {
-    let mut table = [[0u32; 256]; 4];
+/// Apply the P permutation to a (possibly sparse) 32-bit S-output word.
+/// Used at compile time to build the fused S+P table.
+const fn apply_p_to_partial(s: u32) -> u32 {
+    let mut out = 0u32;
     let mut i = 0usize;
     while i < 32 {
-        let src      = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of 32-bit S-output)
-        let src_byte = src / 8;
-        let src_bit  = src % 8;
-        let out_bit  = 31 - i;
-        let mut v = 0usize;
-        while v < 256 {
-            if (v >> (7 - src_bit)) & 1 == 1 {
-                table[src_byte][v] |= 1u32 << out_bit;
-            }
-            v += 1;
+        // P[i] is the 1-indexed FIPS source bit for output FIPS bit (i+1).
+        // FIPS bit k ↔ u32 bit (32−k).
+        let src_bit = (32 - P[i] as usize) as u32; // 0 = LSB
+        let dst_bit = (31 - i) as u32;
+        if (s >> src_bit) & 1 == 1 {
+            out |= 1u32 << dst_bit;
         }
         i += 1;
     }
-    table
+    out
+}
+
+/// Build the fused S+P table: 8 S-boxes × 64 inputs → P-permuted u32 contribution.
+///
+/// SP_TABLE[i][b6] = P(S_i(b6) placed at bits [28−4i .. 31−4i] of the 32-bit word).
+/// Since P is a linear permutation, P(s0|s1|…|s7) = P(s0)|P(s1)|…|P(s7),
+/// so OR-ing all 8 entries gives the correct f-function output.
+/// Reduces 8 S-box + 4 P byte-table lookups per round to 8 SP lookups.
+const fn build_sp() -> [[u32; 64]; 8] {
+    let mut sp = [[0u32; 64]; 8];
+    let mut i = 0usize;
+    while i < 8 {
+        let mut j = 0usize; // raw 6-bit input b6
+        while j < 64 {
+            let row = ((j & 0x20) >> 4) | (j & 0x01); // bits 5 and 0
+            let col = (j >> 1) & 0x0F;                  // bits 4..1
+            let sval = SBOXES[i][row * 16 + col] as u32;
+            // S-box i places its 4-bit output at u32 bits [28−4i .. 31−4i].
+            let partial = sval << (28 - 4 * i) as u32;
+            sp[i][j] = apply_p_to_partial(partial);
+            j += 1;
+        }
+        i += 1;
+    }
+    sp
 }
 
 static IP_TABLE: [[u64; 256]; 8] = build_perm64(&IP);
 static FP_TABLE: [[u64; 256]; 8] = build_perm64(&FP);
 static  E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
-static  P_TABLE: [[u32; 256]; 4] = build_perm_p(&P);
+static SP_TABLE: [[u32;  64]; 8] = build_sp();
 
 #[inline(always)]
 fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
@@ -259,14 +282,6 @@ fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
   | t[1][((r >> 16) & 0xff) as usize]
   | t[2][((r >>  8) & 0xff) as usize]
   | t[3][ (r        & 0xff) as usize]
-}
-
-#[inline(always)]
-fn fast_perm_p(s: u32, t: &[[u32; 256]; 4]) -> u32 {
-    t[0][(s >> 24)          as usize]
-  | t[1][((s >> 16) & 0xff) as usize]
-  | t[2][((s >>  8) & 0xff) as usize]
-  | t[3][ (s        & 0xff) as usize]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -355,23 +370,16 @@ fn f(r: u32, subkey: u64) -> u32 {
     // Expand R from 32 to 48 bits using the precomputed E byte-table.
     let xored = fast_expand(r, &E_TABLE) ^ subkey;
 
-    // Pass through 8 S-boxes.
-    let mut sout = 0u32;
-    for i in 0..8 {
-        // Each S-box receives 6 bits.  Bits are numbered MSB-first within xored.
+    // Look up each S-box's fused S+P contribution and OR them together.
+    // SP_TABLE[i][b6] already incorporates both the S-box substitution and
+    // the P permutation, so no separate P step is needed.
+    let mut result = 0u32;
+    for i in 0..8usize {
         let shift = 42 - 6 * i; // bits [47..42], [41..36], ... [5..0]
         let b6 = ((xored >> shift) & 0x3F) as usize;
-
-        // Row = (b1 << 1) | b6  where b1 = MSB of the 6-bit group.
-        let row = ((b6 & 0x20) >> 4) | (b6 & 0x01); // bits 5 and 0
-        let col = (b6 >> 1) & 0x0F;                  // bits 4..1
-        let sval = SBOXES[i][row * 16 + col] as u32;
-
-        sout |= sval << (28 - 4 * i);
+        result |= SP_TABLE[i][b6];
     }
-
-    // Apply permutation P via the precomputed byte-table.
-    fast_perm_p(sout, &P_TABLE)
+    result
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

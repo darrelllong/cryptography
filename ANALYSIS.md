@@ -188,21 +188,79 @@ compiler unrolls and pipelines them, but cannot eliminate the fundamental
 serial data dependency: each output bit depends on a different input bit,
 preventing SIMD or word-parallel execution.
 
-The implementation uses precomputed byte-level lookup tables for IP, FP, E,
-and P — the same technique AES uses for MixColumns.  Each 64-bit permutation
-becomes 8 table lookups; each 32-bit permutation becomes 4.  The tables are
-computed once at compile time via `const fn` and stored in `.rodata`; none
-of the 1408 bit-level loop iterations appear in the hot path.  This gives a
-2.6× speedup over bit-by-bit permutations (18 → 47 MiB/s).
+The implementation uses precomputed byte-level lookup tables for IP, FP, and E
+— the same technique AES uses for MixColumns.  Each 64-bit permutation becomes
+8 table lookups; the 48-bit expansion becomes 4.  The tables are computed once
+at compile time via `const fn` and stored in `.rodata`; none of the 1408
+bit-level loop iterations appear in the hot path.  The byte-table step alone
+gives a 2.6× speedup over bit-by-bit permutations (18 → 47 MiB/s).
 
-The remaining bottleneck is the S-box loop: 8 iterations per round × 16
-rounds = 128 S-box lookups per block, each requiring a 6-bit index extraction
-and a table read.  The standard optimisation — combining S and P into a single
-6-bit-input → 32-bit-output table — is intentionally omitted to keep the
-algorithm spec-faithful.  With combined S+P tables the DES f-function would
-reduce to 8 lookups per round (from 8 S-lookups + 4 P-lookups), and throughput
-would approach 100–150 MiB/s.  The current implementation documents what
-FIPS 46-3 literally describes and validates every vector against NIST CAVP.
+The further optimisation — fusing the 8 S-boxes and the 32-bit P permutation
+into a single `SP_TABLE[8][64]` — eliminates the separate P step entirely.
+Because P is a linear bit permutation, it distributes over OR:
+
+```
+P(s₀ | s₁ | … | s₇) = P(s₀) | P(s₁) | … | P(s₇)
+```
+
+Each `SP_TABLE[i][b6]` entry stores the P-permuted contribution of S-box i for
+6-bit input `b6`, precomputed at compile time by `build_sp()` (a `const fn`
+that calls `apply_p_to_partial` for every entry).  The f-function becomes 1
+expand + 8 SP lookups per round — 8 KiB for E_TABLE plus 2 KiB for SP_TABLE,
+both comfortably in L1 cache.  The 43 NIST CAVP vectors still pass unchanged.
+
+---
+
+## Magma
+
+Magma (GOST R 34.12-2015, RFC 8891) is a 32-round Feistel cipher with a 64-bit
+block and 256-bit key.  It is standardised from the earlier GOST 28147-89 cipher,
+differing primarily in having published, fixed S-boxes rather than secret ones.
+
+### Round function
+
+The round function `g[k](a)` operates on a 32-bit half-block:
+
+```
+g[k](a) = rotl₁₁(t(a + k mod 2³²))
+```
+
+where `t` applies eight independent 4-bit S-boxes (`Pi'_0 .. Pi'_7`) to the eight
+nibbles of the 32-bit word, and `rotl₁₁` rotates the result left by 11 bits.
+
+Each Feistel step is:
+
+```
+G[k](a₁, a₀) = (a₀,  g[k](a₀) ⊕ a₁)       — swap after applying g
+G*[k](a₁, a₀) = (g[k](a₀) ⊕ a₁) ‖ a₀      — no swap; used for the final round
+```
+
+Both encryption and decryption apply 31 rounds of `G` followed by one `G*`;
+the only difference is the round-key order.
+
+### Key schedule
+
+The 256-bit key is split into eight 32-bit subkeys `k[0]..k[7]` (big-endian).
+The 32 encryption round keys repeat the subkeys in a fixed pattern:
+
+```
+Rounds  1–8:  k[0], k[1], …, k[7]   (forward)
+Rounds  9–16: k[0], k[1], …, k[7]   (forward, again)
+Rounds 17–24: k[0], k[1], …, k[7]   (forward, again)
+Rounds 25–32: k[7], k[6], …, k[0]   (reversed)
+```
+
+Decryption uses the exact reverse of this sequence — equivalent to applying
+`k[0..8]` once then `k[7..0]` three times — which the implementation builds by
+reversing the encryption array.
+
+### Why Magma is slower than DES
+
+Magma has 32 rounds while DES has 16.  Magma's individual round is cheaper — one
+wrapping add, 8 nibble table lookups, and one rotate — whereas DES includes the
+E-expansion and P-box bit permutations even with SP-table fusion.  The net effect
+is comparable throughput (Magma ~64 MiB/s, DES ~78 MiB/s), with Magma's 2×
+round count roughly offsetting its simpler round function.
 
 ---
 
@@ -285,20 +343,37 @@ arithmetic nonlinearity but far less than Simon's multi-rotation AND structure.
 
 | Variant | Block | Effective key | Throughput | 1 GiB |
 |---------|------:|--------------:|-----------:|------:|
-| DES | 64 b | 56 b | 47 MiB/s | 21.8 s |
-| 3DES-2key (EDE) | 64 b | 80 b | 15 MiB/s | 68 s |
-| 3DES-3key (EDE) | 64 b | 112 b | 15 MiB/s | 68 s |
+| DES | 64 b | 56 b | 78 MiB/s | 13.1 s |
+| 3DES-2key (EDE) | 64 b | 80 b | 23 MiB/s | 44 s |
+| 3DES-3key (EDE) | 64 b | 112 b | 23 MiB/s | 44 s |
 
-DES is 8× slower than AES-256 and 21× slower than Speck128/128.  The
-implementation uses byte-level precomputed tables for all four permutations
-(IP, FP, E, P), giving a 2.6× speedup over the raw bit-by-bit loops.  The
-remaining bottleneck is the 8-iteration S-box loop per Feistel round, which
-the byte tables do not touch.
+DES at 78 MiB/s is the result of two successive compile-time table optimisations:
 
-3DES-2key and 3DES-3key run at the same throughput (15 MiB/s) because both
+1. **Byte-level permutation tables** for IP, FP, and E reduce 1408 bit-by-bit
+   operations to table lookups (18 → 47 MiB/s, 2.6×).
+2. **Fused S+P table** (`SP_TABLE[8][64]`) combines all eight S-boxes and the
+   P permutation into a single 2 KiB table: 8 lookups per round instead of
+   8 S-box + 4 P lookups (47 → 78 MiB/s, 1.66×).
+
+Both sets of tables are computed at compile time via `const fn`; neither adds
+runtime allocation or unsafe code.  The total speedup from raw bit-by-bit is
+78 / 18 ≈ 4.3×.
+
+3DES-2key and 3DES-3key run at the same throughput (23 MiB/s) because both
 perform exactly three DES block operations per plaintext block regardless of
 key option.  The 3× overhead gives approximately 1/3 the DES rate
-(47/3 ≈ 16 MiB/s theoretical; measured 15 MiB/s).
+(78 / 3 ≈ 26 MiB/s theoretical; measured 23 MiB/s).
+
+### Magma
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| Magma-256 | 64 b | 256 b | 32 | 64 MiB/s | 16.0 s |
+
+Magma achieves ~64 MiB/s — comparable to DES (78 MiB/s) despite a 256-bit key
+and 32 rounds.  The round function has no bit permutations: just a wrapping add,
+8 nibble-level table lookups, and a 32-bit rotate.  The 2× round count relative
+to DES is nearly offset by the simpler per-round work.
 
 ### Summary
 
@@ -307,13 +382,15 @@ key option.  The 3× overhead gives approximately 1/3 the DES rate
 | Speck | 1002 MiB/s (128/128) | 209 MiB/s (32/64) |
 | AES | 537 MiB/s (128) | 375 MiB/s (256) |
 | Simon | 253 MiB/s (128/128) | 84 MiB/s (32/64) |
-| DES | 47 MiB/s | — |
-| 3DES | — | 15 MiB/s (2-key) |
+| DES | 78 MiB/s | — |
+| Magma | 64 MiB/s | — |
+| 3DES | — | 23 MiB/s (2-key or 3-key) |
 
-Speck128/128 is the fastest cipher in the suite.  DES and 3DES are 50–170×
-slower than the best Speck variants because bit-permutation is inherently
-expensive in software.  For applications requiring 64-bit blocks and high
-throughput, Speck64/128 (308 MiB/s) is the natural choice.
+Speck128/128 is the fastest cipher in the suite.  DES, Magma, and 3DES are
+13–44× slower than the best Speck variants because both DES's bit permutations
+and Magma's 32 rounds are inherently expensive in software.  For applications
+requiring 64-bit blocks and high throughput, Speck64/128 (308 MiB/s) is the
+natural choice.
 
 ---
 
@@ -338,3 +415,7 @@ throughput, Speck64/128 (308 MiB/s) is the natural choice.
 - N.J. Daemen and V. Rijmen.
   *The Design of Rijndael: AES — The Advanced Encryption Standard*.
   Springer, 2002.
+
+- V. Dolmatov and A. Degtyarev.
+  *GOST R 34.12-2015: Block Cipher "Magma"*.
+  RFC 8891, IETF, September 2020.

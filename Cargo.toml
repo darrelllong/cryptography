@@ -7,10 +7,6 @@ edition = "2021"
 name = "cryptography"
 path = "src/lib.rs"
 
-[[bin]]
-name = "cryptography"
-path = "src/main.rs"
-
 # Benchmarks: `cargo bench`
 # Requires libsodium: brew install libsodium
 [[bench]]

@@ -3,6 +3,8 @@
 
 pub mod aes;
 pub mod des;
+pub mod grasshopper;
+pub mod magma;
 pub mod simon;
 pub mod speck;
 
@@ -21,6 +23,8 @@ pub trait BlockCipher {
 
 pub use aes::{Aes128, Aes192, Aes256};
 pub use des::{Des, KeySchedule, TDesMode, TripleDes, key_schedule};
+pub use grasshopper::Grasshopper;
+pub use magma::Magma;
 pub use simon::{
     Simon32_64, Simon48_72, Simon48_96,
     Simon64_96, Simon64_128,

@@ -15,6 +15,8 @@ use cryptography::{
     BlockCipher,
     Aes128, Aes192, Aes256,
     Des, TripleDes,
+    Grasshopper,
+    Magma,
     Simon32_64, Simon48_72, Simon48_96,
     Simon64_96, Simon64_128,
     Simon96_96, Simon96_144,
@@ -130,5 +132,27 @@ fn bench_des(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, bench_simon, bench_speck, bench_aes, bench_des);
+// ── Grasshopper (Kuznyechik) ──────────────────────────────────────────────
+
+fn bench_grasshopper(c: &mut Criterion) {
+    let src = vec![0u8; MB];
+    let mut g = c.benchmark_group("Grasshopper");
+
+    bench_one(&mut g, "Grasshopper-256", Grasshopper::new(&[0u8; 32]), &src);
+
+    g.finish();
+}
+
+// ── Magma ─────────────────────────────────────────────────────────────────
+
+fn bench_magma(c: &mut Criterion) {
+    let src = vec![0u8; MB];
+    let mut g = c.benchmark_group("Magma");
+
+    bench_one(&mut g, "Magma-256", Magma::new(&[0u8; 32]), &src);
+
+    g.finish();
+}
+
+criterion_group!(benches, bench_simon, bench_speck, bench_aes, bench_des, bench_grasshopper, bench_magma);
 criterion_main!(benches);
