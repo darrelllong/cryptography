@@ -1,2 +1,6 @@
 /target
 /benchmarks/target
+/ml/.venv/
+/ml/data/
+/ml/out/
+/ml/__pycache__/

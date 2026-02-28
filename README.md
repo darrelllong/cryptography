@@ -164,6 +164,35 @@ AES-256-GCM row, when available, is also an AEAD and is feature-detected at
 runtime, so it may be skipped if `sodiumoxide` reports that hardware AES is
 unavailable.
 
+## ML Distinguisher Experiment
+
+The repository also includes a TensorFlow experiment under `ml/` for testing
+whether a deep network can distinguish raw cipher output from chance.
+
+The dataset uses only the fast cipher implementations. The `Ct` variants are
+not separate classes because they should emit exactly the same bits as the fast
+path for the same key and input.
+
+Generate a balanced dataset of raw 32-byte samples:
+
+```text
+cargo run --release --bin gen_ml_dataset -- --output ml/data
+```
+
+Train the model in the local TensorFlow virtualenv:
+
+```text
+ml/.venv/bin/python ml/train_distinguisher.py --generate
+```
+
+This writes the trained model and weights to `ml/out/`:
+
+- `cipher_distinguisher.keras`
+- `cipher_distinguisher.weights.h5`
+- `labels.json`
+- `metrics.json`
+- `history.csv`
+
 ## Design Notes
 
 - No `unsafe`.
