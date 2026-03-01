@@ -415,7 +415,7 @@ family and supporting primitive covered in this repository:
 - SHA-3 / SHAKE: `fips202.pdf`
 - HMAC: `fips198-1.pdf`
 - DRBGs: `sp800-90a-r1.pdf`
-- Public-key primitives: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`
+- Public-key primitives and RSA standards: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`, `rfc8017-pkcs1-v2_2.pdf`, `sp800-56b-r2.pdf`, `fips186-5.pdf`
 - Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
@@ -485,6 +485,17 @@ Boyar-Peralta AES S-box circuit paper is stored at
   url         = {https://csrc.nist.gov/pubs/fips/198-1/final},
 }
 
+@techreport{fips186-5,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Digital Signature Standard ({DSS})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 186-5},
+  year        = {2023},
+  month       = feb,
+  url         = {https://csrc.nist.gov/pubs/fips/186-5/final},
+}
+
 @misc{sp800-90a-r1,
   author       = {{National Institute of Standards and Technology}},
   title        = {Recommendation for Random Number Generation Using Deterministic Random Bit Generators},
@@ -492,6 +503,15 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year         = {2015},
   month        = jun,
   url          = {https://csrc.nist.gov/pubs/sp/800/90/a/r1/final},
+}
+
+@misc{sp800-56b-r2,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Pair-Wise Key-Establishment Using Integer Factorization Cryptography},
+  howpublished = {Special Publication 800-56B Revision 2},
+  year         = {2019},
+  month        = mar,
+  url          = {https://csrc.nist.gov/pubs/sp/800/56/b/r2/final},
 }
 
 @article{cocks-1973,
@@ -510,6 +530,16 @@ Boyar-Peralta AES S-box circuit paper is stored at
   pages   = {120--126},
   year    = {1978},
   doi     = {10.1145/359340.359342},
+}
+
+@misc{rfc8017,
+  author       = {K. Moriarty and B. Kaliski and J. Jonsson and A. Rusch},
+  title        = {{PKCS} \#1: RSA Cryptography Specifications Version 2.2},
+  howpublished = {RFC 8017},
+  year         = {2016},
+  month        = nov,
+  doi          = {10.17487/RFC8017},
+  url          = {https://www.rfc-editor.org/rfc/rfc8017},
 }
 
 @article{elgamal-1985,

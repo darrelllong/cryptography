@@ -154,6 +154,17 @@ trait shape, but they are not substitutes for modern DRBG deployments.
   code. They do not yet add padding, encoding, signatures, KEM wrapping, or
   randomized key generation helpers.
 
+For the future "usable" layer, the standards path is clear primarily for RSA:
+
+- `RFC 8017` for `RSAES-OAEP`, `RSASSA-PSS`, and the legacy PKCS #1 v1.5
+  formats
+- `SP 800-56B Rev. 2` for NIST-approved RSA key-establishment usage
+- `FIPS 186-5` for current RSA signature requirements
+
+The other currently implemented public-key schemes do not have the same level
+of mainstream NIST/RFC padding guidance, so the practical wrapper work will be
+standards-driven for RSA first and much more scheme-specific for the rest.
+
 The public-key layer is intentionally separated into:
 
 - `bigint`: a simple limb-based `BigUint` / `BigInt` substrate
@@ -1414,6 +1425,17 @@ modest word-level parallelism.
   url         = {https://csrc.nist.gov/pubs/fips/198-1/final},
 }
 
+@techreport{fips186-5,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Digital Signature Standard ({DSS})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 186-5},
+  year        = {2023},
+  month       = feb,
+  url         = {https://csrc.nist.gov/pubs/fips/186-5/final},
+}
+
 @misc{sp800-90a-r1,
   author       = {{National Institute of Standards and Technology}},
   title        = {Recommendation for Random Number Generation Using Deterministic Random Bit Generators},
@@ -1421,6 +1443,15 @@ modest word-level parallelism.
   year         = {2015},
   month        = jun,
   url          = {https://csrc.nist.gov/pubs/sp/800/90/a/r1/final},
+}
+
+@misc{sp800-56b-r2,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Pair-Wise Key-Establishment Using Integer Factorization Cryptography},
+  howpublished = {Special Publication 800-56B Revision 2},
+  year         = {2019},
+  month        = mar,
+  url          = {https://csrc.nist.gov/pubs/sp/800/56/b/r2/final},
 }
 
 @article{cocks-1973,
@@ -1439,6 +1470,16 @@ modest word-level parallelism.
   pages   = {120--126},
   year    = {1978},
   doi     = {10.1145/359340.359342},
+}
+
+@misc{rfc8017,
+  author       = {K. Moriarty and B. Kaliski and J. Jonsson and A. Rusch},
+  title        = {{PKCS} \#1: RSA Cryptography Specifications Version 2.2},
+  howpublished = {RFC 8017},
+  year         = {2016},
+  month        = nov,
+  doi          = {10.17487/RFC8017},
+  url          = {https://www.rfc-editor.org/rfc/rfc8017},
 }
 
 @article{elgamal-1985,
