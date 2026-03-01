@@ -22,6 +22,24 @@ pub fn gcd(lhs: &BigUint, rhs: &BigUint) -> BigUint {
     current
 }
 
+/// Least common multiple.
+///
+/// This is the Carmichael-function building block used by the RSA code: the
+/// Python reference chooses `lambda = lcm(p - 1, q - 1)` rather than Euler's
+/// totient because the private exponent only needs to invert modulo the
+/// exponent cycle length.
+#[must_use]
+pub fn lcm(lhs: &BigUint, rhs: &BigUint) -> BigUint {
+    if lhs.is_zero() || rhs.is_zero() {
+        return BigUint::zero();
+    }
+
+    let divisor = gcd(lhs, rhs);
+    let (quotient, remainder) = lhs.div_rem(&divisor);
+    debug_assert!(remainder.is_zero(), "gcd divides the left operand exactly");
+    quotient.mul_ref(rhs)
+}
+
 /// `base^exponent mod modulus` by repeated squaring.
 ///
 /// # Panics
@@ -142,7 +160,7 @@ pub fn mod_inverse(a: &BigUint, n: &BigUint) -> Option<BigUint> {
 
 #[cfg(test)]
 mod tests {
-    use super::{gcd, is_probable_prime, mod_inverse, mod_pow};
+    use super::{gcd, is_probable_prime, lcm, mod_inverse, mod_pow};
     use crate::public_key::bigint::BigUint;
 
     #[test]
@@ -150,6 +168,13 @@ mod tests {
         let lhs = BigUint::from_u64(48);
         let rhs = BigUint::from_u64(18);
         assert_eq!(gcd(&lhs, &rhs), BigUint::from_u64(6));
+    }
+
+    #[test]
+    fn lcm_small_values() {
+        let lhs = BigUint::from_u64(60);
+        let rhs = BigUint::from_u64(52);
+        assert_eq!(lcm(&lhs, &rhs), BigUint::from_u64(780));
     }
 
     #[test]

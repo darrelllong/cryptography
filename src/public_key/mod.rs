@@ -9,3 +9,4 @@
 pub mod bigint;
 pub mod cocks;
 pub mod primes;
+pub mod rsa;
