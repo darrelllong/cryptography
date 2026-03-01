@@ -1,6 +1,11 @@
 //! Hash functions, message authentication helpers, and sponge constructions.
 
 /// Minimal trait for fixed-output hash functions that can back HMAC.
+///
+/// SHA-1 and SHA-2 implementations behind this trait are Merkle-Damgard style
+/// hashes, so their raw outputs inherit the usual length-extension caveat.
+/// Use `Hmac<H>` for keyed authentication, or prefer SHA-3 / SHAKE when you
+/// specifically want sponge-based hashing semantics.
 pub trait Digest: Clone {
     /// Byte-oriented block size used by the Merkle-Damgard or sponge API.
     ///

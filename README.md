@@ -140,6 +140,10 @@ zuc.fill(&mut buf);
 SHA-1 / SHA-2 / SHA-3 expose fixed-output hashes, and SHAKE exposes
 extendable-output functions:
 
+For keyed integrity, do not treat raw SHA-1 / SHA-2 digests as MACs. Those
+Merkle-Damgard hashes have the usual length-extension caveat; use `Hmac<H>`
+instead, or prefer SHA-3 / SHAKE when sponge-based hashing is a better fit.
+
 ```rust
 use cryptography::{Digest, Hmac, Sha256, Sha3_256, Shake128};
 

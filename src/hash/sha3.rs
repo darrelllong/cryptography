@@ -200,7 +200,6 @@ impl<const RATE: usize> Keccak<RATE> {
 
         crate::ct::zeroize_slice(sponge.state.as_mut_slice());
         crate::ct::zeroize_slice(sponge.block.as_mut_slice());
-        sponge.offset = 0;
 
         crate::ct::zeroize_slice(self.state.as_mut_slice());
         crate::ct::zeroize_slice(self.block.as_mut_slice());

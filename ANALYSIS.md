@@ -73,6 +73,11 @@ The SHA-1 and SHA-2 implementations follow the FIPS 180-4 Merkle-Damgard
 constructions directly. The SHA-2 set includes both the 32-bit word family and
 the 64-bit word family, including the truncated SHA-512 variants.
 
+That also means the raw SHA-1 / SHA-2 digests inherit the usual
+length-extension caveat. They are appropriate as hash functions, but they
+should not be used directly as keyed authenticators; use `Hmac<H>` for that, or
+use SHA-3 / SHAKE when sponge-based hashing semantics are preferable.
+
 `Hmac<H>` follows the standard FIPS 198-1 / RFC 2104 inner-pad / outer-pad
 construction over the hash function's byte-oriented block size. For the SHA-3
 family, that means the Keccak rate in bytes, which is the block size used by
@@ -146,7 +151,7 @@ feature constructions, or stronger dataset controls.
 - History: published by the NSA in 2013 as a lightweight block cipher family optimized for hardware.
 - Properties: Feistel family with 10 variants spanning 32- to 128-bit block sizes; compact round function; software performance is respectable but trails comparable SPECK variants.
 - Usage and deprecation: suitable for research, compatibility work, and environments that specifically require SIMON. It is not a mainstream default for new software designs, largely because ecosystem adoption outside the lightweight-crypto niche is limited.
-- Known issues: many variants use 32-, 48-, 64-, or 96-bit blocks, so long-message limits matter sooner than they do with 128-bit block ciphers. The crate exposes only the raw primitive, so callers must choose their own safe mode of operation.
+- Known issues: many variants use 32-, 48-, 64-, or 96-bit blocks, so long-message limits matter sooner than they do with 128-bit block ciphers. Generic block modes are available in the crate, but callers still have to choose and use a safe mode themselves because there is no SIMON-specific protocol or AEAD wrapper here.
 
 Simon (Beaulieu et al., NSA 2013) is a Feistel cipher optimised for hardware.
 Its round function is:
@@ -195,7 +200,7 @@ it selects a compile-time constant expression; no runtime dispatch occurs.
 - History: published alongside SIMON by the NSA in 2013 as the software-oriented member of the lightweight pair.
 - Properties: ARX family with 10 variants; excellent software throughput, especially in the 128-bit block variants; simple round structure and strong performance on general-purpose CPUs.
 - Usage and deprecation: useful for interop, benchmarking, and constrained-environment experiments. Like SIMON, it is not the default recommendation for new general-purpose applications because broad standards adoption is limited and policy acceptance has been uneven.
-- Known issues: smaller-block variants have the same birthday-bound concerns as SIMON. The crate provides the raw block cipher only, not authenticated encryption. While the implementation is naturally closer to constant-time than the table-driven ciphers, protocol misuse remains the larger risk.
+- Known issues: smaller-block variants have the same birthday-bound concerns as SIMON. Generic block modes are available in the crate, but there is no SPECK-specific authenticated-encryption wrapper here. While the implementation is naturally closer to constant-time than the table-driven ciphers, protocol misuse remains the larger risk.
 
 Speck (Beaulieu et al., NSA 2013) is an Add-Rotate-XOR (ARX) cipher whose
 round function is:
@@ -234,7 +239,7 @@ maximum across all variants) and no heap allocation.  `ℓ` stores only the
 - History: standardized by NIST as FIPS 197 in 2001 after the Rijndael competition; it is the dominant general-purpose block cipher in modern protocols and software.
 - Properties: 128-bit block cipher with 128/192/256-bit keys; the main practical choice for new designs; broad public analysis and hardware support.
 - Usage and deprecation: preferred default block cipher in this repository for general-purpose use. The `Aes128`/`Aes192`/`Aes256` types are the fast table-based software paths. `Aes128Ct`/`Aes192Ct`/`Aes256Ct` exist for software-only constant-time use. AES itself is not deprecated.
-- Known issues: the fast AES types (`Aes128`, `Aes192`, `Aes256`) use T-tables and are not constant-time; use the `Ct` variants or a separate hardware-backed implementation if side channels matter. This crate exposes the raw block primitive only, not an AEAD or block mode.
+- Known issues: the fast AES types (`Aes128`, `Aes192`, `Aes256`) use T-tables and are not constant-time; use the `Ct` variants or a separate hardware-backed implementation if side channels matter. The crate now provides generic block modes plus `Gcm`, `Gmac`, and `Xts`, but higher-level protocol framing and nonce/IV discipline are still the caller's responsibility.
 
 AES (FIPS 197) uses a byte-substitution, row-shift, column-mix, and key-add
 round structure operating in GF(2⁸).
@@ -321,7 +326,7 @@ keys by applying the Serpent S-box sequence to each group of four prekeys.
 - History: designed by Bruce Schneier, John Kelsey, Doug Whiting, David Wagner, Chris Hall, and Niels Ferguson for the AES competition in 1998. It was one of the AES finalists and remains one of the best-known AES-era alternative block ciphers.
 - Properties: 128-bit block cipher with 128/192/256-bit keys; 16 rounds; Feistel-like structure with keyed `q` permutations, an MDS matrix, and input/output whitening.
 - Usage and deprecation: appropriate for interoperability, comparative study, and legacy protocol work that explicitly names Twofish. It is not deprecated, but it is far less common than AES in deployed systems.
-- Known issues: the fast Twofish types use direct lookup tables for the `q0` / `q1` permutations and are not constant-time; the `Ct` variants replace those lookups with fixed-scan nibble selection and are slower. This crate exposes the raw primitive only, not a mode or AEAD. Like the other non-AEAD block ciphers here, misuse at the mode/protocol layer is the larger operational risk.
+- Known issues: the fast Twofish types use direct lookup tables for the `q0` / `q1` permutations and are not constant-time; the `Ct` variants replace those lookups with fixed-scan nibble selection and are slower. Generic block modes are available in the crate, but there is no Twofish-specific AEAD or protocol profile here, so mode/protocol misuse is still the larger operational risk.
 
 Twofish is a 16-round 128-bit block cipher that mixes two 32-bit `g` outputs
 into a pseudo-Hadamard transform each round. In the standard notation:
@@ -368,7 +373,7 @@ the published zero-key vectors for all three standard key sizes.
 - History: developed by NTT and Mitsubishi Electric in 2000, later adopted by CRYPTREC and standardized in ISO/IEC 18033-3. It is the best-known Japanese general-purpose block cipher of the AES era.
 - Properties: 128-bit block cipher with 128/192/256-bit keys; 18 rounds for 128-bit keys and 24 rounds for 192/256-bit keys; Feistel structure with additional `FL` / `FLINV` layers every 6 rounds.
 - Usage and deprecation: appropriate for Camellia interoperability, standards conformance, and comparative study. It is not deprecated, but outside ecosystems that explicitly require it, AES is still the simpler default.
-- Known issues: the fast Camellia types use the direct 8-bit S-box table and are not constant-time; the `Ct` variants avoid those table loads with a packed ANF S-box and are slower. This crate exposes the raw block primitive only, not a block mode or AEAD.
+- Known issues: the fast Camellia types use the direct 8-bit S-box table and are not constant-time; the `Ct` variants avoid those table loads with a packed ANF S-box and are slower. Generic block modes are available in the crate, but there is no Camellia-specific AEAD or protocol profile here.
 
 Camellia is a balanced 64-bit-half Feistel cipher wrapped in 128-bit
 prewhitening/postwhitening. Every round group uses the same 64-bit `F`
@@ -477,7 +482,7 @@ both comfortably in L1 cache.  The 43 NIST CAVP vectors still pass unchanged.
 - History: designed by Carlisle Adams in the mid-1990s and published as RFC 2144. The algorithm is also commonly referred to as CAST5, especially when a specific key size such as CAST5-128 is intended.
 - Properties: 64-bit block cipher with variable key sizes from 40 to 128 bits in 8-bit increments; 12 rounds for keys up to 80 bits and 16 rounds above that; classic Feistel structure with three alternating nonlinear round functions.
 - Usage and deprecation: appropriate for legacy interoperability, OpenPGP-era compatibility work, and historical study. It should not be the default choice for new designs; modern 128-bit block ciphers are easier to deploy safely at scale.
-- Known issues: the 64-bit block size imposes the same birthday-bound long-message limits as DES, 3DES, MAGMA, and PRESENT. The fast `Cast128` path uses direct 8-bit S-box tables and is not constant-time; `Cast128Ct` avoids secret-indexed loads with fixed-scan table selection and is materially slower. This crate exposes the raw primitive only and does not wrap it in the OpenPGP or CMS profiles that historically used CAST5.
+- Known issues: the 64-bit block size imposes the same birthday-bound long-message limits as DES, 3DES, MAGMA, and PRESENT. The fast `Cast128` path uses direct 8-bit S-box tables and is not constant-time; `Cast128Ct` avoids secret-indexed loads with fixed-scan table selection and is materially slower. Generic block modes are available in the crate, but it still does not wrap CAST5 in the OpenPGP or CMS profiles that historically used it.
 
 CAST-128 is a 16-round Feistel cipher in its full-key form. Each round applies
 one of three nonlinear functions:
@@ -521,7 +526,7 @@ supports the published 40-, 80-, and 128-bit known-answer vectors.
 - History: introduced in the CHES 2007 paper as an ultra-lightweight block cipher for constrained hardware. It was later standardized in ISO/IEC 29192-2 as one of the reference lightweight block ciphers.
 - Properties: 64-bit block cipher with 80-bit and 128-bit key schedules; 31 rounds; simple 4-bit substitution-permutation structure optimized for small area rather than software throughput.
 - Usage and deprecation: appropriate for lightweight-crypto study, hardware-oriented interoperability, and comparison with other small-footprint designs. It is not a mainstream general-purpose default and should not displace AES in ordinary software.
-- Known issues: the 64-bit block size imposes the same birthday-bound message limits as DES, MAGMA, and other 64-bit primitives. The fast types (`Present80`, `Present128`) use a direct 4-bit S-box table; the `Ct` variants avoid secret-indexed S-box loads but are slower. This crate exposes only the raw block cipher.
+- Known issues: the 64-bit block size imposes the same birthday-bound message limits as DES, MAGMA, and other 64-bit primitives. The fast types (`Present80`, `Present128`) use a direct 4-bit S-box table; the `Ct` variants avoid secret-indexed S-box loads but are slower. Generic block modes are available in the crate, but there is no PRESENT-specific profile layer here.
 
 PRESENT is a compact substitution-permutation network. Each round applies:
 
@@ -555,7 +560,7 @@ key.
 - History: developed by KISA and standardized in South Korea in the late 1990s; widely used in Korean electronic commerce and finance, then documented for IETF use in RFC 4009 and RFC 4196.
 - Properties: 128-bit block cipher with a 128-bit key; 16-round Feistel structure; two 8-bit S-boxes; mixes XOR and modular addition inside the round function.
 - Usage and deprecation: appropriate for SEED interoperability and standards work. It is not deprecated in the narrow standards sense, but for new general-purpose deployments outside ecosystems that require it, AES is still the more common default.
-- Known issues: the fast `Seed` path uses direct 8-bit S-box loads and is not constant-time; `SeedCt` avoids those table reads and is slower. This crate implements the raw block cipher only, not the RFC 4196 CBC/IPsec profile.
+- Known issues: the fast `Seed` path uses direct 8-bit S-box loads and is not constant-time; `SeedCt` avoids those table reads and is slower. Generic block modes are available in the crate, but it does not implement the RFC 4196 CBC/IPsec profile for you.
 
 SEED is a 16-round Feistel cipher over 64-bit halves. The round function mixes
 two 32-bit words with two 32-bit subkeys, then applies three layers of the
@@ -595,7 +600,7 @@ published intermediate values.
 - History: standardized as GOST R 34.12-2015 and documented in RFC 8891; it descends from the older GOST 28147-89 cipher.
 - Properties: 64-bit block, 256-bit key, 32-round Feistel design; regionally important for Russian standards and compatibility work.
 - Usage and deprecation: appropriate for GOST interoperability and historical/standards analysis. It is not the preferred choice for new general-purpose deployments outside ecosystems that require it. MAGMA itself is not formally deprecated within its standards family, but it is legacy-leaning relative to GRASSHOPPER.
-- Known issues: the 64-bit block size imposes the same long-message limits as DES-class ciphers. The `Magma` type is table-driven and not constant-time; `MagmaCt` exists but is materially slower. As with the other block ciphers here, this crate provides the primitive only, not a mode.
+- Known issues: the 64-bit block size imposes the same long-message limits as DES-class ciphers. The `Magma` type is table-driven and not constant-time; `MagmaCt` exists but is materially slower. Generic block modes are available in the crate, but there is no dedicated GOST-mode wrapper here.
 
 Magma (GOST R 34.12-2015, RFC 8891) is a 32-round Feistel cipher with a 64-bit
 block and 256-bit key.  It is standardised from the earlier GOST 28147-89 cipher,
@@ -662,7 +667,7 @@ round count roughly offsetting its simpler round function.
 - History: standardized in China as GM/T 0002-2012 and GB/T 32907-2016; widely used in Chinese commercial and government cryptographic profiles.
 - Properties: 128-bit block, 128-bit key, 32 rounds; structurally simple and faster than the older 64-bit block ciphers in this crate, but slower than AES fast-path software.
 - Usage and deprecation: appropriate for SM4 interoperability, standards conformance, and comparative study. It is not deprecated, but it is primarily a regional standards cipher rather than a global default.
-- Known issues: the fast SM4 type (`Sm4`) uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. This crate exposes only the raw block cipher.
+- Known issues: the fast SM4 type (`Sm4`) uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. Generic block modes are available in the crate, but there is no SM4-specific protocol wrapper here.
 
 ### ZUC-128
 

@@ -772,10 +772,34 @@ mod tests {
     }
 
     #[test]
+    fn sha512_224_abc_streaming() {
+        let mut h = Sha512_224::new();
+        h.update(b"a");
+        h.update(b"b");
+        h.update(b"c");
+        assert_eq!(
+            hex(&h.finalize()),
+            "4634270f707b6a54daae7530460842e20e37ed265ceee9a43e8924aa"
+        );
+    }
+
+    #[test]
     fn sha512_256_empty() {
         assert_eq!(
             hex(&Sha512_256::digest(b"")),
             "c672b8d1ef56ed28ab87c3622c511406".to_owned() + "9bdd3ad7b8f9737498d0c01ecef0967a"
+        );
+    }
+
+    #[test]
+    fn sha512_256_abc_streaming() {
+        let mut h = Sha512_256::new();
+        h.update(b"a");
+        h.update(b"b");
+        h.update(b"c");
+        assert_eq!(
+            hex(&h.finalize()),
+            "53048e2681941ef99b2e29b76b4c7dab".to_owned() + "e4c2d0c634fc6d46e0e2f13107e7af23"
         );
     }
 
