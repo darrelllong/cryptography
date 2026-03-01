@@ -8,5 +8,6 @@
 
 pub mod bigint;
 pub mod cocks;
+pub mod elgamal;
 pub mod primes;
 pub mod rsa;
