@@ -4,9 +4,12 @@
 mod ct;
 
 pub mod aes;
+pub mod camellia;
 pub mod des;
 pub mod grasshopper;
 pub mod magma;
+pub mod present;
+pub mod seed;
 pub mod simon;
 pub mod sm4;
 pub mod speck;
@@ -26,9 +29,15 @@ pub trait BlockCipher {
 }
 
 pub use aes::{Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct};
+pub use camellia::{
+    Camellia, Camellia128, Camellia128Ct, Camellia192, Camellia192Ct, Camellia256, Camellia256Ct,
+    CamelliaCt,
+};
 pub use des::{key_schedule, Des, DesCt, KeySchedule, TDesMode, TripleDes};
 pub use grasshopper::{Grasshopper, GrasshopperCt};
 pub use magma::{Magma, MagmaCt};
+pub use present::{Present, Present128, Present128Ct, Present80, Present80Ct, PresentCt};
+pub use seed::{Seed, SeedCt};
 pub use simon::{
     Simon128_128, Simon128_192, Simon128_256, Simon32_64, Simon48_72, Simon48_96, Simon64_128,
     Simon64_96, Simon96_144, Simon96_96,

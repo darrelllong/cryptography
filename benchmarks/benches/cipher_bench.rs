@@ -12,11 +12,13 @@
 use criterion::measurement::WallTime;
 use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use cryptography::{
-    Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct, BlockCipher, Des, DesCt, Grasshopper,
-    GrasshopperCt, Magma, MagmaCt, Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128,
-    Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct, Speck32_64,
-    Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128,
-    Speck128_192, Speck128_256, TripleDes, Zuc128, Zuc128Ct,
+    Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct, BlockCipher, Camellia128, Camellia128Ct,
+    Camellia192, Camellia192Ct, Camellia256, Camellia256Ct, Des, DesCt, Grasshopper,
+    GrasshopperCt, Magma, MagmaCt, Present128, Present128Ct, Present80, Present80Ct, Seed, SeedCt,
+    Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128, Simon96_96, Simon96_144,
+    Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct, Speck32_64, Speck48_72, Speck48_96,
+    Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128, Speck128_192, Speck128_256,
+    TripleDes, Zuc128, Zuc128Ct,
 };
 use std::hint::black_box;
 
@@ -134,6 +136,36 @@ fn bench_des(c: &mut Criterion) {
     g.finish();
 }
 
+// ── PRESENT ───────────────────────────────────────────────────────────────
+
+fn bench_present(c: &mut Criterion) {
+    let src = vec![0u8; MB];
+    let mut g = c.benchmark_group("PRESENT");
+
+    bench_one(&mut g, "PRESENT-80", Present80::new(&[0u8; 10]), &src);
+    bench_one(&mut g, "PRESENT-80-ct", Present80Ct::new(&[0u8; 10]), &src);
+    bench_one(&mut g, "PRESENT-128", Present128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "PRESENT-128-ct", Present128Ct::new(&[0u8; 16]), &src);
+
+    g.finish();
+}
+
+// ── Camellia ──────────────────────────────────────────────────────────────
+
+fn bench_camellia(c: &mut Criterion) {
+    let src = vec![0u8; MB];
+    let mut g = c.benchmark_group("Camellia");
+
+    bench_one(&mut g, "Camellia-128", Camellia128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Camellia-128-ct", Camellia128Ct::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Camellia-192", Camellia192::new(&[0u8; 24]), &src);
+    bench_one(&mut g, "Camellia-192-ct", Camellia192Ct::new(&[0u8; 24]), &src);
+    bench_one(&mut g, "Camellia-256", Camellia256::new(&[0u8; 32]), &src);
+    bench_one(&mut g, "Camellia-256-ct", Camellia256Ct::new(&[0u8; 32]), &src);
+
+    g.finish();
+}
+
 // ── Grasshopper (Kuznyechik) ──────────────────────────────────────────────
 
 fn bench_grasshopper(c: &mut Criterion) {
@@ -166,6 +198,18 @@ fn bench_sm4(c: &mut Criterion) {
 
     bench_one(&mut g, "SM4-128", Sm4::new(&[0u8; 16]), &src);
     bench_one(&mut g, "SM4-128-ct", Sm4Ct::new(&[0u8; 16]), &src);
+
+    g.finish();
+}
+
+// ── SEED ──────────────────────────────────────────────────────────────────
+
+fn bench_seed(c: &mut Criterion) {
+    let src = vec![0u8; MB];
+    let mut g = c.benchmark_group("SEED");
+
+    bench_one(&mut g, "SEED-128", Seed::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "SEED-128-ct", SeedCt::new(&[0u8; 16]), &src);
 
     g.finish();
 }
@@ -204,9 +248,12 @@ criterion_group!(
     bench_speck,
     bench_aes,
     bench_des,
+    bench_present,
+    bench_camellia,
     bench_grasshopper,
     bench_magma,
     bench_sm4,
+    bench_seed,
     bench_zuc
 );
 criterion_main!(benches);

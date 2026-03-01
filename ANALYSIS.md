@@ -35,13 +35,44 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | Family | Public types | Correctness coverage | Benchmark coverage |
 |--------|--------------|----------------------|--------------------|
 | AES | `Aes128/192/256`, `Aes128/192/256Ct` | NIST KATs for fast and `Ct` paths, S-box self-checks, fast-vs-`Ct` equivalence (`cargo test aes::tests`) | `cipher_bench` for fast-vs-`Ct`; `aes_bench` for focused AES comparisons |
+| Camellia | `Camellia128/192/256`, `Camellia128/192/256Ct` | RFC 3713 Appendix A KATs for all 3 key sizes, `Ct` S-box self-checks (`cargo test camellia::tests`) | `cipher_bench` |
 | DES / 3DES | `Des`, `DesCt`, `TripleDes` | DES KATs, `DesCt` KAT, 2-key and 3-key TDES coverage (`cargo test des::tests`) | `cipher_bench` |
+| PRESENT | `Present80`, `Present80Ct`, `Present128`, `Present128Ct` | CHES 2007 80-bit KATs, 128-bit KATs, `Ct` S-box self-checks (`cargo test present::tests`) | `cipher_bench` |
+| SEED | `Seed`, `SeedCt` | RFC 4009 Appendix B KATs, zero-key round-key KAT, `Ct` S-box self-checks (`cargo test seed::tests`) | `cipher_bench` |
 | Simon | all 10 variants | Known-answer vectors for every variant (`cargo test simon::tests`) | `cipher_bench` |
 | Speck | all 10 variants | Known-answer vectors for every variant (`cargo test speck::tests`) | `cipher_bench` |
 | Magma | `Magma`, `MagmaCt` | RFC vector for fast and `Ct`, plus fast-vs-`Ct` equivalence (`cargo test magma::tests`) | `cipher_bench` |
 | Grasshopper | `Grasshopper`, `GrasshopperCt` | RFC vectors, round-trip checks, fast-vs-`Ct` equivalence (`cargo test grasshopper::tests`) | `cipher_bench` |
 | SM4 | `Sm4`, `Sm4Ct`, `Sms4`, `Sms4Ct` | Spec example, 1,000,000-encryption vector, alias checks, fast-vs-`Ct` equivalence (`cargo test sm4::tests`) | `cipher_bench` |
 | ZUC-128 | `Zuc128`, `Zuc128Ct` | Official keystream vectors, partial/fill tests, fast-vs-`Ct` equivalence (`cargo test zuc::tests`) | `cipher_bench` |
+
+---
+
+## ML Distinguisher Experiments
+
+The repository also includes an `ml/` experiment harness that generates raw
+fixed-width ciphertext samples and trains neural-network classifiers on them.
+This is a distinguisher experiment, not a claim of practical cryptanalysis: if
+held-out accuracy rises above chance, the first question is whether the dataset
+generator leaked structure, not whether the cipher has been "broken".
+
+On the current 11-class setup, chance accuracy is `1/11 = 0.0909`. The runs
+completed so far stayed at or near that baseline:
+
+| Run | Model | Sample width | Held-out result |
+|-----|-------|-------------:|----------------:|
+| `pytorch-mps-run1` | residual 1D CNN | 32 bytes | `0.0883` |
+| `pytorch-mps-run2` | residual 1D CNN | 32 bytes | `0.0899` |
+| `adaptive/s32_base-seed1337` | residual 1D CNN | 32 bytes | `0.0926` |
+| `adaptive/s256_large-seed2337` | wider residual 1D CNN | 256 bytes | `0.0910` |
+| `byte-transformer-mps-256-run2` | byte-level transformer | 256 bytes | `0.0909` |
+
+The best completed result (`0.0926`) is still effectively chance. No completed
+CNN or transformer run produced a reproducible held-out accuracy meaningfully
+above baseline, so the current conclusion is simple: the implemented sample
+generator and tested model families have not found a useful distinguisher. The
+code remains in `ml/` for anyone who wants to try larger models, different
+feature constructions, or stronger dataset controls.
 
 ---
 
@@ -183,6 +214,34 @@ keeps the core implementation portable and safe across processors instead.
 
 ---
 
+### Camellia
+
+- Reference: `camellia-spec` (primary specification); `rfc3713` (IETF algorithm text); `rfc4312` (IPsec profile).
+- History: developed by NTT and Mitsubishi Electric in 2000, later adopted by CRYPTREC and standardized in ISO/IEC 18033-3. It is the best-known Japanese general-purpose block cipher of the AES era.
+- Properties: 128-bit block cipher with 128/192/256-bit keys; 18 rounds for 128-bit keys and 24 rounds for 192/256-bit keys; Feistel structure with additional `FL` / `FLINV` layers every 6 rounds.
+- Usage and deprecation: appropriate for Camellia interoperability, standards conformance, and comparative study. It is not deprecated, but outside ecosystems that explicitly require it, AES is still the simpler default.
+- Known issues: the fast Camellia types use the direct 8-bit S-box table and are not constant-time; the `Ct` variants avoid those table loads with a packed ANF S-box and are slower. This crate exposes the raw block primitive only, not a block mode or AEAD.
+
+Camellia is a balanced 64-bit-half Feistel cipher wrapped in 128-bit
+prewhitening/postwhitening. Every round group uses the same 64-bit `F`
+function, then inserts one `FL` / `FLINV` pair after each set of six rounds.
+For 128-bit keys the schedule is 18 rounds total; for 192- and 256-bit keys
+it extends to 24 rounds with one extra `FL` / `FLINV` layer.
+
+#### Key schedule
+
+The key schedule derives two intermediate 128-bit values `KA` and `KB` from
+the user key by running the Camellia `F` function under the six fixed `Sigma`
+constants defined in RFC 3713. Round keys are then generated by rotating `KL`,
+`KR`, `KA`, and `KB` and taking 64-bit halves exactly as listed in the
+specification.
+
+The implementation precomputes the full subkey set at construction time:
+`kw1..kw4`, `k1..k18`/`k24`, and `ke1..ke4`/`ke6`. Decryption follows the RFC
+rule directly by using the same structure with subkeys in reverse order.
+
+---
+
 ### DES and Triple-DES
 
 - Reference: `fips46-3` (DES); `sp800-67r2` (Triple-DES/TDEA).
@@ -261,6 +320,80 @@ Each `SP_TABLE[i][b6]` entry stores the P-permuted contribution of S-box i for
 that calls `apply_p_to_partial` for every entry).  The f-function becomes 1
 expand + 8 SP lookups per round — 8 KiB for E_TABLE plus 2 KiB for SP_TABLE,
 both comfortably in L1 cache.  The 43 NIST CAVP vectors still pass unchanged.
+
+---
+
+### PRESENT
+
+- Reference: `bogdanov-2007-present`.
+- History: introduced in the CHES 2007 paper as an ultra-lightweight block cipher for constrained hardware. It was later standardized in ISO/IEC 29192-2 as one of the reference lightweight block ciphers.
+- Properties: 64-bit block cipher with 80-bit and 128-bit key schedules; 31 rounds; simple 4-bit substitution-permutation structure optimized for small area rather than software throughput.
+- Usage and deprecation: appropriate for lightweight-crypto study, hardware-oriented interoperability, and comparison with other small-footprint designs. It is not a mainstream general-purpose default and should not displace AES in ordinary software.
+- Known issues: the 64-bit block size imposes the same birthday-bound message limits as DES, MAGMA, and other 64-bit primitives. The fast types (`Present80`, `Present128`) use a direct 4-bit S-box table; the `Ct` variants avoid secret-indexed S-box loads but are slower. This crate exposes only the raw block cipher.
+
+PRESENT is a compact substitution-permutation network. Each round applies:
+
+```
+state ← state ⊕ round_key
+state ← S(state)     16 parallel 4-bit S-boxes
+state ← P(state)     fixed bit permutation across the 64-bit block
+```
+
+The final round omits the S/P layers and ends with one last key XOR. The
+4-bit S-box is small enough that the fast path uses a direct nibble table,
+while the constant-time path evaluates the same mapping in packed ANF form.
+
+#### Key schedule
+
+For the original 80-bit design, the 80-bit key register is rotated left by 61
+bits each round, the top nibble is passed through the S-box, and the round
+counter is XORed into bits 19..15. The 128-bit variant applies the same
+61-bit rotation, substitutes the top two nibbles, and XORs the counter into
+bits 66..62.
+
+Both schedules are expanded once at construction time into 32 precomputed
+64-bit round keys, matching the algorithm's 31 rounds plus final whitening
+key.
+
+---
+
+### SEED
+
+- Reference: `rfc4009` (algorithm text); `rfc4196` (IPsec usage profile).
+- History: developed by KISA and standardized in South Korea in the late 1990s; widely used in Korean electronic commerce and finance, then documented for IETF use in RFC 4009 and RFC 4196.
+- Properties: 128-bit block cipher with a 128-bit key; 16-round Feistel structure; two 8-bit S-boxes; mixes XOR and modular addition inside the round function.
+- Usage and deprecation: appropriate for SEED interoperability and standards work. It is not deprecated in the narrow standards sense, but for new general-purpose deployments outside ecosystems that require it, AES is still the more common default.
+- Known issues: the fast `Seed` path uses direct 8-bit S-box loads and is not constant-time; `SeedCt` avoids those table reads and is slower. This crate implements the raw block cipher only, not the RFC 4196 CBC/IPsec profile.
+
+SEED is a 16-round Feistel cipher over 64-bit halves. The round function mixes
+two 32-bit words with two 32-bit subkeys, then applies three layers of the
+nonlinear `G` transform with modular additions between them:
+
+```
+T1 = G((R0 ^ K0) ^ (R1 ^ K1))
+T0 = G((R0 ^ K0) + T1)
+T1 = G(T1 + T0)
+T0 = T0 + T1
+```
+
+Those two 32-bit outputs are XORed into the left half, then the Feistel halves
+swap. After round 16, the ciphertext is the final right half followed by the
+final left half, matching RFC 4009 Appendix B.
+
+#### Key schedule
+
+SEED expands the 128-bit key into sixteen 64-bit round keys (`K0`, `K1` pairs).
+Each round computes:
+
+```
+K0 = G(Key0 + Key2 - KCi)
+K1 = G(Key1 - Key3 + KCi)
+```
+
+Then odd rounds rotate `Key0 || Key1` right by 8 bits, while even rounds
+rotate `Key2 || Key3` left by 8 bits. The implementation stores the 32
+subkey words directly and verifies the zero-key schedule against the RFC's
+published intermediate values.
 
 ---
 
@@ -383,37 +516,53 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | AES-128 | 542.7 MiB/s | 60.6 MiB/s | 8.9x |
 | AES-192 | 444.4 MiB/s | 50.4 MiB/s | 8.8x |
 | AES-256 | 374.8 MiB/s | 42.9 MiB/s | 8.7x |
+| Camellia-128 | 121.9 MiB/s | 5.8 MiB/s | 20.9x |
+| Camellia-192 | 65.0 MiB/s | 4.2 MiB/s | 15.6x |
+| Camellia-256 | 91.6 MiB/s | 4.4 MiB/s | 20.7x |
 | DES | 81.1 MiB/s | 8.3 MiB/s | 9.8x |
+| PRESENT-80 | 12.4 MiB/s | 3.9 MiB/s | 3.1x |
+| PRESENT-128 | 12.3 MiB/s | 3.9 MiB/s | 3.2x |
 | Magma-256 | 62.0 MiB/s | 14.3 MiB/s | 4.3x |
 | Grasshopper-256 | 26.1 MiB/s | 4.1 MiB/s | 6.3x |
 | SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
+| SEED-128 | 68.7 MiB/s | 4.5 MiB/s | 15.4x |
 | ZUC-128 | 551.1 MiB/s | 28.3 MiB/s | 19.5x |
 
-Radar view (log-scaled; 4 MiB/s to 560 MiB/s):
+Radar view (representative variants; log-scaled, 4 MiB/s to 1024 MiB/s):
 
 ![Fast vs Ct log-scaled radar chart](assets/fast-vs-ct-radar.svg)
 
 Mermaid fallback (absolute throughput):
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'plotColorPalette': '#0f766e,#b45309'}}}%%
+%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbf8f1', 'textColor': '#342f29', 'primaryTextColor': '#342f29', 'lineColor': '#a79d90', 'plotColorPalette': '#0f766e,#b45309'}}}%%
 xychart-beta
-    title "Fast vs Ct throughput (MiB/s)"
-    x-axis ["AES-128", "AES-192", "AES-256", "DES", "Magma", "Grasshopper", "SM4", "ZUC"]
+    title "Fast vs Ct throughput (MiB/s, representative variants)"
+    x-axis ["AES-128", "AES-192", "AES-256", "DES", "PRESENT-80", "Camellia-128", "Magma", "Grasshopper", "SM4", "SEED-128", "ZUC"]
     y-axis "MiB/s" 0 --> 560
-    bar [542.7, 444.4, 374.8, 81.1, 62.0, 26.1, 122.7, 551.1]
-    bar [60.6, 50.4, 42.9, 8.3, 14.3, 4.1, 7.6, 28.3]
+    bar [542.7, 444.4, 374.8, 81.1, 12.4, 121.9, 62.0, 26.1, 122.7, 68.7, 551.1]
+    bar [60.6, 50.4, 42.9, 8.3, 3.9, 5.8, 14.3, 4.1, 7.6, 4.5, 28.3]
 ```
+
+The Mermaid colors are configured to match the SVG (`#0f766e` fast,
+`#b45309` `Ct`), but Mermaid rendering still depends on the host renderer. The
+SVG above is the authoritative visual if a dark-mode viewer ignores those theme
+variables.
 
 These ratios line up with the implementation strategy:
 
 - The AES `Ct` variants keep the bytewise AES round structure, but each S-box is a
   Boyar-Peralta straight-line boolean circuit instead of a T-table lookup.
+- The Camellia and SEED `Ct` variants use packed ANF evaluation for 8-bit S-boxes,
+  so they pay a steep penalty relative to their fast table-driven software paths.
 - `DesCt` keeps the normal DES round function, but evaluates E/P with fixed
   loops and the S-boxes through packed ANF bitsets instead of the byte tables
   and fused `SP_TABLE`.
+- `Present*Ct` pays the smallest penalty in the group because its nonlinear
+  layer is only a single 4-bit S-box; the expensive part of PRESENT remains
+  the 31-round bit permutation structure shared by both paths.
 - `MagmaCt` only changes the eight 4-bit S-boxes, so it pays the smallest
-  penalty of the four.
+  penalty among the 64-bit ciphers apart from PRESENT.
 - `GrasshopperCt` removes both the table-driven S-box and the `L_TABLES`
   shortcuts, so it remains the slowest of the Ct variants in absolute terms.
 - The SM4 and ZUC `Ct` variants both use packed ANF evaluation for 8-bit S-boxes,
@@ -546,6 +695,49 @@ perform exactly three DES block operations per plaintext block regardless of
 key option.  The 3× overhead gives approximately 1/3 the DES rate
 (81 / 3 ≈ 27 MiB/s theoretical; measured ~24 MiB/s).
 
+### PRESENT
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| PRESENT-80 | 64 b | 80 b | 31 | 12.4 MiB/s | 82.6 s |
+| PRESENT-128 | 64 b | 128 b | 31 | 12.3 MiB/s | 83.0 s |
+
+PRESENT is now the slowest block cipher in the repository's fast-path suite.
+That is not surprising: it trades large tables and wide-word arithmetic for a
+very small hardware footprint, so software pays for 31 rounds of nibble-level
+substitution plus a dense 64-bit bit permutation. The `Ct` path is only about
+3× slower because the fast path's S-box is already only a tiny 4-bit lookup;
+most of the cost is in the shared permutation layer, not in the substitution.
+
+### Camellia
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| Camellia-128 | 128 b | 128 b | 18 | 121.9 MiB/s | 8.4 s |
+| Camellia-192 | 128 b | 192 b | 24 | 65.0 MiB/s | 15.8 s |
+| Camellia-256 | 128 b | 256 b | 24 | 91.6 MiB/s | 11.2 s |
+
+Camellia lands in the same broad software class as SM4 and SEED: clearly
+slower than AES, but still much faster than DES-class 64-bit designs. The
+fast path depends on 8-bit S-box lookups and the Feistel structure's XOR-heavy
+mixing, while the `Ct` path replaces those lookups with packed ANF evaluation
+and drops into the single-digit MiB/s range. On this host, Camellia-128 is the
+best-performing variant; Camellia-192 and Camellia-256 both add the extra
+round groups and `FL` / `FL^{-1}` layers that widen the gap versus AES.
+
+### SEED
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| SEED-128 | 128 b | 128 b | 16 | 68.7 MiB/s | 14.9 s |
+
+SEED sits between the 64-bit legacy designs and the faster modern 128-bit
+software ciphers. Its 16-round Feistel structure is not extreme, but each round
+feeds four substituted bytes through a fairly heavy linear mix, so the fast path
+still trails Camellia and SM4. The `Ct` path is much slower because both S-box
+layers become packed ANF bitset evaluations in the round function and the key
+schedule.
+
 ### MAGMA
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
@@ -600,16 +792,21 @@ evaluation of two separate 8-bit S-boxes.
 | AES | 543 MiB/s (128) | 375 MiB/s (256) |
 | Simon | 265 MiB/s (128/128) | 90 MiB/s (32/64) |
 | SM4 | 123 MiB/s | — |
+| Camellia | 122 MiB/s (128) | 65 MiB/s (192) |
 | DES | 81 MiB/s | — |
+| SEED | 69 MiB/s | — |
 | Magma | 62 MiB/s | — |
 | Grasshopper | 26 MiB/s | — |
 | 3DES | — | 24 MiB/s (2-key or 3-key) |
+| PRESENT | 12.4 MiB/s (80) | 12.3 MiB/s (128) |
 
 Speck128/128 remains the fastest block cipher in the suite. ZUC is the fastest
 non-block primitive, and AES-128 remains the fastest conventional standardized
-block cipher here. At the other end, Grasshopper and 3DES are expensive in pure
-software because they pair heavier round structures with comparatively modest
-word-level parallelism.
+block cipher here. Camellia, SM4, and SEED form a middle tier of standardized
+128-bit designs that are still usable in pure software, but materially slower
+than AES. At the other end, Grasshopper, 3DES, and especially PRESENT are
+expensive in pure software because they pair heavier round structures or dense
+bit permutations with comparatively modest word-level parallelism.
 
 ---
 
@@ -645,6 +842,60 @@ are included here so the prose and the bibliography stay in sync.
   howpublished = {{IACR} Cryptology ePrint Archive, Report 2011/332},
   year         = {2011},
   url          = {https://eprint.iacr.org/2011/332},
+}
+
+@misc{camellia-spec,
+  author       = {Kazumaro Aoki and Takeshi Ichikawa and Masayuki Kanda and
+                  Mitsuru Matsui and Shiho Moriai and Junko Nakajima and
+                  Toshio Tokita},
+  title        = {Specification of Camellia, a 128-bit Block Cipher},
+  howpublished = {CRYPTREC submission / algorithm specification},
+  year         = {2001},
+  url          = {https://www.cryptrec.go.jp/en/cryptrec_03_spec_cypherlist_files/PDF/06_01espec.pdf},
+}
+
+@techreport{rfc3713,
+  author      = {Mitsuru Matsui and Junko Nakajima and Shiho Moriai},
+  title       = {A Description of the Camellia Encryption Algorithm},
+  type        = {{RFC}},
+  number      = {3713},
+  institution = {IETF},
+  year        = {2004},
+  month       = apr,
+  url         = {https://www.rfc-editor.org/rfc/rfc3713},
+}
+
+@techreport{rfc4312,
+  author      = {K. Seo and S. Kent},
+  title       = {Camellia Encryption Algorithm Use with IPsec},
+  type        = {{RFC}},
+  number      = {4312},
+  institution = {IETF},
+  year        = {2005},
+  month       = dec,
+  url         = {https://www.rfc-editor.org/rfc/rfc4312},
+}
+
+@techreport{rfc4009,
+  author      = {Jongwook Park and Sungjae Lee and Jeeyeon Kim and Jaeil Lee},
+  title       = {The {SEED} Encryption Algorithm},
+  type        = {{RFC}},
+  number      = {4009},
+  institution = {IETF},
+  year        = {2005},
+  month       = feb,
+  url         = {https://www.rfc-editor.org/rfc/rfc4009},
+}
+
+@techreport{rfc4196,
+  author      = {Hyangjin Lee and Jaeho Yoon and Seoklae Lee and Jaeil Lee},
+  title       = {The {SEED} Cipher Algorithm and Its Use with {IPsec}},
+  type        = {{RFC}},
+  number      = {4196},
+  institution = {IETF},
+  year        = {2005},
+  month       = oct,
+  url         = {https://www.rfc-editor.org/rfc/rfc4196},
 }
 
 @techreport{fips46-3,
@@ -698,6 +949,18 @@ are included here so the prose and the bibliography stay in sync.
   year        = {2020},
   month       = sep,
   url         = {https://www.rfc-editor.org/rfc/rfc8891},
+}
+
+@inproceedings{bogdanov-2007-present,
+  author    = {Andrey Bogdanov and Lars R. Knudsen and Gregor Leander and
+               Christof Paar and Axel Poschmann and Matthew J. B. Robshaw and
+               Yannick Seurin and Charlotte Vikkelsoe},
+  title     = {{PRESENT}: An Ultra-Lightweight Block Cipher},
+  booktitle = {Cryptographic Hardware and Embedded Systems --- {CHES} 2007},
+  year      = {2007},
+  pages     = {450--466},
+  publisher = {Springer},
+  url       = {https://crypto.orange-labs.fr/papers/ches2007-450.pdf},
 }
 
 @techreport{gm-t-0002-2012,

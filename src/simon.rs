@@ -277,9 +277,9 @@ mod tests {
 
     #[test]
     fn simon48_72_kat() {
-        let key: [u8;  9] = parse("00010208090a101112");
-        let pt:  [u8;  6] = parse("6720616c696e");
-        let ct:  [u8;  6] = parse("ace5daac2c29");
+        let key: [u8; 9] = parse("00010208090a101112");
+        let pt: [u8; 6] = parse("6720616c696e");
+        let ct: [u8; 6] = parse("ace5daac2c29");
         let c = Simon48_72::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -292,8 +292,8 @@ mod tests {
     #[test]
     fn simon48_96_kat() {
         let key: [u8; 12] = parse("00010208090a10111218191a");
-        let pt:  [u8;  6] = parse("6369726e6420");
-        let ct:  [u8;  6] = parse("a5066e56f1ac");
+        let pt: [u8; 6] = parse("6369726e6420");
+        let ct: [u8; 6] = parse("a5066e56f1ac");
         let c = Simon48_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -306,8 +306,8 @@ mod tests {
     #[test]
     fn simon64_96_kat() {
         let key: [u8; 12] = parse("0001020308090a0b10111213");
-        let pt:  [u8;  8] = parse("6720726f636c696e");
-        let ct:  [u8;  8] = parse("7fe2a25cc88f1a11");
+        let pt: [u8; 8] = parse("6720726f636c696e");
+        let ct: [u8; 8] = parse("7fe2a25cc88f1a11");
         let c = Simon64_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -321,8 +321,8 @@ mod tests {
     #[test]
     fn simon96_96_kat() {
         let key: [u8; 12] = parse("00010203040508090a0b0c0d");
-        let pt:  [u8; 12] = parse("696c6c617220207468652070");
-        let ct:  [u8; 12] = parse("b462a407286082f08f3d0669");
+        let pt: [u8; 12] = parse("696c6c617220207468652070");
+        let ct: [u8; 12] = parse("b462a407286082f08f3d0669");
         let c = Simon96_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -336,8 +336,8 @@ mod tests {
     #[test]
     fn simon96_144_kat() {
         let key: [u8; 18] = parse("00010203040508090a0b0c0d101112131415");
-        let pt:  [u8; 12] = parse("7420746861746f6620647573");
-        let ct:  [u8; 12] = parse("1e456c1cadece91adbc5593f");
+        let pt: [u8; 12] = parse("7420746861746f6620647573");
+        let ct: [u8; 12] = parse("1e456c1cadece91adbc5593f");
         let c = Simon96_144::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -351,8 +351,8 @@ mod tests {
     #[test]
     fn simon128_128_kat() {
         let key: [u8; 16] = parse("000102030405060708090a0b0c0d0e0f");
-        let pt:  [u8; 16] = parse("65727320646573632074726176656c6c");
-        let ct:  [u8; 16] = parse("3ffe541e1e1b6849bc0b4ef82a83aa65");
+        let pt: [u8; 16] = parse("65727320646573632074726176656c6c");
+        let ct: [u8; 16] = parse("3ffe541e1e1b6849bc0b4ef82a83aa65");
         let c = Simon128_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -366,8 +366,8 @@ mod tests {
     #[test]
     fn simon128_192_kat() {
         let key: [u8; 24] = parse("000102030405060708090a0b0c0d0e0f1011121314151617");
-        let pt:  [u8; 16] = parse("6e207468657265207269626520776865");
-        let ct:  [u8; 16] = parse("4f0ddcfcef61acc45bb897256e8d9c6c");
+        let pt: [u8; 16] = parse("6e207468657265207269626520776865");
+        let ct: [u8; 16] = parse("4f0ddcfcef61acc45bb897256e8d9c6c");
         let c = Simon128_192::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -381,9 +381,10 @@ mod tests {
 
     #[test]
     fn simon128_256_kat() {
-        let key: [u8; 32] = parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
-        let pt:  [u8; 16] = parse("6f6f6d20696e2074697320612073696d");
-        let ct:  [u8; 16] = parse("a0a3c8af79552b8d68b8e7ef872af73b");
+        let key: [u8; 32] =
+            parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt: [u8; 16] = parse("6f6f6d20696e2074697320612073696d");
+        let ct: [u8; 16] = parse("a0a3c8af79552b8d68b8e7ef872af73b");
         let c = Simon128_256::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");

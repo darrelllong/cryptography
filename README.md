@@ -7,8 +7,11 @@ Implemented families:
 
 - DES and Triple-DES
 - AES (`Aes128/192/256`) plus software constant-time variants (`Aes*Ct`)
+- Camellia (`Camellia128/192/256`) plus software constant-time variants
+- SEED plus `SeedCt`
 - SIMON (all 10 published variants)
 - SPECK (all 10 published variants)
+- PRESENT (`Present80` / `Present128`) plus software constant-time variants
 - Magma plus `MagmaCt`
 - Grasshopper plus `GrasshopperCt`
 - SM4 / SMS4 plus `Sm4Ct`
@@ -123,7 +126,15 @@ Run one family:
 
 ```text
 cargo test aes::tests
+cargo test camellia::tests
+cargo test des::tests
+cargo test grasshopper::tests
+cargo test magma::tests
+cargo test present::tests
+cargo test seed::tests
+cargo test simon::tests
 cargo test sm4::tests
+cargo test speck::tests
 cargo test zuc::tests
 ```
 
@@ -166,29 +177,38 @@ unavailable.
 
 ## ML Distinguisher Experiment
 
-The repository also includes a TensorFlow experiment under `ml/` for testing
+The repository also includes a PyTorch experiment under `ml/` for testing
 whether a deep network can distinguish raw cipher output from chance.
 
 The dataset uses only the fast cipher implementations. The `Ct` variants are
 not separate classes because they should emit exactly the same bits as the fast
 path for the same key and input.
 
-Generate a balanced dataset of raw 32-byte samples:
+Generate a balanced dataset of raw samples:
 
 ```text
 cargo run --release --bin gen_ml_dataset -- --output ml/data
 ```
 
-Train the model in the local TensorFlow virtualenv:
+For wider samples, pass `--sample-len`:
 
 ```text
-ml/.venv/bin/python ml/train_distinguisher.py --generate
+cargo run --release --bin gen_ml_dataset -- --output ml/data --sample-len 256
 ```
+
+Train the model in the local PyTorch virtualenv:
+
+```text
+ml/.venv-torch/bin/python ml/train_distinguisher.py --generate
+```
+
+The trainer also exposes `--model-size base|large|xlarge` so you can scale the
+network along with the dataset.
 
 This writes the trained model and weights to `ml/out/`:
 
-- `cipher_distinguisher.keras`
-- `cipher_distinguisher.weights.h5`
+- `cipher_distinguisher.pt`
+- `cipher_distinguisher_state_dict.pt`
 - `labels.json`
 - `metrics.json`
 - `history.csv`
@@ -209,7 +229,10 @@ The `pubs/` directory now carries one or more local PDFs for every cipher
 family covered in this repository:
 
 - AES: `fips197.pdf`, `boyar-peralta-2011-a-depth-16-circuit-for-the-aes-s-box.pdf`
+- Camellia: `camellia-specification.pdf`
 - DES / 3DES: `fips46-3.pdf`, `nist-sp-800-67r2.pdf`
+- PRESENT: `present-ches2007.pdf`
+- SEED: `rfc4009-seed-algorithm.pdf`, `rfc4196-seed-ipsec.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
 - Magma: `rfc8891-magma.pdf`
@@ -262,6 +285,60 @@ Boyar-Peralta AES S-box circuit paper is stored at
   url         = {https://csrc.nist.gov/publications/detail/fips/46/3/archive/1999-10-25},
 }
 
+@misc{camellia-spec,
+  author       = {Kazumaro Aoki and Takeshi Ichikawa and Masayuki Kanda and
+                  Mitsuru Matsui and Shiho Moriai and Junko Nakajima and
+                  Toshio Tokita},
+  title        = {Specification of Camellia, a 128-bit Block Cipher},
+  howpublished = {CRYPTREC submission / algorithm specification},
+  year         = {2001},
+  url          = {https://www.cryptrec.go.jp/en/cryptrec_03_spec_cypherlist_files/PDF/06_01espec.pdf},
+}
+
+@techreport{rfc3713,
+  author      = {Mitsuru Matsui and Junko Nakajima and Shiho Moriai},
+  title       = {A Description of the Camellia Encryption Algorithm},
+  type        = {{RFC}},
+  number      = {3713},
+  institution = {IETF},
+  year        = {2004},
+  month       = apr,
+  url         = {https://www.rfc-editor.org/rfc/rfc3713},
+}
+
+@techreport{rfc4312,
+  author      = {K. Seo and S. Kent},
+  title       = {Camellia Encryption Algorithm Use with IPsec},
+  type        = {{RFC}},
+  number      = {4312},
+  institution = {IETF},
+  year        = {2005},
+  month       = dec,
+  url         = {https://www.rfc-editor.org/rfc/rfc4312},
+}
+
+@techreport{rfc4009,
+  author      = {Jongwook Park and Sungjae Lee and Jeeyeon Kim and Jaeil Lee},
+  title       = {The {SEED} Encryption Algorithm},
+  type        = {{RFC}},
+  number      = {4009},
+  institution = {IETF},
+  year        = {2005},
+  month       = feb,
+  url         = {https://www.rfc-editor.org/rfc/rfc4009},
+}
+
+@techreport{rfc4196,
+  author      = {Hyangjin Lee and Jaeho Yoon and Seoklae Lee and Jaeil Lee},
+  title       = {The {SEED} Cipher Algorithm and Its Use with {IPsec}},
+  type        = {{RFC}},
+  number      = {4196},
+  institution = {IETF},
+  year        = {2005},
+  month       = oct,
+  url         = {https://www.rfc-editor.org/rfc/rfc4196},
+}
+
 @techreport{sp800-67r2,
   author      = {{National Institute of Standards and Technology}},
   title       = {Recommendation for the Triple Data Encryption Algorithm
@@ -302,6 +379,18 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year        = {2020},
   month       = sep,
   url         = {https://www.rfc-editor.org/rfc/rfc8891},
+}
+
+@inproceedings{bogdanov-2007-present,
+  author    = {Andrey Bogdanov and Lars R. Knudsen and Gregor Leander and
+               Christof Paar and Axel Poschmann and Matthew J. B. Robshaw and
+               Yannick Seurin and Charlotte Vikkelsoe},
+  title     = {{PRESENT}: An Ultra-Lightweight Block Cipher},
+  booktitle = {Cryptographic Hardware and Embedded Systems --- {CHES} 2007},
+  year      = {2007},
+  pages     = {450--466},
+  publisher = {Springer},
+  url       = {https://crypto.orange-labs.fr/papers/ches2007-450.pdf},
 }
 
 @techreport{gm-t-0002-2012,

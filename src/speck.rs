@@ -251,9 +251,9 @@ mod tests {
 
     #[test]
     fn speck48_72_kat() {
-        let key: [u8;  9] = parse("00010208090a101112");
-        let pt:  [u8;  6] = parse("6c792072616c");
-        let ct:  [u8;  6] = parse("a549c0dc5a38");
+        let key: [u8; 9] = parse("00010208090a101112");
+        let pt: [u8; 6] = parse("6c792072616c");
+        let ct: [u8; 6] = parse("a549c0dc5a38");
         let c = Speck48_72::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -266,8 +266,8 @@ mod tests {
     #[test]
     fn speck48_96_kat() {
         let key: [u8; 12] = parse("00010208090a10111218191a");
-        let pt:  [u8;  6] = parse("73206d746869");
-        let ct:  [u8;  6] = parse("105e735d44b6");
+        let pt: [u8; 6] = parse("73206d746869");
+        let ct: [u8; 6] = parse("105e735d44b6");
         let c = Speck48_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -280,8 +280,8 @@ mod tests {
     #[test]
     fn speck64_96_kat() {
         let key: [u8; 12] = parse("0001020308090a0b10111213");
-        let pt:  [u8;  8] = parse("2046617465616e73");
-        let ct:  [u8;  8] = parse("ec52799f6c947541");
+        let pt: [u8; 8] = parse("2046617465616e73");
+        let ct: [u8; 8] = parse("ec52799f6c947541");
         let c = Speck64_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -294,8 +294,8 @@ mod tests {
     #[test]
     fn speck64_128_kat() {
         let key: [u8; 16] = parse("0001020308090a0b1011121318191a1b");
-        let pt:  [u8;  8] = parse("7465723b2d437574");
-        let ct:  [u8;  8] = parse("48a56f8c8b024e45");
+        let pt: [u8; 8] = parse("7465723b2d437574");
+        let ct: [u8; 8] = parse("48a56f8c8b024e45");
         let c = Speck64_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -309,8 +309,8 @@ mod tests {
     #[test]
     fn speck96_96_kat() {
         let key: [u8; 12] = parse("00010203040508090a0b0c0d");
-        let pt:  [u8; 12] = parse("2c20686f7765207573616765");
-        let ct:  [u8; 12] = parse("7871ab094d9eaa798fdebd62");
+        let pt: [u8; 12] = parse("2c20686f7765207573616765");
+        let ct: [u8; 12] = parse("7871ab094d9eaa798fdebd62");
         let c = Speck96_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -324,8 +324,8 @@ mod tests {
     #[test]
     fn speck96_144_kat() {
         let key: [u8; 18] = parse("00010203040508090a0b0c0d101112131415");
-        let pt:  [u8; 12] = parse("6e2074696d657665722c2069");
-        let ct:  [u8; 12] = parse("8a227210f32be62e2540e47a");
+        let pt: [u8; 12] = parse("6e2074696d657665722c2069");
+        let ct: [u8; 12] = parse("8a227210f32be62e2540e47a");
         let c = Speck96_144::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -339,8 +339,8 @@ mod tests {
     #[test]
     fn speck128_128_kat() {
         let key: [u8; 16] = parse("000102030405060708090a0b0c0d0e0f");
-        let pt:  [u8; 16] = parse("206571756976616c206d616465206974");
-        let ct:  [u8; 16] = parse("6532787951985da6180d575cdffe6078");
+        let pt: [u8; 16] = parse("206571756976616c206d616465206974");
+        let ct: [u8; 16] = parse("6532787951985da6180d575cdffe6078");
         let c = Speck128_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -354,8 +354,8 @@ mod tests {
     #[test]
     fn speck128_192_kat() {
         let key: [u8; 24] = parse("000102030405060708090a0b0c0d0e0f1011121314151617");
-        let pt:  [u8; 16] = parse("6869656620486172656e7420746f2043");
-        let ct:  [u8; 16] = parse("665513133acfe41b86183ce05d18bcf9");
+        let pt: [u8; 16] = parse("6869656620486172656e7420746f2043");
+        let ct: [u8; 16] = parse("665513133acfe41b86183ce05d18bcf9");
         let c = Speck128_192::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -369,9 +369,10 @@ mod tests {
 
     #[test]
     fn speck128_256_kat() {
-        let key: [u8; 32] = parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
-        let pt:  [u8; 16] = parse("496e2074686f7365706f6f6e65722e20");
-        let ct:  [u8; 16] = parse("3ef5c00504010941438f189c8db4ee4e");
+        let key: [u8; 32] =
+            parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt: [u8; 16] = parse("496e2074686f7365706f6f6e65722e20");
+        let ct: [u8; 16] = parse("3ef5c00504010941438f189c8db4ee4e");
         let c = Speck128_256::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");

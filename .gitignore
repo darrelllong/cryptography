@@ -1,6 +1,8 @@
 /target
 /benchmarks/target
+Cargo.lock
 /ml/.venv/
+/ml/.venv-*/
 /ml/data/
 /ml/out/
 /ml/__pycache__/

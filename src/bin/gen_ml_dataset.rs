@@ -8,9 +8,9 @@ use cryptography::{
     TripleDes, Zuc128,
 };
 
-const SAMPLE_LEN: usize = 32;
+const DEFAULT_SAMPLE_LEN: usize = 32;
 
-type SampleFn = fn(&mut SplitMix64, &mut [u8; SAMPLE_LEN]);
+type SampleFn = fn(&mut SplitMix64, &mut [u8]);
 
 struct CipherSpec {
     name: &'static str,
@@ -67,6 +67,7 @@ const CIPHERS: &[CipherSpec] = &[
 #[derive(Clone, Debug)]
 struct Config {
     output: PathBuf,
+    sample_len: usize,
     train_per_class: usize,
     val_per_class: usize,
     test_per_class: usize,
@@ -77,6 +78,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             output: PathBuf::from("ml/data"),
+            sample_len: DEFAULT_SAMPLE_LEN,
             train_per_class: 20_000,
             val_per_class: 4_000,
             test_per_class: 4_000,
@@ -136,11 +138,7 @@ impl SplitMix64 {
     }
 }
 
-fn fill_block_samples<C: BlockCipher>(
-    cipher: &C,
-    rng: &mut SplitMix64,
-    out: &mut [u8; SAMPLE_LEN],
-) {
+fn fill_block_samples<C: BlockCipher>(cipher: &C, rng: &mut SplitMix64, out: &mut [u8]) {
     let mut written = 0usize;
     while written < out.len() {
         let mut block = vec![0u8; C::BLOCK_LEN];
@@ -152,70 +150,70 @@ fn fill_block_samples<C: BlockCipher>(
     }
 }
 
-fn gen_aes128(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_aes128(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 16];
     rng.fill(&mut key);
     let cipher = Aes128::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_aes256(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_aes256(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 32];
     rng.fill(&mut key);
     let cipher = Aes256::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_des(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_des(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 8];
     rng.fill(&mut key);
     let cipher = Des::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_tdes3(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_tdes3(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 24];
     rng.fill(&mut key);
     let cipher = TripleDes::new_3key(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_simon128_128(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_simon128_128(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 16];
     rng.fill(&mut key);
     let cipher = Simon128_128::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_speck128_128(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_speck128_128(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 16];
     rng.fill(&mut key);
     let cipher = Speck128_128::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_magma(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_magma(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 32];
     rng.fill(&mut key);
     let cipher = Magma::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_grasshopper(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_grasshopper(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 32];
     rng.fill(&mut key);
     let cipher = Grasshopper::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_sm4(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_sm4(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 16];
     rng.fill(&mut key);
     let cipher = Sm4::new(&key);
     fill_block_samples(&cipher, rng, out);
 }
 
-fn gen_zuc128(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_zuc128(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 16];
     let mut iv = [0u8; 16];
     rng.fill(&mut key);
@@ -224,7 +222,7 @@ fn gen_zuc128(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
     cipher.fill(out);
 }
 
-fn gen_random(rng: &mut SplitMix64, out: &mut [u8; SAMPLE_LEN]) {
+fn gen_random(rng: &mut SplitMix64, out: &mut [u8]) {
     rng.fill(out);
 }
 
@@ -237,6 +235,17 @@ fn parse_args() -> Result<Config, String> {
             "--output" => {
                 let value = args.next().ok_or("missing value for --output")?;
                 cfg.output = PathBuf::from(value);
+            }
+            "--sample-len" => {
+                let value = args
+                    .next()
+                    .ok_or("missing value for --sample-len")?
+                    .parse::<usize>()
+                    .map_err(|_| "invalid integer for --sample-len")?;
+                if value == 0 {
+                    return Err("--sample-len must be greater than zero".to_string());
+                }
+                cfg.sample_len = value;
             }
             "--train-per-class" => {
                 let value = args
@@ -288,6 +297,7 @@ fn usage() -> String {
          \n\
          Options:\n\
            --output PATH             Output directory (default: ml/data)\n\
+           --sample-len N            Bytes per sample (default: {DEFAULT_SAMPLE_LEN})\n\
            --train-per-class N       Train samples per class (default: 20000)\n\
            --val-per-class N         Validation samples per class (default: 4000)\n\
            --test-per-class N        Test samples per class (default: 4000)\n\
@@ -295,7 +305,7 @@ fn usage() -> String {
            --help                    Show this help\n\
          \n\
          Dataset classes: {}\n\
-         Sample format: raw {SAMPLE_LEN}-byte outputs only (no IVs, no labels in-band).",
+         Sample format: raw N-byte outputs only (no IVs, no labels in-band).",
         CIPHERS
             .iter()
             .map(|c| c.name)
@@ -307,6 +317,7 @@ fn usage() -> String {
 fn write_split(
     dir: &Path,
     split_name: &str,
+    sample_len: usize,
     per_class: usize,
     rng: &mut SplitMix64,
 ) -> io::Result<usize> {
@@ -322,7 +333,7 @@ fn write_split(
     }
     rng.shuffle(&mut labels);
 
-    let mut sample = [0u8; SAMPLE_LEN];
+    let mut sample = vec![0u8; sample_len];
     for &label in &labels {
         (CIPHERS[label as usize].generate)(rng, &mut sample);
         samples_file.write_all(&sample)?;
@@ -346,11 +357,11 @@ fn write_manifest(
         .collect::<Vec<_>>()
         .join(", ");
     let manifest = format!(
-        "{{\n  \"sample_len\": {SAMPLE_LEN},\n  \"seed\": {seed},\n  \"classes\": [{classes}],\n  \
+        "{{\n  \"sample_len\": {},\n  \"seed\": {seed},\n  \"classes\": [{classes}],\n  \
          \"train_per_class\": {},\n  \"val_per_class\": {},\n  \"test_per_class\": {},\n  \
          \"train_samples\": {train_total},\n  \"val_samples\": {val_total},\n  \
          \"test_samples\": {test_total}\n}}\n",
-        cfg.train_per_class, cfg.val_per_class, cfg.test_per_class
+        cfg.sample_len, cfg.train_per_class, cfg.val_per_class, cfg.test_per_class
     );
     fs::write(dir.join("manifest.json"), manifest)
 }
@@ -374,16 +385,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seed = rng.state;
 
     fs::create_dir_all(&cfg.output)?;
-    let train_total = write_split(&cfg.output, "train", cfg.train_per_class, &mut rng)?;
-    let val_total = write_split(&cfg.output, "val", cfg.val_per_class, &mut rng)?;
-    let test_total = write_split(&cfg.output, "test", cfg.test_per_class, &mut rng)?;
+    let train_total = write_split(
+        &cfg.output,
+        "train",
+        cfg.sample_len,
+        cfg.train_per_class,
+        &mut rng,
+    )?;
+    let val_total = write_split(
+        &cfg.output,
+        "val",
+        cfg.sample_len,
+        cfg.val_per_class,
+        &mut rng,
+    )?;
+    let test_total = write_split(
+        &cfg.output,
+        "test",
+        cfg.sample_len,
+        cfg.test_per_class,
+        &mut rng,
+    )?;
     write_manifest(&cfg.output, &cfg, seed, train_total, val_total, test_total)?;
 
     println!(
         "wrote dataset to {} ({} classes, {}-byte samples, {} total rows)",
         cfg.output.display(),
         CIPHERS.len(),
-        SAMPLE_LEN,
+        cfg.sample_len,
         train_total + val_total + test_total
     );
 
