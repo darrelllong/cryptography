@@ -10,8 +10,8 @@ pub mod hash;
 pub mod modes;
 
 pub use ciphers::{
-    aes, camellia, cast128, des, grasshopper, magma, present, seed, serpent, simon, sm4, speck,
-    twofish, zuc,
+    aes, camellia, cast128, chacha20, des, grasshopper, magma, present, salsa20, seed, serpent,
+    simon, sm4, speck, twofish, zuc,
 };
 
 /// Common interface for block ciphers.
@@ -50,10 +50,12 @@ pub use ciphers::camellia::{
     CamelliaCt,
 };
 pub use ciphers::cast128::{Cast128, Cast128Ct, Cast5, Cast5Ct};
+pub use ciphers::chacha20::{ChaCha20, XChaCha20};
 pub use ciphers::des::{key_schedule, Des, DesCt, KeySchedule, TDesMode, TripleDes};
 pub use ciphers::grasshopper::{Grasshopper, GrasshopperCt};
 pub use ciphers::magma::{Magma, MagmaCt};
 pub use ciphers::present::{Present, Present128, Present128Ct, Present80, Present80Ct, PresentCt};
+pub use ciphers::salsa20::Salsa20;
 pub use ciphers::seed::{Seed, SeedCt};
 pub use ciphers::serpent::{
     Serpent, Serpent128, Serpent128Ct, Serpent192, Serpent192Ct, Serpent256, Serpent256Ct,

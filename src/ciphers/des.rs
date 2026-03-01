@@ -1,3 +1,14 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::doc_markdown,
+    clippy::explicit_iter_loop,
+    clippy::inline_always,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    clippy::needless_range_loop
+)]
+
 //! DES and Triple-DES (TDEA) implemented from FIPS PUB 46-3.
 //!
 //! All tables are transcribed verbatim from the FIPS 46-3 document

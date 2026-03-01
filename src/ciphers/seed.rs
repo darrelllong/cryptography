@@ -1,3 +1,12 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::inline_always,
+    clippy::manual_is_multiple_of,
+    clippy::must_use_candidate,
+    clippy::similar_names
+)]
+
 //! SEED block cipher — RFC 4009 / RFC 4196.
 //!
 //! 128-bit block, 128-bit key, 16-round Feistel network.

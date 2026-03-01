@@ -1,3 +1,11 @@
+#![allow(
+    clippy::inline_always,
+    clippy::many_single_char_names,
+    clippy::must_use_candidate,
+    clippy::new_without_default,
+    clippy::needless_range_loop
+)]
+
 //! SHA-1 from FIPS 180-4.
 //!
 //! SHA-1 is retained here for compatibility and HMAC support. It is no longer

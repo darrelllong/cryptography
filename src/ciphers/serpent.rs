@@ -1,3 +1,9 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::inline_always
+)]
+
 //! Serpent block cipher — AES submission / FSE 1998.
 //!
 //! 128-bit block cipher with three standard key sizes:

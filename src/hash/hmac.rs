@@ -1,3 +1,5 @@
+#![allow(clippy::must_use_candidate)]
+
 //! Hash-based Message Authentication Code (HMAC).
 //!
 //! This is the standard HMAC construction from FIPS 198-1 / RFC 2104, layered

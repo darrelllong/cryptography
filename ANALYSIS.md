@@ -47,20 +47,30 @@ was reviewed as part of this split; its AES-GCM-SIV design is a
 nonce-misuse-resistant AEAD around AES and `POLYVAL`, so it still belongs in a
 dedicated AEAD module rather than in the basic generic wrappers.
 
+Correctness coverage is concentrated in [src/modes/mod.rs](/Users/darrell/cryptography/src/modes/mod.rs):
+
+- SP 800-38A AES-128 vectors for `Ecb`, `Cbc`, `Cfb`, `Ofb`, and `Ctr`
+- SP 800-38B AES-CMAC vectors
+- SP 800-38D AES-GCM vectors, including AAD handling and wrong-tag rejection
+- OpenSSL cross-checks for `Xts`
+- a non-AES generic-path test (`Ctr` over `Des`) to prove the wrappers are not
+  accidentally hard-wired to AES
+
+The biggest operational caveat remains the same one the standards stress:
+these wrappers make the primitives available, but IV, nonce, tweak, and key
+management are still protocol responsibilities. `Gcm` in particular requires
+nonce uniqueness, and the portable `GHASH` path is documented as not
+constant-time.
+
 ---
 
-## Hash and CSPRNG Support
+## Hash Functions and XOFs
 
-- Reference: `fips180-4` for SHA-1 and SHA-2; `fips202` for SHA-3 and SHAKE; `fips198-1` for `Hmac`; `sp800-90a-r1` for `CtrDrbgAes256`.
-- Hashes: the crate now includes `Sha1`, the full SHA-2 family (`Sha224`,
+- Reference: `fips180-4`, `fips202`.
+- Hashes: the crate includes `Sha1`, the full SHA-2 family (`Sha224`,
   `Sha256`, `Sha384`, `Sha512`, `Sha512_224`, `Sha512_256`), the SHA-3 family
   (`Sha3_224`, `Sha3_256`, `Sha3_384`, `Sha3_512`), plus the XOFs `Shake128`
   and `Shake256`.
-- MACs: the crate includes generic `Hmac<H>` over any in-tree `Digest`
-  implementation, so one wrapper now spans SHA-1, SHA-2, SHA-3, and future
-  additions.
-- CSPRNGs: the crate includes historical generators (`BlumBlumShub`,
-  `BlumMicali`) and a standards-based `CtrDrbgAes256`.
 - Why SHAKE matters here: `Shake128` / `Shake256` provide the XOF abstraction
   needed for upcoming `XDRBG` work without introducing external dependencies.
 
@@ -78,15 +88,59 @@ length-extension caveat. They are appropriate as hash functions, but they
 should not be used directly as keyed authenticators; use `Hmac<H>` for that, or
 use SHA-3 / SHAKE when sponge-based hashing semantics are preferable.
 
+Coverage is intentionally a mix of fixed vectors and external cross-checks:
+
+- SHA-1, SHA-2, and SHA-3 empty-string vectors
+- streaming `abc` tests across the major fixed-output variants
+- SHAKE empty-input and streaming squeeze tests
+- OpenSSL cross-checks for representative `Sha256` and HMAC cases where the
+  external tool supports the algorithm directly
+
+---
+
+## Message Authentication
+
+- Reference: `fips198-1`, `sp800-38b`, `sp800-38d`.
+- Implemented now: generic `Hmac<H>` for any in-tree `Digest`, plus the
+  block-cipher MACs `Cmac` and `Gmac` in the mode layer.
+- Scope: `Hmac<H>` covers SHA-1, SHA-2, SHA-3, and future digest additions
+  without per-hash wrapper code.
+
 `Hmac<H>` follows the standard FIPS 198-1 / RFC 2104 inner-pad / outer-pad
 construction over the hash function's byte-oriented block size. For the SHA-3
 family, that means the Keccak rate in bytes, which is the block size used by
 HMAC-SHA3.
 
+The practical guidance is straightforward:
+
+- use `Hmac<H>` when you need a hash-based MAC
+- use `Cmac` when you specifically need the NIST block-cipher MAC
+- use `Gmac` only when you actually want the GCM hash/MAC construction without
+  the encryption half
+
+All three are integrity mechanisms, not signatures, and all three still depend
+on correct key and nonce discipline in the surrounding protocol.
+
+---
+
+## CSPRNGs
+
+- Reference: `sp800-90a-r1`.
+- Implemented now: historical `BlumBlumShub`, historical `BlumMicali`, and
+  standards-based `CtrDrbgAes256`.
+- Scope: the historical generators are educational/reference-grade; the
+  standards-track DRBG is the one intended for practical deterministic byte
+  generation.
+
 `CtrDrbgAes256` follows the SP 800-90A Rev. 1 AES-256 CTR_DRBG construction in
 its no-derivation-function form. It stores the 256-bit key and 128-bit `V`
 state directly, supports reseeding and optional additional input, and wipes its
 internal state on drop.
+
+`BlumBlumShub` and `BlumMicali` are intentionally small `u128` reference
+implementations, not large-parameter deployment generators. They are useful for
+historical study, bit-generator experiments, and validating the shared `Csprng`
+trait shape, but they are not substitutes for modern DRBG deployments.
 
 ---
 
@@ -111,7 +165,13 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | Magma | `Magma`, `MagmaCt` | RFC vector for fast and `Ct`, plus fast-vs-`Ct` equivalence (`cargo test magma::tests`) | `cipher_bench` |
 | Grasshopper | `Grasshopper`, `GrasshopperCt` | RFC vectors, round-trip checks, fast-vs-`Ct` equivalence (`cargo test grasshopper::tests`) | `cipher_bench` |
 | SM4 | `Sm4`, `Sm4Ct`, `Sms4`, `Sms4Ct` | Spec example, 1,000,000-encryption vector, alias checks, fast-vs-`Ct` equivalence (`cargo test sm4::tests`) | `cipher_bench` |
+| ChaCha20 / XChaCha20 | `ChaCha20`, `XChaCha20` | RFC 8439 ChaCha20 block vector, XChaCha HChaCha20 vector, cross-check that XChaCha matches HChaCha20-derived ChaCha20 (`cargo test chacha20::tests`) | `cipher_bench` |
+| Salsa20 | `Salsa20` | eSTREAM known-answer vector, XOR round-trip, chunked-stream consistency (`cargo test salsa20::tests`) | `cipher_bench` |
 | ZUC-128 | `Zuc128`, `Zuc128Ct` | Official keystream vectors, partial/fill tests, fast-vs-`Ct` equivalence (`cargo test zuc::tests`) | `cipher_bench` |
+| Hashes / XOFs | `Sha1`, `Sha2*`, `Sha3*`, `Shake*` | FIPS vectors, streaming tests, and representative OpenSSL cross-checks (`cargo test hash::`) | not benchmarked |
+| HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
+| Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
+| CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
 
 ---
 
@@ -669,6 +729,22 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: appropriate for SM4 interoperability, standards conformance, and comparative study. It is not deprecated, but it is primarily a regional standards cipher rather than a global default.
 - Known issues: the fast SM4 type (`Sm4`) uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. Generic block modes are available in the crate, but there is no SM4-specific protocol wrapper here.
 
+### ChaCha20 / XChaCha20
+
+- Reference: `chacha-2008`, `rfc8439`, `draft-irtf-cfrg-xchacha-03`.
+- History: ChaCha was introduced by Daniel J. Bernstein in 2008 as a software-tuned Salsa20 variant; XChaCha extends it with HChaCha20-derived subkeys and a 192-bit nonce for safer large-scale nonce management.
+- Properties: stream ciphers with a 256-bit key and 64-byte blocks; `ChaCha20` uses a 96-bit nonce and 32-bit counter, while `XChaCha20` uses a 192-bit nonce and derives a one-time subkey before running the standard ChaCha20 core.
+- Usage and deprecation: `ChaCha20` is the modern general-purpose ARX stream cipher to prefer over Salsa20 for most new software designs, especially when RFC 8439 interoperability matters. `XChaCha20` is the better fit when random nonces are easier operationally than global nonce coordination.
+- Known issues: there is no separate `Ct` type because the core is already table-free ARX, but nonce reuse with the same key is still catastrophic. `ChaCha20`'s 96-bit nonce is adequate for protocol-framed use; `XChaCha20` exists specifically to give callers a much larger nonce space when they need safer random-nonce operation.
+
+### Salsa20
+
+- Reference: `salsafamily-2007`.
+- History: designed by Daniel J. Bernstein in 2005 as the original 20-round member of the Salsa20 family, later becoming one of the best-known software-oriented ARX stream ciphers and the direct predecessor of ChaCha.
+- Properties: stream cipher with a 256-bit default key form (and original 128-bit compatibility form), 64-byte blocks, 8-byte nonce, and an ARX core built from 32-bit addition, rotation, and XOR.
+- Usage and deprecation: appropriate for Salsa20 interoperability, comparative study, and software-oriented stream-cipher use. It is not deprecated as a primitive, but modern protocol ecosystems more often standardize ChaCha20 than Salsa20.
+- Known issues: Salsa20 is naturally closer to constant-time than the table-driven ciphers here because its core is ARX, so there is no separate `Ct` type. As with any stream cipher, nonce reuse with the same key is catastrophic, and the original 64-bit nonce is smaller than newer designs such as XChaCha.
+
 ### ZUC-128
 
 - Reference: `etsi-sage-zuc-v16`.
@@ -1040,6 +1116,31 @@ block ciphers. Its 32 rounds are expensive, but each round is still just four
 byte S-boxes plus a linear transform on one 32-bit word, so the fast path lands
 well ahead of DES and Magma on this host.
 
+### ChaCha20 / XChaCha20
+
+| Variant | Key | Nonce | Throughput | 1 GiB |
+|---------|----:|------:|-----------:|------:|
+| ChaCha20 | 256 b | 96 b | 810 MiB/s | 1.3 s |
+| XChaCha20 | 256 b | 192 b | 794 MiB/s | 1.3 s |
+
+ChaCha20 is essentially in the same throughput tier as Salsa20 on this host,
+while XChaCha20 pays only a small one-time setup cost for the HChaCha20
+subkey derivation. That makes XChaCha20 the more forgiving default when callers
+want a modern software stream cipher with a large nonce space and do not want
+to hand-manage 96-bit nonce uniqueness.
+
+### Salsa20
+
+| Variant | Key | Nonce | Throughput | 1 GiB |
+|---------|----:|------:|-----------:|------:|
+| Salsa20 | 256 b | 64 b | 836 MiB/s | 1.2 s |
+
+Salsa20 is the fastest stream cipher currently implemented in the crate. Its
+20-round ARX core is table-free and software-friendly, so on this M4 Pro it
+outruns ZUC and lands in the same general throughput tier as the faster
+software-oriented block ciphers. The tradeoff is the original 64-bit nonce
+size, which is smaller than newer extended-nonce descendants such as XChaCha.
+
 ### ZUC-128
 
 | Variant | Key | IV | Throughput | 1 GiB |
@@ -1057,6 +1158,8 @@ evaluation of two separate 8-bit S-boxes.
 | Cipher | Best throughput | Worst throughput |
 |--------|----------------:|-----------------:|
 | Speck | 1068 MiB/s (128/128) | 222 MiB/s (32/64) |
+| Salsa20 | 836 MiB/s | — |
+| ChaCha20 | 810 MiB/s | 794 MiB/s (XChaCha20) |
 | ZUC | 551 MiB/s | — |
 | AES | 543 MiB/s (128) | 375 MiB/s (256) |
 | Simon | 265 MiB/s (128/128) | 90 MiB/s (32/64) |
@@ -1071,9 +1174,10 @@ evaluation of two separate 8-bit S-boxes.
 | PRESENT | 12.4 MiB/s (80) | 12.3 MiB/s (128) |
 | Twofish | 13.3 MiB/s (192) | 13.1 MiB/s (128/256) |
 
-Speck128/128 remains the fastest block cipher in the suite. ZUC is the fastest
-non-block primitive, and AES-128 remains the fastest conventional standardized
-block cipher here. CAST-128 is the fastest 64-bit block cipher in the
+Speck128/128 remains the fastest block cipher in the suite. Salsa20 is still
+the fastest stream cipher by a small margin, with ChaCha20 and XChaCha20 just
+behind it and well ahead of ZUC. AES-128 remains the fastest conventional
+standardized block cipher. CAST-128 is the fastest 64-bit block cipher in the
 repository, while Camellia, SM4, and SEED form a middle tier of standardized
 128-bit designs that are still usable in pure software, but materially slower
 than AES. At the other end, Grasshopper, 3DES, PRESENT, and the current
@@ -1084,9 +1188,6 @@ modest word-level parallelism.
 ---
 
 ## References
-
-The quick-reference section cites the following keys. Matching BibTeX entries
-are included here so the prose and the bibliography stay in sync.
 
 ```bibtex
 @misc{simon-speck-2013,
@@ -1400,5 +1501,48 @@ are included here so the prose and the bibliography stay in sync.
   year        = {2011},
   note        = {Referenced by 3GPP TS 35.222 / ETSI TS 135 222},
   url         = {https://www.etsi.org/deliver/etsi_ts/135200_135299/135222/16.00.00_60/ts_135222v160000p.pdf},
+}
+
+@misc{chacha-2008,
+  author       = {Daniel J. Bernstein},
+  title        = {ChaCha, a variant of Salsa20},
+  howpublished = {Author's specification paper},
+  year         = {2008},
+  month        = jan,
+  url          = {https://cr.yp.to/chacha/chacha-20080128.pdf},
+}
+
+@techreport{rfc8439,
+  author      = {Y. Nir and A. Langley},
+  title       = {ChaCha20 and Poly1305 for {IETF} Protocols},
+  type        = {{RFC}},
+  number      = {8439},
+  institution = {IETF},
+  year        = {2018},
+  month       = jun,
+  url         = {https://www.rfc-editor.org/rfc/rfc8439},
+}
+
+@misc{draft-irtf-cfrg-xchacha-03,
+  author       = {A. Langley and Y. Nir},
+  title        = {{XChaCha}: eXtended-nonce ChaCha and {AEAD}\_XChaCha20\_Poly1305},
+  howpublished = {Internet-Draft, draft-irtf-cfrg-xchacha-03},
+  year         = {2020},
+  month        = jan,
+  url          = {https://www.ietf.org/archive/id/draft-irtf-cfrg-xchacha-03.txt},
+  note         = {Local PDF copy in `pubs/` generated from the IETF draft text},
+}
+
+@incollection{salsafamily-2007,
+  author    = {Daniel J. Bernstein},
+  title     = {The {Salsa20} family of stream ciphers},
+  booktitle = {New Stream Cipher Designs},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4986},
+  pages     = {84--97},
+  publisher = {Springer},
+  year      = {2008},
+  note      = {Author's specification PDF dated 2007-12-25},
+  url       = {https://cr.yp.to/snuffle/salsafamily-20071225.pdf},
 }
 ```

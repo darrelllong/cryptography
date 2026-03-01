@@ -1,3 +1,9 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate
+)]
+
 //! Blum-Micali pseudorandom bit generator.
 //!
 //! This is the original discrete-log based one-bit generator:

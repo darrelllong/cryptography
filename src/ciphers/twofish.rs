@@ -1,3 +1,10 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::inline_always,
+    clippy::many_single_char_names,
+    clippy::trivially_copy_pass_by_ref
+)]
+
 //! Twofish block cipher — AES submission (1998).
 //!
 //! 128-bit block cipher with the three standard key sizes:

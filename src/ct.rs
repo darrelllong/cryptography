@@ -1,3 +1,10 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::inline_always,
+    clippy::ref_as_ptr
+)]
+
 //! Shared helpers for secret handling and software constant-time building
 //! blocks.
 //!

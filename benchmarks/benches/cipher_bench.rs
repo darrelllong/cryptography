@@ -14,13 +14,13 @@ use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_grou
 use cryptography::{
     Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct, BlockCipher, Camellia128,
     Camellia128Ct, Camellia192, Camellia192Ct, Camellia256, Camellia256Ct, Cast128, Cast128Ct,
-    Des, DesCt, Grasshopper, GrasshopperCt, Magma, MagmaCt, Present128, Present128Ct, Present80,
-    Present80Ct, Seed, SeedCt, Serpent128, Serpent128Ct, Serpent192, Serpent192Ct, Serpent256,
-    Serpent256Ct, Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128, Simon96_96,
-    Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct, Speck32_64, Speck48_72,
-    Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128, Speck128_192,
-    Speck128_256, TripleDes, Twofish128, Twofish128Ct, Twofish192, Twofish192Ct, Twofish256,
-    Twofish256Ct, Zuc128, Zuc128Ct,
+    ChaCha20, Des, DesCt, Grasshopper, GrasshopperCt, Magma, MagmaCt, Present128, Present128Ct,
+    Present80, Present80Ct, Salsa20, Seed, SeedCt, Serpent128, Serpent128Ct, Serpent192,
+    Serpent192Ct, Serpent256, Serpent256Ct, Simon32_64, Simon48_72, Simon48_96, Simon64_96,
+    Simon64_128, Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct,
+    Speck32_64, Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144,
+    Speck128_128, Speck128_192, Speck128_256, TripleDes, Twofish128, Twofish128Ct, Twofish192,
+    Twofish192Ct, Twofish256, Twofish256Ct, XChaCha20, Zuc128, Zuc128Ct,
 };
 use std::hint::black_box;
 
@@ -262,6 +262,52 @@ fn bench_seed(c: &mut Criterion) {
 
 // ── ZUC-128 ───────────────────────────────────────────────────────────────
 
+fn bench_chacha20(c: &mut Criterion) {
+    let mut g = c.benchmark_group("ChaCha20");
+    g.throughput(Throughput::Bytes(MB as u64));
+    g.bench_function("ChaCha20", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                ChaCha20::new(&[0u8; 32], &[0u8; 12]).apply_keystream(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.bench_function("XChaCha20", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                XChaCha20::new(&[0u8; 32], &[0u8; 24]).apply_keystream(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.finish();
+}
+
+// ── Salsa20 ───────────────────────────────────────────────────────────────
+
+fn bench_salsa20(c: &mut Criterion) {
+    let mut g = c.benchmark_group("Salsa20");
+    g.throughput(Throughput::Bytes(MB as u64));
+    g.bench_function("Salsa20", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                Salsa20::new(&[0u8; 32], &[0u8; 8]).apply_keystream(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.finish();
+}
+
+// ── ZUC-128 ───────────────────────────────────────────────────────────────
+
 fn bench_zuc(c: &mut Criterion) {
     let mut g = c.benchmark_group("ZUC");
     g.throughput(Throughput::Bytes(MB as u64));
@@ -303,6 +349,8 @@ criterion_group!(
     bench_magma,
     bench_sm4,
     bench_seed,
+    bench_chacha20,
+    bench_salsa20,
     bench_zuc
 );
 criterion_main!(benches);

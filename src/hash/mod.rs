@@ -35,6 +35,7 @@ pub trait Digest: Clone {
     fn zeroize(&mut self);
 
     /// Convenience helper for one-shot hashing.
+    #[must_use]
     fn digest(data: &[u8]) -> Vec<u8> {
         let mut h = Self::new();
         h.update(data);

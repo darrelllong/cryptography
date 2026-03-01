@@ -117,7 +117,8 @@ impl SplitMix64 {
         // This simple modulo has slight bias when `upper` is not a power of
         // two. That is acceptable here because it is only used for shuffling
         // dataset rows, not for any cryptographic purpose.
-        (self.next_u64() % upper as u64) as usize
+        usize::try_from(self.next_u64() % u64::try_from(upper).expect("upper fits in u64"))
+            .expect("value reduced modulo upper always fits in usize")
     }
 
     fn fill(&mut self, buf: &mut [u8]) {
@@ -336,7 +337,10 @@ fn write_split(
 
     let mut labels = Vec::with_capacity(total);
     for label in 0..CIPHERS.len() {
-        labels.extend(std::iter::repeat(label as u8).take(per_class));
+        labels.extend(std::iter::repeat_n(
+            u8::try_from(label).expect("label count fits in u8"),
+            per_class,
+        ));
     }
     rng.shuffle(&mut labels);
 

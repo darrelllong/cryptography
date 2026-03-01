@@ -1,3 +1,9 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::inline_always,
+    clippy::must_use_candidate
+)]
+
 //! PRESENT lightweight block cipher — CHES 2007 / ISO/IEC 29192-2.
 //!
 //! 64-bit block cipher with two standard key schedules:

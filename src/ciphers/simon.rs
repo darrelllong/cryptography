@@ -1,3 +1,5 @@
+#![allow(clippy::unreadable_literal)]
+
 //! Simon family of lightweight block ciphers.
 //!
 //! Implemented from "The SIMON and SPECK Families of Lightweight Block Ciphers"

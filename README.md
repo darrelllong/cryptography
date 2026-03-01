@@ -18,6 +18,8 @@ Implemented families:
 - Magma plus `MagmaCt`
 - Grasshopper plus `GrasshopperCt`
 - SM4 / SMS4 plus `Sm4Ct`
+- ChaCha20 and XChaCha20
+- Salsa20
 - ZUC-128 plus `Zuc128Ct`
 
 Supporting primitives:
@@ -124,14 +126,23 @@ added here.
 
 ### Stream-cipher example
 
-ZUC produces keystream words and can fill a caller-supplied buffer:
+ZUC produces keystream words and can fill a caller-supplied buffer, while
+Salsa20, ChaCha20, and XChaCha20 apply their keystream directly to plaintext
+or ciphertext:
 
 ```rust
-use cryptography::Zuc128;
+use cryptography::{ChaCha20, Salsa20, XChaCha20, Zuc128};
 
+let mut msg = *b"example message...";
+let mut salsa = Salsa20::new(&[0u8; 32], &[0u8; 8]);
+let mut chacha = ChaCha20::new(&[1u8; 32], &[0u8; 12]);
+let mut xchacha = XChaCha20::new(&[2u8; 32], &[0u8; 24]);
 let mut buf = [0u8; 64];
-let zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]);
+let mut zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]);
 
+salsa.apply_keystream(&mut msg);
+chacha.apply_keystream(&mut msg);
+xchacha.apply_keystream(&mut msg);
 zuc.fill(&mut buf);
 ```
 
@@ -223,10 +234,12 @@ cargo test magma::tests
 cargo test present::tests
 cargo test serpent::tests
 cargo test seed::tests
+cargo test chacha20::tests
 cargo test simon::tests
 cargo test sm4::tests
 cargo test speck::tests
 cargo test twofish::tests
+cargo test salsa20::tests
 cargo test zuc::tests
 ```
 
@@ -340,6 +353,8 @@ family and supporting primitive covered in this repository:
 - Grasshopper: `rfc7801-kuznyechik.pdf`
 - Magma: `rfc8891-magma.pdf`
 - SM4: `sm4-linear-cryptanalysis-2024.pdf` (the official GM/T host is not reachable from this sandbox, so the checked-in local PDF is a public SM4-family paper)
+- ChaCha20 / XChaCha20: `chacha-20080128.pdf`, `rfc8439-chacha20-poly1305.pdf`, `draft-irtf-cfrg-xchacha-03.pdf`
+- Salsa20: `salsafamily-20071225.pdf`
 - ZUC-128: `ts-135222-zuc.pdf`
 
 ## References
@@ -660,5 +675,48 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year        = {2011},
   note        = {Referenced by 3GPP TS 35.222 / ETSI TS 135 222},
   url         = {https://www.etsi.org/deliver/etsi_ts/135200_135299/135222/16.00.00_60/ts_135222v160000p.pdf},
+}
+
+@incollection{salsafamily-2007,
+  author    = {Daniel J. Bernstein},
+  title     = {The {Salsa20} family of stream ciphers},
+  booktitle = {New Stream Cipher Designs},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4986},
+  pages     = {84--97},
+  publisher = {Springer},
+  year      = {2008},
+  note      = {Author's specification PDF dated 2007-12-25},
+  url       = {https://cr.yp.to/snuffle/salsafamily-20071225.pdf},
+}
+
+@misc{chacha-2008,
+  author       = {Daniel J. Bernstein},
+  title        = {ChaCha, a variant of Salsa20},
+  howpublished = {Author's specification paper},
+  year         = {2008},
+  month        = jan,
+  url          = {https://cr.yp.to/chacha/chacha-20080128.pdf},
+}
+
+@techreport{rfc8439,
+  author      = {Y. Nir and A. Langley},
+  title       = {ChaCha20 and Poly1305 for {IETF} Protocols},
+  type        = {{RFC}},
+  number      = {8439},
+  institution = {IETF},
+  year        = {2018},
+  month       = jun,
+  url         = {https://www.rfc-editor.org/rfc/rfc8439},
+}
+
+@misc{draft-irtf-cfrg-xchacha-03,
+  author       = {A. Langley and Y. Nir},
+  title        = {{XChaCha}: eXtended-nonce ChaCha and {AEAD}\_XChaCha20\_Poly1305},
+  howpublished = {Internet-Draft, draft-irtf-cfrg-xchacha-03},
+  year         = {2020},
+  month        = jan,
+  url          = {https://www.ietf.org/archive/id/draft-irtf-cfrg-xchacha-03.txt},
+  note         = {Local PDF copy in `pubs/` generated from the IETF draft text},
 }
 ```

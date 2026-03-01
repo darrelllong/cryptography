@@ -1,3 +1,9 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::inline_always,
+    clippy::must_use_candidate
+)]
+
 //! ZUC-128 stream cipher — GM/T 0001.1 / ETSI SAGE ZUC specification v1.6.
 //!
 //! 128-bit key, 128-bit IV.  Outputs 32-bit keystream words.

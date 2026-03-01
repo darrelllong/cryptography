@@ -1,3 +1,9 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::inline_always
+)]
+
 //! Shared word helpers for the SIMON / SPECK families.
 
 /// Load bytes as a little-endian n-bit word into a u64.

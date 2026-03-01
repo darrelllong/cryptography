@@ -1,3 +1,10 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::explicit_iter_loop,
+    clippy::inline_always,
+    clippy::must_use_candidate
+)]
+
 //! Kuznyechik (Grasshopper) block cipher — RFC 7801 / GOST R 34.12-2015.
 //!
 //! 128-bit block, 256-bit key, 10 rounds.

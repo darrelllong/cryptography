@@ -1,3 +1,11 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::doc_markdown,
+    clippy::explicit_iter_loop,
+    clippy::inline_always,
+    clippy::must_use_candidate
+)]
+
 //! SM4 block cipher (formerly SMS4) — GM/T 0002-2012 / GB/T 32907-2016.
 //!
 //! 128-bit block, 128-bit key, 32 rounds.

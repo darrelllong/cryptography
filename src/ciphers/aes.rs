@@ -1,3 +1,13 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::doc_markdown,
+    clippy::empty_line_after_doc_comments,
+    clippy::inline_always,
+    clippy::must_use_candidate,
+    clippy::too_many_lines,
+    clippy::unreadable_literal
+)]
+
 /// AES (Rijndael, 128-bit block) — AES-128, AES-192, AES-256.
 ///
 /// Implemented from FIPS PUB 197 (2001), the complete Rijndael specification

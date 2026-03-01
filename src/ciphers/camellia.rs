@@ -1,3 +1,12 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::inline_always,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    clippy::similar_names
+)]
+
 //! Camellia block cipher — CRYPTREC / ISO/IEC 18033-3 / RFC 3713.
 //!
 //! 128-bit block cipher with three standard key sizes:

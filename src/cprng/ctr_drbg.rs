@@ -1,3 +1,10 @@
+#![allow(
+    clippy::doc_markdown,
+    clippy::inline_always,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate
+)]
+
 //! CTR_DRBG from NIST SP 800-90A Rev. 1 using AES-256 without a derivation
 //! function.
 //!

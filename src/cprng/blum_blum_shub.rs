@@ -1,3 +1,5 @@
+#![allow(clippy::missing_panics_doc, clippy::must_use_candidate)]
+
 //! Blum Blum Shub (BBS) pseudorandom bit generator.
 //!
 //! This is the classic quadratic-residue generator:

@@ -1,3 +1,9 @@
+#![allow(
+    clippy::inline_always,
+    clippy::many_single_char_names,
+    clippy::new_without_default
+)]
+
 //! SHA-2 family from FIPS 180-4.
 
 use super::Digest;

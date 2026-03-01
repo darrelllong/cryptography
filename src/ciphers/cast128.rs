@@ -1,3 +1,10 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::inline_always,
+    clippy::must_use_candidate,
+    clippy::trivially_copy_pass_by_ref
+)]
+
 //! CAST-128 / CAST5 block cipher — RFC 2144.
 //!
 //! 64-bit block cipher with variable key sizes from 40 to 128 bits in 8-bit

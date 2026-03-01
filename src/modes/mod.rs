@@ -1,3 +1,5 @@
+#![allow(clippy::doc_markdown, clippy::missing_panics_doc)]
+
 //! Generic block-cipher modes of operation.
 //!
 //! Implemented in this layer:
@@ -405,7 +407,7 @@ impl<C: BlockCipher> Ctr<C> {
     }
 }
 
-/// XEX-based Tweaked CodeBook mode with ciphertext Stealing (XTS).
+/// XEX-based Tweaked `CodeBook` mode with ciphertext Stealing (XTS).
 ///
 /// This implementation supports 128-bit block ciphers, which is the case
 /// covered by SP 800-38E / XTS-AES.
@@ -646,7 +648,7 @@ impl<C: BlockCipher> Cmac<C> {
         } else {
             data.len().div_ceil(blk)
         };
-        let last_complete = !data.is_empty() && data.len() % blk == 0;
+        let last_complete = !data.is_empty() && data.len().is_multiple_of(blk);
 
         let mut x = vec![0u8; blk];
         let mut y = vec![0u8; blk];

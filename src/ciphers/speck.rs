@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 //! Speck family of lightweight block ciphers.
 //!
 //! Implemented from "The SIMON and SPECK Families of Lightweight Block Ciphers"

@@ -1,3 +1,12 @@
+#![allow(
+    clippy::cast_lossless,
+    clippy::inline_always,
+    clippy::must_use_candidate,
+    clippy::needless_range_loop,
+    clippy::similar_names,
+    clippy::trivially_copy_pass_by_ref
+)]
+
 //! Magma (GOST R 34.12-2015) block cipher — RFC 8891.
 //!
 //! 64-bit block, 256-bit key, 32 Feistel rounds.

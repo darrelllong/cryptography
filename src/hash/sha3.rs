@@ -1,3 +1,5 @@
+#![allow(clippy::inline_always, clippy::new_without_default)]
+
 //! SHA-3 (Keccak-f[1600]) from FIPS 202.
 //!
 //! This module implements the fixed-output SHA-3 family:
