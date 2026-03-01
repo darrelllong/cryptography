@@ -683,6 +683,8 @@ impl<C: BlockCipher> Cmac<C> {
 mod tests {
     use super::*;
     use crate::Aes128;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
 
     fn parse<const N: usize>(s: &str) -> [u8; N] {
         let mut out = [0u8; N];
@@ -691,6 +693,22 @@ mod tests {
             out[i] = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
         }
         out
+    }
+
+    fn run_openssl(args: &[&str], stdin: &[u8]) -> Option<Vec<u8>> {
+        let mut child = Command::new("openssl")
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        child.stdin.as_mut()?.write_all(stdin).ok()?;
+        let out = child.wait_with_output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        Some(out.stdout)
     }
 
     #[test]
@@ -928,6 +946,37 @@ mod tests {
             data,
             parse::<31>("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e")
         );
+    }
+
+    #[test]
+    fn xts_aes128_runtime_cross_check_with_openssl() {
+        let key1 = parse::<16>("000102030405060708090a0b0c0d0e0f");
+        let key2 = parse::<16>("101112131415161718191a1b1c1d1e1f");
+        let tweak = [0u8; 16];
+        let plaintext =
+            parse::<31>("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e");
+
+        let expected = match run_openssl(
+            &[
+                "enc",
+                "-aes-128-xts",
+                "-e",
+                "-nopad",
+                "-K",
+                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+                "-iv",
+                "00000000000000000000000000000000",
+            ],
+            &plaintext,
+        ) {
+            Some(bytes) => bytes,
+            None => return,
+        };
+
+        let mut data = plaintext;
+        let mode = Xts::new(Aes128::new(&key1), Aes128::new(&key2));
+        mode.encrypt_sector(&tweak, &mut data);
+        assert_eq!(data.as_slice(), expected.as_slice());
     }
 
     #[test]

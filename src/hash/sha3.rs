@@ -10,7 +10,7 @@
 //! The core is the Keccak sponge over the 1600-bit permutation with the SHA-3
 //! domain-separation suffix `0x06`.
 
-use super::Xof;
+use super::{Digest, Xof};
 
 const RHO: [u32; 25] = [
     0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
@@ -218,6 +218,33 @@ macro_rules! define_sha3 {
                 let mut h = Self::new();
                 h.update(data);
                 h.finalize()
+            }
+        }
+
+        impl Digest for $name {
+            const BLOCK_LEN: usize = $rate;
+            const OUTPUT_LEN: usize = $out_len;
+
+            fn new() -> Self {
+                $name {
+                    inner: Keccak::new(),
+                }
+            }
+
+            fn update(&mut self, data: &[u8]) {
+                self.inner.update(data);
+            }
+
+            fn finalize_into(self, out: &mut [u8]) {
+                assert_eq!(out.len(), $out_len, "wrong digest length");
+                let digest = self.inner.finalize::<$out_len>();
+                out.copy_from_slice(&digest);
+            }
+
+            fn zeroize(&mut self) {
+                crate::ct::zeroize_slice(self.inner.state.as_mut_slice());
+                crate::ct::zeroize_slice(self.inner.block.as_mut_slice());
+                self.inner.pos = 0;
             }
         }
     };

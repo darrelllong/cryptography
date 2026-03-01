@@ -135,20 +135,22 @@ let zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]);
 zuc.fill(&mut buf);
 ```
 
-### Hash / XOF example
+### Hash / XOF / HMAC example
 
-SHA-3 exposes fixed-output hashes, and SHAKE exposes extendable-output
-functions:
+SHA-1 / SHA-2 / SHA-3 expose fixed-output hashes, and SHAKE exposes
+extendable-output functions:
 
 ```rust
-use cryptography::{Sha3_256, Shake128};
+use cryptography::{Digest, Hmac, Sha256, Sha3_256, Shake128};
 
-let digest = Sha3_256::digest(b"abc");
+let digest = Sha256::digest(b"abc");
 let mut out = [0u8; 32];
 Shake128::digest(b"abc", &mut out);
+let tag = Hmac::<Sha3_256>::compute(b"key", b"message");
 
 assert_eq!(digest.len(), 32);
 assert_eq!(out.len(), 32);
+assert_eq!(tag.len(), Sha3_256::OUTPUT_LEN);
 ```
 
 ### CSPRNG example
@@ -325,7 +327,9 @@ family and supporting primitive covered in this repository:
 - Serpent: `serpent.pdf`
 - Twofish: `twofish-paper.pdf`
 - SEED: `rfc4009-seed-algorithm.pdf`, `rfc4196-seed-ipsec.pdf`
+- SHA-1 / SHA-2: `fips180-4.pdf`
 - SHA-3 / SHAKE: `fips202.pdf`
+- HMAC: `fips198-1.pdf`
 - DRBGs: `sp800-90a-r1.pdf`
 - Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
@@ -370,6 +374,28 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year        = {2015},
   month       = aug,
   url         = {https://csrc.nist.gov/pubs/fips/202/final},
+}
+
+@techreport{fips180-4,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Secure Hash Standard ({SHS})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 180-4},
+  year        = {2015},
+  month       = aug,
+  url         = {https://csrc.nist.gov/pubs/fips/180-4/upd1/final},
+}
+
+@techreport{fips198-1,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {The Keyed-Hash Message Authentication Code ({HMAC})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 198-1},
+  year        = {2008},
+  month       = jul,
+  url         = {https://csrc.nist.gov/pubs/fips/198-1/final},
 }
 
 @misc{sp800-90a-r1,

@@ -51,9 +51,14 @@ dedicated AEAD module rather than in the basic generic wrappers.
 
 ## Hash and CSPRNG Support
 
-- Reference: `fips202` for SHA-3 and SHAKE; `sp800-90a-r1` for `CtrDrbgAes256`.
-- Hashes: the crate now includes `Sha3_224`, `Sha3_256`, `Sha3_384`, `Sha3_512`,
-  plus the XOFs `Shake128` and `Shake256`.
+- Reference: `fips180-4` for SHA-1 and SHA-2; `fips202` for SHA-3 and SHAKE; `fips198-1` for `Hmac`; `sp800-90a-r1` for `CtrDrbgAes256`.
+- Hashes: the crate now includes `Sha1`, the full SHA-2 family (`Sha224`,
+  `Sha256`, `Sha384`, `Sha512`, `Sha512_224`, `Sha512_256`), the SHA-3 family
+  (`Sha3_224`, `Sha3_256`, `Sha3_384`, `Sha3_512`), plus the XOFs `Shake128`
+  and `Shake256`.
+- MACs: the crate includes generic `Hmac<H>` over any in-tree `Digest`
+  implementation, so one wrapper now spans SHA-1, SHA-2, SHA-3, and future
+  additions.
 - CSPRNGs: the crate includes historical generators (`BlumBlumShub`,
   `BlumMicali`) and a standards-based `CtrDrbgAes256`.
 - Why SHAKE matters here: `Shake128` / `Shake256` provide the XOF abstraction
@@ -63,6 +68,15 @@ The SHA-3 / SHAKE implementation is a direct Keccak-f[1600] sponge. The fixed
 SHA-3 hashes use the FIPS 202 SHA-3 domain suffix `0x06`, while the SHAKE XOFs
 use the FIPS 202 SHAKE suffix `0x1f`. This keeps the internal sponge reusable
 across both fixed-output hashing and variable-length output generation.
+
+The SHA-1 and SHA-2 implementations follow the FIPS 180-4 Merkle-Damgard
+constructions directly. The SHA-2 set includes both the 32-bit word family and
+the 64-bit word family, including the truncated SHA-512 variants.
+
+`Hmac<H>` follows the standard FIPS 198-1 / RFC 2104 inner-pad / outer-pad
+construction over the hash function's byte-oriented block size. For the SHA-3
+family, that means the Keccak rate in bytes, which is the block size used by
+HMAC-SHA3.
 
 `CtrDrbgAes256` follows the SP 800-90A Rev. 1 AES-256 CTR_DRBG construction in
 its no-derivation-function form. It stores the 256-bit key and 128-bit `V`
@@ -1099,6 +1113,28 @@ are included here so the prose and the bibliography stay in sync.
   year        = {2015},
   month       = aug,
   url         = {https://csrc.nist.gov/pubs/fips/202/final},
+}
+
+@techreport{fips180-4,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Secure Hash Standard ({SHS})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 180-4},
+  year        = {2015},
+  month       = aug,
+  url         = {https://csrc.nist.gov/pubs/fips/180-4/upd1/final},
+}
+
+@techreport{fips198-1,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {The Keyed-Hash Message Authentication Code ({HMAC})},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 198-1},
+  year        = {2008},
+  month       = jul,
+  url         = {https://csrc.nist.gov/pubs/fips/198-1/final},
 }
 
 @misc{sp800-90a-r1,
