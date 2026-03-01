@@ -697,11 +697,11 @@ differing primarily in having published, fixed S-boxes rather than secret ones.
 The round function `g[k](a)` operates on a 32-bit half-block:
 
 ```math
-g[k](a) = \operatorname{rotl}_{11}(t(a + k \bmod 2^{32}))
+g[k](a) = \mathrm{rotl}_{11}(t(a + k \bmod 2^{32}))
 ```
 
 where `t` applies eight independent 4-bit S-boxes ($\Pi'_0 .. \Pi'_7$) to the
-eight nibbles of the 32-bit word, and $\operatorname{rotl}_{11}$ rotates the
+eight nibbles of the 32-bit word, and $\mathrm{rotl}_{11}$ rotates the
 result left by 11 bits.
 
 Each Feistel step is:
