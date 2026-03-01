@@ -4,6 +4,8 @@
 //! prime inputs, public modulus `n = p^2 q`, and private decryption exponent
 //! modulo `gamma = p q`. Padding and randomized wrappers come later.
 
+use core::fmt;
+
 use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{is_probable_prime, lcm, mod_inverse, mod_pow};
 
@@ -14,7 +16,7 @@ pub struct SchmidtSamoaPublicKey {
 }
 
 /// Private key for the raw Schmidt-Samoa primitive.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct SchmidtSamoaPrivateKey {
     d: BigUint,
     gamma: BigUint,
@@ -31,6 +33,10 @@ impl SchmidtSamoaPublicKey {
     }
 
     /// Apply the raw public map `m^n mod n`.
+    ///
+    /// Unlike textbook RSA, the public exponent is the modulus `n` itself.
+    /// The inverse map recovers the original message only for values
+    /// interpreted in the range `[0, gamma)`, where `gamma = p q`.
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         mod_pow(message, &self.n, &self.n)
@@ -51,9 +57,18 @@ impl SchmidtSamoaPrivateKey {
     }
 
     /// Apply the raw private map `c^d mod gamma`.
+    ///
+    /// This recovers the original message only for plaintexts represented in
+    /// the range `[0, gamma)`.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         mod_pow(ciphertext, &self.d, &self.gamma)
+    }
+}
+
+impl fmt::Debug for SchmidtSamoaPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SchmidtSamoaPrivateKey(<redacted>)")
     }
 }
 
@@ -73,6 +88,9 @@ impl SchmidtSamoa {
 
         let p_minus_one = p.sub_ref(&BigUint::one());
         let q_minus_one = q.sub_ref(&BigUint::one());
+        // This explicit divisibility check is equivalent to the later
+        // `mod_inverse(...)?` failure, but keeping it here makes the Python
+        // parameter restriction visible at the key-derivation boundary.
         if q_minus_one.modulo(p).is_zero() || p_minus_one.modulo(q).is_zero() {
             return None;
         }
@@ -99,9 +117,10 @@ mod tests {
     fn derive_small_reference_key() {
         let p = BigUint::from_u64(3);
         let q = BigUint::from_u64(5);
-        let (public, private) =
-            SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
+        let (public, private) = SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
         assert_eq!(public.modulus(), &BigUint::from_u64(45));
+        // With p = 3 and q = 5, n = 45 ≡ 1 (mod lcm(2, 4)), so the modular
+        // inverse used for the private exponent collapses to d = 1.
         assert_eq!(private.exponent(), &BigUint::from_u64(1));
         assert_eq!(private.gamma(), &BigUint::from_u64(15));
     }
@@ -110,8 +129,7 @@ mod tests {
     fn roundtrip_small_messages() {
         let p = BigUint::from_u64(3);
         let q = BigUint::from_u64(5);
-        let (public, private) =
-            SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
+        let (public, private) = SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
 
         for msg in [0u64, 1, 2, 7, 14] {
             let message = BigUint::from_u64(msg);
@@ -125,8 +143,7 @@ mod tests {
     fn exact_small_ciphertext_matches_reference() {
         let p = BigUint::from_u64(3);
         let q = BigUint::from_u64(5);
-        let (public, private) =
-            SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
+        let (public, private) = SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
         let message = BigUint::from_u64(7);
         let ciphertext = public.encrypt_raw(&message);
         assert_eq!(ciphertext, BigUint::from_u64(37));
@@ -142,5 +159,8 @@ mod tests {
         let p = BigUint::from_u64(3);
         let composite = BigUint::from_u64(21);
         assert!(SchmidtSamoa::from_primes(&p, &composite).is_none());
+
+        let p = BigUint::from_u64(5);
+        assert!(SchmidtSamoa::from_primes(&p, &p).is_none());
     }
 }

@@ -4,6 +4,10 @@
 //! repeated-squaring modular exponentiation plus Miller-Rabin with a fixed
 //! witness set. The fixed bases keep the implementation deterministic and easy
 //! to test while we are still in the pure-Rust, dependency-free foundation.
+//!
+//! A smaller `u128`-bounded Miller-Rabin helper also exists in
+//! `crate::cprng::primes`; the duplication is intentional because the
+//! arithmetic types and intended use-cases differ.
 
 use super::bigint::{BigInt, BigUint};
 
@@ -73,11 +77,15 @@ fn decompose_n_minus_one(n: &BigUint) -> (BigUint, usize) {
     (odd_factor, two_adic_exponent)
 }
 
-fn is_witness(base: &BigUint, candidate: &BigUint) -> bool {
+fn is_witness(
+    base: &BigUint,
+    candidate: &BigUint,
+    odd_factor: &BigUint,
+    two_adic_exponent: usize,
+) -> bool {
     let one = BigUint::one();
     let n_minus_one = candidate.sub_ref(&one);
-    let (odd_factor, two_adic_exponent) = decompose_n_minus_one(candidate);
-    let mut value = mod_pow(base, &odd_factor, candidate);
+    let mut value = mod_pow(base, odd_factor, candidate);
 
     for _ in 0..two_adic_exponent {
         let next = BigUint::mod_mul(&value, &value, candidate);
@@ -119,15 +127,19 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
     if !candidate.is_odd() {
         return false;
     }
+    if bases.is_empty() {
+        return false;
+    }
 
     let n_minus_one = candidate.sub_ref(&BigUint::one());
+    let (odd_factor, two_adic_exponent) = decompose_n_minus_one(candidate);
 
     for &base in bases {
         let witness = BigUint::from_u64(base);
         if witness >= n_minus_one {
             continue;
         }
-        if is_witness(&witness, candidate) {
+        if is_witness(&witness, candidate, &odd_factor, two_adic_exponent) {
             return false;
         }
     }

@@ -331,6 +331,51 @@ The dataset uses only the fast cipher implementations. The `Ct` variants are
 not separate classes because they should emit exactly the same bits as the fast
 path for the same key and input.
 
+## Public-Key How To
+
+The public-key module keeps the raw arithmetic primitives separate from the
+standards-based usage layer:
+
+- raw math: `Rsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
+- standards-facing RSA wrappers: `RsaOaep<H>` and `RsaPss<H>`
+
+Generate a teaching-sized RSA key pair from a CSPRNG:
+
+```rust
+use cryptography::{CtrDrbgAes256, Rsa};
+
+let seed = [0x55u8; 48];
+let mut drbg = CtrDrbgAes256::new(&seed);
+let (public, private) = Rsa::generate(&mut drbg, 512).expect("RSA key");
+```
+
+Encrypt and decrypt with `RSAES-OAEP`:
+
+```rust
+use cryptography::{RsaOaep, Sha1};
+
+let oaep_seed = [0x11u8; 20];
+let ciphertext =
+    RsaOaep::<Sha1>::encrypt(&public, b"", b"hello", &oaep_seed).expect("OAEP");
+let plaintext = RsaOaep::<Sha1>::decrypt(&private, b"", &ciphertext).expect("OAEP");
+
+assert_eq!(plaintext, b"hello");
+```
+
+Sign and verify with `RSASSA-PSS`:
+
+```rust
+use cryptography::{RsaPss, Sha256};
+
+let salt = [0x22u8; 16];
+let signature = RsaPss::<Sha256>::sign(&private, b"message", &salt).expect("PSS");
+assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
+```
+
+The raw primitives still expose the bare modular maps for teaching and direct
+comparison with the companion Python code. The wrapper layer is where the
+standards-compliant formatting lives.
+
 Generate a balanced dataset of raw samples:
 
 ```text

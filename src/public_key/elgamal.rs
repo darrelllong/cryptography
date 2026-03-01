@@ -4,6 +4,8 @@
 //! explicit group parameters plus the bare multiplicative encrypt/decrypt
 //! transform. Random key generation and message encoding stay in later layers.
 
+use core::fmt;
+
 use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{is_probable_prime, mod_pow};
 
@@ -16,7 +18,7 @@ pub struct ElGamalPublicKey {
 }
 
 /// Private key for the raw `ElGamal` primitive.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ElGamalPrivateKey {
     p: BigUint,
     a: BigUint,
@@ -100,6 +102,12 @@ impl ElGamalPrivateKey {
         let exponent = self.p.sub_ref(&BigUint::one()).sub_ref(&self.a);
         let factor = mod_pow(&ciphertext.gamma, &exponent, &self.p);
         BigUint::mod_mul(&factor, &ciphertext.delta, &self.p)
+    }
+}
+
+impl fmt::Debug for ElGamalPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ElGamalPrivateKey(<redacted>)")
     }
 }
 

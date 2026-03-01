@@ -4,6 +4,8 @@
 //! encryption prepends a fixed CRC tag and adds `n / 2` before squaring so the
 //! decryptor can distinguish the intended square root among the four CRT roots.
 
+use core::fmt;
+
 use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow};
 
@@ -16,7 +18,7 @@ pub struct RabinPublicKey {
 }
 
 /// Private key for the raw Rabin primitive.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct RabinPrivateKey {
     p: BigUint,
     q: BigUint,
@@ -64,8 +66,16 @@ impl RabinPrivateKey {
         let half = half_modulus(&n);
         let tag_modulus = BigUint::from_u64(1u64 << 32);
 
-        let p_exponent = self.p.add_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
-        let q_exponent = self.q.add_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
+        let p_exponent = self
+            .p
+            .add_ref(&BigUint::one())
+            .div_rem(&BigUint::from_u64(4))
+            .0;
+        let q_exponent = self
+            .q
+            .add_ref(&BigUint::one())
+            .div_rem(&BigUint::from_u64(4))
+            .0;
         let m_p = mod_pow(ciphertext, &p_exponent, &self.p);
         let m_q = mod_pow(ciphertext, &q_exponent, &self.q);
 
@@ -94,6 +104,12 @@ impl RabinPrivateKey {
         }
 
         None
+    }
+}
+
+impl fmt::Debug for RabinPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RabinPrivateKey(<redacted>)")
     }
 }
 
@@ -180,7 +196,9 @@ mod tests {
         for msg in [0u64, 1] {
             let message = BigUint::from_u64(msg);
             let ciphertext = public.encrypt_raw(&message).expect("message fits");
-            let plaintext = private.decrypt_raw(&ciphertext).expect("tagged root exists");
+            let plaintext = private
+                .decrypt_raw(&ciphertext)
+                .expect("tagged root exists");
             assert_eq!(plaintext, message);
         }
     }

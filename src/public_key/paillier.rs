@@ -5,6 +5,8 @@
 //! multiplicative encryption formula over `n^2`. Random key generation and
 //! message encoding stay in later layers.
 
+use core::fmt;
+
 use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{gcd, is_probable_prime, lcm, mod_inverse, mod_pow};
 
@@ -16,7 +18,7 @@ pub struct PaillierPublicKey {
 }
 
 /// Private key for the raw Paillier primitive.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct PaillierPrivateKey {
     n: BigUint,
     lambda: BigUint,
@@ -85,6 +87,12 @@ impl PaillierPrivateKey {
     }
 }
 
+impl fmt::Debug for PaillierPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("PaillierPrivateKey(<redacted>)")
+    }
+}
+
 impl Paillier {
     /// Derive a raw Paillier key pair from explicit primes and an explicit
     /// public base.
@@ -121,10 +129,7 @@ impl Paillier {
         let u = mod_inverse(&lifted, &n)?;
 
         Some((
-            PaillierPublicKey {
-                n: n.clone(),
-                zeta,
-            },
+            PaillierPublicKey { n: n.clone(), zeta },
             PaillierPrivateKey { n, lambda, u },
         ))
     }
@@ -135,7 +140,10 @@ impl Paillier {
     /// simple choice and lets the raw primitive be constructed without adding a
     /// separate randomness layer yet.
     #[must_use]
-    pub fn from_primes(p: &BigUint, q: &BigUint) -> Option<(PaillierPublicKey, PaillierPrivateKey)> {
+    pub fn from_primes(
+        p: &BigUint,
+        q: &BigUint,
+    ) -> Option<(PaillierPublicKey, PaillierPrivateKey)> {
         let n = p.mul_ref(q);
         let base = n.add_ref(&BigUint::one());
         Self::from_primes_with_base(p, q, &base)
@@ -145,7 +153,10 @@ impl Paillier {
 fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
     let shifted = value.sub_ref(&BigUint::one());
     let (quotient, remainder) = shifted.div_rem(modulus);
-    debug_assert!(remainder.is_zero(), "Paillier L input is congruent to 1 mod n");
+    debug_assert!(
+        remainder.is_zero(),
+        "Paillier L input is congruent to 1 mod n"
+    );
     quotient
 }
 

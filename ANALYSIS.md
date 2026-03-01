@@ -147,14 +147,16 @@ trait shape, but they are not substitutes for modern DRBG deployments.
 ## Public-Key Primitives
 
 - References: `cocks-1973`, `rsa-1978`, `elgamal-1985`, `rabin-1979`,
-  `paillier-1999`, `schmidt-samoa-2005`.
+  `paillier-1999`, `schmidt-samoa-2005`, `rfc8017`, `sp800-56b-r2`,
+  `fips186-5`.
 - Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, and
-  `SchmidtSamoa`.
-- Scope: these are the naked arithmetic primitives from the companion Python
-  code. They do not yet add padding, encoding, signatures, KEM wrapping, or
-  randomized key generation helpers.
+  `SchmidtSamoa`, plus `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA
+  encryption and signatures.
+- Scope: the non-RSA schemes are still the naked arithmetic primitives from
+  the companion Python code. RSA now has a separate standards-facing wrapper
+  layer above the raw trapdoor permutation.
 
-For the future "usable" layer, the standards path is clear primarily for RSA:
+The standards path is clear primarily for RSA:
 
 - `RFC 8017` for `RSAES-OAEP`, `RSASSA-PSS`, and the legacy PKCS #1 v1.5
   formats
@@ -171,11 +173,12 @@ The public-key layer is intentionally separated into:
 - `primes`: repeated-squaring modular exponentiation, Miller-Rabin, `gcd`,
   `lcm`, and modular inverse
 - one file per raw scheme
+- `rsa_pkcs1`: standards-based RSA wrappers (`OAEP` and `PSS`)
 
 That mirrors the earlier cipher layering: get the math right first, then add
-protocol-safe framing later. The current code is therefore best read as a
-reference implementation of the core trapdoor operations, not as a complete
-drop-in PKE toolkit.
+protocol-safe framing. The current code is therefore best read as a reference
+implementation of the core trapdoor operations, with RSA as the first scheme
+that also has an immediately usable standards-compliant layer.
 
 ---
 
@@ -207,7 +210,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
 | Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
 | CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
-| Public-key primitives | `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, round-trips, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
+| Public-key primitives | `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, RSA OAEP/PSS wrapper tests, round-trips, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
 
 ---
 

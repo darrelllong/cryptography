@@ -5,6 +5,8 @@
 //! responsible for mapping messages into the integer domain expected by the
 //! scheme.
 
+use core::fmt;
+
 use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow};
 
@@ -15,7 +17,7 @@ pub struct CocksPublicKey {
 }
 
 /// Private key for the raw Cocks primitive.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct CocksPrivateKey {
     pi: BigUint,
     q: BigUint,
@@ -33,10 +35,17 @@ impl CocksPublicKey {
 
     /// Encrypt the raw integer message.
     ///
-    /// This follows the teaching implementation directly: `c = m^n mod n`.
+    /// This follows the teaching implementation directly: `c = m^n mod n`,
+    /// where the public exponent is the modulus `n` itself.
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         mod_pow(message, &self.n, &self.n)
+    }
+}
+
+impl fmt::Debug for CocksPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CocksPrivateKey(<redacted>)")
     }
 }
 
@@ -78,13 +87,7 @@ impl Cocks {
         let pi = mod_inverse(p, &q_minus_one)?;
         let n = p.mul_ref(q);
 
-        Some((
-            CocksPublicKey { n },
-            CocksPrivateKey {
-                pi,
-                q: q.clone(),
-            },
-        ))
+        Some((CocksPublicKey { n }, CocksPrivateKey { pi, q: q.clone() }))
     }
 }
 
@@ -107,8 +110,7 @@ mod tests {
     fn roundtrip_small_messages() {
         let prime_p = BigUint::from_u64(19);
         let prime_q = BigUint::from_u64(23);
-        let (public, private) =
-            Cocks::from_primes(&prime_p, &prime_q).expect("valid Cocks key");
+        let (public, private) = Cocks::from_primes(&prime_p, &prime_q).expect("valid Cocks key");
 
         for msg in [0u64, 1, 2, 7, 11, 22] {
             let message = BigUint::from_u64(msg);
@@ -133,6 +135,8 @@ mod tests {
     fn rejects_non_invertible_choice() {
         let p = BigUint::from_u64(23);
         let q = BigUint::from_u64(47);
+        // Here q - 1 = 46 is divisible by p = 23, so p has no inverse modulo
+        // q - 1 and the Cocks private exponent cannot be formed.
         assert!(Cocks::from_primes(&p, &q).is_none());
     }
 }

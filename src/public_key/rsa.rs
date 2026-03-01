@@ -5,8 +5,11 @@
 //! modular exponentiation for encrypt/decrypt. Padding, encoding, and hybrid
 //! KEM/PKE framing are separate layers.
 
+use core::fmt;
+
 use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{gcd, is_probable_prime, lcm, mod_inverse, mod_pow};
+use crate::Csprng;
 
 /// Public key for the raw RSA primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -16,7 +19,7 @@ pub struct RsaPublicKey {
 }
 
 /// Private key for the raw RSA primitive.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct RsaPrivateKey {
     d: BigUint,
     n: BigUint,
@@ -65,6 +68,12 @@ impl RsaPrivateKey {
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         mod_pow(ciphertext, &self.d, &self.n)
+    }
+}
+
+impl fmt::Debug for RsaPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RsaPrivateKey(<redacted>)")
     }
 }
 
@@ -132,12 +141,80 @@ impl Rsa {
             exponent_bit += 1;
         }
     }
+
+    /// Generate a teaching-sized RSA key pair from a CSPRNG and explicit
+    /// public exponent.
+    ///
+    /// This keeps the raw primitive usable without forcing callers to provide
+    /// their own prime search. The generated primes are only screened with the
+    /// in-tree Miller-Rabin helper, so this is appropriate for demonstration
+    /// and testing rather than high-assurance production key generation.
+    #[must_use]
+    pub fn generate_with_exponent<R: Csprng>(
+        rng: &mut R,
+        bits: usize,
+        exponent: &BigUint,
+    ) -> Option<(RsaPublicKey, RsaPrivateKey)> {
+        if bits < 32 {
+            return None;
+        }
+
+        let p_bits = bits / 2;
+        let q_bits = bits - p_bits;
+        loop {
+            let p = random_probable_prime(rng, p_bits);
+            let q = random_probable_prime(rng, q_bits);
+            if let Some(keypair) = Self::from_primes_with_exponent(&p, &q, exponent) {
+                return Some(keypair);
+            }
+        }
+    }
+
+    /// Generate a teaching-sized RSA key pair using the Python reference's
+    /// default exponent search.
+    #[must_use]
+    pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(RsaPublicKey, RsaPrivateKey)> {
+        if bits < 32 {
+            return None;
+        }
+
+        let p_bits = bits / 2;
+        let q_bits = bits - p_bits;
+        loop {
+            let p = random_probable_prime(rng, p_bits);
+            let q = random_probable_prime(rng, q_bits);
+            if let Some(keypair) = Self::from_primes(&p, &q) {
+                return Some(keypair);
+            }
+        }
+    }
+}
+
+fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> BigUint {
+    let mut bytes = vec![0u8; bits.div_ceil(8)];
+    let top_bit = (bits - 1) % 8;
+    let excess_bits = bytes.len() * 8 - bits;
+    let top_mask = 0xff_u8 >> excess_bits;
+    loop {
+        rng.fill_bytes(&mut bytes);
+        bytes[0] &= top_mask;
+        bytes[0] |= 1u8 << top_bit;
+        let last = bytes.len() - 1;
+        bytes[last] |= 1;
+
+        let candidate = BigUint::from_be_bytes(&bytes);
+        if is_probable_prime(&candidate) {
+            crate::ct::zeroize_slice(bytes.as_mut_slice());
+            return candidate;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Rsa;
     use crate::public_key::bigint::BigUint;
+    use crate::CtrDrbgAes256;
 
     #[test]
     fn derive_reference_key_with_default_exponent() {
@@ -185,8 +262,7 @@ mod tests {
 
         let left_cipher = public.encrypt_raw(&left);
         let right_cipher = public.encrypt_raw(&right);
-        let combined_cipher =
-            BigUint::mod_mul(&left_cipher, &right_cipher, public.modulus());
+        let combined_cipher = BigUint::mod_mul(&left_cipher, &right_cipher, public.modulus());
         let decrypted = private.decrypt_raw(&combined_cipher);
         let expected = BigUint::mod_mul(&left, &right, public.modulus());
 
@@ -210,5 +286,16 @@ mod tests {
         let q = BigUint::from_u64(13);
         let exponent = BigUint::from_u64(3);
         assert!(Rsa::from_primes_with_exponent(&p, &q, &exponent).is_none());
+    }
+
+    #[test]
+    fn generate_teaching_keypair() {
+        let seed = [0x55u8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Rsa::generate(&mut drbg, 64).expect("generated RSA key");
+        assert!(public.modulus().bits() >= 63);
+        let message = BigUint::from_u64(42);
+        let ciphertext = public.encrypt_raw(&message);
+        assert_eq!(private.decrypt_raw(&ciphertext), message);
     }
 }

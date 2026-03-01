@@ -89,8 +89,8 @@ impl BigUint {
             return Self::zero();
         }
 
-        let lo = u64::try_from(value & u128::from(u64::MAX))
-            .expect("low 64 bits always fit into u64");
+        let lo =
+            u64::try_from(value & u128::from(u64::MAX)).expect("low 64 bits always fit into u64");
         let hi = u64::try_from(value >> 64).expect("high 64 bits always fit into u64");
         if hi == 0 {
             Self { limbs: vec![lo] }
@@ -102,6 +102,8 @@ impl BigUint {
     }
 
     /// Decode big-endian bytes.
+    ///
+    /// Internally, limb 0 always stores the least-significant 64 bits.
     #[must_use]
     pub fn from_be_bytes(bytes: &[u8]) -> Self {
         if bytes.is_empty() {
@@ -132,6 +134,10 @@ impl BigUint {
     }
 
     /// Encode as big-endian bytes without leading zero bytes.
+    ///
+    /// Internally, limb 0 stores the least-significant 64 bits, so encoding
+    /// walks the limbs in reverse order and strips only the leading zero bytes
+    /// introduced by the fixed-width `u64` representation.
     ///
     /// # Panics
     ///
@@ -318,8 +324,7 @@ impl BigUint {
             let mut carry = 0u128;
             for (j, &rhs) in other.limbs.iter().enumerate() {
                 let idx = i + j;
-                let acc =
-                    u128::from(out[idx]) + u128::from(lhs) * u128::from(rhs) + carry;
+                let acc = u128::from(out[idx]) + u128::from(lhs) * u128::from(rhs) + carry;
                 out[idx] = low_u64(acc);
                 carry = acc >> 64;
             }
@@ -334,6 +339,9 @@ impl BigUint {
         }
 
         let mut result = Self { limbs: out };
+        // A normalized non-zero multiplicand and multiplier cannot produce a
+        // spuriously zero high limb except through the carry chain itself, so
+        // one post-pass normalization is enough.
         result.normalize();
         result
     }
@@ -354,6 +362,8 @@ impl BigUint {
         if carry != 0 {
             self.limbs.push(carry);
         }
+        // A left shift on an already-normalized value cannot introduce a
+        // leading zero limb, so no normalize() pass is required here.
     }
 
     /// Shift right by one bit.
@@ -401,6 +411,11 @@ impl BigUint {
     }
 
     /// Compute `(lhs * rhs) mod modulus` using double-and-add.
+    ///
+    /// This is intentionally the simple teaching implementation. It keeps the
+    /// value reduced at each step so intermediate products never explode in
+    /// size, but the repeated division-based reductions make it much slower
+    /// than Montgomery multiplication for real public-key sizes.
     ///
     /// # Panics
     ///
@@ -463,6 +478,12 @@ impl BigUint {
         while self.limbs.last().copied() == Some(0) {
             self.limbs.pop();
         }
+    }
+}
+
+impl Drop for BigUint {
+    fn drop(&mut self) {
+        crate::ct::zeroize_slice(self.limbs.as_mut_slice());
     }
 }
 
@@ -620,9 +641,8 @@ mod tests {
 
     #[test]
     fn bytes_roundtrip() {
-        let value = BigUint::from_be_bytes(&[
-            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22,
-        ]);
+        let value =
+            BigUint::from_be_bytes(&[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22]);
         assert_eq!(
             value.to_be_bytes(),
             vec![0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22]
@@ -634,8 +654,14 @@ mod tests {
         let a = BigUint::from_u128(1_000_000_000_000);
         let b = BigUint::from_u128(777_777_777_777);
         assert_eq!(a.add_ref(&b), BigUint::from_u128(1_777_777_777_777));
-        assert_eq!(a.sub_ref(&BigUint::from_u64(1)), BigUint::from_u128(999_999_999_999));
-        assert_eq!(a.mul_ref(&b), BigUint::from_u128(777_777_777_777_000_000_000_000));
+        assert_eq!(
+            a.sub_ref(&BigUint::from_u64(1)),
+            BigUint::from_u128(999_999_999_999)
+        );
+        assert_eq!(
+            a.mul_ref(&b),
+            BigUint::from_u128(777_777_777_777_000_000_000_000)
+        );
     }
 
     #[test]
@@ -653,10 +679,7 @@ mod tests {
         let a = BigUint::from_u64(123_456_789);
         let b = BigUint::from_u64(987_654_321);
         let m = BigUint::from_u64(1_000_000_007);
-        assert_eq!(
-            BigUint::mod_mul(&a, &b, &m),
-            BigUint::from_u64(259_106_859)
-        );
+        assert_eq!(BigUint::mod_mul(&a, &b, &m), BigUint::from_u64(259_106_859));
     }
 
     #[test]
@@ -674,7 +697,10 @@ mod tests {
         let a = BigInt::from_biguint(BigUint::from_u64(10));
         let b = BigInt::from_parts(Sign::Negative, BigUint::from_u64(3));
         assert_eq!(a.add_ref(&b), BigInt::from_biguint(BigUint::from_u64(7)));
-        assert_eq!(b.sub_ref(&a), BigInt::from_parts(Sign::Negative, BigUint::from_u64(13)));
+        assert_eq!(
+            b.sub_ref(&a),
+            BigInt::from_parts(Sign::Negative, BigUint::from_u64(13))
+        );
         assert_eq!(
             BigInt::from_parts(Sign::Negative, BigUint::from_u64(3))
                 .modulo_positive(&BigUint::from_u64(11)),

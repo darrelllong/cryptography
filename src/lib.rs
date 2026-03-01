@@ -88,13 +88,10 @@ pub use hash::{Digest, Xof};
 pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, Gmac, Ofb, Xts};
 pub use public_key::bigint::{BigInt, BigUint, Sign};
 pub use public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
-pub use public_key::elgamal::{
-    ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey,
-};
+pub use public_key::elgamal::{ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey};
 pub use public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
 pub use public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};
 pub use public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
-pub use public_key::schmidt_samoa::{
-    SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey,
-};
+pub use public_key::rsa_pkcs1::{RsaOaep, RsaPss};
+pub use public_key::schmidt_samoa::{SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey};
 pub use public_key::{bigint, primes};
