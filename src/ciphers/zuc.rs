@@ -152,9 +152,15 @@ fn nonlinear_f<const CT: bool>(core: &mut ZucCore, x0: u32, x1: u32, x2: u32) ->
     let w = (x0 ^ core.r1).wrapping_add(core.r2);
     let w1 = core.r1.wrapping_add(x1);
     let w2 = core.r2 ^ x2;
-    let sbox_fn = if CT { sbox_ct } else { sbox };
-    core.r1 = sbox_fn(l1((w1 << 16) | (w2 >> 16)));
-    core.r2 = sbox_fn(l2((w2 << 16) | (w1 >> 16)));
+    // Keep the CT choice as a const-folded branch so monomorphization leaves
+    // direct calls in the hot loop instead of an indirect fn-pointer dispatch.
+    if CT {
+        core.r1 = sbox_ct(l1((w1 << 16) | (w2 >> 16)));
+        core.r2 = sbox_ct(l2((w2 << 16) | (w1 >> 16)));
+    } else {
+        core.r1 = sbox(l1((w1 << 16) | (w2 >> 16)));
+        core.r2 = sbox(l2((w2 << 16) | (w1 >> 16)));
+    }
     w
 }
 

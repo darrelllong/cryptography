@@ -8,6 +8,7 @@ pub mod ciphers;
 pub mod cprng;
 pub mod hash;
 pub mod modes;
+pub mod public_key;
 
 pub use ciphers::{
     aes, camellia, cast128, chacha20, des, grasshopper, magma, present, salsa20, seed, serpent,
@@ -85,3 +86,6 @@ pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
 pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, Gmac, Ofb, Xts};
+pub use public_key::bigint::{BigInt, BigUint, Sign};
+pub use public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
+pub use public_key::{bigint, primes};

@@ -5,7 +5,7 @@
 //! from the first 16 bytes of a 24-byte nonce, then uses the remaining 8 bytes
 //! in the IETF `ChaCha20` layout.
 //!
-//! The design intent is the same as in the ChaCha paper and later RFC profile:
+//! The design intent is the same as in the `ChaCha` paper and later RFC profile:
 //! keep the core purely ARX (add-rotate-XOR) so software implementations are
 //! fast, portable, and naturally closer to constant-time than table-driven
 //! stream ciphers.
