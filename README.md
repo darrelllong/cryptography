@@ -20,6 +20,14 @@ Implemented families:
 - SM4 / SMS4 plus `Sm4Ct`
 - ZUC-128 plus `Zuc128Ct`
 
+Supporting primitives:
+
+- SHA-3 (`Sha3_224/256/384/512`)
+- SHAKE (`Shake128`, `Shake256`)
+- Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`
+- Historical CSPRNGs: `BlumBlumShub`, `BlumMicali`
+- SP 800-90A Rev. 1: `CtrDrbgAes256`
+
 See [ANALYSIS.md](ANALYSIS.md) for algorithm notes, coverage, and the current
 benchmark numbers for this host.
 
@@ -71,6 +79,49 @@ let pt = cipher.decrypt_block(&ct);
 assert_eq!(pt, block);
 ```
 
+### Modes of operation example
+
+The generic mode wrappers accept any `BlockCipher` in the crate:
+
+```rust
+use cryptography::{Aes128, Cbc, Cmac, Ctr, Gcm, Xts};
+
+let cipher = Aes128::new(&[0u8; 16]);
+
+let mut cbc_buf = [0u8; 32];
+let iv = [0u8; 16];
+Cbc::new(cipher).encrypt_nopad(&iv, &mut cbc_buf);
+
+let mut ctr_buf = [0u8; 37];
+let counter = [0u8; 16];
+Ctr::new(Aes128::new(&[0u8; 16])).apply_keystream(&counter, &mut ctr_buf);
+
+let tag = Cmac::new(Aes128::new(&[0u8; 16])).compute(b"header and body");
+assert_eq!(tag.len(), 16);
+
+let mut gcm_buf = [0u8; 23];
+let nonce = [0u8; 12];
+let aad = b"header";
+let tag = Gcm::new(Aes128::new(&[0u8; 16])).encrypt(&nonce, aad, &mut gcm_buf);
+assert!(Gcm::new(Aes128::new(&[0u8; 16])).decrypt(&nonce, aad, &mut gcm_buf, &tag));
+
+let mut sector = [0u8; 32];
+let tweak = [0u8; 16];
+Xts::new(Aes128::new(&[0u8; 16]), Aes128::new(&[1u8; 16])).encrypt_sector(&tweak, &mut sector);
+```
+
+The current mode layer implements:
+
+- SP 800-38A: ECB, CBC, CFB (full-block), OFB, CTR
+- SP 800-38B: CMAC
+- SP 800-38D: GCM, GMAC
+- SP 800-38E: XTS (for 128-bit block ciphers)
+
+RFC 8452's AES-GCM-SIV was reviewed while designing this layer. It is a
+nonce-misuse-resistant AEAD built around AES and `POLYVAL`, so it belongs in a
+later authenticated-encryption layer rather than in the basic mode adapters
+added here.
+
 ### Stream-cipher example
 
 ZUC produces keystream words and can fill a caller-supplied buffer:
@@ -82,6 +133,35 @@ let mut buf = [0u8; 64];
 let zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]);
 
 zuc.fill(&mut buf);
+```
+
+### Hash / XOF example
+
+SHA-3 exposes fixed-output hashes, and SHAKE exposes extendable-output
+functions:
+
+```rust
+use cryptography::{Sha3_256, Shake128};
+
+let digest = Sha3_256::digest(b"abc");
+let mut out = [0u8; 32];
+Shake128::digest(b"abc", &mut out);
+
+assert_eq!(digest.len(), 32);
+assert_eq!(out.len(), 32);
+```
+
+### CSPRNG example
+
+The shared `Csprng` trait lets callers fill caller-owned buffers regardless of
+which generator is underneath:
+
+```rust
+use cryptography::{Csprng, CtrDrbgAes256};
+
+let mut drbg = CtrDrbgAes256::new(&[0u8; 48]);
+let mut out = [0u8; 32];
+drbg.fill_bytes(&mut out);
 ```
 
 ### Fast vs `Ct` variants
@@ -148,6 +228,12 @@ Coverage is in-module, not in separate test scripts. Each cipher family ships
 its own known-answer vectors and fast-vs-`Ct` equivalence tests where both
 paths exist.
 
+The generic mode layer is covered in-module too:
+
+```text
+cargo test modes::tests
+```
+
 ## How To Benchmark
 
 The benchmark targets live in the separate `benchmarks/` crate so the root
@@ -172,14 +258,11 @@ Run the AES-focused comparison benchmark:
 cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
 ```
 
-`aes_bench` compares the crate's AES implementations against libsodium. It
-requires a working `libsodium` installation. This is a calibration benchmark,
-not a strict apples-to-apples comparison: the crate's rows are raw AES block
-cipher throughput, while the libsodium `secretbox` rows are a complete
-XSalsa20-Poly1305 authenticated-encryption construction. The libsodium
-AES-256-GCM row, when available, is also an AEAD and is feature-detected at
-runtime, so it may be skipped if `sodiumoxide` reports that hardware AES is
-unavailable.
+`aes_bench` compares the crate's AES implementations against libsodium
+`secretbox`. This is a calibration benchmark, not a strict apples-to-apples
+comparison: the crate's rows are raw AES block-cipher throughput, while the
+libsodium row is a complete XSalsa20-Poly1305 authenticated-encryption
+construction.
 
 ## ML Distinguisher Experiment
 
@@ -232,7 +315,7 @@ This writes the trained model and weights to `ml/out/`:
 ## Local PDFs
 
 The `pubs/` directory now carries one or more local PDFs for every cipher
-family covered in this repository:
+family and supporting primitive covered in this repository:
 
 - AES: `fips197.pdf`, `boyar-peralta-2011-a-depth-16-circuit-for-the-aes-s-box.pdf`
 - CAST-128 / CAST5: `rfc2144-cast128.pdf`
@@ -242,6 +325,9 @@ family covered in this repository:
 - Serpent: `serpent.pdf`
 - Twofish: `twofish-paper.pdf`
 - SEED: `rfc4009-seed-algorithm.pdf`, `rfc4196-seed-ipsec.pdf`
+- SHA-3 / SHAKE: `fips202.pdf`
+- DRBGs: `sp800-90a-r1.pdf`
+- Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
 - Magma: `rfc8891-magma.pdf`
@@ -273,6 +359,82 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year        = {2001},
   month       = nov,
   url         = {https://csrc.nist.gov/publications/detail/fips/197/final},
+}
+
+@techreport{fips202,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {{SHA}-3 Standard: Permutation-Based Hash and Extendable-Output Functions},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 202},
+  year        = {2015},
+  month       = aug,
+  url         = {https://csrc.nist.gov/pubs/fips/202/final},
+}
+
+@misc{sp800-90a-r1,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Random Number Generation Using Deterministic Random Bit Generators},
+  howpublished = {Special Publication 800-90A Revision 1},
+  year         = {2015},
+  month        = jun,
+  url          = {https://csrc.nist.gov/pubs/sp/800/90/a/r1/final},
+}
+
+@misc{sp800-38a,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: Methods and Techniques},
+  howpublished = {Special Publication 800-38A},
+  year         = {2001},
+  month        = dec,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/a/final},
+}
+
+@misc{sp800-38b,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: The {CMAC} Mode for Authentication},
+  howpublished = {Special Publication 800-38B},
+  year         = {2005},
+  month        = may,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/b/final},
+}
+
+@misc{sp800-38d,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode ({GCM}) and {GMAC}},
+  howpublished = {Special Publication 800-38D},
+  year         = {2007},
+  month        = nov,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/d/final},
+}
+
+@misc{sp800-38e,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: The {XTS}-{AES} Mode for Confidentiality on Storage Devices},
+  howpublished = {Special Publication 800-38E},
+  year         = {2010},
+  month        = jan,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/e/final},
+}
+
+@misc{sp800-38f,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: Methods for Key Wrapping},
+  howpublished = {Special Publication 800-38F},
+  year         = {2012},
+  month        = dec,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/f/final},
+}
+
+@techreport{rfc8452,
+  author      = {S. Gueron and A. Langley and Y. Lindell},
+  title       = {{AES}-{GCM}-{SIV}: Nonce Misuse-Resistant Authenticated Encryption},
+  type        = {{RFC}},
+  number      = {8452},
+  institution = {IETF},
+  year        = {2019},
+  month       = apr,
+  url         = {https://www.rfc-editor.org/rfc/rfc8452},
 }
 
 @misc{boyar-peralta-2011,

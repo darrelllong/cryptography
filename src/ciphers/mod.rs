@@ -1,5 +1,7 @@
 //! Block and stream ciphers.
 
+mod simon_speck_util;
+
 pub mod aes;
 pub mod camellia;
 pub mod cast128;

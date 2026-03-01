@@ -25,6 +25,21 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
     a
 }
 
+#[inline]
+fn mul_mod(mut a: u128, mut b: u128, m: u128) -> u128 {
+    let mut out = 0u128;
+    a %= m;
+    b %= m;
+    while b != 0 {
+        if b & 1 != 0 {
+            out = (out + a) % m;
+        }
+        a = (a << 1) % m;
+        b >>= 1;
+    }
+    out
+}
+
 /// Blum Blum Shub over a `u128` modulus.
 pub struct BlumBlumShub {
     n: u128,
@@ -50,7 +65,7 @@ impl BlumBlumShub {
 
         Self {
             n,
-            state: (seed * seed) % n,
+            state: mul_mod(seed, seed, n),
         }
     }
 
@@ -62,7 +77,7 @@ impl BlumBlumShub {
     /// Return the current output bit and advance to the next state.
     pub fn next_bit(&mut self) -> u8 {
         let bit = (self.state & 1) as u8;
-        self.state = (self.state * self.state) % self.n;
+        self.state = mul_mod(self.state, self.state, self.n);
         bit
     }
 }
@@ -101,5 +116,18 @@ mod tests {
         let mut out = [0u8; 2];
         bbs.fill_bytes(&mut out);
         assert_eq!(out, [0xca, 0x0d]);
+    }
+
+    #[test]
+    fn large_modulus_above_u64_still_advances() {
+        let p = (1u128 << 32) + 15;
+        let q = (1u128 << 32) + 63;
+        let mut bbs = BlumBlumShub::new(p, q, 3);
+        let n = p * q;
+
+        for _ in 0..16 {
+            let _ = bbs.next_bit();
+            assert!(bbs.state() < n);
+        }
     }
 }

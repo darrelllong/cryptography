@@ -5,7 +5,6 @@
 //!
 //!   * our-AES-software            — AES-128/192/256 ECB
 //!   * libsodium-XSalsa20-Poly1305 — NaCl secretbox (stream cipher + MAC)
-//!   * libsodium-AES256GCM         — AES-256-GCM via hardware AES (if available)
 //!
 //! Run:
 //!   cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
@@ -101,8 +100,7 @@ fn bench_our_aes(c: &mut Criterion) {
 
 // ── NaCl / libsodium ─────────────────────────────────────────────────────────
 //
-// secretbox  = XSalsa20-Poly1305: NaCl's recommended authenticated cipher.
-// aes256gcm  = AES-256-GCM: hardware-only (AES-NI / ARMv8 Crypto).
+// secretbox = XSalsa20-Poly1305: NaCl's recommended authenticated cipher.
 //
 // Note: secretbox includes a 32-byte MAC tag in the output; the AES-ECB bench
 // above has zero overhead.  The comparison shows the full "real-world" NaCl
@@ -132,33 +130,6 @@ fn bench_nacl(c: &mut Criterion) {
         });
 
         group.finish();
-    }
-
-    // ── AES-256-GCM (libsodium, hardware-accelerated) ──
-    {
-        use sodiumoxide::crypto::aead::aes256gcm;
-        if let Ok(aes) = aes256gcm::Aes256Gcm::new() {
-            let key = aes.gen_key();
-            let nonce = aes.gen_initial_nonce();
-            let msg16 = [0u8; 16];
-            let msg1k = [0u8; 1024];
-
-            let mut group = c.benchmark_group("libsodium-AES256GCM");
-
-            group.throughput(Throughput::Bytes(16));
-            group.bench_function("16B", |b| {
-                b.iter(|| aes.seal(black_box(&msg16), None, &nonce, &key))
-            });
-
-            group.throughput(Throughput::Bytes(1024));
-            group.bench_function("1KiB", |b| {
-                b.iter(|| aes.seal(black_box(&msg1k), None, &nonce, &key))
-            });
-
-            group.finish();
-        } else {
-            eprintln!("note: AES-NI/ARMv8 not detected — skipping libsodium AES-256-GCM bench");
-        }
     }
 }
 

@@ -245,3 +245,51 @@ pub(crate) fn eval_nibble_sbox(coeffs: &[u16; 4], input: u8) -> u8 {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subset_mask8_zero_and_all_ones() {
+        let (lo0, hi0) = subset_mask8(0);
+        assert_eq!(lo0, 1);
+        assert_eq!(hi0, 0);
+
+        let (lof, hif) = subset_mask8(0xff);
+        assert_eq!(lof, u128::MAX);
+        assert_eq!(hif, u128::MAX);
+    }
+
+    #[test]
+    fn subset_mask8_single_bit() {
+        let (lo, hi) = subset_mask8(0x01);
+        assert_eq!(lo, 0b11);
+        assert_eq!(hi, 0);
+
+        let (lo, hi) = subset_mask8(0x80);
+        assert_eq!(lo, 1);
+        assert_eq!(hi, 1);
+    }
+
+    #[test]
+    fn parity_helpers_known_values() {
+        assert_eq!(parity128(0), 0);
+        assert_eq!(parity128(1), 1);
+        assert_eq!(parity128(0b1011), 1);
+        assert_eq!(parity128(u128::MAX), 0);
+
+        assert_eq!(parity16(0), 0);
+        assert_eq!(parity16(1), 1);
+        assert_eq!(parity16(0b1011), 1);
+        assert_eq!(parity16(0xffff), 0);
+    }
+
+    #[test]
+    fn ct_lookup_u8_16_picks_exact_entry() {
+        let table = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        for i in 0u8..16 {
+            assert_eq!(ct_lookup_u8_16(&table, i), i);
+        }
+    }
+}

@@ -26,6 +26,51 @@ throughput benchmarks.
 
 ---
 
+## Modes of Operation
+
+- Reference: `sp800-38a`, `sp800-38b`, `sp800-38d`, `sp800-38e`, `sp800-38f`, `rfc8452`.
+- Implemented now: generic SP 800-38A wrappers (`Ecb`, `Cbc`, `Cfb`, `Ofb`,
+  `Ctr`), SP 800-38B `Cmac`, SP 800-38D `Gcm` / `Gmac`, and SP 800-38E `Xts`.
+- Scope: these wrappers are generic over any `BlockCipher` in the crate, so
+  they work across AES, DES, Camellia, PRESENT, CAST-128, and the other block
+  ciphers without duplicating mode logic in each cipher module. `Gcm` / `Gmac`
+  and `Xts` require 128-bit block ciphers, which is the standards-constrained
+  case.
+- Not implemented yet: key wrap and RFC 8452 AES-GCM-SIV. Those require
+  dedicated framing or polynomial machinery beyond the reusable mode layer.
+
+The implemented mode layer is intentionally the reusable foundation layer: it
+makes the raw block ciphers immediately usable for standards-based
+confidentiality, storage confidentiality, and message-authentication
+constructions without baking those wrappers into each cipher module. RFC 8452
+was reviewed as part of this split; its AES-GCM-SIV design is a
+nonce-misuse-resistant AEAD around AES and `POLYVAL`, so it still belongs in a
+dedicated AEAD module rather than in the basic generic wrappers.
+
+---
+
+## Hash and CSPRNG Support
+
+- Reference: `fips202` for SHA-3 and SHAKE; `sp800-90a-r1` for `CtrDrbgAes256`.
+- Hashes: the crate now includes `Sha3_224`, `Sha3_256`, `Sha3_384`, `Sha3_512`,
+  plus the XOFs `Shake128` and `Shake256`.
+- CSPRNGs: the crate includes historical generators (`BlumBlumShub`,
+  `BlumMicali`) and a standards-based `CtrDrbgAes256`.
+- Why SHAKE matters here: `Shake128` / `Shake256` provide the XOF abstraction
+  needed for upcoming `XDRBG` work without introducing external dependencies.
+
+The SHA-3 / SHAKE implementation is a direct Keccak-f[1600] sponge. The fixed
+SHA-3 hashes use the FIPS 202 SHA-3 domain suffix `0x06`, while the SHAKE XOFs
+use the FIPS 202 SHAKE suffix `0x1f`. This keeps the internal sponge reusable
+across both fixed-output hashing and variable-length output generation.
+
+`CtrDrbgAes256` follows the SP 800-90A Rev. 1 AES-256 CTR_DRBG construction in
+its no-derivation-function form. It stores the 256-bit key and 128-bit `V`
+state directly, supports reseeding and optional additional input, and wipes its
+internal state on drop.
+
+---
+
 ## Coverage Matrix
 
 There are no standalone correctness scripts in this repository. Correctness is
@@ -39,7 +84,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | Camellia | `Camellia128/192/256`, `Camellia128/192/256Ct` | RFC 3713 Appendix A KATs for all 3 key sizes, `Ct` S-box self-checks (`cargo test camellia::tests`) | `cipher_bench` |
 | DES / 3DES | `Des`, `DesCt`, `TripleDes` | DES KATs, `DesCt` KAT, 2-key and 3-key TDES coverage (`cargo test des::tests`) | `cipher_bench` |
 | PRESENT | `Present80`, `Present80Ct`, `Present128`, `Present128Ct` | CHES 2007 80-bit KATs, 128-bit KATs, `Ct` S-box self-checks (`cargo test present::tests`) | `cipher_bench` |
-| Serpent | `Serpent128/192/256`, `Serpent128/192/256Ct` | Submission-vector KATs for all 3 key sizes, `Ct` S-box self-checks (`cargo test serpent::tests`) | not benchmarked yet |
+| Serpent | `Serpent128/192/256`, `Serpent128/192/256Ct` | Submission-vector KATs for all 3 key sizes, `Ct` S-box self-checks (`cargo test serpent::tests`) | `cipher_bench` |
 | Twofish | `Twofish128/192/256`, `Twofish128/192/256Ct` | Submission zero-key KATs for all 3 key sizes, fast-vs-`Ct` q-permutation self-checks (`cargo test twofish::tests`) | `cipher_bench` |
 | SEED | `Seed`, `SeedCt` | RFC 4009 Appendix B KATs, zero-key round-key KAT, `Ct` S-box self-checks (`cargo test seed::tests`) | `cipher_bench` |
 | Simon | all 10 variants | Known-answer vectors for every variant (`cargo test simon::tests`) | `cipher_bench` |
@@ -656,6 +701,9 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | DES | 81.1 MiB/s | 8.3 MiB/s | 9.8x |
 | PRESENT-80 | 12.4 MiB/s | 3.9 MiB/s | 3.1x |
 | PRESENT-128 | 12.3 MiB/s | 3.9 MiB/s | 3.2x |
+| Serpent-128 | 11.9 MiB/s | 7.5 MiB/s | 1.6x |
+| Serpent-192 | 11.8 MiB/s | 7.5 MiB/s | 1.6x |
+| Serpent-256 | 11.9 MiB/s | 7.6 MiB/s | 1.6x |
 | Magma-256 | 62.0 MiB/s | 14.3 MiB/s | 4.3x |
 | Grasshopper-256 | 26.1 MiB/s | 4.1 MiB/s | 6.3x |
 | SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
@@ -716,6 +764,10 @@ These ratios line up with the implementation strategy:
 - `Present*Ct` pays the smallest penalty in the group because its nonlinear
   layer is only a single 4-bit S-box; the expensive part of PRESENT remains
   the 31-round bit permutation structure shared by both paths.
+- Serpent's `Ct` path is unusually close to the fast path because both variants
+  already execute a bitslice-style word-oriented round structure; the `Ct`
+  version only replaces the tiny 4-bit S-box lookups with packed ANF
+  evaluation, so the substitution layer is not the dominant cost.
 - `MagmaCt` only changes the eight 4-bit S-boxes, so it pays the smallest
   penalty among the 64-bit ciphers apart from PRESENT.
 - `GrasshopperCt` removes both the table-driven S-box and the `L_TABLES`
@@ -816,20 +868,12 @@ Current midpoint throughputs on this host:
 | libsodium XSalsa20-Poly1305 (16-byte message) | 84.3 MiB/s |
 | libsodium XSalsa20-Poly1305 (1 KiB message) | 685.6 MiB/s |
 
-On this run, libsodium AES-256-GCM was not available through `sodiumoxide` and
-the benchmark skipped it with:
-
-```text
-note: AES-NI/ARMv8 not detected — skipping libsodium AES-256-GCM bench
-```
-
 This comparison is intentionally a calibration exercise, not a strict
 apples-to-apples algorithm match. The `AES` rows are this crate's raw block
 cipher core. The libsodium `XSalsa20-Poly1305` rows are a full NaCl-style
-stream-cipher-plus-MAC construction. The optional libsodium `AES-256-GCM` row,
-when present, is an AEAD that also relies on libsodium's own hardware support
-checks. The point is to compare this crate's portable software primitives to a
-widely used optimized cryptographic library, not to claim identical semantics.
+stream-cipher-plus-MAC construction. The point is to compare this crate's
+portable software primitives to a widely used optimized cryptographic library,
+not to claim identical semantics.
 
 ### DES / Triple-DES
 
@@ -869,6 +913,21 @@ very small hardware footprint, so software pays for 31 rounds of nibble-level
 substitution plus a dense 64-bit bit permutation. The `Ct` path is only about
 3× slower because the fast path's S-box is already only a tiny 4-bit lookup;
 most of the cost is in the shared permutation layer, not in the substitution.
+
+### Serpent
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| Serpent-128 | 128 b | 128 b | 32 | 11.9 MiB/s | 86.0 s |
+| Serpent-192 | 128 b | 192 b | 32 | 11.8 MiB/s | 86.8 s |
+| Serpent-256 | 128 b | 256 b | 32 | 11.9 MiB/s | 86.0 s |
+
+Serpent is slow in absolute terms but notably stable across key sizes because
+all three variants keep the same 32-round encryption core; only the key
+schedule differs. Its `Ct` path stays relatively close to the fast path because
+the implementation is already bitslice-oriented: both variants spend most of
+their time in the shared linear transform and key XOR layers, not in large
+table lookups.
 
 ### Camellia
 
@@ -1029,6 +1088,82 @@ are included here so the prose and the bibliography stay in sync.
   year        = {2001},
   month       = nov,
   url         = {https://csrc.nist.gov/publications/detail/fips/197/final},
+}
+
+@techreport{fips202,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {{SHA}-3 Standard: Permutation-Based Hash and Extendable-Output Functions},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 202},
+  year        = {2015},
+  month       = aug,
+  url         = {https://csrc.nist.gov/pubs/fips/202/final},
+}
+
+@misc{sp800-90a-r1,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Random Number Generation Using Deterministic Random Bit Generators},
+  howpublished = {Special Publication 800-90A Revision 1},
+  year         = {2015},
+  month        = jun,
+  url          = {https://csrc.nist.gov/pubs/sp/800/90/a/r1/final},
+}
+
+@misc{sp800-38a,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: Methods and Techniques},
+  howpublished = {Special Publication 800-38A},
+  year         = {2001},
+  month        = dec,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/a/final},
+}
+
+@misc{sp800-38b,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: The {CMAC} Mode for Authentication},
+  howpublished = {Special Publication 800-38B},
+  year         = {2005},
+  month        = may,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/b/final},
+}
+
+@misc{sp800-38d,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode ({GCM}) and {GMAC}},
+  howpublished = {Special Publication 800-38D},
+  year         = {2007},
+  month        = nov,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/d/final},
+}
+
+@misc{sp800-38e,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: The {XTS}-{AES} Mode for Confidentiality on Storage Devices},
+  howpublished = {Special Publication 800-38E},
+  year         = {2010},
+  month        = jan,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/e/final},
+}
+
+@misc{sp800-38f,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: Methods for Key Wrapping},
+  howpublished = {Special Publication 800-38F},
+  year         = {2012},
+  month        = dec,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/f/final},
+}
+
+@techreport{rfc8452,
+  author      = {S. Gueron and A. Langley and Y. Lindell},
+  title       = {{AES}-{GCM}-{SIV}: Nonce Misuse-Resistant Authenticated Encryption},
+  type        = {{RFC}},
+  number      = {8452},
+  institution = {IETF},
+  year        = {2019},
+  month       = apr,
+  url         = {https://www.rfc-editor.org/rfc/rfc8452},
 }
 
 @misc{boyar-peralta-2011,

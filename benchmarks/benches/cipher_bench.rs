@@ -15,11 +15,12 @@ use cryptography::{
     Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct, BlockCipher, Camellia128,
     Camellia128Ct, Camellia192, Camellia192Ct, Camellia256, Camellia256Ct, Cast128, Cast128Ct,
     Des, DesCt, Grasshopper, GrasshopperCt, Magma, MagmaCt, Present128, Present128Ct, Present80,
-    Present80Ct, Seed, SeedCt, Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128,
-    Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct, Speck32_64,
-    Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128,
-    Speck128_192, Speck128_256, TripleDes, Twofish128, Twofish128Ct, Twofish192, Twofish192Ct,
-    Twofish256, Twofish256Ct, Zuc128, Zuc128Ct,
+    Present80Ct, Seed, SeedCt, Serpent128, Serpent128Ct, Serpent192, Serpent192Ct, Serpent256,
+    Serpent256Ct, Simon32_64, Simon48_72, Simon48_96, Simon64_96, Simon64_128, Simon96_96,
+    Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct, Speck32_64, Speck48_72,
+    Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144, Speck128_128, Speck128_192,
+    Speck128_256, TripleDes, Twofish128, Twofish128Ct, Twofish192, Twofish192Ct, Twofish256,
+    Twofish256Ct, Zuc128, Zuc128Ct,
 };
 use std::hint::black_box;
 
@@ -151,6 +152,22 @@ fn bench_present(c: &mut Criterion) {
     g.finish();
 }
 
+// ── Serpent ───────────────────────────────────────────────────────────────
+
+fn bench_serpent(c: &mut Criterion) {
+    let src = vec![0u8; MB];
+    let mut g = c.benchmark_group("Serpent");
+
+    bench_one(&mut g, "Serpent-128", Serpent128::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Serpent-128-ct", Serpent128Ct::new(&[0u8; 16]), &src);
+    bench_one(&mut g, "Serpent-192", Serpent192::new(&[0u8; 24]), &src);
+    bench_one(&mut g, "Serpent-192-ct", Serpent192Ct::new(&[0u8; 24]), &src);
+    bench_one(&mut g, "Serpent-256", Serpent256::new(&[0u8; 32]), &src);
+    bench_one(&mut g, "Serpent-256-ct", Serpent256Ct::new(&[0u8; 32]), &src);
+
+    g.finish();
+}
+
 // ── Camellia ──────────────────────────────────────────────────────────────
 
 fn bench_camellia(c: &mut Criterion) {
@@ -278,6 +295,7 @@ criterion_group!(
     bench_aes,
     bench_des,
     bench_present,
+    bench_serpent,
     bench_camellia,
     bench_cast128,
     bench_twofish,

@@ -6,6 +6,8 @@ mod ct;
 
 pub mod ciphers;
 pub mod cprng;
+pub mod hash;
+pub mod modes;
 
 pub use ciphers::{
     aes, camellia, cast128, des, grasshopper, magma, present, seed, serpent, simon, sm4, speck,
@@ -75,3 +77,6 @@ pub use ciphers::zuc::{Zuc128, Zuc128Ct};
 pub use cprng::blum_blum_shub::BlumBlumShub;
 pub use cprng::blum_micali::BlumMicali;
 pub use cprng::ctr_drbg::CtrDrbgAes256;
+pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
+pub use hash::Xof;
+pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, Gmac, Ofb, Xts};

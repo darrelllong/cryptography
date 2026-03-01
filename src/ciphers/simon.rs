@@ -20,6 +20,8 @@
 //!
 //! Known-answer tests use Appendix B of the 2013 paper.
 
+use super::simon_speck_util::{load_le, rotl, rotr, store_le};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Z sequences — Table 3.2
 //
@@ -35,41 +37,6 @@ const Z: [u64; 5] = [
     0b11110000101100111001010001001000000111101001100011010111011011,
     0b11110111001001010011000011101000000100011011010110011110001011,
 ];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Load bytes as a little-endian n-bit word into a u64.
-#[inline(always)]
-fn load_le(src: &[u8]) -> u64 {
-    let mut v = 0u64;
-    for (i, &b) in src.iter().enumerate() {
-        v |= (b as u64) << (8 * i);
-    }
-    v
-}
-
-/// Store the low bytes of a u64 in little-endian order.
-#[inline(always)]
-fn store_le(mut v: u64, dst: &mut [u8]) {
-    for b in dst.iter_mut() {
-        *b = v as u8;
-        v >>= 8;
-    }
-}
-
-#[inline(always)]
-fn rotl(x: u64, r: u32, n: u32, mask: u64) -> u64 {
-    debug_assert!(r > 0 && r < n);
-    ((x << r) | (x >> (n - r))) & mask
-}
-
-#[inline(always)]
-fn rotr(x: u64, r: u32, n: u32, mask: u64) -> u64 {
-    debug_assert!(r > 0 && r < n);
-    ((x >> r) | (x << (n - r))) & mask
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Key expansion — §3

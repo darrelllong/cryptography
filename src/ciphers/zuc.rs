@@ -132,6 +132,97 @@ fn l2(x: u32) -> u32 {
 
 // ── ZUC-128 ───────────────────────────────────────────────────────────────
 
+struct ZucCore {
+    s: [u32; 16],
+    r1: u32,
+    r2: u32,
+}
+
+#[inline]
+fn bit_reorganization(s: &[u32; 16]) -> (u32, u32, u32, u32) {
+    let x0 = ((s[15] << 1) & 0xFFFF_0000) | (s[14] & 0xFFFF);
+    let x1 = ((s[11] << 16) & 0xFFFF_0000) | ((s[9] >> 15) & 0xFFFF);
+    let x2 = ((s[7] << 16) & 0xFFFF_0000) | ((s[5] >> 15) & 0xFFFF);
+    let x3 = ((s[2] << 16) & 0xFFFF_0000) | ((s[0] >> 15) & 0xFFFF);
+    (x0, x1, x2, x3)
+}
+
+#[inline]
+fn nonlinear_f<const CT: bool>(core: &mut ZucCore, x0: u32, x1: u32, x2: u32) -> u32 {
+    let w = (x0 ^ core.r1).wrapping_add(core.r2);
+    let w1 = core.r1.wrapping_add(x1);
+    let w2 = core.r2 ^ x2;
+    let sbox_fn = if CT { sbox_ct } else { sbox };
+    core.r1 = sbox_fn(l1((w1 << 16) | (w2 >> 16)));
+    core.r2 = sbox_fn(l2((w2 << 16) | (w1 >> 16)));
+    w
+}
+
+#[inline]
+fn lfsr_feedback(s: &[u32; 16]) -> u32 {
+    let mut v = s[0];
+    v = add31(v, mul31(s[0], 8));
+    v = add31(v, mul31(s[4], 20));
+    v = add31(v, mul31(s[10], 21));
+    v = add31(v, mul31(s[13], 17));
+    v = add31(v, mul31(s[15], 15));
+    v
+}
+
+#[inline]
+fn lfsr_clock(s: &mut [u32; 16], new_val: u32) {
+    s.copy_within(1..16, 0);
+    s[15] = if new_val == 0 { 0x7FFF_FFFF } else { new_val };
+}
+
+fn init_core<const CT: bool>(key: &[u8; 16], iv: &[u8; 16]) -> ZucCore {
+    let mut s = [0u32; 16];
+    for i in 0..16 {
+        s[i] = ((key[i] as u32) << 23) | ((D[i] as u32) << 8) | (iv[i] as u32);
+    }
+    let mut core = ZucCore { s, r1: 0, r2: 0 };
+
+    for _ in 0..32 {
+        let (x0, x1, x2, _) = bit_reorganization(&core.s);
+        let w = nonlinear_f::<CT>(&mut core, x0, x1, x2);
+        let s16 = add31(lfsr_feedback(&core.s), w >> 1);
+        lfsr_clock(&mut core.s, s16);
+    }
+
+    let (x0, x1, x2, _) = bit_reorganization(&core.s);
+    nonlinear_f::<CT>(&mut core, x0, x1, x2);
+    let fb = lfsr_feedback(&core.s);
+    lfsr_clock(&mut core.s, fb);
+
+    core
+}
+
+#[inline]
+fn next_word_core<const CT: bool>(core: &mut ZucCore) -> u32 {
+    let (x0, x1, x2, x3) = bit_reorganization(&core.s);
+    let w = nonlinear_f::<CT>(core, x0, x1, x2);
+    let fb = lfsr_feedback(&core.s);
+    lfsr_clock(&mut core.s, fb);
+    w ^ x3
+}
+
+fn fill_core<const CT: bool>(core: &mut ZucCore, buf: &mut [u8]) {
+    let mut chunks = buf.chunks_exact_mut(4);
+    for ch in &mut chunks {
+        let ks = next_word_core::<CT>(core).to_be_bytes();
+        for (b, k) in ch.iter_mut().zip(ks.iter()) {
+            *b ^= k;
+        }
+    }
+    let rem = chunks.into_remainder();
+    if !rem.is_empty() {
+        let ks = next_word_core::<CT>(core).to_be_bytes();
+        for (b, k) in rem.iter_mut().zip(ks.iter()) {
+            *b ^= k;
+        }
+    }
+}
+
 /// ZUC-128 stream cipher (GM/T 0001.1 / ETSI SAGE ZUC v1.6).
 ///
 /// Generates 32-bit keystream words via [`next_word`]; byte-oriented output
@@ -141,9 +232,7 @@ fn l2(x: u32) -> u32 {
 /// [`next_word`]: Zuc128::next_word
 /// [`fill`]: Zuc128::fill
 pub struct Zuc128 {
-    s: [u32; 16], // LFSR: s[0] is oldest, s[15] is newest
-    r1: u32,      // nonlinear function register R1
-    r2: u32,      // nonlinear function register R2
+    core: ZucCore,
 }
 
 /// ZUC-128 constant-time software path.
@@ -152,98 +241,20 @@ pub struct Zuc128 {
 /// `Zuc128`, but replaces the S-box table reads inside the nonlinear function
 /// with the packed ANF evaluator above.
 pub struct Zuc128Ct {
-    s: [u32; 16],
-    r1: u32,
-    r2: u32,
+    core: ZucCore,
 }
 
 impl Zuc128 {
     /// Construct and initialize ZUC-128 from a 128-bit key and 128-bit IV.
     pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
-        // Load LFSR: s[i] = key[i](8b) ‖ d[i](15b) ‖ iv[i](8b) — spec §3.1
-        let mut s = [0u32; 16];
-        for i in 0..16 {
-            s[i] = ((key[i] as u32) << 23) | ((D[i] as u32) << 8) | (iv[i] as u32);
+        Self {
+            core: init_core::<false>(key, iv),
         }
-        let mut z = Zuc128 { s, r1: 0, r2: 0 };
-
-        // Initialization phase: 32 clocks, F output fed back into LFSR.
-        for _ in 0..32 {
-            let (x0, x1, x2, _) = z.bit_reorganization();
-            let w = z.nonlinear_f(x0, x1, x2);
-            let s16 = add31(z.lfsr_feedback(), w >> 1);
-            z.lfsr_clock(s16);
-        }
-
-        // Working-stage warm-up (spec §3.2 step (a)): one extra working-mode
-        // clock that updates R1/R2 but whose W output is discarded.
-        let (x0, x1, x2, _) = z.bit_reorganization();
-        z.nonlinear_f(x0, x1, x2);
-        z.lfsr_clock(z.lfsr_feedback());
-
-        z
     }
-
-    // ── Internal helpers ───────────────────────────────────────────────────
-
-    /// Bit reorganization (spec §2.2.2).
-    ///
-    /// Extracts four 32-bit words X0..X3 from the LFSR cells.
-    #[inline]
-    fn bit_reorganization(&self) -> (u32, u32, u32, u32) {
-        let s = &self.s;
-        let x0 = ((s[15] << 1) & 0xFFFF_0000) | (s[14] & 0xFFFF);
-        let x1 = ((s[11] << 16) & 0xFFFF_0000) | ((s[9] >> 15) & 0xFFFF);
-        let x2 = ((s[7] << 16) & 0xFFFF_0000) | ((s[5] >> 15) & 0xFFFF);
-        let x3 = ((s[2] << 16) & 0xFFFF_0000) | ((s[0] >> 15) & 0xFFFF);
-        (x0, x1, x2, x3)
-    }
-
-    /// Nonlinear function F (spec §2.2.3).
-    ///
-    /// Updates R1 and R2; returns W.
-    #[inline]
-    fn nonlinear_f(&mut self, x0: u32, x1: u32, x2: u32) -> u32 {
-        let w = (x0 ^ self.r1).wrapping_add(self.r2);
-        let w1 = self.r1.wrapping_add(x1);
-        let w2 = self.r2 ^ x2;
-        self.r1 = sbox(l1((w1 << 16) | (w2 >> 16)));
-        self.r2 = sbox(l2((w2 << 16) | (w1 >> 16)));
-        w
-    }
-
-    /// LFSR feedback (spec §2.1, recurrence relation).
-    ///
-    /// s₁₆ = (1 + 2⁸)·s₀ + 2²⁰·s₄ + 2²¹·s₁₀ + 2¹⁷·s₁₃ + 2¹⁵·s₁₅  mod (2³¹−1)
-    #[inline]
-    fn lfsr_feedback(&self) -> u32 {
-        let s = &self.s;
-        let mut v = s[0];
-        v = add31(v, mul31(s[0], 8));
-        v = add31(v, mul31(s[4], 20));
-        v = add31(v, mul31(s[10], 21));
-        v = add31(v, mul31(s[13], 17));
-        v = add31(v, mul31(s[15], 15));
-        v
-    }
-
-    /// Shift LFSR left by one step, loading `new_val` into s[15].
-    ///
-    /// If `new_val == 0`, stores 0x7FFF_FFFF per spec (avoids all-zero LFSR).
-    #[inline]
-    fn lfsr_clock(&mut self, new_val: u32) {
-        self.s.copy_within(1..16, 0);
-        self.s[15] = if new_val == 0 { 0x7FFF_FFFF } else { new_val };
-    }
-
-    // ── Public interface ───────────────────────────────────────────────────
 
     /// Generate the next 32-bit keystream word.
     pub fn next_word(&mut self) -> u32 {
-        let (x0, x1, x2, x3) = self.bit_reorganization();
-        let w = self.nonlinear_f(x0, x1, x2);
-        self.lfsr_clock(self.lfsr_feedback());
-        w ^ x3
+        next_word_core::<false>(&mut self.core)
     }
 
     /// XOR `buf` with keystream bytes (32-bit words in big-endian byte order).
@@ -251,44 +262,16 @@ impl Zuc128 {
     /// Calling `fill` twice with the same key/IV and an identical buffer
     /// recovers the original contents (stream-cipher encrypt/decrypt).
     pub fn fill(&mut self, buf: &mut [u8]) {
-        let mut chunks = buf.chunks_exact_mut(4);
-        for ch in &mut chunks {
-            let ks = self.next_word().to_be_bytes();
-            for (b, k) in ch.iter_mut().zip(ks.iter()) {
-                *b ^= k;
-            }
-        }
-        let rem = chunks.into_remainder();
-        if !rem.is_empty() {
-            let ks = self.next_word().to_be_bytes();
-            for (b, k) in rem.iter_mut().zip(ks.iter()) {
-                *b ^= k;
-            }
-        }
+        fill_core::<false>(&mut self.core, buf);
     }
 }
 
 impl Zuc128Ct {
     /// Construct and initialize ZUC-128Ct from a 128-bit key and 128-bit IV.
     pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
-        let mut s = [0u32; 16];
-        for i in 0..16 {
-            s[i] = ((key[i] as u32) << 23) | ((D[i] as u32) << 8) | (iv[i] as u32);
+        Self {
+            core: init_core::<true>(key, iv),
         }
-        let mut z = Zuc128Ct { s, r1: 0, r2: 0 };
-
-        for _ in 0..32 {
-            let (x0, x1, x2, _) = z.bit_reorganization();
-            let w = z.nonlinear_f(x0, x1, x2);
-            let s16 = add31(z.lfsr_feedback(), w >> 1);
-            z.lfsr_clock(s16);
-        }
-
-        let (x0, x1, x2, _) = z.bit_reorganization();
-        z.nonlinear_f(x0, x1, x2);
-        z.lfsr_clock(z.lfsr_feedback());
-
-        z
     }
 
     /// Construct and wipe the caller-provided key and IV buffers.
@@ -299,84 +282,30 @@ impl Zuc128Ct {
         out
     }
 
-    #[inline]
-    fn bit_reorganization(&self) -> (u32, u32, u32, u32) {
-        let s = &self.s;
-        let x0 = ((s[15] << 1) & 0xFFFF_0000) | (s[14] & 0xFFFF);
-        let x1 = ((s[11] << 16) & 0xFFFF_0000) | ((s[9] >> 15) & 0xFFFF);
-        let x2 = ((s[7] << 16) & 0xFFFF_0000) | ((s[5] >> 15) & 0xFFFF);
-        let x3 = ((s[2] << 16) & 0xFFFF_0000) | ((s[0] >> 15) & 0xFFFF);
-        (x0, x1, x2, x3)
-    }
-
-    #[inline]
-    fn nonlinear_f(&mut self, x0: u32, x1: u32, x2: u32) -> u32 {
-        let w = (x0 ^ self.r1).wrapping_add(self.r2);
-        let w1 = self.r1.wrapping_add(x1);
-        let w2 = self.r2 ^ x2;
-        self.r1 = sbox_ct(l1((w1 << 16) | (w2 >> 16)));
-        self.r2 = sbox_ct(l2((w2 << 16) | (w1 >> 16)));
-        w
-    }
-
-    #[inline]
-    fn lfsr_feedback(&self) -> u32 {
-        let s = &self.s;
-        let mut v = s[0];
-        v = add31(v, mul31(s[0], 8));
-        v = add31(v, mul31(s[4], 20));
-        v = add31(v, mul31(s[10], 21));
-        v = add31(v, mul31(s[13], 17));
-        v = add31(v, mul31(s[15], 15));
-        v
-    }
-
-    #[inline]
-    fn lfsr_clock(&mut self, new_val: u32) {
-        self.s.copy_within(1..16, 0);
-        self.s[15] = if new_val == 0 { 0x7FFF_FFFF } else { new_val };
-    }
-
     /// Generate the next 32-bit keystream word.
     pub fn next_word(&mut self) -> u32 {
-        let (x0, x1, x2, x3) = self.bit_reorganization();
-        let w = self.nonlinear_f(x0, x1, x2);
-        self.lfsr_clock(self.lfsr_feedback());
-        w ^ x3
+        next_word_core::<true>(&mut self.core)
     }
 
     /// XOR `buf` with keystream bytes (32-bit words in big-endian byte order).
     pub fn fill(&mut self, buf: &mut [u8]) {
-        let mut chunks = buf.chunks_exact_mut(4);
-        for ch in &mut chunks {
-            let ks = self.next_word().to_be_bytes();
-            for (b, k) in ch.iter_mut().zip(ks.iter()) {
-                *b ^= k;
-            }
-        }
-        let rem = chunks.into_remainder();
-        if !rem.is_empty() {
-            let ks = self.next_word().to_be_bytes();
-            for (b, k) in rem.iter_mut().zip(ks.iter()) {
-                *b ^= k;
-            }
-        }
+        fill_core::<true>(&mut self.core, buf);
     }
 }
 
 impl Drop for Zuc128 {
     fn drop(&mut self) {
-        crate::ct::zeroize_slice(self.s.as_mut_slice());
-        self.r1 = 0;
-        self.r2 = 0;
+        crate::ct::zeroize_slice(self.core.s.as_mut_slice());
+        self.core.r1 = 0;
+        self.core.r2 = 0;
     }
 }
 
 impl Drop for Zuc128Ct {
     fn drop(&mut self) {
-        crate::ct::zeroize_slice(self.s.as_mut_slice());
-        self.r1 = 0;
-        self.r2 = 0;
+        crate::ct::zeroize_slice(self.core.s.as_mut_slice());
+        self.core.r1 = 0;
+        self.core.r2 = 0;
     }
 }
 
