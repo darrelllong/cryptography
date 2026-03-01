@@ -147,8 +147,9 @@ trait shape, but they are not substitutes for modern DRBG deployments.
 ## Public-Key Primitives
 
 - References: `cocks-1973`, `rsa-1978`, `elgamal-1985`, `rabin-1979`,
-  `paillier-1999`.
-- Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, and `Paillier`.
+  `paillier-1999`, `schmidt-samoa-2005`.
+- Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, and
+  `SchmidtSamoa`.
 - Scope: these are the naked arithmetic primitives from the companion Python
   code. They do not yet add padding, encoding, signatures, KEM wrapping, or
   randomized key generation helpers.
@@ -195,7 +196,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
 | Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
 | CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
-| Public-key primitives | `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier` | focused raw-arithmetic KATs, round-trips, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
+| Public-key primitives | `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, round-trips, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
 
 ---
 
@@ -1469,6 +1470,17 @@ modest word-level parallelism.
   year      = {1999},
   publisher = {Springer},
   doi       = {10.1007/3-540-48910-X_16},
+}
+
+@inproceedings{schmidt-samoa-2005,
+  author    = {Katja Schmidt-Samoa},
+  title     = {A New Rabin-Type Trapdoor Permutation Equivalent to Factoring},
+  booktitle = {Electronic Notes in Theoretical Computer Science},
+  volume    = {157},
+  pages     = {79--94},
+  year      = {2006},
+  publisher = {Elsevier},
+  doi       = {10.1016/j.entcs.2005.11.052},
 }
 
 @misc{sp800-38a,

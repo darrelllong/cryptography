@@ -1,4 +1,4 @@
-//! Schmidt-Samoa public-key primitive (Schmidt-Samoa, 2005).
+//! Schmidt-Samoa public-key primitive (Katja Schmidt-Samoa, 2005).
 //!
 //! This is the raw arithmetic map from the companion Python code: explicit
 //! prime inputs, public modulus `n = p^2 q`, and private decryption exponent

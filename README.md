@@ -415,7 +415,7 @@ family and supporting primitive covered in this repository:
 - SHA-3 / SHAKE: `fips202.pdf`
 - HMAC: `fips198-1.pdf`
 - DRBGs: `sp800-90a-r1.pdf`
-- Public-key primitives: `cocks-1973-note-on-non-secret-encryption.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `rsa-1978.pdf`
+- Public-key primitives: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`
 - Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
@@ -541,6 +541,17 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year      = {1999},
   publisher = {Springer},
   doi       = {10.1007/3-540-48910-X_16},
+}
+
+@inproceedings{schmidt-samoa-2005,
+  author    = {Katja Schmidt-Samoa},
+  title     = {A New Rabin-Type Trapdoor Permutation Equivalent to Factoring},
+  booktitle = {Electronic Notes in Theoretical Computer Science},
+  volume    = {157},
+  pages     = {79--94},
+  year      = {2006},
+  publisher = {Elsevier},
+  doi       = {10.1016/j.entcs.2005.11.052},
 }
 
 @misc{sp800-38a,
