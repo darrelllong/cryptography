@@ -415,6 +415,7 @@ family and supporting primitive covered in this repository:
 - SHA-3 / SHAKE: `fips202.pdf`
 - HMAC: `fips198-1.pdf`
 - DRBGs: `sp800-90a-r1.pdf`
+- Public-key primitives: `cocks-1973-note-on-non-secret-encryption.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `rsa-1978.pdf`
 - Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
@@ -491,6 +492,55 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year         = {2015},
   month        = jun,
   url          = {https://csrc.nist.gov/pubs/sp/800/90/a/r1/final},
+}
+
+@article{cocks-1973,
+  author  = {Clifford Cocks},
+  title   = {A Note on Non-Secret Encryption},
+  journal = {{CESG} Research Memorandum},
+  year    = {1973},
+}
+
+@article{rsa-1978,
+  author  = {Ronald L. Rivest and Adi Shamir and Leonard Adleman},
+  title   = {A Method for Obtaining Digital Signatures and Public-Key Cryptosystems},
+  journal = {Communications of the ACM},
+  volume  = {21},
+  number  = {2},
+  pages   = {120--126},
+  year    = {1978},
+  doi     = {10.1145/359340.359342},
+}
+
+@article{elgamal-1985,
+  author  = {Taher ElGamal},
+  title   = {A Public Key Cryptosystem and a Signature Scheme Based on Discrete Logarithms},
+  journal = {{IEEE} Transactions on Information Theory},
+  volume  = {31},
+  number  = {4},
+  pages   = {469--472},
+  year    = {1985},
+  doi     = {10.1109/TIT.1985.1057074},
+}
+
+@article{rabin-1979,
+  author  = {Michael O. Rabin},
+  title   = {Digitalized Signatures and Public-Key Functions as Intractable as Factorization},
+  journal = {MIT Laboratory for Computer Science Technical Report},
+  number  = {MIT/LCS/TR-212},
+  year    = {1979},
+}
+
+@inproceedings{paillier-1999,
+  author    = {Pascal Paillier},
+  title     = {Public-Key Cryptosystems Based on Composite Degree Residuosity Classes},
+  booktitle = {Advances in Cryptology --- EUROCRYPT '99},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1592},
+  pages     = {223--238},
+  year      = {1999},
+  publisher = {Springer},
+  doi       = {10.1007/3-540-48910-X_16},
 }
 
 @misc{sp800-38a,

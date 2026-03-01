@@ -63,6 +63,33 @@ pub fn mod_pow(base: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigUint
     result
 }
 
+fn decompose_n_minus_one(n: &BigUint) -> (BigUint, usize) {
+    let mut odd_factor = n.sub_ref(&BigUint::one());
+    let mut two_adic_exponent = 0usize;
+    while !odd_factor.is_odd() {
+        odd_factor.shr1();
+        two_adic_exponent += 1;
+    }
+    (odd_factor, two_adic_exponent)
+}
+
+fn is_witness(base: &BigUint, candidate: &BigUint) -> bool {
+    let one = BigUint::one();
+    let n_minus_one = candidate.sub_ref(&one);
+    let (odd_factor, two_adic_exponent) = decompose_n_minus_one(candidate);
+    let mut value = mod_pow(base, &odd_factor, candidate);
+
+    for _ in 0..two_adic_exponent {
+        let next = BigUint::mod_mul(&value, &value, candidate);
+        if next == one && value != one && value != n_minus_one {
+            return true;
+        }
+        value = next;
+    }
+
+    value != one
+}
+
 /// Miller-Rabin probable-prime test with a fixed witness set.
 #[must_use]
 pub fn is_probable_prime(n: &BigUint) -> bool {
@@ -93,36 +120,14 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         return false;
     }
 
-    let one = BigUint::one();
-    let n_minus_one = candidate.sub_ref(&one);
-    let mut odd_factor = n_minus_one.clone();
-    let mut two_adic_exponent = 0usize;
-    while !odd_factor.is_odd() {
-        odd_factor.shr1();
-        two_adic_exponent += 1;
-    }
+    let n_minus_one = candidate.sub_ref(&BigUint::one());
 
     for &base in bases {
         let witness = BigUint::from_u64(base);
         if witness >= n_minus_one {
             continue;
         }
-
-        let mut value = mod_pow(&witness, &odd_factor, candidate);
-        if value == one || value == n_minus_one {
-            continue;
-        }
-
-        let mut witnessed_composite = true;
-        for _ in 1..two_adic_exponent {
-            value = BigUint::mod_mul(&value, &value, candidate);
-            if value == n_minus_one {
-                witnessed_composite = false;
-                break;
-            }
-        }
-
-        if witnessed_composite {
+        if is_witness(&witness, candidate) {
             return false;
         }
     }

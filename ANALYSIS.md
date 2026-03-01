@@ -144,6 +144,29 @@ trait shape, but they are not substitutes for modern DRBG deployments.
 
 ---
 
+## Public-Key Primitives
+
+- References: `cocks-1973`, `rsa-1978`, `elgamal-1985`, `rabin-1979`,
+  `paillier-1999`.
+- Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, and `Paillier`.
+- Scope: these are the naked arithmetic primitives from the companion Python
+  code. They do not yet add padding, encoding, signatures, KEM wrapping, or
+  randomized key generation helpers.
+
+The public-key layer is intentionally separated into:
+
+- `bigint`: a simple limb-based `BigUint` / `BigInt` substrate
+- `primes`: repeated-squaring modular exponentiation, Miller-Rabin, `gcd`,
+  `lcm`, and modular inverse
+- one file per raw scheme
+
+That mirrors the earlier cipher layering: get the math right first, then add
+protocol-safe framing later. The current code is therefore best read as a
+reference implementation of the core trapdoor operations, not as a complete
+drop-in PKE toolkit.
+
+---
+
 ## Coverage Matrix
 
 There are no standalone correctness scripts in this repository. Correctness is
@@ -172,6 +195,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
 | Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
 | CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
+| Public-key primitives | `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier` | focused raw-arithmetic KATs, round-trips, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
 
 ---
 
@@ -1396,6 +1420,55 @@ modest word-level parallelism.
   year         = {2015},
   month        = jun,
   url          = {https://csrc.nist.gov/pubs/sp/800/90/a/r1/final},
+}
+
+@article{cocks-1973,
+  author  = {Clifford Cocks},
+  title   = {A Note on Non-Secret Encryption},
+  journal = {{CESG} Research Memorandum},
+  year    = {1973},
+}
+
+@article{rsa-1978,
+  author  = {Ronald L. Rivest and Adi Shamir and Leonard Adleman},
+  title   = {A Method for Obtaining Digital Signatures and Public-Key Cryptosystems},
+  journal = {Communications of the ACM},
+  volume  = {21},
+  number  = {2},
+  pages   = {120--126},
+  year    = {1978},
+  doi     = {10.1145/359340.359342},
+}
+
+@article{elgamal-1985,
+  author  = {Taher ElGamal},
+  title   = {A Public Key Cryptosystem and a Signature Scheme Based on Discrete Logarithms},
+  journal = {{IEEE} Transactions on Information Theory},
+  volume  = {31},
+  number  = {4},
+  pages   = {469--472},
+  year    = {1985},
+  doi     = {10.1109/TIT.1985.1057074},
+}
+
+@article{rabin-1979,
+  author  = {Michael O. Rabin},
+  title   = {Digitalized Signatures and Public-Key Functions as Intractable as Factorization},
+  journal = {MIT Laboratory for Computer Science Technical Report},
+  number  = {MIT/LCS/TR-212},
+  year    = {1979},
+}
+
+@inproceedings{paillier-1999,
+  author    = {Pascal Paillier},
+  title     = {Public-Key Cryptosystems Based on Composite Degree Residuosity Classes},
+  booktitle = {Advances in Cryptology --- EUROCRYPT '99},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1592},
+  pages     = {223--238},
+  year      = {1999},
+  publisher = {Springer},
+  doi       = {10.1007/3-540-48910-X_16},
 }
 
 @misc{sp800-38a,
