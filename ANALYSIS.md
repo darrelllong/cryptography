@@ -649,7 +649,7 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | AES-128 | 542.7 MiB/s | 60.6 MiB/s | 8.9x |
 | AES-192 | 444.4 MiB/s | 50.4 MiB/s | 8.8x |
 | AES-256 | 374.8 MiB/s | 42.9 MiB/s | 8.7x |
-| CAST-128 | 244.9 MiB/s | 4.0 MiB/s | 61.7x |
+| CAST-128 | 246.5 MiB/s | 3.9 MiB/s | 62.9x |
 | Camellia-128 | 121.9 MiB/s | 5.8 MiB/s | 20.9x |
 | Camellia-192 | 65.0 MiB/s | 4.2 MiB/s | 15.6x |
 | Camellia-256 | 91.6 MiB/s | 4.4 MiB/s | 20.7x |
@@ -660,9 +660,9 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | Grasshopper-256 | 26.1 MiB/s | 4.1 MiB/s | 6.3x |
 | SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
 | SEED-128 | 68.7 MiB/s | 4.5 MiB/s | 15.4x |
-| Twofish-128 | 6.1 MiB/s | 2.3 MiB/s | 2.7x |
-| Twofish-192 | 6.6 MiB/s | 2.0 MiB/s | 3.3x |
-| Twofish-256 | 6.6 MiB/s | 1.7 MiB/s | 3.8x |
+| Twofish-128 | 13.1 MiB/s | 2.3 MiB/s | 5.6x |
+| Twofish-192 | 13.3 MiB/s | 2.0 MiB/s | 6.8x |
+| Twofish-256 | 13.1 MiB/s | 1.7 MiB/s | 7.6x |
 | ZUC-128 | 551.1 MiB/s | 28.3 MiB/s | 19.5x |
 
 Radar view (representative `Ct`-capable families; log-scaled, 4 MiB/s to 1024 MiB/s):
@@ -676,7 +676,7 @@ xychart-beta
     title "Fast vs Ct throughput (MiB/s, higher-throughput families)"
     x-axis ["AES-128", "AES-192", "AES-256", "CAST-128", "Camellia-128", "SM4", "ZUC"]
     y-axis "MiB/s" 0 --> 560
-    bar [542.7, 444.4, 374.8, 244.9, 121.9, 122.7, 551.1]
+    bar [542.7, 444.4, 374.8, 246.5, 121.9, 122.7, 551.1]
     bar [60.6, 50.4, 42.9, 4.0, 5.8, 7.6, 28.3]
 ```
 
@@ -694,7 +694,7 @@ xychart-beta
     title "Fast vs Ct throughput (MiB/s, lower-throughput families)"
     x-axis ["PRESENT-80", "PRESENT-128", "Twofish-128", "Twofish-192", "Twofish-256"]
     y-axis "MiB/s" 0 --> 16
-    bar [12.4, 12.3, 6.1, 6.6, 6.6]
+    bar [12.4, 12.3, 13.1, 13.3, 13.1]
     bar [3.9, 3.9, 2.3, 2.0, 1.7]
 ```
 
@@ -890,7 +890,7 @@ round groups and `FL` / `FL^{-1}` layers that widen the gap versus AES.
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| CAST-128 | 64 b | 128 b | 16 | 244.9 MiB/s | 4.2 s |
+| CAST-128 | 64 b | 128 b | 16 | 246.5 MiB/s | 4.2 s |
 
 CAST-128 is much faster than the other 64-bit Feistel designs in this crate.
 That is mostly a consequence of its RFC design choices: the round function
@@ -903,17 +903,18 @@ loads with fixed-scan selection drops throughput to about 4.0 MiB/s.
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| Twofish-128 | 128 b | 128 b | 16 | 6.1 MiB/s | 166.8 s |
-| Twofish-192 | 128 b | 192 b | 16 | 6.6 MiB/s | 154.8 s |
-| Twofish-256 | 128 b | 256 b | 16 | 6.6 MiB/s | 156.2 s |
+| Twofish-128 | 128 b | 128 b | 16 | 13.1 MiB/s | 78.2 s |
+| Twofish-192 | 128 b | 192 b | 16 | 13.3 MiB/s | 76.9 s |
+| Twofish-256 | 128 b | 256 b | 16 | 13.1 MiB/s | 78.3 s |
 
-Twofish is the slowest 128-bit block cipher in the current fast-path suite by
-far. That is not an indictment of the algorithm; it reflects this specific
-portable implementation strategy. The current code computes the keyed `h()`
-function directly on every round and subkey derivation using the `q`
-permutations plus GF(2^8) matrix multiplies, instead of precomputing the large
-keyed tables that high-performance Twofish software usually relies on. The
-result is simple and faithful, but expensive.
+Twofish is still one of the slowest 128-bit block ciphers in the current
+fast-path suite, but removing the extra per-block copies in the `BlockCipher`
+wrapper roughly doubled throughput versus the first draft. It remains slow
+because this implementation computes the keyed `h()` function directly on every
+round and subkey derivation using the `q` permutations plus GF(2^8) matrix
+multiplies, instead of precomputing the large keyed tables that
+high-performance Twofish software usually relies on. The result is simple and
+faithful, but still expensive.
 
 ### SEED
 
@@ -983,21 +984,21 @@ evaluation of two separate 8-bit S-boxes.
 | Simon | 265 MiB/s (128/128) | 90 MiB/s (32/64) |
 | SM4 | 123 MiB/s | — |
 | Camellia | 122 MiB/s (128) | 65 MiB/s (192) |
-| CAST-128 | 245 MiB/s | — |
+| CAST-128 | 247 MiB/s | — |
 | DES | 81 MiB/s | — |
 | SEED | 69 MiB/s | — |
 | Magma | 62 MiB/s | — |
 | Grasshopper | 26 MiB/s | — |
 | 3DES | — | 24 MiB/s (2-key or 3-key) |
 | PRESENT | 12.4 MiB/s (80) | 12.3 MiB/s (128) |
-| Twofish | 6.6 MiB/s (192/256) | 6.1 MiB/s (128) |
+| Twofish | 13.3 MiB/s (192) | 13.1 MiB/s (128/256) |
 
 Speck128/128 remains the fastest block cipher in the suite. ZUC is the fastest
 non-block primitive, and AES-128 remains the fastest conventional standardized
 block cipher here. CAST-128 is the fastest 64-bit block cipher in the
 repository, while Camellia, SM4, and SEED form a middle tier of standardized
 128-bit designs that are still usable in pure software, but materially slower
-than AES. At the other end, Grasshopper, 3DES, PRESENT, and this current
+than AES. At the other end, Grasshopper, 3DES, PRESENT, and the current
 table-light Twofish implementation are expensive in pure software because they
 pair heavier round structures or dense internal transforms with comparatively
 modest word-level parallelism.

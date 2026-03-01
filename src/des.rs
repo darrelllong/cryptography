@@ -195,7 +195,6 @@ const SBOX_ANF: [[u64; 4]; 8] = build_sbox_anf();
 // Tables are computed entirely at compile time via const fns.
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
     let mut table = [[0u64; 256]; 8];
     let mut i = 0usize;
@@ -216,7 +215,6 @@ const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
     table
 }
 
-#[allow(dead_code)]
 const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
     let mut table = [[0u64; 256]; 4];
     let mut i = 0usize;
@@ -261,7 +259,6 @@ const fn apply_p_to_partial(s: u32) -> u32 {
 /// Since P is a linear permutation, P(s0|s1|…|s7) = P(s0)|P(s1)|…|P(s7),
 /// so OR-ing all 8 entries gives the correct f-function output.
 /// Reduces 8 S-box + 4 P byte-table lookups per round to 8 SP lookups.
-#[allow(dead_code)]
 const fn build_sp() -> [[u32; 64]; 8] {
     let mut sp = [[0u32; 64]; 8];
     let mut i = 0usize;
@@ -281,16 +278,11 @@ const fn build_sp() -> [[u32; 64]; 8] {
     sp
 }
 
-#[allow(dead_code)]
 static IP_TABLE: [[u64; 256]; 8] = build_perm64(&IP);
-#[allow(dead_code)]
 static FP_TABLE: [[u64; 256]; 8] = build_perm64(&FP);
-#[allow(dead_code)]
 static E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
-#[allow(dead_code)]
 static SP_TABLE: [[u32; 64]; 8] = build_sp();
 
-#[allow(dead_code)]
 #[inline(always)]
 fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
     t[0][(x >> 56) as usize]
@@ -303,7 +295,6 @@ fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
         | t[7][(x & 0xff) as usize]
 }
 
-#[allow(dead_code)]
 #[inline(always)]
 fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
     t[0][(r >> 24) as usize]
@@ -888,23 +879,6 @@ mod tests {
     // ── TECBvartext.rsp — Variable Plaintext KAT ─────────────────────────────
     // Key is all-ones parity (0x0101010101010101, all actual key bits = 0).
     // From NIST CAVP KAT_TDES/TECBvartext.rsp (CAVS 11.1, 2011-04-21).
-
-    #[test]
-    fn vartext_first_8() {
-        let cases = [
-            ("0101010101010101", "8000000000000000", "95f8a5e5dd31d900"),
-            ("0101010101010101", "4000000000000000", "dd7f121ca5015619"),
-            ("0101010101010101", "2000000000000000", "2e8653104f3834ea"),
-            ("0101010101010101", "1000000000000000", "4bd388ff6cd81d4f"),
-            ("0101010101010101", "0800000000000000", "20b9e767b2fb1456"),
-            ("0101010101010101", "0400000000000000", "55579380d77138ef"),
-            ("0101010101010101", "0200000000000000", "6cc5defaaf04512f"),
-            ("0101010101010101", "0100000000000000", "0d9f279ba5d87260"),
-        ];
-        for (k, pt, ct) in cases {
-            tdes_kat(k, pt, ct);
-        }
-    }
 
     #[test]
     fn vartext_all_64() {

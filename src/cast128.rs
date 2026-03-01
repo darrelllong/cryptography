@@ -363,18 +363,14 @@ impl BlockCipher for Cast128 {
     const BLOCK_LEN: usize = 8;
 
     fn encrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), 8);
-        let mut tmp = [0u8; 8];
-        tmp.copy_from_slice(block);
-        let ct = self.encrypt_block(&tmp);
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        let ct = self.encrypt_block(arr);
         block.copy_from_slice(&ct);
     }
 
     fn decrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), 8);
-        let mut tmp = [0u8; 8];
-        tmp.copy_from_slice(block);
-        let pt = self.decrypt_block(&tmp);
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        let pt = self.decrypt_block(arr);
         block.copy_from_slice(&pt);
     }
 }
@@ -428,18 +424,14 @@ impl BlockCipher for Cast128Ct {
     const BLOCK_LEN: usize = 8;
 
     fn encrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), 8);
-        let mut tmp = [0u8; 8];
-        tmp.copy_from_slice(block);
-        let ct = self.encrypt_block(&tmp);
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        let ct = self.encrypt_block(arr);
         block.copy_from_slice(&ct);
     }
 
     fn decrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), 8);
-        let mut tmp = [0u8; 8];
-        tmp.copy_from_slice(block);
-        let pt = self.decrypt_block(&tmp);
+        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+        let pt = self.decrypt_block(arr);
         block.copy_from_slice(&pt);
     }
 }

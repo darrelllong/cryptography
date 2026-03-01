@@ -400,18 +400,14 @@ macro_rules! serpent_type {
             const BLOCK_LEN: usize = 16;
 
             fn encrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let ct = self.encrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let ct = self.encrypt_block(arr);
                 block.copy_from_slice(&ct);
             }
 
             fn decrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let pt = self.decrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let pt = self.decrypt_block(arr);
                 block.copy_from_slice(&pt);
             }
         }
@@ -455,18 +451,14 @@ macro_rules! serpent_type {
             const BLOCK_LEN: usize = 16;
 
             fn encrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let ct = self.encrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let ct = self.encrypt_block(arr);
                 block.copy_from_slice(&ct);
             }
 
             fn decrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let pt = self.decrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let pt = self.decrypt_block(arr);
                 block.copy_from_slice(&pt);
             }
         }

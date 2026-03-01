@@ -119,6 +119,7 @@ const S1_ANF: [[u128; 2]; 8] = build_sbox_anf(&S1);
 
 #[inline(always)]
 fn shl_256<const SHIFT: u32>(lo: u128, hi: u128) -> (u128, u128) {
+    debug_assert!(SHIFT >= 1 && SHIFT <= 127);
     (lo << SHIFT, (hi << SHIFT) | (lo >> (128 - SHIFT)))
 }
 

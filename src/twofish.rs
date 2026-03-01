@@ -137,15 +137,12 @@ fn q_perm(x: u8, which: usize, use_ct: bool) -> u8 {
 #[inline(always)]
 fn gf_mul(mut a: u8, mut b: u8) -> u8 {
     let mut out = 0u8;
-    while b != 0 {
-        if b & 1 != 0 {
-            out ^= a;
-        }
+    for _ in 0..8 {
+        let mask = 0u8.wrapping_sub(b & 1);
+        out ^= a & mask;
         let hi = a & 0x80;
         a <<= 1;
-        if hi != 0 {
-            a ^= (GF_POLY & 0xff) as u8;
-        }
+        a ^= ((GF_POLY & 0xff) as u8) & 0u8.wrapping_sub((hi >> 7) & 1);
         b >>= 1;
     }
     out
@@ -190,7 +187,7 @@ fn mds_multiply(y: [u8; 4]) -> u32 {
     u32::from_le_bytes(out)
 }
 
-fn h(mut x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
+fn h(x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
     let mut y = x.to_le_bytes();
 
     // Extra key words add extra q-permutation layers for 192- and 256-bit
@@ -232,8 +229,8 @@ fn h(mut x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
         use_ct,
     );
 
-    x = mds_multiply(y);
-    x
+    let result = mds_multiply(y);
+    result
 }
 
 fn expand_key<const N: usize>(key: &[u8; N], use_ct: bool) -> ([u32; 40], [u32; 4], usize) {
@@ -443,18 +440,14 @@ macro_rules! define_twofish_type {
             const BLOCK_LEN: usize = 16;
 
             fn encrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let out = self.encrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let out = self.encrypt_block(arr);
                 block.copy_from_slice(&out);
             }
 
             fn decrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let out = self.decrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let out = self.decrypt_block(arr);
                 block.copy_from_slice(&out);
             }
         }
@@ -496,18 +489,14 @@ macro_rules! define_twofish_type {
             const BLOCK_LEN: usize = 16;
 
             fn encrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let out = self.encrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let out = self.encrypt_block(arr);
                 block.copy_from_slice(&out);
             }
 
             fn decrypt(&self, block: &mut [u8]) {
-                assert_eq!(block.len(), 16);
-                let mut tmp = [0u8; 16];
-                tmp.copy_from_slice(block);
-                let out = self.decrypt_block(&tmp);
+                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let out = self.decrypt_block(arr);
                 block.copy_from_slice(&out);
             }
         }

@@ -114,6 +114,9 @@ impl SplitMix64 {
 
     fn next_usize(&mut self, upper: usize) -> usize {
         debug_assert!(upper > 0);
+        // This simple modulo has slight bias when `upper` is not a power of
+        // two. That is acceptable here because it is only used for shuffling
+        // dataset rows, not for any cryptographic purpose.
         (self.next_u64() % upper as u64) as usize
     }
 
@@ -139,9 +142,13 @@ impl SplitMix64 {
 }
 
 fn fill_block_samples<C: BlockCipher>(cipher: &C, rng: &mut SplitMix64, out: &mut [u8]) {
+    // Each sample intentionally concatenates multiple blocks under one random
+    // key. That keeps the class distribution tied to the primitive itself
+    // instead of to per-block key churn, which is fine for this distinguisher
+    // experiment because the key is never exposed to the model.
+    let mut block = vec![0u8; C::BLOCK_LEN];
     let mut written = 0usize;
     while written < out.len() {
-        let mut block = vec![0u8; C::BLOCK_LEN];
         rng.fill(&mut block);
         cipher.encrypt(&mut block);
         let take = (out.len() - written).min(block.len());
