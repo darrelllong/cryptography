@@ -4,6 +4,11 @@
 //! 32-bit block counter. `XChaCha20` derives a one-time subkey with `HChaCha20`
 //! from the first 16 bytes of a 24-byte nonce, then uses the remaining 8 bytes
 //! in the IETF `ChaCha20` layout.
+//!
+//! The design intent is the same as in the ChaCha paper and later RFC profile:
+//! keep the core purely ARX (add-rotate-XOR) so software implementations are
+//! fast, portable, and naturally closer to constant-time than table-driven
+//! stream ciphers.
 
 const CONSTANTS: [u8; 16] = *b"expand 32-byte k";
 
@@ -125,6 +130,9 @@ fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
         quarter_round(&mut state, 3, 4, 9, 14);
     }
 
+    // HChaCha20 keeps the "outer" words after 20 rounds; that is exactly the
+    // subkey extraction step the XChaCha construction uses to turn a 24-byte
+    // nonce into a one-time ChaCha20 key.
     let output = [
         state[0], state[1], state[2], state[3], state[12], state[13], state[14], state[15],
     ];

@@ -6,6 +6,11 @@
 //!
 //! `mul_mod` relies on left-doubling without widening arithmetic, so the
 //! modulus must stay below `2^127`.
+//!
+//! `is_probable_prime` uses the Miller-Rabin probable-prime test with a fixed
+//! small witness set. That is a good fit for the crate's `u128` toy/reference
+//! utilities, while a future bigint public-key layer should use a dedicated
+//! large-integer primality pipeline.
 
 // Keep the fixed witness set through 37. For these toy `u128` reference
 // generators we want a deterministic small-base screen, and the upper witness
@@ -68,6 +73,8 @@ pub(crate) fn is_probable_prime(n: u128) -> bool {
         }
     }
 
+    // Write `n - 1 = d * 2^s` with odd `d`, then run the standard
+    // Miller-Rabin witness loop on the fixed bases below.
     let mut d = n - 1;
     let mut s = 0u32;
     while d.is_multiple_of(2) {

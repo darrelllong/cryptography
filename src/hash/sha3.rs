@@ -9,6 +9,10 @@
 //!
 //! The core is the Keccak sponge over the 1600-bit permutation with the SHA-3
 //! domain-separation suffix `0x06`.
+//!
+//! `Shake128` and `Shake256` are built on the same permutation, but use the
+//! SHAKE domain suffix (`0x1f`) and expose the sponge's natural
+//! absorb-then-squeeze interface through the `Xof` trait.
 
 use super::{Digest, Xof};
 

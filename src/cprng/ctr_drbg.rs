@@ -10,7 +10,9 @@
 //!
 //! Because the derivation function is omitted, callers must supply exactly
 //! 48 bytes of already-conditioned seed material for instantiation, reseeding,
-//! and optional additional input.
+//! and optional additional input. That keeps the implementation small and easy
+//! to audit, but it also means this module intentionally does not try to be a
+//! generic entropy conditioner.
 
 use crate::ct::zeroize_slice;
 use crate::{Aes256, BlockCipher, Csprng};

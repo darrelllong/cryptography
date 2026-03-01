@@ -3,6 +3,10 @@
 //! This is the standard 20-round Salsa20 core with an 8-byte nonce and a
 //! 64-byte keystream block. It supports both the original 16-byte and 32-byte
 //! key forms from the published specification.
+//!
+//! The code keeps the original Salsa20 layout instead of rewriting it into a
+//! ChaCha-like form so the state words remain easy to compare directly against
+//! the published eSTREAM-family vectors.
 
 const SIGMA: [u8; 16] = *b"expand 32-byte k";
 const TAU: [u8; 16] = *b"expand 16-byte k";
@@ -75,6 +79,8 @@ fn key_setup(key: &[u8], nonce: [u8; 8], counter: u64) -> [u32; 16] {
         key.len()
     );
 
+    // Salsa20 swaps the sigma/tau constants depending on whether the caller is
+    // using the 32-byte or legacy 16-byte key form.
     let constants = if key.len() == 32 { &SIGMA } else { &TAU };
     let k0 = &key[..16];
     let k1 = if key.len() == 32 {

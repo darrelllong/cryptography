@@ -1,4 +1,14 @@
-//! Hash functions, message authentication helpers, and sponge constructions.
+//! Hash functions, XOFs, and message-authentication helpers.
+//!
+//! The in-tree hash families currently cover:
+//!
+//! - FIPS 180-4 (`Sha1`, SHA-2)
+//! - FIPS 202 (`Sha3_*`, `Shake*`)
+//! - FIPS 198-1 / RFC 2104 (`Hmac<H>`)
+//!
+//! The shared traits in this module are the glue that lets one keyed
+//! construction (`Hmac<H>`) work across multiple named hash families without
+//! reimplementing the HMAC state machine for each one.
 
 /// Minimal trait for fixed-output hash functions that can back HMAC.
 ///
@@ -29,6 +39,10 @@ pub trait Digest: Clone {
     fn finalize_into(self, out: &mut [u8]);
 
     /// Finalize in place and wipe the internal state.
+    ///
+    /// This exists primarily so keyed constructions such as `Hmac<H>` can
+    /// consume intermediate hash state without leaving key-derived chaining
+    /// values behind in memory.
     fn finalize_reset(&mut self, out: &mut [u8]);
 
     /// Best-effort zeroization of the internal state.
@@ -57,7 +71,9 @@ pub trait Xof {
     /// Finalize if needed and squeeze more output.
     ///
     /// The first call transitions the XOF from absorb mode to squeeze mode.
-    /// Subsequent calls continue producing output from the same stream.
+    /// Subsequent calls continue producing output from the same stream. This
+    /// models sponge-based XOFs such as SHAKE, where the caller may not know
+    /// the required output length up front.
     fn squeeze(&mut self, out: &mut [u8]);
 }
 

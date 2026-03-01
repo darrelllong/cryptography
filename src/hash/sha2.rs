@@ -1,4 +1,14 @@
 //! SHA-2 family from FIPS 180-4.
+//!
+//! This module includes both the 32-bit and 64-bit SHA-2 lines:
+//!
+//! - `Sha224`, `Sha256`
+//! - `Sha384`, `Sha512`
+//! - `Sha512_224`, `Sha512_256`
+//!
+//! The implementation keeps the two compression functions separate because the
+//! 32-bit and 64-bit schedules really are different algorithms at the round
+//! level, even though the high-level padding rules are shared.
 
 use super::Digest;
 

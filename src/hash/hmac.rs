@@ -12,10 +12,14 @@ pub struct Hmac<H: Digest> {
 }
 
 impl<H: Digest> Hmac<H> {
+    /// Build the RFC 2104 / FIPS 198-1 keyed inner and outer hash states.
     #[must_use]
     pub fn new(key: &[u8]) -> Self {
         let mut key_block = vec![0u8; H::BLOCK_LEN];
         if key.len() > H::BLOCK_LEN {
+            // HMAC hashes oversize keys down to one digest-width block first so
+            // the actual ipad/opad processing always starts from exactly one
+            // block of key material, regardless of caller input length.
             let mut digest = H::digest(key);
             key_block[..H::OUTPUT_LEN].copy_from_slice(&digest);
             crate::ct::zeroize_slice(digest.as_mut_slice());
@@ -50,6 +54,9 @@ impl<H: Digest> Hmac<H> {
     #[must_use]
     pub fn finalize(mut self) -> Vec<u8> {
         let mut inner_digest = vec![0u8; H::OUTPUT_LEN];
+        // `finalize_reset` is used here for two reasons: it produces the
+        // standard inner digest and it actively wipes the live keyed hash state
+        // instead of leaving the ipad-derived chaining value behind until drop.
         self.inner.finalize_reset(&mut inner_digest);
         self.outer.update(&inner_digest);
         let mut out = vec![0u8; H::OUTPUT_LEN];
