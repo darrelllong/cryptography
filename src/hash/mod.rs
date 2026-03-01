@@ -17,7 +17,14 @@ pub trait Digest: Clone {
     fn update(&mut self, data: &[u8]);
 
     /// Finalize the hash into `out`.
+    ///
+    /// The default one-shot `digest(...)` helper below allocates. Prefer the
+    /// concrete types' inherent `digest(...)` methods when you know the hash at
+    /// compile time and want a fixed-size array.
     fn finalize_into(self, out: &mut [u8]);
+
+    /// Finalize in place and wipe the internal state.
+    fn finalize_reset(&mut self, out: &mut [u8]);
 
     /// Best-effort zeroization of the internal state.
     fn zeroize(&mut self);

@@ -60,6 +60,10 @@ impl BlumBlumShub {
         assert_eq!(p % 4, 3, "p must be congruent to 3 mod 4");
         assert_eq!(q % 4, 3, "q must be congruent to 3 mod 4");
         let n = p.checked_mul(q).expect("modulus overflow");
+        assert!(
+            n < (1u128 << 127),
+            "modulus must be < 2^127 for the u128 mul_mod helper"
+        );
         assert!(seed > 0 && seed < n, "seed must be in 1..n");
         assert_eq!(gcd(seed, n), 1, "seed must be coprime to n");
 

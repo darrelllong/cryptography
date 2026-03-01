@@ -323,6 +323,31 @@ impl Sha2_32Core {
         out
     }
 
+    fn finalize_into_reset<const OUT: usize>(&mut self, out: &mut [u8; OUT]) {
+        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
+        self.block[self.pos] = 0x80;
+        self.pos += 1;
+
+        if self.pos > 56 {
+            self.block[self.pos..].fill(0);
+            compress32(&mut self.state, &self.block);
+            self.block = [0u8; 64];
+            self.pos = 0;
+        }
+
+        self.block[self.pos..56].fill(0);
+        self.block[56..].copy_from_slice(&self.bit_len.to_be_bytes());
+        compress32(&mut self.state, &self.block);
+
+        let mut full = [0u8; 32];
+        for (chunk, word) in full.chunks_exact_mut(4).zip(self.state.iter()) {
+            chunk.copy_from_slice(&word.to_be_bytes());
+        }
+        out.copy_from_slice(&full[..OUT]);
+
+        self.zeroize();
+    }
+
     fn zeroize(&mut self) {
         crate::ct::zeroize_slice(self.state.as_mut_slice());
         crate::ct::zeroize_slice(self.block.as_mut_slice());
@@ -390,6 +415,31 @@ impl Sha2_64Core {
         out
     }
 
+    fn finalize_into_reset<const OUT: usize>(&mut self, out: &mut [u8; OUT]) {
+        self.bit_len = self.bit_len.wrapping_add((self.pos as u128) * 8);
+        self.block[self.pos] = 0x80;
+        self.pos += 1;
+
+        if self.pos > 112 {
+            self.block[self.pos..].fill(0);
+            compress64(&mut self.state, &self.block);
+            self.block = [0u8; 128];
+            self.pos = 0;
+        }
+
+        self.block[self.pos..112].fill(0);
+        self.block[112..].copy_from_slice(&self.bit_len.to_be_bytes());
+        compress64(&mut self.state, &self.block);
+
+        let mut full = [0u8; 64];
+        for (chunk, word) in full.chunks_exact_mut(8).zip(self.state.iter()) {
+            chunk.copy_from_slice(&word.to_be_bytes());
+        }
+        out.copy_from_slice(&full[..OUT]);
+
+        self.zeroize();
+    }
+
     fn zeroize(&mut self) {
         crate::ct::zeroize_slice(self.state.as_mut_slice());
         crate::ct::zeroize_slice(self.block.as_mut_slice());
@@ -447,6 +497,11 @@ macro_rules! define_sha2_32 {
                 out.copy_from_slice(&self.inner.finalize::<$out_len>());
             }
 
+            fn finalize_reset(&mut self, out: &mut [u8]) {
+                let out: &mut [u8; $out_len] = out.try_into().expect("wrong digest length");
+                self.inner.finalize_into_reset::<$out_len>(out);
+            }
+
             fn zeroize(&mut self) {
                 self.inner.zeroize();
             }
@@ -501,6 +556,11 @@ macro_rules! define_sha2_64 {
             fn finalize_into(self, out: &mut [u8]) {
                 assert_eq!(out.len(), $out_len, "wrong digest length");
                 out.copy_from_slice(&self.inner.finalize::<$out_len>());
+            }
+
+            fn finalize_reset(&mut self, out: &mut [u8]) {
+                let out: &mut [u8; $out_len] = out.try_into().expect("wrong digest length");
+                self.inner.finalize_into_reset::<$out_len>(out);
             }
 
             fn zeroize(&mut self) {
@@ -603,8 +663,6 @@ define_sha2_64!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::process::{Command, Stdio};
 
     fn hex(bytes: &[u8]) -> String {
         let mut out = String::with_capacity(bytes.len() * 2);
@@ -615,27 +673,23 @@ mod tests {
         out
     }
 
-    fn run_openssl(args: &[&str], stdin: &[u8]) -> Option<Vec<u8>> {
-        let mut child = Command::new("openssl")
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        child.stdin.as_mut()?.write_all(stdin).ok()?;
-        let out = child.wait_with_output().ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        Some(out.stdout)
-    }
-
     #[test]
     fn sha224_empty() {
         assert_eq!(
             hex(&Sha224::digest(b"")),
             "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f"
+        );
+    }
+
+    #[test]
+    fn sha224_abc_streaming() {
+        let mut h = Sha224::new();
+        h.update(b"a");
+        h.update(b"b");
+        h.update(b"c");
+        assert_eq!(
+            hex(&h.finalize()),
+            "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7"
         );
     }
 
@@ -670,6 +724,20 @@ mod tests {
     }
 
     #[test]
+    fn sha384_abc_streaming() {
+        let mut h = Sha384::new();
+        h.update(b"a");
+        h.update(b"b");
+        h.update(b"c");
+        assert_eq!(
+            hex(&h.finalize()),
+            "cb00753f45a35e8bb5a03d699ac65007".to_owned()
+                + "272c32ab0eded1631a8b605a43ff5bed"
+                + "8086072ba1e7cc2358baeca134c825a7"
+        );
+    }
+
+    #[test]
     fn sha512_empty() {
         assert_eq!(
             hex(&Sha512::digest(b"")),
@@ -677,6 +745,21 @@ mod tests {
                 + "d620e4050b5715dc83f4a921d36ce9ce"
                 + "47d0d13c5d85f2b0ff8318d2877eec2f"
                 + "63b931bd47417a81a538327af927da3e"
+        );
+    }
+
+    #[test]
+    fn sha512_abc_streaming() {
+        let mut h = Sha512::new();
+        h.update(b"a");
+        h.update(b"b");
+        h.update(b"c");
+        assert_eq!(
+            hex(&h.finalize()),
+            "ddaf35a193617abacc417349ae204131".to_owned()
+                + "12e6fa4e89a97ea20a9eeee64b55d39a"
+                + "2192992a274fc1a836ba3c23a3feebbd"
+                + "454d4423643ce80e2a9ac94fa54ca49f"
         );
     }
 
@@ -699,7 +782,7 @@ mod tests {
     #[test]
     fn sha256_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let expected = match run_openssl(&["dgst", "-sha256", "-binary"], msg) {
+        let expected = match crate::ct::run_openssl(&["dgst", "-sha256", "-binary"], msg) {
             Some(bytes) => bytes,
             None => return,
         };

@@ -242,7 +242,11 @@ struct Subkeys {
 }
 
 fn expand_subkeys(key: &[u8], use_ct: bool) -> Subkeys {
-    assert!((5..=16).contains(&key.len()));
+    assert!(
+        (5..=16).contains(&key.len()),
+        "CAST-128 key length must be 5..=16 bytes, got {}",
+        key.len()
+    );
 
     let mut x = [0u8; 16];
     x[..key.len()].copy_from_slice(key);

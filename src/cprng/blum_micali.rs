@@ -54,6 +54,10 @@ impl BlumMicali {
     /// Construct a generator with prime modulus `p`, base `g`, and seed `x0`.
     pub fn new(p: u128, g: u128, seed: u128) -> Self {
         assert!(p > 2, "p must be > 2");
+        assert!(
+            p < (1u128 << 127),
+            "modulus must be < 2^127 for the u128 mul_mod helper"
+        );
         assert!(g > 1 && g < p, "g must be in 2..p");
         assert!(seed > 0 && seed < p, "seed must be in 1..p");
         Self { p, g, state: seed }

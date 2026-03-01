@@ -11,6 +11,11 @@
 use core::ptr;
 use core::sync::atomic::{compiler_fence, Ordering};
 
+#[cfg(test)]
+use std::io::Write;
+#[cfg(test)]
+use std::process::{Command, Stdio};
+
 #[inline(always)]
 fn eq_mask_u32(a: u8, b: u8) -> u32 {
     let x = (a ^ b) as u16;
@@ -46,6 +51,35 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
         i += 1;
     }
     out
+}
+
+#[inline]
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= *x ^ *y;
+    }
+    diff == 0
+}
+
+#[cfg(test)]
+pub(crate) fn run_openssl(args: &[&str], stdin: &[u8]) -> Option<Vec<u8>> {
+    let mut child = Command::new("openssl")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.as_mut()?.write_all(stdin).ok()?;
+    let out = child.wait_with_output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(out.stdout)
 }
 
 /// Build packed ANF coefficients for an 8-bit S-box.

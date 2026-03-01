@@ -115,6 +115,23 @@ enum XofState<const RATE: usize> {
     Squeezing(KeccakSponge<RATE>),
 }
 
+impl<const RATE: usize> XofState<RATE> {
+    fn zeroize(&mut self) {
+        match self {
+            XofState::Absorbing(inner) => {
+                crate::ct::zeroize_slice(inner.state.as_mut_slice());
+                crate::ct::zeroize_slice(inner.block.as_mut_slice());
+                inner.pos = 0;
+            }
+            XofState::Squeezing(sponge) => {
+                crate::ct::zeroize_slice(sponge.state.as_mut_slice());
+                crate::ct::zeroize_slice(sponge.block.as_mut_slice());
+                sponge.offset = 0;
+            }
+        }
+    }
+}
+
 #[inline(always)]
 fn state_to_rate_bytes<const RATE: usize>(state: &[u64; 25]) -> [u8; RATE] {
     let mut rate_bytes = [0u8; RATE];
@@ -167,6 +184,27 @@ impl<const RATE: usize> Keccak<RATE> {
         let mut out = [0u8; OUT];
         sponge.squeeze(&mut out);
         out
+    }
+
+    fn finalize_into_reset<const OUT: usize>(&mut self, suffix: u8, out: &mut [u8; OUT]) {
+        self.block[self.pos] ^= suffix;
+        self.block[RATE - 1] ^= 0x80;
+        absorb_block(&mut self.state, &self.block);
+
+        let mut sponge: KeccakSponge<RATE> = KeccakSponge {
+            block: state_to_rate_bytes(&self.state),
+            state: self.state,
+            offset: 0,
+        };
+        sponge.squeeze(out);
+
+        crate::ct::zeroize_slice(sponge.state.as_mut_slice());
+        crate::ct::zeroize_slice(sponge.block.as_mut_slice());
+        sponge.offset = 0;
+
+        crate::ct::zeroize_slice(self.state.as_mut_slice());
+        crate::ct::zeroize_slice(self.block.as_mut_slice());
+        self.pos = 0;
     }
 }
 
@@ -241,6 +279,11 @@ macro_rules! define_sha3 {
                 out.copy_from_slice(&digest);
             }
 
+            fn finalize_reset(&mut self, out: &mut [u8]) {
+                let out: &mut [u8; $out_len] = out.try_into().expect("wrong digest length");
+                self.inner.finalize_into_reset::<$out_len>(0x06, out);
+            }
+
             fn zeroize(&mut self) {
                 crate::ct::zeroize_slice(self.inner.state.as_mut_slice());
                 crate::ct::zeroize_slice(self.inner.block.as_mut_slice());
@@ -301,6 +344,12 @@ macro_rules! define_shake {
                     XofState::Absorbing(_) => unreachable!(),
                     XofState::Squeezing(sponge) => sponge.squeeze(out),
                 }
+            }
+        }
+
+        impl Drop for $name {
+            fn drop(&mut self) {
+                self.inner.zeroize();
             }
         }
     };

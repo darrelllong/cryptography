@@ -46,18 +46,6 @@ fn increment_be(counter: &mut [u8]) {
 }
 
 #[inline]
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= *x ^ *y;
-    }
-    diff == 0
-}
-
-#[inline]
 fn rb_for(block_len: usize) -> u8 {
     match block_len {
         8 => 0x1b,
@@ -139,6 +127,9 @@ fn xex_decrypt_block<C: BlockCipher>(cipher: &C, tweak: &[u8; 16], block: &mut [
 fn ghash_mul(x: u128, y: u128) -> u128 {
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
+    // Portable reference GHASH multiplication. This is not constant-time; use
+    // a CLMUL-backed implementation or a dedicated constant-time GHASH path in
+    // production code with a strict side-channel threat model.
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
@@ -188,6 +179,13 @@ fn ghash_iv(h: u128, iv: &[u8]) -> [u8; 16] {
 }
 
 #[inline]
+fn gcm_hash_subkey<C: BlockCipher>(cipher: &C) -> u128 {
+    let mut h = [0u8; 16];
+    cipher.encrypt(&mut h);
+    u128::from_be_bytes(h)
+}
+
+#[inline]
 fn counter_keystream<C: BlockCipher>(cipher: &C, counter: &[u8; 16]) -> [u8; 16] {
     let mut out = *counter;
     cipher.encrypt(&mut out);
@@ -201,11 +199,20 @@ fn gcm_compute_tag<C: BlockCipher>(
     ciphertext: &[u8],
 ) -> [u8; 16] {
     assert_block_128::<C>();
+    let h = gcm_hash_subkey(cipher);
+    let j0 = ghash_iv(h, nonce);
+    let s = ghash(h, aad, ciphertext);
+    let tag_mask = u128::from_be_bytes(counter_keystream(cipher, &j0));
+    (s ^ tag_mask).to_be_bytes()
+}
 
-    let mut h = [0u8; 16];
-    cipher.encrypt(&mut h);
-    let h = u128::from_be_bytes(h);
-
+fn gcm_compute_tag_with_h<C: BlockCipher>(
+    cipher: &C,
+    h: u128,
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> [u8; 16] {
     let j0 = ghash_iv(h, nonce);
     let s = ghash(h, aad, ciphertext);
     let tag_mask = u128::from_be_bytes(counter_keystream(cipher, &j0));
@@ -581,15 +588,12 @@ impl<C: BlockCipher> Gcm<C> {
     }
 
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
-        let expected = self.compute_tag(nonce, aad, data);
-        if !constant_time_eq(&expected, tag) {
+        assert_block_128::<C>();
+        let h = gcm_hash_subkey(&self.cipher);
+        let expected = gcm_compute_tag_with_h(&self.cipher, h, nonce, aad, data);
+        if !crate::ct::constant_time_eq(&expected, tag) {
             return false;
         }
-
-        assert_block_128::<C>();
-        let mut h = [0u8; 16];
-        self.cipher.encrypt(&mut h);
-        let h = u128::from_be_bytes(h);
         let j0 = ghash_iv(h, nonce);
         let mut counter = j0;
         increment_be32(&mut counter);
@@ -625,7 +629,7 @@ impl<C: BlockCipher> Gmac<C> {
     }
 
     pub fn verify(&self, nonce: &[u8], aad: &[u8], tag: &[u8]) -> bool {
-        constant_time_eq(&self.compute(nonce, aad), tag)
+        crate::ct::constant_time_eq(&self.compute(nonce, aad), tag)
     }
 }
 
@@ -675,7 +679,7 @@ impl<C: BlockCipher> Cmac<C> {
     }
 
     pub fn verify(&self, data: &[u8], tag: &[u8]) -> bool {
-        constant_time_eq(&self.compute(data), tag)
+        crate::ct::constant_time_eq(&self.compute(data), tag)
     }
 }
 
@@ -683,9 +687,6 @@ impl<C: BlockCipher> Cmac<C> {
 mod tests {
     use super::*;
     use crate::Aes128;
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
     fn parse<const N: usize>(s: &str) -> [u8; N] {
         let mut out = [0u8; N];
         assert_eq!(s.len(), 2 * N);
@@ -693,22 +694,6 @@ mod tests {
             out[i] = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
         }
         out
-    }
-
-    fn run_openssl(args: &[&str], stdin: &[u8]) -> Option<Vec<u8>> {
-        let mut child = Command::new("openssl")
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        child.stdin.as_mut()?.write_all(stdin).ok()?;
-        let out = child.wait_with_output().ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        Some(out.stdout)
     }
 
     #[test]
@@ -956,7 +941,7 @@ mod tests {
         let plaintext =
             parse::<31>("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e");
 
-        let expected = match run_openssl(
+        let expected = match crate::ct::run_openssl(
             &[
                 "enc",
                 "-aes-128-xts",
@@ -977,6 +962,20 @@ mod tests {
         let mode = Xts::new(Aes128::new(&key1), Aes128::new(&key2));
         mode.encrypt_sector(&tweak, &mut data);
         assert_eq!(data.as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn ctr_des_roundtrip_generic() {
+        let key = parse::<8>("133457799bbcdff1");
+        let counter = parse::<8>("0123456789abcdef");
+        let original = *b"generic DES mode path!";
+        let mut data = original;
+
+        let mode = Ctr::new(crate::Des::new(&key));
+        mode.apply_keystream(&counter, &mut data);
+        assert_ne!(data, original);
+        mode.apply_keystream(&counter, &mut data);
+        assert_eq!(data, original);
     }
 
     #[test]

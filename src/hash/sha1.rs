@@ -122,6 +122,30 @@ impl Sha1 {
         h.update(data);
         h.finalize()
     }
+
+    fn finalize_into_reset(&mut self, out: &mut [u8; 20]) {
+        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
+
+        self.block[self.pos] = 0x80;
+        self.pos += 1;
+
+        if self.pos > 56 {
+            self.block[self.pos..].fill(0);
+            compress(&mut self.state, &self.block);
+            self.block = [0u8; 64];
+            self.pos = 0;
+        }
+
+        self.block[self.pos..56].fill(0);
+        self.block[56..].copy_from_slice(&self.bit_len.to_be_bytes());
+        compress(&mut self.state, &self.block);
+
+        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
+            chunk.copy_from_slice(&word.to_be_bytes());
+        }
+
+        self.zeroize();
+    }
 }
 
 impl Digest for Sha1 {
@@ -139,6 +163,11 @@ impl Digest for Sha1 {
     fn finalize_into(self, out: &mut [u8]) {
         assert_eq!(out.len(), 20, "wrong digest length");
         out.copy_from_slice(&self.finalize());
+    }
+
+    fn finalize_reset(&mut self, out: &mut [u8]) {
+        let out: &mut [u8; 20] = out.try_into().expect("wrong digest length");
+        self.finalize_into_reset(out);
     }
 
     fn zeroize(&mut self) {

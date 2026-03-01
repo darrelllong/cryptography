@@ -5,18 +5,6 @@
 
 use super::Digest;
 
-#[inline]
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= *x ^ *y;
-    }
-    diff == 0
-}
-
 /// Streaming HMAC state over an arbitrary in-tree digest.
 pub struct Hmac<H: Digest> {
     inner: H,
@@ -60,12 +48,10 @@ impl<H: Digest> Hmac<H> {
 
     pub fn finalize(mut self) -> Vec<u8> {
         let mut inner_digest = vec![0u8; H::OUTPUT_LEN];
-        let inner = core::mem::replace(&mut self.inner, H::new());
-        inner.finalize_into(&mut inner_digest);
+        self.inner.finalize_reset(&mut inner_digest);
         self.outer.update(&inner_digest);
         let mut out = vec![0u8; H::OUTPUT_LEN];
-        let outer = core::mem::replace(&mut self.outer, H::new());
-        outer.finalize_into(&mut out);
+        self.outer.finalize_reset(&mut out);
         crate::ct::zeroize_slice(inner_digest.as_mut_slice());
         out
     }
@@ -77,7 +63,7 @@ impl<H: Digest> Hmac<H> {
     }
 
     pub fn verify(key: &[u8], data: &[u8], tag: &[u8]) -> bool {
-        constant_time_eq(&Self::compute(key, data), tag)
+        crate::ct::constant_time_eq(&Self::compute(key, data), tag)
     }
 }
 
@@ -92,9 +78,6 @@ impl<H: Digest> Drop for Hmac<H> {
 mod tests {
     use super::*;
     use crate::{Sha256, Sha3_256, Sha3_512};
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-
     fn hex(bytes: &[u8]) -> String {
         let mut out = String::with_capacity(bytes.len() * 2);
         for b in bytes {
@@ -102,22 +85,6 @@ mod tests {
             let _ = write!(&mut out, "{b:02x}");
         }
         out
-    }
-
-    fn run_openssl(args: &[&str], stdin: &[u8]) -> Option<Vec<u8>> {
-        let mut child = Command::new("openssl")
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        child.stdin.as_mut()?.write_all(stdin).ok()?;
-        let out = child.wait_with_output().ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        Some(out.stdout)
     }
 
     #[test]
@@ -164,7 +131,7 @@ mod tests {
     fn hmac_sha3_256_matches_openssl() {
         let key = b"key";
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let expected = match run_openssl(
+        let expected = match crate::ct::run_openssl(
             &[
                 "dgst",
                 "-sha3-256",
