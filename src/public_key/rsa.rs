@@ -176,6 +176,24 @@ mod tests {
     }
 
     #[test]
+    fn raw_rsa_is_multiplicatively_homomorphic() {
+        let p = BigUint::from_u64(61);
+        let q = BigUint::from_u64(53);
+        let (public, private) = Rsa::from_primes(&p, &q).expect("valid RSA key");
+        let left = BigUint::from_u64(12);
+        let right = BigUint::from_u64(17);
+
+        let left_cipher = public.encrypt_raw(&left);
+        let right_cipher = public.encrypt_raw(&right);
+        let combined_cipher =
+            BigUint::mod_mul(&left_cipher, &right_cipher, public.modulus());
+        let decrypted = private.decrypt_raw(&combined_cipher);
+        let expected = BigUint::mod_mul(&left, &right, public.modulus());
+
+        assert_eq!(decrypted, expected);
+    }
+
+    #[test]
     fn explicit_exponent_matches_classic_example() {
         let p = BigUint::from_u64(61);
         let q = BigUint::from_u64(53);

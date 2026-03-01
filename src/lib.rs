@@ -91,6 +91,7 @@ pub use public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
 pub use public_key::elgamal::{
     ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey,
 };
+pub use public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
 pub use public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};
 pub use public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
 pub use public_key::{bigint, primes};

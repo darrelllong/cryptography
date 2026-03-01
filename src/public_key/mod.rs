@@ -9,6 +9,7 @@
 pub mod bigint;
 pub mod cocks;
 pub mod elgamal;
+pub mod paillier;
 pub mod primes;
 pub mod rabin;
 pub mod rsa;
