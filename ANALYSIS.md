@@ -19,10 +19,10 @@ pub trait BlockCipher {
 }
 ```
 
-The `encrypt_block` / `decrypt_block` methods taking typed `&[u8; N]` arrays
-remain on each struct for callers that know the block size at compile time.
-The trait methods provide a uniform interface for generic code such as the
-throughput benchmarks.
+Most block-cipher structs also expose inherent `encrypt_block` /
+`decrypt_block` methods taking typed `&[u8; N]` arrays for callers that know
+the block size at compile time. The trait methods provide the uniform dynamic
+interface used by generic code such as the throughput benchmarks.
 
 ---
 
@@ -741,7 +741,7 @@ reversing the encryption array.
 Magma has 32 rounds while DES has 16.  Magma's individual round is cheaper — one
 wrapping add, 8 nibble table lookups, and one rotate — whereas DES includes the
 E-expansion and P-box bit permutations even with SP-table fusion.  The net effect
-is comparable throughput (Magma ~64 MiB/s, DES ~78 MiB/s), with Magma's 2×
+is comparable throughput (Magma ~59 MiB/s, DES ~79 MiB/s), with Magma's 2×
 round count roughly offsetting its simpler round function.
 
 ---
@@ -754,6 +754,24 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: appropriate for GOST interoperability and for comparing non-AES 128-bit block ciphers. It is the more modern Russian standard choice in this repository. It is not broadly deployed like AES, so most non-GOST applications should still prefer AES.
 - Known issues: the fast `Grasshopper` type uses table lookups and is not constant-time; `GrasshopperCt` is substantially slower. Its software implementation is comparatively slow even on the fast path because the linear layer is expensive.
 
+Grasshopper alternates a bytewise substitution layer with a byte-mixing linear
+layer over $\mathrm{GF}(2^8)$. The defining round transform is:
+
+```math
+L(a_{15}, \dots, a_0) = (l(a), a_{15}, \dots, a_1)
+```
+
+where the new byte is
+
+```math
+l(a) = \bigoplus_{i=0}^{15} c_i \cdot a_i
+```
+
+for fixed field constants $c_i$. In software, that 16-byte linear recurrence is
+the expensive part: even when the fast path precomputes tables, the round still
+has much more byte shuffling and finite-field work than AES. That is the main
+reason Grasshopper stays at the slow end of the 128-bit block-cipher table.
+
 #### SM4
 
 - Reference: `gm-t-0002-2012` (standard); `liu-2024-sm4-linear` (local PDF currently checked in under `pubs/`).
@@ -761,6 +779,29 @@ round count roughly offsetting its simpler round function.
 - Properties: 128-bit block, 128-bit key, 32 rounds; structurally simple and faster than the older 64-bit block ciphers in this crate, but slower than AES fast-path software.
 - Usage and deprecation: appropriate for SM4 interoperability, standards conformance, and comparative study. It is not deprecated, but it is primarily a regional standards cipher rather than a global default.
 - Known issues: the fast SM4 type (`Sm4`) uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. Generic block modes are available in the crate, but there is no SM4-specific protocol wrapper here.
+
+SM4 is a 32-round unbalanced Feistel-like design on four 32-bit words. Its
+round step is:
+
+```math
+X_{i+4} = X_i \oplus T(X_{i+1} \oplus X_{i+2} \oplus X_{i+3} \oplus rk_i)
+```
+
+with
+
+```math
+T(x) = L(\tau(x))
+```
+
+where $\tau$ applies the byte S-box and $L$ is the linear transform
+
+```math
+L(x) = x \oplus \mathrm{rotl}_2(x) \oplus \mathrm{rotl}_{10}(x) \oplus \mathrm{rotl}_{18}(x) \oplus \mathrm{rotl}_{24}(x)
+```
+
+That is why the fast path lands in the middle of the pack: each round is
+structurally simple, but 32 rounds still means a lot of repeated byte
+substitution and word rotation.
 
 ### Stream Ciphers
 
@@ -772,6 +813,29 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: `ChaCha20` is the modern general-purpose ARX stream cipher to prefer over Salsa20 for most new software designs, especially when RFC 8439 interoperability matters. `XChaCha20` is the better fit when random nonces are easier operationally than global nonce coordination.
 - Known issues: there is no separate `Ct` type because the core is already table-free ARX, but nonce reuse with the same key is still catastrophic. `ChaCha20`'s 96-bit nonce is adequate for protocol-framed use; `XChaCha20` exists specifically to give callers a much larger nonce space when they need safer random-nonce operation.
 
+ChaCha20 builds each 64-byte keystream block from 20 rounds of the quarter
+round:
+
+```math
+a = a + b,\quad d = \mathrm{rotl}_{16}(d \oplus a)
+```
+
+```math
+c = c + d,\quad b = \mathrm{rotl}_{12}(b \oplus c)
+```
+
+```math
+a = a + b,\quad d = \mathrm{rotl}_{8}(d \oplus a)
+```
+
+```math
+c = c + d,\quad b = \mathrm{rotl}_{7}(b \oplus c)
+```
+
+XChaCha20 adds one HChaCha20 subkey derivation up front, then runs the same
+ChaCha20 core with the derived key and the tail of the 24-byte nonce. That is
+why the sustained throughput is effectively identical in the benchmark.
+
 #### Salsa20
 
 - Reference: `salsafamily-2007`.
@@ -780,6 +844,30 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: appropriate for Salsa20 interoperability, comparative study, and software-oriented stream-cipher use. It is not deprecated as a primitive, but modern protocol ecosystems more often standardize ChaCha20 than Salsa20.
 - Known issues: Salsa20 is naturally closer to constant-time than the table-driven ciphers here because its core is ARX, so there is no separate `Ct` type. As with any stream cipher, nonce reuse with the same key is catastrophic, and the original 64-bit nonce is smaller than newer designs such as XChaCha.
 
+Salsa20 uses a very similar ARX strategy, but with the original Salsa quarter
+round:
+
+```math
+b = b \oplus \mathrm{rotl}_{7}(a + d)
+```
+
+```math
+c = c \oplus \mathrm{rotl}_{9}(b + a)
+```
+
+```math
+d = d \oplus \mathrm{rotl}_{13}(c + b)
+```
+
+```math
+a = a \oplus \mathrm{rotl}_{18}(d + c)
+```
+
+That is why it is so fast here: like ChaCha20, the entire core is just
+addition, rotation, and XOR on 32-bit words, with no tables and no expensive
+finite-field work. On this host it outruns ZUC largely because ZUC's nonlinear
+function and LFSR bookkeeping do more per generated word than a pure ARX core.
+
 #### ZUC-128
 
 - Reference: `etsi-sage-zuc-v16`.
@@ -787,6 +875,23 @@ round count roughly offsetting its simpler round function.
 - Properties: 128-bit stream cipher with a 128-bit key and 128-bit IV; high software throughput in the default path; not a block cipher, so it fills arbitrary buffers directly.
 - Usage and deprecation: appropriate for ZUC interoperability, radio-stack work, and standards testing. It is not deprecated in the telecom profiles that use it. In this crate it is exposed as the raw keystream generator rather than the higher-level EEA3/EIA3 constructions.
 - Known issues: the fast ZUC type (`Zuc128`) uses table-based S-boxes in the nonlinear function and is not constant-time; `Zuc128Ct` is much slower. As a stream cipher, keystream reuse with the same key/IV is catastrophic, so IV management is the caller's responsibility.
+
+ZUC keeps 16 31-bit LFSR words plus two nonlinear 32-bit registers. Each output
+word uses:
+
+```math
+X_0, X_1, X_2, X_3 = BR(s_{15}, \dots, s_0)
+```
+
+followed by the nonlinear filter
+
+```math
+W = (X_0 \oplus R_1) + R_2,\quad Z = W \oplus X_3
+```
+
+and then an LFSR update over $\mathrm{GF}(2^{31}-1)$. That extra LFSR feedback
+and two-S-box nonlinear stage make it heavier than Salsa20's pure ARX core,
+but it still lands well ahead of AES-128 on this host.
 
 ---
 
@@ -982,23 +1087,23 @@ the `Ct` path and libsodium:
 
 ```text
 cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench -- \
-  --sample-size 10 --measurement-time 0.2 --warm-up-time 0.1
+  --sample-size 30 --measurement-time 0.5 --warm-up-time 0.2
 ```
 
 Current midpoint throughputs on this host:
 
 | Benchmark | Throughput |
 |-----------|-----------:|
-| `Aes128` (16-byte block) | 479.5 MiB/s |
-| `Aes192` (16-byte block) | 383.0 MiB/s |
-| `Aes256` (16-byte block) | 314.5 MiB/s |
-| `Aes256` (1 KiB) | 324.4 MiB/s |
-| `Aes128Ct` (16-byte block) | 40.4 MiB/s |
-| `Aes192Ct` (16-byte block) | 49.3 MiB/s |
-| `Aes256Ct` (16-byte block) | 43.2 MiB/s |
-| `Aes256Ct` (1 KiB) | 39.8 MiB/s |
+| `Aes128` (16-byte block) | 483.4 MiB/s |
+| `Aes192` (16-byte block) | 406.5 MiB/s |
+| `Aes256` (16-byte block) | 339.1 MiB/s |
+| `Aes256` (1 KiB) | 346.2 MiB/s |
+| `Aes128Ct` (16-byte block) | 63.5 MiB/s |
+| `Aes192Ct` (16-byte block) | 52.1 MiB/s |
+| `Aes256Ct` (16-byte block) | 44.1 MiB/s |
+| `Aes256Ct` (1 KiB) | 43.6 MiB/s |
 | libsodium XSalsa20-Poly1305 (16-byte message) | 79.0 MiB/s |
-| libsodium XSalsa20-Poly1305 (1 KiB message) | 627.6 MiB/s |
+| libsodium XSalsa20-Poly1305 (1 KiB message) | 630.4 MiB/s |
 
 This comparison is intentionally a calibration exercise, not a strict
 apples-to-apples algorithm match. The `AES` rows are this crate's raw block
@@ -1186,11 +1291,12 @@ size, which is smaller than newer extended-nonce descendants such as XChaCha.
 |---------|----:|---:|-----------:|------:|
 | ZUC-128 | 128 b | 128 b | 552.3 MiB/s | 1.9 s |
 
-ZUC is a stream cipher, so the benchmark fills a 1 MiB buffer rather than
-walking block boundaries. On this M4 Pro, the fast path is the single fastest
-non-Speck primitive in the repository. The `Ct` path is much slower because
-its nonlinear function replaces direct `S0`/`S1` table loads with packed ANF
-evaluation of two separate 8-bit S-boxes.
+As with ChaCha20 and Salsa20, the benchmark measures ZUC by filling a 1 MiB
+buffer directly. On this M4 Pro, the fast path is no longer the fastest
+non-Speck primitive once the ARX stream ciphers are included, but it still
+lands well ahead of AES-128 and the faster block ciphers. The `Ct` path is
+much slower because its nonlinear function replaces direct `S0`/`S1` table
+loads with packed ANF evaluation of two separate 8-bit S-boxes.
 
 ### Summary
 
