@@ -123,6 +123,7 @@ macro_rules! speck_variant {
             round_keys: [u64; $T],
         }
         impl $Name {
+            /// Expand the paper-defined master key into this variant's round keys.
             pub fn new(key: &[u8; $key_len]) -> Self {
                 let mut rk = [0u64; $T];
                 speck_expand(
@@ -139,6 +140,7 @@ macro_rules! speck_variant {
                 );
                 Self { round_keys: rk }
             }
+            /// Expand the key and then wipe the caller-owned key buffer.
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
                 // Mirrors `new`, but clears the caller-owned key bytes after
                 // expansion so only the internal round keys remain live.
@@ -146,11 +148,13 @@ macro_rules! speck_variant {
                 crate::ct::zeroize_slice(key.as_mut_slice());
                 out
             }
+            /// Encrypt one block using the cached ARX round keys.
             pub fn encrypt_block(&self, block: &[u8; $blk_len]) -> [u8; $blk_len] {
                 let mut out = *block;
                 speck_enc(&mut out, &self.round_keys, $alpha, $beta, $n, $mask);
                 out
             }
+            /// Decrypt one block using the cached ARX round keys.
             pub fn decrypt_block(&self, block: &[u8; $blk_len]) -> [u8; $blk_len] {
                 let mut out = *block;
                 speck_dec(&mut out, &self.round_keys, $alpha, $beta, $n, $mask);

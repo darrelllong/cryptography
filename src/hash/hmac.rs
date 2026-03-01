@@ -47,11 +47,13 @@ impl<H: Digest> Hmac<H> {
         Self { inner, outer }
     }
 
+    /// Absorb more message bytes into the keyed inner hash.
     pub fn update(&mut self, data: &[u8]) {
         self.inner.update(data);
     }
 
     #[must_use]
+    /// Finalize the MAC and return the authentication tag.
     pub fn finalize(mut self) -> Vec<u8> {
         let mut inner_digest = vec![0u8; H::OUTPUT_LEN];
         // `finalize_reset` is used here for two reasons: it produces the
@@ -66,6 +68,7 @@ impl<H: Digest> Hmac<H> {
     }
 
     #[must_use]
+    /// Compute an HMAC tag in one shot.
     pub fn compute(key: &[u8], data: &[u8]) -> Vec<u8> {
         let mut mac = Self::new(key);
         mac.update(data);
@@ -73,6 +76,7 @@ impl<H: Digest> Hmac<H> {
     }
 
     #[must_use]
+    /// Compute and compare the tag in constant time.
     pub fn verify(key: &[u8], data: &[u8], tag: &[u8]) -> bool {
         crate::ct::constant_time_eq(&Self::compute(key, data), tag)
     }

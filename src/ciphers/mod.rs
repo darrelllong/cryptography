@@ -1,4 +1,9 @@
 //! Block and stream ciphers.
+//!
+//! The crate keeps primitive implementations grouped here and layers higher
+//! level composition (`modes`, `hash`, `cprng`) on top. This separation keeps
+//! the cipher modules focused on the algorithm cores and their direct key
+//! schedules rather than mixing protocol or framing concerns into each file.
 
 mod simon_speck_util;
 

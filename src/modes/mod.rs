@@ -241,16 +241,19 @@ pub struct Ecb<C> {
 }
 
 impl<C> Ecb<C> {
+    /// Wrap a block cipher in SP 800-38A ECB mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
 }
 
 impl<C: BlockCipher> Ecb<C> {
+    /// Encrypt block-aligned data in place without padding.
     pub fn encrypt_nopad(&self, data: &mut [u8]) {
         assert_block_multiple::<C>(data);
         for block in data.chunks_exact_mut(C::BLOCK_LEN) {
@@ -258,6 +261,7 @@ impl<C: BlockCipher> Ecb<C> {
         }
     }
 
+    /// Decrypt block-aligned data in place without padding.
     pub fn decrypt_nopad(&self, data: &mut [u8]) {
         assert_block_multiple::<C>(data);
         for block in data.chunks_exact_mut(C::BLOCK_LEN) {
@@ -272,10 +276,12 @@ pub struct Cbc<C> {
 }
 
 impl<C> Cbc<C> {
+    /// Wrap a block cipher in SP 800-38A CBC mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
@@ -324,10 +330,12 @@ pub struct Cfb<C> {
 }
 
 impl<C> Cfb<C> {
+    /// Wrap a block cipher in SP 800-38A CFB mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
@@ -381,10 +389,12 @@ pub struct Ofb<C> {
 }
 
 impl<C> Ofb<C> {
+    /// Wrap a block cipher in SP 800-38A OFB mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
@@ -411,10 +421,12 @@ pub struct Ctr<C> {
 }
 
 impl<C> Ctr<C> {
+    /// Wrap a block cipher in SP 800-38A CTR mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
@@ -449,6 +461,10 @@ pub struct Xts<C> {
 }
 
 impl<C> Xts<C> {
+    /// Wrap a pair of block ciphers in SP 800-38E XTS mode.
+    ///
+    /// `data_cipher` encrypts the sector payload blocks. `tweak_cipher`
+    /// derives the per-sector tweak stream from the caller-supplied tweak.
     pub fn new(data_cipher: C, tweak_cipher: C) -> Self {
         Self {
             data_cipher,
@@ -456,10 +472,12 @@ impl<C> Xts<C> {
         }
     }
 
+    /// Borrow the data-encryption cipher.
     pub fn data_cipher(&self) -> &C {
         &self.data_cipher
     }
 
+    /// Borrow the tweak-derivation cipher.
     pub fn tweak_cipher(&self) -> &C {
         &self.tweak_cipher
     }
@@ -580,10 +598,12 @@ pub struct Cmac<C> {
 }
 
 impl<C> Cmac<C> {
+    /// Wrap a block cipher in SP 800-38B CMAC mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
@@ -595,20 +615,24 @@ pub struct Gcm<C> {
 }
 
 impl<C> Gcm<C> {
+    /// Wrap a 128-bit block cipher in SP 800-38D GCM mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
 }
 
 impl<C: BlockCipher> Gcm<C> {
+    /// Compute the GCM authentication tag over `aad` and `ciphertext`.
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
         gcm_compute_tag(&self.cipher, nonce, aad, ciphertext)
     }
 
+    /// Encrypt in place and return the 128-bit authentication tag.
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         assert_block_128::<C>();
         let mut h = [0u8; 16];
@@ -629,6 +653,9 @@ impl<C: BlockCipher> Gcm<C> {
         (s ^ tag_mask).to_be_bytes()
     }
 
+    /// Verify the tag and, if valid, decrypt in place.
+    ///
+    /// Returns `false` and leaves `data` unchanged if tag verification fails.
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
         assert_block_128::<C>();
         let h = gcm_hash_subkey(&self.cipher);
@@ -656,26 +683,31 @@ pub struct Gmac<C> {
 }
 
 impl<C> Gmac<C> {
+    /// Wrap a 128-bit block cipher in SP 800-38D GMAC mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
 
+    /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
     }
 }
 
 impl<C: BlockCipher> Gmac<C> {
+    /// Compute a GMAC tag over associated data only.
     pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; 16] {
         gcm_compute_tag(&self.cipher, nonce, aad, &[])
     }
 
+    /// Verify a GMAC tag in constant time.
     pub fn verify(&self, nonce: &[u8], aad: &[u8], tag: &[u8]) -> bool {
         crate::ct::constant_time_eq(&self.compute(nonce, aad), tag)
     }
 }
 
 impl<C: BlockCipher> Cmac<C> {
+    /// Compute a CMAC tag over arbitrary-length input.
     pub fn compute(&self, data: &[u8]) -> Vec<u8> {
         let blk = C::BLOCK_LEN;
         let mut l = vec![0u8; blk];
@@ -720,6 +752,7 @@ impl<C: BlockCipher> Cmac<C> {
         m_last
     }
 
+    /// Verify a CMAC tag in constant time.
     pub fn verify(&self, data: &[u8], tag: &[u8]) -> bool {
         crate::ct::constant_time_eq(&self.compute(data), tag)
     }

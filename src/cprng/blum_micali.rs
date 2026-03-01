@@ -10,7 +10,8 @@
 //! For a secure instantiation, `p` should be a large prime and `g` should be a
 //! generator of a large subgroup. This reference implementation uses `u128`
 //! arithmetic, so it is intended for experimentation and testing, not for
-//! modern deployment.
+//! modern deployment. The construction follows the original Blum-Micali
+//! generator (1984), implemented here as a tiny fixed-width reference form.
 
 use super::primes::{is_probable_prime, mod_pow};
 use crate::Csprng;

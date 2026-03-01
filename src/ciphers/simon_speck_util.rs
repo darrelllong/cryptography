@@ -1,4 +1,8 @@
 //! Shared word helpers for the SIMON / SPECK families.
+//!
+//! These are factored out because both families use the same little-endian
+//! word packing and masked rotate helpers; keeping one copy avoids duplicated
+//! audit surface without changing either paper's round function.
 
 /// Load bytes as a little-endian n-bit word into a u64.
 #[inline]

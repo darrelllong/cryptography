@@ -58,6 +58,10 @@ impl CtrDrbgAes256 {
     }
 
     /// Instantiate and wipe the caller-provided seed buffer.
+    ///
+    /// This is useful when the caller already has seed material in a mutable
+    /// staging buffer and does not want that seed to remain live after the
+    /// DRBG has absorbed it.
     pub fn new_wiping(seed_material: &mut [u8; SEED_LEN]) -> Self {
         let out = Self::new(seed_material);
         zeroize_slice(seed_material.as_mut_slice());
@@ -65,6 +69,9 @@ impl CtrDrbgAes256 {
     }
 
     /// Reseed from fresh 48-byte seed material.
+    ///
+    /// In the no-derivation-function profile, reseeding uses the same exact
+    /// seed length and update path as instantiation.
     pub fn reseed(&mut self, seed_material: &[u8; SEED_LEN]) {
         self.update(Some(seed_material));
         self.reseed_counter = 1;
@@ -113,6 +120,9 @@ impl CtrDrbgAes256 {
     }
 
     /// Current reseed counter.
+    ///
+    /// This is primarily exposed so callers can inspect how close a long-lived
+    /// instance is to the SP 800-90A reseed limit.
     #[must_use]
     pub fn reseed_counter(&self) -> u64 {
         self.reseed_counter

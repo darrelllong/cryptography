@@ -311,22 +311,26 @@ macro_rules! serpent_type {
         }
 
         impl $name {
+            /// Expand the user key into the 33 Serpent round-key words.
             pub fn new(key: &[u8; $key_len]) -> Self {
                 Self {
                     round_keys: expand_round_keys(key, false),
                 }
             }
 
+            /// Expand the key and then wipe the caller-owned key buffer.
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
                 let cipher = Self::new(key);
                 zeroize_slice(key);
                 cipher
             }
 
+            /// Encrypt one 128-bit block.
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 encrypt_block_words(&self.round_keys, block, false)
             }
 
+            /// Decrypt one 128-bit block.
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 decrypt_block_words(&self.round_keys, block, false)
             }
@@ -362,22 +366,26 @@ macro_rules! serpent_type {
         }
 
         impl $name_ct {
+            /// Expand the user key into the 33 Serpent round-key words.
             pub fn new(key: &[u8; $key_len]) -> Self {
                 Self {
                     round_keys: expand_round_keys(key, true),
                 }
             }
 
+            /// Expand the key and then wipe the caller-owned key buffer.
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
                 let cipher = Self::new(key);
                 zeroize_slice(key);
                 cipher
             }
 
+            /// Encrypt one 128-bit block with the software constant-time path.
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 encrypt_block_words(&self.round_keys, block, true)
             }
 
+            /// Decrypt one 128-bit block with the software constant-time path.
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 decrypt_block_words(&self.round_keys, block, true)
             }

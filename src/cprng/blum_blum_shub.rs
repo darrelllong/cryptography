@@ -12,6 +12,8 @@
 //!
 //! This implementation is intentionally small and uses `u128`, which keeps it
 //! practical as a reference tool but not as a serious large-parameter BBS.
+//! The construction is the Blum-Blum-Shub generator from Blum, Blum, and Shub
+//! (1986), translated here into a tiny fixed-width reference form.
 
 use super::primes::{gcd, is_probable_prime, mul_mod};
 use crate::Csprng;

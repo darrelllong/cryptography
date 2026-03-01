@@ -408,22 +408,26 @@ macro_rules! define_twofish_type {
         }
 
         impl $name {
+            /// Expand the user key into the whitening and round subkeys.
             pub fn new(key: &[u8; $key_len]) -> Self {
                 Self {
                     core: TwofishCore::new(key, false),
                 }
             }
 
+            /// Expand the key and then wipe the caller-owned key buffer.
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
                 let out = Self::new(key);
                 zeroize_slice(key);
                 out
             }
 
+            /// Encrypt one 128-bit block.
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 self.core.encrypt_block(block)
             }
 
+            /// Decrypt one 128-bit block.
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 self.core.decrypt_block(block)
             }
@@ -457,22 +461,26 @@ macro_rules! define_twofish_type {
         }
 
         impl $name_ct {
+            /// Expand the user key into the whitening and round subkeys.
             pub fn new(key: &[u8; $key_len]) -> Self {
                 Self {
                     core: TwofishCore::new(key, true),
                 }
             }
 
+            /// Expand the key and then wipe the caller-owned key buffer.
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
                 let out = Self::new(key);
                 zeroize_slice(key);
                 out
             }
 
+            /// Encrypt one 128-bit block with the software constant-time path.
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 self.core.encrypt_block(block)
             }
 
+            /// Decrypt one 128-bit block with the software constant-time path.
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
                 self.core.decrypt_block(block)
             }
