@@ -349,8 +349,33 @@ Train the model in the local PyTorch virtualenv:
 ml/.venv-torch/bin/python ml/train_distinguisher.py --generate
 ```
 
-The trainer also exposes `--model-size base|large|xlarge` so you can scale the
-network along with the dataset.
+The trainer exposes three architecture families:
+
+- `cnn`: residual 1D CNN baseline
+- `transformer`: patch Transformer for wider samples (`--patch-len` controls the patch width)
+- `byte_transformer`: byte-level Transformer that attends over every byte token
+
+It also exposes `--model-size base|large|xlarge` so you can scale the network
+along with the dataset.
+
+For example, a wider patch-Transformer run looks like:
+
+```text
+ml/.venv-torch/bin/python ml/train_distinguisher.py --generate \
+  --sample-len 256 \
+  --architecture transformer \
+  --model-size large \
+  --patch-len 16
+```
+
+And the byte-level Transformer path is:
+
+```text
+ml/.venv-torch/bin/python ml/train_distinguisher.py --generate \
+  --sample-len 256 \
+  --architecture byte_transformer \
+  --model-size base
+```
 
 This writes the trained model and weights to `ml/out/`:
 
@@ -359,6 +384,9 @@ This writes the trained model and weights to `ml/out/`:
 - `labels.json`
 - `metrics.json`
 - `history.csv`
+
+For the fuller ML workflow, including the adaptive overnight runner and dataset
+auditing, see [ml/README.md](ml/README.md).
 
 ## Design Notes
 

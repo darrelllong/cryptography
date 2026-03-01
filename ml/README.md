@@ -50,6 +50,12 @@ Use the local PyTorch virtualenv:
 ml/.venv-torch/bin/python ml/train_distinguisher.py --generate
 ```
 
+The trainer currently exposes three model families:
+
+- `cnn`: a residual 1D CNN baseline for short and medium-width samples
+- `transformer`: a patch Transformer that groups bytes into fixed-width patches
+- `byte_transformer`: a byte-level self-attention model that attends to every byte token directly
+
 Two useful knobs for longer experiments:
 
 ```sh
@@ -68,6 +74,16 @@ ml/.venv-torch/bin/python ml/train_distinguisher.py \
   --architecture transformer \
   --model-size large \
   --patch-len 16
+```
+
+Try the byte-level Transformer when you want full token-level attention:
+
+```sh
+ml/.venv-torch/bin/python ml/train_distinguisher.py \
+  --generate \
+  --sample-len 256 \
+  --architecture byte_transformer \
+  --model-size base
 ```
 
 To recreate that environment later:
@@ -94,9 +110,11 @@ The trainer supports:
 - `--architecture cnn|transformer|byte_transformer`
 - `--model-size base|large|xlarge`
 
-`transformer` is a patch Transformer (good for wide samples). `byte_transformer`
-attends over every byte token directly, which is more expensive but gives a
-different inductive bias for subtle sequence-level effects.
+`transformer` is the patch Transformer, so `--patch-len` only applies there.
+`byte_transformer` attends over every byte token directly, which is more
+expensive but gives a different inductive bias for subtle sequence-level
+effects. `cnn` stays the cheapest baseline and is the best first pass when you
+are sweeping many dataset sizes quickly.
 
 ## Adaptive Overnight Runs
 

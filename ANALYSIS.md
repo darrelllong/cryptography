@@ -183,6 +183,16 @@ This is a distinguisher experiment, not a claim of practical cryptanalysis: if
 held-out accuracy rises above chance, the first question is whether the dataset
 generator leaked structure, not whether the cipher has been "broken".
 
+The harness currently exposes three classifier families:
+
+- a residual 1D CNN (`cnn`)
+- a patch Transformer (`transformer`)
+- a byte-level Transformer (`byte_transformer`)
+
+The completed runs published below cover the CNN family and the byte-level
+Transformer. The patch-Transformer path is available for wider samples, but it
+does not yet have a completed published run in this summary table.
+
 On the current 11-class setup, chance accuracy is `1/11 = 0.0909`. The runs
 completed so far stayed at or near that baseline:
 
@@ -195,11 +205,12 @@ completed so far stayed at or near that baseline:
 | `byte-transformer-mps-256-run2` | byte-level transformer | 256 bytes | `0.0909` |
 
 The best completed result (`0.0926`) is still effectively chance. No completed
-CNN or transformer run produced a reproducible held-out accuracy meaningfully
-above baseline, so the current conclusion is simple: the implemented sample
-generator and tested model families have not found a useful distinguisher. The
-code remains in `ml/` for anyone who wants to try larger models, different
-feature constructions, or stronger dataset controls.
+run from the current CNN or Transformer families produced a reproducible
+held-out accuracy meaningfully above baseline, so the current conclusion is
+simple: the implemented sample generator and tested model families have not
+found a useful distinguisher. The code remains in `ml/` for anyone who wants to
+try larger models, different feature constructions, or stronger dataset
+controls.
 
 ---
 
@@ -218,11 +229,11 @@ feature constructions, or stronger dataset controls.
 Simon (Beaulieu et al., NSA 2013) is a Feistel cipher optimised for hardware.
 Its round function is:
 
-```
-f(x) = (S¹x & S⁸x) ⊕ S²x
+```math
+f(x) = (S^1 x \,\&\, S^8 x) \oplus S^2 x
 ```
 
-where `Sⁿ` denotes left-rotation by n bits.  The AND of two rotations is the
+where $S^n$ denotes left-rotation by $n$ bits. The AND of two rotations is the
 intentional hardware-friendly nonlinearity.  Each encrypt round reads one
 64-bit round key and performs five rotation-and-XOR operations — cheap on any
 64-bit ALU but expensive in software relative to the equivalent circuit area.
@@ -231,11 +242,11 @@ intentional hardware-friendly nonlinearity.  Each encrypt round reads one
 
 The key schedule expands `m` key words into `T` round keys using the recurrence
 
-```
-kᵢ = (~k_{i-m}) ⊕ (I ⊕ S⁻¹)(S⁻³(k_{i-1})) ⊕ zⱼ[(i-m) mod 62] ⊕ 3
+```math
+k_i = \left(\sim k_{i-m}\right) \oplus \left(I \oplus S^{-1}\right)\left(S^{-3}(k_{i-1})\right) \oplus z_j[(i-m) \bmod 62] \oplus 3
 ```
 
-where `zⱼ` is one of five 62-bit LFSR constants tabulated in the paper.  Five
+where $z_j$ is one of five 62-bit LFSR constants tabulated in the paper. Five
 Z sequences cover all ten variants; `j` is chosen to provide maximum algebraic
 separation between the subkey stream and the plain constant `3`.
 
@@ -247,7 +258,7 @@ included in the throughput measurements.
 
 Byte convention follows the NSA C reference: the two block words are stored
 little-endian with `x` (the word entering `f`) first; key words are stored
-little-endian with `k₀` first.  This matches the paper's Appendix B test
+little-endian with $k_0$ first. This matches the paper's Appendix B test
 vectors exactly.
 
 The `simon_variant!` macro instantiates all ten structs from a single
@@ -267,12 +278,19 @@ it selects a compile-time constant expression; no runtime dispatch occurs.
 Speck (Beaulieu et al., NSA 2013) is an Add-Rotate-XOR (ARX) cipher whose
 round function is:
 
-```
-x ← (S^{-α}(x) + y) ⊕ k       right-rotate x by α, add y mod 2ⁿ, XOR k
-y ← S^β(y) ⊕ x                 left-rotate y by β, XOR new x
+```math
+x \leftarrow \left(S^{(-\alpha)}(x) + y\right) \oplus k
 ```
 
-For Speck32/64 the rotation constants are `(α,β) = (7,2)`; for all other
+```math
+y \leftarrow S^{\beta}(y) \oplus x
+```
+
+The first line right-rotates $x$ by $\alpha$, adds $y$ modulo $2^n$, and XORs
+the round key. The second line left-rotates $y$ by $\beta$ and XORs in the new
+$x$.
+
+For Speck32/64 the rotation constants are $(\alpha,\beta) = (7,2)$; for all other
 variants they are `(8,3)`.  Addition, rotation, and XOR map to exactly three
 native 64-bit instructions — the tightest possible round function.
 
@@ -304,7 +322,7 @@ maximum across all variants) and no heap allocation.  `ℓ` stores only the
 - Known issues: the fast AES types (`Aes128`, `Aes192`, `Aes256`) use T-tables and are not constant-time; use the `Ct` variants or a separate hardware-backed implementation if side channels matter. The crate now provides generic block modes plus `Gcm`, `Gmac`, and `Xts`, but higher-level protocol framing and nonce/IV discipline are still the caller's responsibility.
 
 AES (FIPS 197) uses a byte-substitution, row-shift, column-mix, and key-add
-round structure operating in GF(2⁸).
+round structure operating in $\mathrm{GF}(2^8)$.
 
 #### T-table implementation
 
@@ -319,7 +337,7 @@ TE0[v] = {mul2(S[v]),  S[v],       S[v],       mul3(S[v])}  (big-endian)
 
 Processing four 8-bit byte lanes in parallel with table lookups reduces a
 round to 16 table reads and 12 XOR operations per 128-bit block.  All
-GF(2⁸) multiplications are precomputed at compile time; none occur at
+$\mathrm{GF}(2^8)$ multiplications are precomputed at compile time; none occur at
 encryption time.
 
 Decryption uses the inverse tables `TD0–TD3` constructed from `INV_SBOX`
@@ -468,8 +486,8 @@ rule directly by using the same structure with subkeys in reverse order.
 DES (FIPS PUB 46-3) is a 16-round Feistel cipher operating on 64-bit blocks
 with a 56-bit effective key.  Each round applies the f-function:
 
-```
-f(R, K) = P(S(E(R) ⊕ K))
+```math
+f(R, K) = P(S(E(R) \oplus K))
 ```
 
 where E expands 32 bits to 48, S passes 8 × 6-bit groups through eight
@@ -526,8 +544,8 @@ The further optimisation — fusing the 8 S-boxes and the 32-bit P permutation
 into a single `SP_TABLE[8][64]` — eliminates the separate P step entirely.
 Because P is a linear bit permutation, it distributes over OR:
 
-```
-P(s₀ | s₁ | … | s₇) = P(s₀) | P(s₁) | … | P(s₇)
+```math
+P(s_0 \mid s_1 \mid \cdots \mid s_7) = P(s_0) \mid P(s_1) \mid \cdots \mid P(s_7)
 ```
 
 Each `SP_TABLE[i][b6]` entry stores the P-permuted contribution of S-box i for
@@ -592,10 +610,16 @@ supports the published 40-, 80-, and 128-bit known-answer vectors.
 
 PRESENT is a compact substitution-permutation network. Each round applies:
 
+```math
+\mathrm{state} \leftarrow \mathrm{state} \oplus \mathrm{round\_key}
 ```
-state ← state ⊕ round_key
-state ← S(state)     16 parallel 4-bit S-boxes
-state ← P(state)     fixed bit permutation across the 64-bit block
+
+```math
+\mathrm{state} \leftarrow S(\mathrm{state})
+```
+
+```math
+\mathrm{state} \leftarrow P(\mathrm{state})
 ```
 
 The final round omits the S/P layers and ends with one last key XOR. The
@@ -672,19 +696,26 @@ differing primarily in having published, fixed S-boxes rather than secret ones.
 
 The round function `g[k](a)` operates on a 32-bit half-block:
 
-```
-g[k](a) = rotl₁₁(t(a + k mod 2³²))
+```math
+g[k](a) = \operatorname{rotl}_{11}(t(a + k \bmod 2^{32}))
 ```
 
-where `t` applies eight independent 4-bit S-boxes (`Pi'_0 .. Pi'_7`) to the eight
-nibbles of the 32-bit word, and `rotl₁₁` rotates the result left by 11 bits.
+where `t` applies eight independent 4-bit S-boxes ($\Pi'_0 .. \Pi'_7$) to the
+eight nibbles of the 32-bit word, and $\operatorname{rotl}_{11}$ rotates the
+result left by 11 bits.
 
 Each Feistel step is:
 
+```math
+G[k](a_1, a_0) = \left(a_0,\; g[k](a_0) \oplus a_1\right)
 ```
-G[k](a₁, a₀) = (a₀,  g[k](a₀) ⊕ a₁)       — swap after applying g
-G*[k](a₁, a₀) = (g[k](a₀) ⊕ a₁) ‖ a₀      — no swap; used for the final round
+
+```math
+G^*[k](a_1, a_0) = \left(g[k](a_0) \oplus a_1\right) \,\|\, a_0
 ```
+
+The first form swaps after applying $g$. The starred form omits the swap and
+is used for the final round.
 
 Both encryption and decryption apply 31 rounds of `G` followed by one `G*`;
 the only difference is the round-key order.

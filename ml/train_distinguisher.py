@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train a PyTorch distinguisher over raw 32-byte cipher outputs."""
+"""Train PyTorch distinguisher models over raw N-byte cipher outputs."""
 
 from __future__ import annotations
 
@@ -49,13 +49,16 @@ def parse_args() -> argparse.Namespace:
         "--architecture",
         choices=("cnn", "transformer", "byte_transformer"),
         default="cnn",
-        help="Model family to train.",
+        help=(
+            "Model family to train: cnn (residual 1D CNN), transformer "
+            "(patch Transformer), or byte_transformer (byte-level attention)."
+        ),
     )
     parser.add_argument(
         "--patch-len",
         type=int,
         default=16,
-        help="Patch width in bytes for the transformer encoder.",
+        help="Patch width in bytes for the patch-transformer encoder.",
     )
     parser.add_argument(
         "--device",
