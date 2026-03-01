@@ -35,9 +35,12 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | Family | Public types | Correctness coverage | Benchmark coverage |
 |--------|--------------|----------------------|--------------------|
 | AES | `Aes128/192/256`, `Aes128/192/256Ct` | NIST KATs for fast and `Ct` paths, S-box self-checks, fast-vs-`Ct` equivalence (`cargo test aes::tests`) | `cipher_bench` for fast-vs-`Ct`; `aes_bench` for focused AES comparisons |
+| CAST-128 / CAST5 | `Cast128`, `Cast128Ct` | RFC 2144 40/80/128-bit KATs for fast and `Ct` paths (`cargo test cast128::tests`) | `cipher_bench` |
 | Camellia | `Camellia128/192/256`, `Camellia128/192/256Ct` | RFC 3713 Appendix A KATs for all 3 key sizes, `Ct` S-box self-checks (`cargo test camellia::tests`) | `cipher_bench` |
 | DES / 3DES | `Des`, `DesCt`, `TripleDes` | DES KATs, `DesCt` KAT, 2-key and 3-key TDES coverage (`cargo test des::tests`) | `cipher_bench` |
 | PRESENT | `Present80`, `Present80Ct`, `Present128`, `Present128Ct` | CHES 2007 80-bit KATs, 128-bit KATs, `Ct` S-box self-checks (`cargo test present::tests`) | `cipher_bench` |
+| Serpent | `Serpent128/192/256`, `Serpent128/192/256Ct` | Submission-vector KATs for all 3 key sizes, `Ct` S-box self-checks (`cargo test serpent::tests`) | not benchmarked yet |
+| Twofish | `Twofish128/192/256`, `Twofish128/192/256Ct` | Submission zero-key KATs for all 3 key sizes, fast-vs-`Ct` q-permutation self-checks (`cargo test twofish::tests`) | `cipher_bench` |
 | SEED | `Seed`, `SeedCt` | RFC 4009 Appendix B KATs, zero-key round-key KAT, `Ct` S-box self-checks (`cargo test seed::tests`) | `cipher_bench` |
 | Simon | all 10 variants | Known-answer vectors for every variant (`cargo test simon::tests`) | `cipher_bench` |
 | Speck | all 10 variants | Known-answer vectors for every variant (`cargo test speck::tests`) | `cipher_bench` |
@@ -214,6 +217,92 @@ keeps the core implementation portable and safe across processors instead.
 
 ---
 
+### Serpent
+
+- Reference: `anderson-biham-knudsen-1998-serpent`.
+- History: designed by Ross Anderson, Eli Biham, and Lars Knudsen for the AES competition in the late 1990s. It reached the AES final round and remains one of the best-known conservative wide-round AES candidates.
+- Properties: 128-bit block cipher with 128/192/256-bit keys; 32 rounds; substitution-permutation network designed for bitslice implementations and a large security margin rather than minimal round count.
+- Usage and deprecation: appropriate for Serpent interoperability, research, and comparative study. It is not deprecated, but outside systems that explicitly require Serpent, AES is still the more common default.
+- Known issues: the current implementation follows the original submission/reference byte order rather than NESSIE's byte-reversed presentation; callers using NESSIE-oriented test vectors may need to reverse bytes. The fast types use direct 4-bit S-box tables, while the `Ct` variants replace them with packed ANF evaluation and are slower.
+
+Serpent is a 32-round bitslice substitution-permutation network. Each round
+XORs a 128-bit round key into the state, applies one of eight 4-bit S-boxes in
+parallel across 32 bit lanes, and then applies the linear transformation:
+
+```text
+x0 <- rotl(x0, 13)
+x2 <- rotl(x2, 3)
+x1 <- rotl(x1 xor x0 xor x2, 1)
+x3 <- rotl(x3 xor x2 xor (x0 << 3), 7)
+x0 <- rotl(x0 xor x1 xor x3, 5)
+x2 <- rotl(x2 xor x3 xor (x1 << 7), 22)
+```
+
+The final round omits that linear transform and ends with a last round-key XOR.
+This structure maps well to portable 32-bit integer operations and makes a true
+software constant-time path straightforward.
+
+#### Key schedule
+
+Serpent expands the user key into 132 prekey words using the recurrence:
+
+```text
+w[i] = rotl11(w[i-8] xor w[i-5] xor w[i-3] xor w[i-1] xor PHI xor (i-8))
+```
+
+The implementation pads 128- and 192-bit keys with a single `1` bit followed
+by zeros, exactly as described in the submission paper, then derives 33 round
+keys by applying the Serpent S-box sequence to each group of four prekeys.
+
+---
+
+### Twofish
+
+- Reference: `twofish-1998`.
+- History: designed by Bruce Schneier, John Kelsey, Doug Whiting, David Wagner, Chris Hall, and Niels Ferguson for the AES competition in 1998. It was one of the AES finalists and remains one of the best-known AES-era alternative block ciphers.
+- Properties: 128-bit block cipher with 128/192/256-bit keys; 16 rounds; Feistel-like structure with keyed `q` permutations, an MDS matrix, and input/output whitening.
+- Usage and deprecation: appropriate for interoperability, comparative study, and legacy protocol work that explicitly names Twofish. It is not deprecated, but it is far less common than AES in deployed systems.
+- Known issues: the fast Twofish types use direct lookup tables for the `q0` / `q1` permutations and are not constant-time; the `Ct` variants replace those lookups with fixed-scan nibble selection and are slower. This crate exposes the raw primitive only, not a mode or AEAD. Like the other non-AEAD block ciphers here, misuse at the mode/protocol layer is the larger operational risk.
+
+Twofish is a 16-round 128-bit block cipher that mixes two 32-bit `g` outputs
+into a pseudo-Hadamard transform each round. In the standard notation:
+
+```text
+T0 = g(X0)
+T1 = g(ROL8(X1))
+F0 = T0 + T1 + K[2r + 8]
+F1 = T0 + 2*T1 + K[2r + 9]
+```
+
+Those round outputs feed the right half after one-bit rotations, while the
+left and right word pairs trade places every round. The cipher also applies
+four 32-bit input-whitening words and four output-whitening words derived from
+the same subkey schedule.
+
+#### Key schedule
+
+Twofish splits the user key into even and odd 32-bit words (`Me` and `Mo`),
+then derives:
+
+- forty 32-bit subkeys (`K0..K39`) for whitening and the 16 rounds
+- up to four 32-bit S-box key words derived by the Reed-Solomon matrix over
+  the key bytes
+
+Subkeys are generated with the same keyed `h()` function used by the round
+core:
+
+```text
+A = h(2i * RHO, Me)
+B = ROL8(h((2i + 1) * RHO, Mo))
+K[2i]   = A + B
+K[2i+1] = ROL9(A + 2*B)
+```
+
+The implementation follows the AES-submission design paper directly and checks
+the published zero-key vectors for all three standard key sizes.
+
+---
+
 ### Camellia
 
 - Reference: `camellia-spec` (primary specification); `rfc3713` (IETF algorithm text); `rfc4312` (IPsec profile).
@@ -320,6 +409,50 @@ Each `SP_TABLE[i][b6]` entry stores the P-permuted contribution of S-box i for
 that calls `apply_p_to_partial` for every entry).  The f-function becomes 1
 expand + 8 SP lookups per round — 8 KiB for E_TABLE plus 2 KiB for SP_TABLE,
 both comfortably in L1 cache.  The 43 NIST CAVP vectors still pass unchanged.
+
+---
+
+### CAST-128 / CAST5
+
+- Reference: `rfc2144`.
+- History: designed by Carlisle Adams in the mid-1990s and published as RFC 2144. The algorithm is also commonly referred to as CAST5, especially when a specific key size such as CAST5-128 is intended.
+- Properties: 64-bit block cipher with variable key sizes from 40 to 128 bits in 8-bit increments; 12 rounds for keys up to 80 bits and 16 rounds above that; classic Feistel structure with three alternating nonlinear round functions.
+- Usage and deprecation: appropriate for legacy interoperability, OpenPGP-era compatibility work, and historical study. It should not be the default choice for new designs; modern 128-bit block ciphers are easier to deploy safely at scale.
+- Known issues: the 64-bit block size imposes the same birthday-bound long-message limits as DES, 3DES, MAGMA, and PRESENT. The fast `Cast128` path uses direct 8-bit S-box tables and is not constant-time; `Cast128Ct` avoids secret-indexed loads with fixed-scan table selection and is materially slower. This crate exposes the raw primitive only and does not wrap it in the OpenPGP or CMS profiles that historically used CAST5.
+
+CAST-128 is a 16-round Feistel cipher in its full-key form. Each round applies
+one of three nonlinear functions:
+
+```text
+F1(D, Km, Kr) = ((S1[Ia] xor S2[Ib]) - S3[Ic]) + S4[Id]
+F2(D, Km, Kr) = ((S1[Ia] - S2[Ib]) + S3[Ic]) xor S4[Id]
+F3(D, Km, Kr) = ((S1[Ia] + S2[Ib]) xor S3[Ic]) - S4[Id]
+```
+
+where `I` is a rotated mix of the round data word `D` and the masking /
+rotation subkeys:
+
+```text
+Type 1: I = (Km + D) <<< Kr
+Type 2: I = (Km xor D) <<< Kr
+Type 3: I = (Km - D) <<< Kr
+```
+
+The four bytes of `I` index the large 32-bit S-boxes `S1..S4`. For shorter
+keys (40 to 80 bits), the same structure is used but the cipher stops after
+12 rounds, exactly as specified in RFC 2144.
+
+#### Key schedule
+
+The RFC key schedule treats the user key as 16 bytes `x0..xF`, padded on the
+right with zeros for keys shorter than 128 bits. It then alternates between
+two 16-byte temporary states (`x` and `z`) using the auxiliary S-boxes
+`S5..S8` to derive 32 intermediate 32-bit words `K1..K32`.
+
+The first sixteen become the masking subkeys `Km1..Km16`. The second sixteen
+become the rotation subkeys `Kr1..Kr16`, with only the low 5 bits used by the
+round function. The implementation follows the RFC recurrence directly and
+supports the published 40-, 80-, and 128-bit known-answer vectors.
 
 ---
 
@@ -516,6 +649,7 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | AES-128 | 542.7 MiB/s | 60.6 MiB/s | 8.9x |
 | AES-192 | 444.4 MiB/s | 50.4 MiB/s | 8.8x |
 | AES-256 | 374.8 MiB/s | 42.9 MiB/s | 8.7x |
+| CAST-128 | 244.9 MiB/s | 4.0 MiB/s | 61.7x |
 | Camellia-128 | 121.9 MiB/s | 5.8 MiB/s | 20.9x |
 | Camellia-192 | 65.0 MiB/s | 4.2 MiB/s | 15.6x |
 | Camellia-256 | 91.6 MiB/s | 4.4 MiB/s | 20.7x |
@@ -526,28 +660,49 @@ cost of removing secret-indexed table reads in pure portable Rust.
 | Grasshopper-256 | 26.1 MiB/s | 4.1 MiB/s | 6.3x |
 | SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
 | SEED-128 | 68.7 MiB/s | 4.5 MiB/s | 15.4x |
+| Twofish-128 | 6.1 MiB/s | 2.3 MiB/s | 2.7x |
+| Twofish-192 | 6.6 MiB/s | 2.0 MiB/s | 3.3x |
+| Twofish-256 | 6.6 MiB/s | 1.7 MiB/s | 3.8x |
 | ZUC-128 | 551.1 MiB/s | 28.3 MiB/s | 19.5x |
 
-Radar view (representative variants; log-scaled, 4 MiB/s to 1024 MiB/s):
+Radar view (representative `Ct`-capable families; log-scaled, 4 MiB/s to 1024 MiB/s):
 
 ![Fast vs Ct log-scaled radar chart](assets/fast-vs-ct-radar.svg)
 
-Mermaid fallback (absolute throughput):
+Mermaid fallback (split to keep the axis labels readable):
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'background': '#fbf8f1', 'textColor': '#342f29', 'primaryTextColor': '#342f29', 'lineColor': '#a79d90', 'plotColorPalette': '#0f766e,#b45309'}}}%%
 xychart-beta
-    title "Fast vs Ct throughput (MiB/s, representative variants)"
-    x-axis ["AES-128", "AES-192", "AES-256", "DES", "PRESENT-80", "Camellia-128", "Magma", "Grasshopper", "SM4", "SEED-128", "ZUC"]
+    title "Fast vs Ct throughput (MiB/s, higher-throughput families)"
+    x-axis ["AES-128", "AES-192", "AES-256", "CAST-128", "Camellia-128", "SM4", "ZUC"]
     y-axis "MiB/s" 0 --> 560
-    bar [542.7, 444.4, 374.8, 81.1, 12.4, 121.9, 62.0, 26.1, 122.7, 68.7, 551.1]
-    bar [60.6, 50.4, 42.9, 8.3, 3.9, 5.8, 14.3, 4.1, 7.6, 4.5, 28.3]
+    bar [542.7, 444.4, 374.8, 244.9, 121.9, 122.7, 551.1]
+    bar [60.6, 50.4, 42.9, 4.0, 5.8, 7.6, 28.3]
 ```
 
-The Mermaid colors are configured to match the SVG (`#0f766e` fast,
-`#b45309` `Ct`), but Mermaid rendering still depends on the host renderer. The
-SVG above is the authoritative visual if a dark-mode viewer ignores those theme
-variables.
+```mermaid
+xychart-beta
+    title "Fast vs Ct throughput (MiB/s, middle-throughput families)"
+    x-axis ["DES", "SEED-128", "Magma", "Grasshopper"]
+    y-axis "MiB/s" 0 --> 100
+    bar [81.1, 68.7, 62.0, 26.1]
+    bar [8.3, 4.5, 14.3, 4.1]
+```
+
+```mermaid
+xychart-beta
+    title "Fast vs Ct throughput (MiB/s, lower-throughput families)"
+    x-axis ["PRESENT-80", "PRESENT-128", "Twofish-128", "Twofish-192", "Twofish-256"]
+    y-axis "MiB/s" 0 --> 16
+    bar [12.4, 12.3, 6.1, 6.6, 6.6]
+    bar [3.9, 3.9, 2.3, 2.0, 1.7]
+```
+
+Simon and Speck are intentionally omitted from this radar because they do not
+expose separate `Ct` variants in this crate. Their round functions are already
+table-free ARX / bitwise designs in the shipped implementations, so there is no
+separate software-only fast-vs-`Ct` tradeoff to plot. Their throughput still
+appears in the per-family tables below.
 
 These ratios line up with the implementation strategy:
 
@@ -567,6 +722,12 @@ These ratios line up with the implementation strategy:
   shortcuts, so it remains the slowest of the Ct variants in absolute terms.
 - The SM4 and ZUC `Ct` variants both use packed ANF evaluation for 8-bit S-boxes,
   which is substantially heavier than AES's dedicated boolean circuit.
+- `Cast128Ct` pays a steep penalty because both the round function and the key
+  schedule touch the large RFC S-boxes repeatedly, and the current `Ct` path
+  replaces each indexed 32-bit load with a full fixed-scan selection.
+- Twofish is unusual in this table: the `Ct` path is slower, but the fast path
+  is already slow in absolute terms because this implementation computes the
+  keyed `h()` function directly instead of precomputing large keyed MDS tables.
 
 ### Simon
 
@@ -725,6 +886,35 @@ and drops into the single-digit MiB/s range. On this host, Camellia-128 is the
 best-performing variant; Camellia-192 and Camellia-256 both add the extra
 round groups and `FL` / `FL^{-1}` layers that widen the gap versus AES.
 
+### CAST-128 / CAST5
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| CAST-128 | 64 b | 128 b | 16 | 244.9 MiB/s | 4.2 s |
+
+CAST-128 is much faster than the other 64-bit Feistel designs in this crate.
+That is mostly a consequence of its RFC design choices: the round function
+leans heavily on large 32-bit S-box outputs, so the fast path gets substantial
+word-level mixing from only four table reads and a handful of arithmetic
+operations. The downside is visible in the `Ct` path: replacing those table
+loads with fixed-scan selection drops throughput to about 4.0 MiB/s.
+
+### Twofish
+
+| Variant | Block | Key | Rounds | Throughput | 1 GiB |
+|---------|------:|----:|-------:|-----------:|------:|
+| Twofish-128 | 128 b | 128 b | 16 | 6.1 MiB/s | 166.8 s |
+| Twofish-192 | 128 b | 192 b | 16 | 6.6 MiB/s | 154.8 s |
+| Twofish-256 | 128 b | 256 b | 16 | 6.6 MiB/s | 156.2 s |
+
+Twofish is the slowest 128-bit block cipher in the current fast-path suite by
+far. That is not an indictment of the algorithm; it reflects this specific
+portable implementation strategy. The current code computes the keyed `h()`
+function directly on every round and subkey derivation using the `q`
+permutations plus GF(2^8) matrix multiplies, instead of precomputing the large
+keyed tables that high-performance Twofish software usually relies on. The
+result is simple and faithful, but expensive.
+
 ### SEED
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
@@ -793,20 +983,24 @@ evaluation of two separate 8-bit S-boxes.
 | Simon | 265 MiB/s (128/128) | 90 MiB/s (32/64) |
 | SM4 | 123 MiB/s | — |
 | Camellia | 122 MiB/s (128) | 65 MiB/s (192) |
+| CAST-128 | 245 MiB/s | — |
 | DES | 81 MiB/s | — |
 | SEED | 69 MiB/s | — |
 | Magma | 62 MiB/s | — |
 | Grasshopper | 26 MiB/s | — |
 | 3DES | — | 24 MiB/s (2-key or 3-key) |
 | PRESENT | 12.4 MiB/s (80) | 12.3 MiB/s (128) |
+| Twofish | 6.6 MiB/s (192/256) | 6.1 MiB/s (128) |
 
 Speck128/128 remains the fastest block cipher in the suite. ZUC is the fastest
 non-block primitive, and AES-128 remains the fastest conventional standardized
-block cipher here. Camellia, SM4, and SEED form a middle tier of standardized
+block cipher here. CAST-128 is the fastest 64-bit block cipher in the
+repository, while Camellia, SM4, and SEED form a middle tier of standardized
 128-bit designs that are still usable in pure software, but materially slower
-than AES. At the other end, Grasshopper, 3DES, and especially PRESENT are
-expensive in pure software because they pair heavier round structures or dense
-bit permutations with comparatively modest word-level parallelism.
+than AES. At the other end, Grasshopper, 3DES, PRESENT, and this current
+table-light Twofish implementation are expensive in pure software because they
+pair heavier round structures or dense internal transforms with comparatively
+modest word-level parallelism.
 
 ---
 
@@ -842,6 +1036,29 @@ are included here so the prose and the bibliography stay in sync.
   howpublished = {{IACR} Cryptology ePrint Archive, Report 2011/332},
   year         = {2011},
   url          = {https://eprint.iacr.org/2011/332},
+}
+
+@inproceedings{anderson-biham-knudsen-1998-serpent,
+  author    = {Ross Anderson and Eli Biham and Lars Knudsen},
+  title     = {Serpent: A Proposal for the Advanced Encryption Standard},
+  booktitle = {Fast Software Encryption --- FSE 1998},
+  editor    = {Alfred J. Menezes},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1372},
+  pages     = {222--238},
+  publisher = {Springer},
+  year      = {1998},
+  doi       = {10.1007/3-540-69710-1_15},
+  url       = {https://www.cl.cam.ac.uk/archive/rja14/Papers/serpent.pdf},
+}
+
+@misc{twofish-1998,
+  author       = {Bruce Schneier and John Kelsey and Doug Whiting and
+                  David Wagner and Chris Hall and Niels Ferguson},
+  title        = {Twofish: A 128-Bit Block Cipher},
+  howpublished = {AES submission / design paper},
+  year         = {1998},
+  url          = {https://www.schneier.com/wp-content/uploads/2016/02/paper-twofish-paper.pdf},
 }
 
 @misc{camellia-spec,
@@ -919,6 +1136,17 @@ are included here so the prose and the bibliography stay in sync.
   year        = {2017},
   month       = nov,
   url         = {https://csrc.nist.gov/publications/detail/sp/800-67/rev-2/final},
+}
+
+@techreport{rfc2144,
+  author      = {C. Adams},
+  title       = {The CAST-128 Encryption Algorithm},
+  type        = {{RFC}},
+  number      = {2144},
+  institution = {IETF},
+  year        = {1997},
+  month       = may,
+  url         = {https://www.rfc-editor.org/rfc/rfc2144},
 }
 
 @book{daemen-rijmen-2002,

@@ -7,7 +7,10 @@ Implemented families:
 
 - DES and Triple-DES
 - AES (`Aes128/192/256`) plus software constant-time variants (`Aes*Ct`)
+- CAST-128 / CAST5 plus `Cast128Ct`
 - Camellia (`Camellia128/192/256`) plus software constant-time variants
+- Serpent (`Serpent128/192/256`) plus software constant-time variants
+- Twofish (`Twofish128/192/256`) plus software constant-time variants
 - SEED plus `SeedCt`
 - SIMON (all 10 published variants)
 - SPECK (all 10 published variants)
@@ -83,9 +86,9 @@ zuc.fill(&mut buf);
 
 ### Fast vs `Ct` variants
 
-For AES, DES, Magma, Grasshopper, SM4, and ZUC, the default type is the fast
-software implementation and the `Ct` type is the separate constant-time
-software path.
+For AES, CAST-128, DES, Twofish, Magma, Grasshopper, SM4, and ZUC, the default
+type is the fast software implementation and the `Ct` type is the separate
+constant-time software path.
 
 Use the fast path when:
 
@@ -126,15 +129,18 @@ Run one family:
 
 ```text
 cargo test aes::tests
+cargo test cast128::tests
 cargo test camellia::tests
 cargo test des::tests
 cargo test grasshopper::tests
 cargo test magma::tests
 cargo test present::tests
+cargo test serpent::tests
 cargo test seed::tests
 cargo test simon::tests
 cargo test sm4::tests
 cargo test speck::tests
+cargo test twofish::tests
 cargo test zuc::tests
 ```
 
@@ -229,9 +235,12 @@ The `pubs/` directory now carries one or more local PDFs for every cipher
 family covered in this repository:
 
 - AES: `fips197.pdf`, `boyar-peralta-2011-a-depth-16-circuit-for-the-aes-s-box.pdf`
+- CAST-128 / CAST5: `rfc2144-cast128.pdf`
 - Camellia: `camellia-specification.pdf`
 - DES / 3DES: `fips46-3.pdf`, `nist-sp-800-67r2.pdf`
 - PRESENT: `present-ches2007.pdf`
+- Serpent: `serpent.pdf`
+- Twofish: `twofish-paper.pdf`
 - SEED: `rfc4009-seed-algorithm.pdf`, `rfc4196-seed-ipsec.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
@@ -283,6 +292,40 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year        = {1999},
   month       = oct,
   url         = {https://csrc.nist.gov/publications/detail/fips/46/3/archive/1999-10-25},
+}
+
+@techreport{rfc2144,
+  author      = {C. Adams},
+  title       = {The CAST-128 Encryption Algorithm},
+  type        = {{RFC}},
+  number      = {2144},
+  institution = {IETF},
+  year        = {1997},
+  month       = may,
+  url         = {https://www.rfc-editor.org/rfc/rfc2144},
+}
+
+@inproceedings{anderson-biham-knudsen-1998-serpent,
+  author    = {Ross Anderson and Eli Biham and Lars Knudsen},
+  title     = {Serpent: A Proposal for the Advanced Encryption Standard},
+  booktitle = {Fast Software Encryption --- FSE 1998},
+  editor    = {Alfred J. Menezes},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1372},
+  pages     = {222--238},
+  publisher = {Springer},
+  year      = {1998},
+  doi       = {10.1007/3-540-69710-1_15},
+  url       = {https://www.cl.cam.ac.uk/archive/rja14/Papers/serpent.pdf},
+}
+
+@misc{twofish-1998,
+  author       = {Bruce Schneier and John Kelsey and Doug Whiting and
+                  David Wagner and Chris Hall and Niels Ferguson},
+  title        = {Twofish: A 128-Bit Block Cipher},
+  howpublished = {AES submission / design paper},
+  year         = {1998},
+  url          = {https://www.schneier.com/wp-content/uploads/2016/02/paper-twofish-paper.pdf},
 }
 
 @misc{camellia-spec,
