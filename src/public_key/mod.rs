@@ -13,3 +13,4 @@ pub mod paillier;
 pub mod primes;
 pub mod rabin;
 pub mod rsa;
+pub mod schmidt_samoa;

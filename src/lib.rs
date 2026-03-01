@@ -94,4 +94,7 @@ pub use public_key::elgamal::{
 pub use public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
 pub use public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};
 pub use public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
+pub use public_key::schmidt_samoa::{
+    SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey,
+};
 pub use public_key::{bigint, primes};
