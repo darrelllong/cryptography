@@ -1,10 +1,3 @@
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::explicit_iter_loop,
-    clippy::inline_always,
-    clippy::must_use_candidate
-)]
-
 //! Kuznyechik (Grasshopper) block cipher — RFC 7801 / GOST R 34.12-2015.
 //!
 //! 128-bit block, 256-bit key, 10 rounds.
@@ -19,7 +12,7 @@
 //
 // Reduction: x⁸ ≡ x⁷ + x⁶ + x + 1  ⟹  modulus byte 0xC3.
 
-#[inline(always)]
+#[inline]
 const fn gf_mul2(a: u8) -> u8 {
     (a << 1) ^ (0xC3 & 0u8.wrapping_sub(a >> 7))
 }
@@ -36,7 +29,7 @@ const fn gf_mul_const(mut a: u8, mut b: u8) -> u8 {
     r
 }
 
-#[inline(always)]
+#[inline]
 fn gf_mul(mut a: u8, mut b: u8) -> u8 {
     let mut r = 0u8;
     for _ in 0..8 {
@@ -125,10 +118,13 @@ const fn build_l_tables() -> [[u8; 256]; 16] {
     let mut t = [[0u8; 256]; 16];
     let mut i = 0usize;
     while i < 16 {
-        let mut v = 0usize;
-        while v < 256 {
-            t[i][v] = gf_mul_const(L_COEFF[i], v as u8);
-            v += 1;
+        let mut v = 0u8;
+        loop {
+            t[i][v as usize] = gf_mul_const(L_COEFF[i], v);
+            if v == u8::MAX {
+                break;
+            }
+            v = v.wrapping_add(1);
         }
         i += 1;
     }
@@ -210,7 +206,7 @@ fn apply_l_inv(block: &mut [u8; 16]) {
 /// The active monomials for the byte are expanded once, then each output bit
 /// is recovered by intersecting with the precomputed masks and taking parity.
 /// That parity step is the GF(2) sum of all ANF terms selected by this input.
-#[inline(always)]
+#[inline]
 fn pi_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
     crate::ct::eval_byte_sbox(coeffs, input)
 }
@@ -326,7 +322,7 @@ fn key_schedule(key: &[u8; 32]) -> [[u8; 16]; 10] {
 
     for group in 0usize..4 {
         for step in 0usize..8 {
-            let ci = (group * 8 + step + 1) as u8; // 1..=32
+            let ci = u8::try_from(group * 8 + step + 1).expect("round constant index fits in u8"); // 1..=32
             let c = round_const(ci);
             f_step(&mut a1, &mut a0, &c);
         }
@@ -347,7 +343,7 @@ fn key_schedule_ct(key: &[u8; 32]) -> [[u8; 16]; 10] {
 
     for group in 0usize..4 {
         for step in 0usize..8 {
-            let ci = (group * 8 + step + 1) as u8;
+            let ci = u8::try_from(group * 8 + step + 1).expect("round constant index fits in u8");
             let c = round_const_ct(ci);
             f_step_ct(&mut a1, &mut a0, &c);
         }
@@ -369,6 +365,7 @@ pub struct Grasshopper {
 
 impl Grasshopper {
     /// Construct from a 32-byte (256-bit) key.
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         Grasshopper {
             rk: key_schedule(key),
@@ -383,6 +380,7 @@ impl Grasshopper {
     }
 
     /// Encrypt a 128-bit block (ECB mode).
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         let mut s = *block;
         for i in 0..9 {
@@ -395,6 +393,7 @@ impl Grasshopper {
     }
 
     /// Decrypt a 128-bit block (ECB mode).
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         let mut s = *block;
         xor_block(&mut s, &self.rk[9]);
@@ -418,6 +417,7 @@ pub struct GrasshopperCt {
 
 impl GrasshopperCt {
     /// Construct from a 32-byte (256-bit) key.
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         GrasshopperCt {
             rk: key_schedule_ct(key),
@@ -432,6 +432,7 @@ impl GrasshopperCt {
     }
 
     /// Encrypt a 128-bit block (ECB mode).
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         let mut s = *block;
         for i in 0..9 {
@@ -444,6 +445,7 @@ impl GrasshopperCt {
     }
 
     /// Decrypt a 128-bit block (ECB mode).
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         let mut s = *block;
         xor_block(&mut s, &self.rk[9]);
@@ -483,7 +485,7 @@ impl crate::BlockCipher for GrasshopperCt {
 impl Drop for Grasshopper {
     fn drop(&mut self) {
         // Grasshopper keeps all 10 round keys in memory for repeated use.
-        for rk in self.rk.iter_mut() {
+        for rk in &mut self.rk {
             crate::ct::zeroize_slice(rk.as_mut_slice());
         }
     }
@@ -491,7 +493,7 @@ impl Drop for Grasshopper {
 
 impl Drop for GrasshopperCt {
     fn drop(&mut self) {
-        for rk in self.rk.iter_mut() {
+        for rk in &mut self.rk {
             crate::ct::zeroize_slice(rk.as_mut_slice());
         }
     }
@@ -522,7 +524,7 @@ mod tests {
     #[test]
     fn ct_sboxes_match_tables() {
         for x in 0u16..=255 {
-            let b = x as u8;
+            let b = u8::try_from(x).expect("table index fits in u8");
             assert_eq!(pi_eval(&PI_ANF, b), PI[x as usize], "pi {x:02x}");
             assert_eq!(
                 pi_eval(&PI_INV_ANF, b),

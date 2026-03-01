@@ -1,12 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::cast_possible_truncation,
-    clippy::inline_always,
-    clippy::manual_is_multiple_of,
-    clippy::must_use_candidate,
-    clippy::similar_names
-)]
-
 //! SEED block cipher — RFC 4009 / RFC 4196.
 //!
 //! 128-bit block, 128-bit key, 16-round Feistel network.
@@ -83,17 +74,17 @@ const KC: [u32; 16] = [
 const S0_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&S0);
 const S1_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&S1);
 
-#[inline(always)]
+#[inline]
 fn s0_ct(x: u8) -> u8 {
     crate::ct::eval_byte_sbox(&S0_ANF, x)
 }
 
-#[inline(always)]
+#[inline]
 fn s1_ct(x: u8) -> u8 {
     crate::ct::eval_byte_sbox(&S1_ANF, x)
 }
 
-#[inline(always)]
+#[inline]
 fn g(x: u32) -> u32 {
     let [x0, x1, x2, x3] = x.to_le_bytes();
     let a0 = S0[x0 as usize];
@@ -108,7 +99,7 @@ fn g(x: u32) -> u32 {
     ])
 }
 
-#[inline(always)]
+#[inline]
 fn g_ct(x: u32) -> u32 {
     let [x0, x1, x2, x3] = x.to_le_bytes();
     let a0 = s0_ct(x0);
@@ -123,7 +114,7 @@ fn g_ct(x: u32) -> u32 {
     ])
 }
 
-#[inline(always)]
+#[inline]
 fn round_f(r0: u32, r1: u32, k0: u32, k1: u32, use_ct: bool) -> (u32, u32) {
     let apply_g = if use_ct { g_ct } else { g };
 
@@ -153,16 +144,16 @@ fn expand_round_keys(key: &[u8; 16], use_ct: bool) -> [u32; 32] {
         out[2 * i] = apply_g(k0.wrapping_add(k2).wrapping_sub(KC[i]));
         out[2 * i + 1] = apply_g(k1.wrapping_sub(k3).wrapping_add(KC[i]));
 
-        if i % 2 == 0 {
-            let pair = ((k0 as u64) << 32) | (k1 as u64);
+        if i.is_multiple_of(2) {
+            let pair = (u64::from(k0) << 32) | u64::from(k1);
             let rot = pair.rotate_right(8);
-            k0 = (rot >> 32) as u32;
-            k1 = rot as u32;
+            k0 = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
+            k1 = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
         } else {
-            let pair = ((k2 as u64) << 32) | (k3 as u64);
+            let pair = (u64::from(k2) << 32) | u64::from(k3);
             let rot = pair.rotate_left(8);
-            k2 = (rot >> 32) as u32;
-            k3 = rot as u32;
+            k2 = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
+            k3 = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
         }
 
         i += 1;
@@ -180,14 +171,14 @@ fn seed_encrypt(block: [u8; 16], round_keys: &[u32; 32], use_ct: bool) -> [u8; 1
     let mut i = 0usize;
     while i < 16 {
         let (f0, f1) = round_f(r0, r1, round_keys[2 * i], round_keys[2 * i + 1], use_ct);
-        let new_l0 = r0;
-        let new_l1 = r1;
-        let new_r0 = l0 ^ f0;
-        let new_r1 = l1 ^ f1;
-        l0 = new_l0;
-        l1 = new_l1;
-        r0 = new_r0;
-        r1 = new_r1;
+        let next_left0 = r0;
+        let next_left1 = r1;
+        let next_right0 = l0 ^ f0;
+        let next_right1 = l1 ^ f1;
+        l0 = next_left0;
+        l1 = next_left1;
+        r0 = next_right0;
+        r1 = next_right1;
         i += 1;
     }
 
@@ -209,14 +200,14 @@ fn seed_decrypt(block: [u8; 16], round_keys: &[u32; 32], use_ct: bool) -> [u8; 1
     while i > 0 {
         i -= 1;
         let (f0, f1) = round_f(l0, l1, round_keys[2 * i], round_keys[2 * i + 1], use_ct);
-        let prev_r0 = l0;
-        let prev_r1 = l1;
-        let prev_l0 = r0 ^ f0;
-        let prev_l1 = r1 ^ f1;
-        l0 = prev_l0;
-        l1 = prev_l1;
-        r0 = prev_r0;
-        r1 = prev_r1;
+        let prior_right0 = l0;
+        let prior_right1 = l1;
+        let prior_left0 = r0 ^ f0;
+        let prior_left1 = r1 ^ f1;
+        l0 = prior_left0;
+        l1 = prior_left1;
+        r0 = prior_right0;
+        r1 = prior_right1;
     }
 
     let mut out = [0u8; 16];
@@ -233,6 +224,7 @@ pub struct Seed {
 }
 
 impl Seed {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             round_keys: expand_round_keys(key, false),
@@ -245,10 +237,12 @@ impl Seed {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_encrypt(*block, &self.round_keys, false)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_decrypt(*block, &self.round_keys, false)
     }
@@ -260,6 +254,7 @@ pub struct SeedCt {
 }
 
 impl SeedCt {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             round_keys: expand_round_keys(key, true),
@@ -272,10 +267,12 @@ impl SeedCt {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_encrypt(*block, &self.round_keys, true)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_decrypt(*block, &self.round_keys, true)
     }
@@ -408,5 +405,21 @@ mod tests {
             assert_eq!(cipher.encrypt_block(&pt), ct);
             assert_eq!(cipher.decrypt_block(&ct), pt);
         }
+    }
+
+    #[test]
+    fn seed_matches_openssl_ecb() {
+        let key_hex = "000102030405060708090a0b0c0d0e0f";
+        let pt_hex = "00000000000000000000000000000000";
+        let Some(expected) = crate::ct::run_openssl_enc("-seed-ecb", key_hex, None, &h16(pt_hex))
+        else {
+            return;
+        };
+
+        let cipher = Seed::new(&h16(key_hex));
+        assert_eq!(
+            cipher.encrypt_block(&h16(pt_hex)).as_slice(),
+            expected.as_slice()
+        );
     }
 }

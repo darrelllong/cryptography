@@ -1,9 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::inline_always,
-    clippy::must_use_candidate
-)]
-
 //! ZUC-128 stream cipher — GM/T 0001.1 / ETSI SAGE ZUC specification v1.6.
 //!
 //! 128-bit key, 128-bit IV.  Outputs 32-bit keystream words.
@@ -104,13 +98,13 @@ fn mul31(a: u32, n: u32) -> u32 {
 /// Composite 32-bit S-box S = (S0, S1, S0, S1), MSB first (spec §2.2.4).
 #[inline]
 fn sbox(x: u32) -> u32 {
-    (S0[(x >> 24) as usize] as u32) << 24
-        | (S1[((x >> 16) & 0xFF) as usize] as u32) << 16
-        | (S0[((x >> 8) & 0xFF) as usize] as u32) << 8
-        | (S1[(x & 0xFF) as usize] as u32)
+    u32::from(S0[(x >> 24) as usize]) << 24
+        | u32::from(S1[((x >> 16) & 0xFF) as usize]) << 16
+        | u32::from(S0[((x >> 8) & 0xFF) as usize]) << 8
+        | u32::from(S1[(x & 0xFF) as usize])
 }
 
-#[inline(always)]
+#[inline]
 fn sbox_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
     crate::ct::eval_byte_sbox(coeffs, input)
 }
@@ -118,10 +112,10 @@ fn sbox_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
 /// Constant-time composite 32-bit S-box using the packed ANF forms of S0/S1.
 #[inline]
 fn sbox_ct(x: u32) -> u32 {
-    (sbox_eval(&S0_ANF, (x >> 24) as u8) as u32) << 24
-        | (sbox_eval(&S1_ANF, ((x >> 16) & 0xFF) as u8) as u32) << 16
-        | (sbox_eval(&S0_ANF, ((x >> 8) & 0xFF) as u8) as u32) << 8
-        | (sbox_eval(&S1_ANF, (x & 0xFF) as u8) as u32)
+    u32::from(sbox_eval(&S0_ANF, (x >> 24) as u8)) << 24
+        | u32::from(sbox_eval(&S1_ANF, ((x >> 16) & 0xFF) as u8)) << 16
+        | u32::from(sbox_eval(&S0_ANF, ((x >> 8) & 0xFF) as u8)) << 8
+        | u32::from(sbox_eval(&S1_ANF, (x & 0xFF) as u8))
 }
 
 /// Linear transform L1 (spec §2.2.3).
@@ -184,7 +178,7 @@ fn lfsr_clock(s: &mut [u32; 16], new_val: u32) {
 fn init_core<const CT: bool>(key: &[u8; 16], iv: &[u8; 16]) -> ZucCore {
     let mut s = [0u32; 16];
     for i in 0..16 {
-        s[i] = ((key[i] as u32) << 23) | ((D[i] as u32) << 8) | (iv[i] as u32);
+        s[i] = (u32::from(key[i]) << 23) | (u32::from(D[i]) << 8) | u32::from(iv[i]);
     }
     let mut core = ZucCore { s, r1: 0, r2: 0 };
 
@@ -252,6 +246,7 @@ pub struct Zuc128Ct {
 
 impl Zuc128 {
     /// Construct and initialize ZUC-128 from a 128-bit key and 128-bit IV.
+    #[must_use]
     pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
         Self {
             core: init_core::<false>(key, iv),
@@ -274,6 +269,7 @@ impl Zuc128 {
 
 impl Zuc128Ct {
     /// Construct and initialize ZUC-128Ct from a 128-bit key and 128-bit IV.
+    #[must_use]
     pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
         Self {
             core: init_core::<true>(key, iv),
@@ -327,16 +323,16 @@ mod tests {
     #[test]
     fn keystream_zeros() {
         let mut z = Zuc128::new(&[0u8; 16], &[0u8; 16]);
-        assert_eq!(z.next_word(), 0x27bede74, "Z[0]");
-        assert_eq!(z.next_word(), 0x018082da, "Z[1]");
+        assert_eq!(z.next_word(), 0x27be_de74, "Z[0]");
+        assert_eq!(z.next_word(), 0x0180_82da, "Z[1]");
     }
 
     // Test Set 2: key = 0xFF*16, iv = 0xFF*16.
     #[test]
     fn keystream_ones() {
         let mut z = Zuc128::new(&[0xFFu8; 16], &[0xFFu8; 16]);
-        assert_eq!(z.next_word(), 0x0657cfa0, "Z[0]");
-        assert_eq!(z.next_word(), 0x7096398b, "Z[1]");
+        assert_eq!(z.next_word(), 0x0657_cfa0, "Z[0]");
+        assert_eq!(z.next_word(), 0x7096_398b, "Z[1]");
     }
 
     // Test Set 3: mixed key / IV (ZUC spec §3, test set 3).
@@ -351,22 +347,22 @@ mod tests {
             0xc7, 0x66,
         ];
         let mut z = Zuc128::new(&key, &iv);
-        assert_eq!(z.next_word(), 0x14f1c272, "Z[0]");
-        assert_eq!(z.next_word(), 0x3279c419, "Z[1]");
+        assert_eq!(z.next_word(), 0x14f1_c272, "Z[0]");
+        assert_eq!(z.next_word(), 0x3279_c419, "Z[1]");
     }
 
     #[test]
     fn keystream_zeros_ct() {
         let mut z = Zuc128Ct::new(&[0u8; 16], &[0u8; 16]);
-        assert_eq!(z.next_word(), 0x27bede74, "Z[0]");
-        assert_eq!(z.next_word(), 0x018082da, "Z[1]");
+        assert_eq!(z.next_word(), 0x27be_de74, "Z[0]");
+        assert_eq!(z.next_word(), 0x0180_82da, "Z[1]");
     }
 
     #[test]
     fn keystream_ones_ct() {
         let mut z = Zuc128Ct::new(&[0xFFu8; 16], &[0xFFu8; 16]);
-        assert_eq!(z.next_word(), 0x0657cfa0, "Z[0]");
-        assert_eq!(z.next_word(), 0x7096398b, "Z[1]");
+        assert_eq!(z.next_word(), 0x0657_cfa0, "Z[0]");
+        assert_eq!(z.next_word(), 0x7096_398b, "Z[1]");
     }
 
     #[test]
@@ -380,8 +376,8 @@ mod tests {
             0xc7, 0x66,
         ];
         let mut z = Zuc128Ct::new(&key, &iv);
-        assert_eq!(z.next_word(), 0x14f1c272, "Z[0]");
-        assert_eq!(z.next_word(), 0x3279c419, "Z[1]");
+        assert_eq!(z.next_word(), 0x14f1_c272, "Z[0]");
+        assert_eq!(z.next_word(), 0x3279_c419, "Z[1]");
     }
 
     // fill() XOR roundtrip: encrypt then decrypt returns plaintext.
@@ -436,7 +432,7 @@ mod tests {
     #[test]
     fn ct_sboxes_match_tables() {
         for x in 0u16..=255 {
-            let b = x as u8;
+            let b = u8::try_from(x).expect("table index fits in u8");
             assert_eq!(sbox_eval(&S0_ANF, b), S0[x as usize], "S0 {x:02x}");
             assert_eq!(sbox_eval(&S1_ANF, b), S1[x as usize], "S1 {x:02x}");
         }

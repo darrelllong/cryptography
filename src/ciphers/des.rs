@@ -1,18 +1,7 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::cast_possible_truncation,
-    clippy::doc_markdown,
-    clippy::explicit_iter_loop,
-    clippy::inline_always,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate,
-    clippy::needless_range_loop
-)]
-
 //! DES and Triple-DES (TDEA) implemented from FIPS PUB 46-3.
 //!
 //! All tables are transcribed verbatim from the FIPS 46-3 document
-//! (https://csrc.nist.gov/files/pubs/fips/46-3/final/docs/fips46-3.pdf).
+//! (<https://csrc.nist.gov/files/pubs/fips/46-3/final/docs/fips46-3.pdf>).
 //! Tests use the official NIST CAVP Known Answer Test vectors downloaded
 //! directly from csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-
 //! Validation-Program/documents/des/KAT_TDES.zip.
@@ -250,12 +239,12 @@ const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
 /// Used at compile time to build the fused S+P table.
 const fn apply_p_to_partial(s: u32) -> u32 {
     let mut out = 0u32;
-    let mut i = 0usize;
+    let mut i = 0u32;
     while i < 32 {
         // P[i] is the 1-indexed FIPS source bit for output FIPS bit (i+1).
         // FIPS bit k ↔ u32 bit (32−k).
-        let src_bit = (32 - P[i] as usize) as u32; // 0 = LSB
-        let dst_bit = (31 - i) as u32;
+        let src_bit = 32u32 - P[i as usize] as u32; // 0 = LSB
+        let dst_bit = 31u32 - i;
         if (s >> src_bit) & 1 == 1 {
             out |= 1u32 << dst_bit;
         }
@@ -266,22 +255,22 @@ const fn apply_p_to_partial(s: u32) -> u32 {
 
 /// Build the fused S+P table: 8 S-boxes × 64 inputs → P-permuted u32 contribution.
 ///
-/// SP_TABLE[i][b6] = P(S_i(b6) placed at bits [28−4i .. 31−4i] of the 32-bit word).
+/// `SP_TABLE`[i][b6] = `P(S_i(b6)` placed at bits [28−4i .. 31−4i] of the 32-bit word).
 /// Since P is a linear permutation, P(s0|s1|…|s7) = P(s0)|P(s1)|…|P(s7),
 /// so OR-ing all 8 entries gives the correct f-function output.
 /// Reduces 8 S-box + 4 P byte-table lookups per round to 8 SP lookups.
 const fn build_sp() -> [[u32; 64]; 8] {
     let mut sp = [[0u32; 64]; 8];
-    let mut i = 0usize;
+    let mut i = 0u32;
     while i < 8 {
         let mut j = 0usize; // raw 6-bit input b6
         while j < 64 {
             let row = ((j & 0x20) >> 4) | (j & 0x01); // bits 5 and 0
             let col = (j >> 1) & 0x0F; // bits 4..1
-            let sval = SBOXES[i][row * 16 + col] as u32;
+            let sval = SBOXES[i as usize][row * 16 + col] as u32;
             // S-box i places its 4-bit output at u32 bits [28−4i .. 31−4i].
-            let partial = sval << (28 - 4 * i) as u32;
-            sp[i][j] = apply_p_to_partial(partial);
+            let partial = sval << (28u32 - 4 * i);
+            sp[i as usize][j] = apply_p_to_partial(partial);
             j += 1;
         }
         i += 1;
@@ -294,7 +283,7 @@ static FP_TABLE: [[u64; 256]; 8] = build_perm64(&FP);
 static E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
 static SP_TABLE: [[u32; 64]; 8] = build_sp();
 
-#[inline(always)]
+#[inline]
 fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
     t[0][(x >> 56) as usize]
         | t[1][((x >> 48) & 0xff) as usize]
@@ -306,7 +295,7 @@ fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
         | t[7][(x & 0xff) as usize]
 }
 
-#[inline(always)]
+#[inline]
 fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
     t[0][(r >> 24) as usize]
         | t[1][((r >> 16) & 0xff) as usize]
@@ -319,7 +308,7 @@ fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Extract bit `pos` (1-indexed, MSB = 1) from a 64-bit big-endian block.
-#[inline(always)]
+#[inline]
 fn bit64(block: u64, pos: u8) -> u64 {
     (block >> (64 - pos)) & 1
 }
@@ -345,7 +334,7 @@ fn permute64_to48(input: u64, table: &[u8; 48]) -> u64 {
 }
 
 /// Left-rotate a `bits`-wide value by `n` positions.
-#[inline(always)]
+#[inline]
 fn rotate_left(val: u32, n: u8, bits: u8) -> u32 {
     let mask = (1u32 << bits) - 1;
     ((val << n) | (val >> (bits - n))) & mask
@@ -362,13 +351,16 @@ pub type KeySchedule = [u64; 16];
 /// Returns 16 subkeys, each 48 bits (stored in the low 48 bits of u64).
 ///
 /// For decryption, pass the returned schedule reversed to [`des_ecb_block`].
+#[must_use]
 pub fn key_schedule(key: u64) -> KeySchedule {
     // PC-1: select and permute 56 bits.
     // The first 28 bits of pc1_out form C0, the next 28 bits form D0.
     let pc1_out = permute64(key, &PC1);
 
-    let mut c = (pc1_out >> 28) as u32 & 0x0FFF_FFFF; // bits 1-28 → C0
-    let mut d = pc1_out as u32 & 0x0FFF_FFFF; // bits 29-56 → D0
+    let c_bytes = ((pc1_out >> 28) & 0x0FFF_FFFF).to_be_bytes();
+    let d_bytes = (pc1_out & 0x0FFF_FFFF).to_be_bytes();
+    let mut c = u32::from_be_bytes([c_bytes[4], c_bytes[5], c_bytes[6], c_bytes[7]]); // bits 1-28 → C0
+    let mut d = u32::from_be_bytes([d_bytes[4], d_bytes[5], d_bytes[6], d_bytes[7]]); // bits 29-56 → D0
 
     let mut schedule = [0u64; 16];
     for i in 0..16 {
@@ -377,7 +369,7 @@ pub fn key_schedule(key: u64) -> KeySchedule {
 
         // Merge C and D into a 56-bit value for PC-2 selection.
         // C occupies the upper 28 bits; D the lower 28.
-        let cd: u64 = ((c as u64) << 28) | (d as u64);
+        let cd: u64 = (u64::from(c) << 28) | u64::from(d);
 
         // PC-2 references bit positions 1–56 within the 56-bit CD register.
         // We represent CD as a 64-bit value with the 56 bits in the MSBs
@@ -398,15 +390,15 @@ fn f(r: u32, subkey: u64) -> u32 {
     let xored = fast_expand(r, &E_TABLE) ^ subkey;
 
     let mut result = 0u32;
-    for i in 0..8usize {
+    for (i, sp_row) in SP_TABLE.iter().enumerate() {
         let shift = 42 - 6 * i;
         let b6 = ((xored >> shift) & 0x3F) as usize;
-        result |= SP_TABLE[i][b6];
+        result |= sp_row[b6];
     }
     result
 }
 
-#[inline(always)]
+#[inline]
 fn subset_mask6(x: u8) -> u64 {
     // Expand one 6-bit input into the set of all active monomials in
     // {1, x0, x1, ..., x0x1, ...}. Bit i decides whether the current mask is
@@ -414,35 +406,36 @@ fn subset_mask6(x: u8) -> u64 {
     // monomial bitmask itself.
     let mut mask = 1u64;
 
-    let bit0 = 0u64.wrapping_sub((x & 1) as u64);
+    let bit0 = 0u64.wrapping_sub(u64::from(x & 1));
     mask |= (mask << 1) & bit0;
 
-    let bit1 = 0u64.wrapping_sub(((x >> 1) & 1) as u64);
+    let bit1 = 0u64.wrapping_sub(u64::from((x >> 1) & 1));
     mask |= (mask << 2) & bit1;
 
-    let bit2 = 0u64.wrapping_sub(((x >> 2) & 1) as u64);
+    let bit2 = 0u64.wrapping_sub(u64::from((x >> 2) & 1));
     mask |= (mask << 4) & bit2;
 
-    let bit3 = 0u64.wrapping_sub(((x >> 3) & 1) as u64);
+    let bit3 = 0u64.wrapping_sub(u64::from((x >> 3) & 1));
     mask |= (mask << 8) & bit3;
 
-    let bit4 = 0u64.wrapping_sub(((x >> 4) & 1) as u64);
+    let bit4 = 0u64.wrapping_sub(u64::from((x >> 4) & 1));
     mask |= (mask << 16) & bit4;
 
-    let bit5 = 0u64.wrapping_sub(((x >> 5) & 1) as u64);
+    let bit5 = 0u64.wrapping_sub(u64::from((x >> 5) & 1));
     mask |= (mask << 32) & bit5;
 
     mask
 }
 
-#[inline(always)]
+#[inline]
 fn parity64(mut x: u64) -> u8 {
     x ^= x >> 32;
     x ^= x >> 16;
     x ^= x >> 8;
     x ^= x >> 4;
     x &= 0x0f;
-    ((0x6996u16 >> (x as u16)) & 1) as u8
+    let nibble = u16::try_from(x).expect("masked parity nibble fits in u16");
+    u8::try_from((0x6996u16 >> nibble) & 1).expect("parity bit fits in u8")
 }
 
 /// Evaluate one DES S-box from the packed ANF representation.
@@ -451,7 +444,7 @@ fn parity64(mut x: u64) -> u8 {
 /// each packed coefficient mask selects which monomials contribute to one
 /// output bit. Taking parity of the intersection is exactly "sum the selected
 /// ANF terms modulo 2".
-#[inline(always)]
+#[inline]
 fn sbox_ct(sbox_idx: usize, input: u8) -> u8 {
     let active = subset_mask6(input);
     let coeffs = &SBOX_ANF[sbox_idx];
@@ -475,7 +468,7 @@ fn sbox_ct(sbox_idx: usize, input: u8) -> u8 {
 fn f_ct(r: u32, subkey: u64) -> u32 {
     let mut expanded = 0u64;
     for (i, &src) in E.iter().enumerate() {
-        let bit = ((r >> (32 - src)) & 1) as u64;
+        let bit = u64::from((r >> (32 - src)) & 1);
         expanded |= bit << (47 - i);
     }
     let xored = expanded ^ subkey;
@@ -484,7 +477,7 @@ fn f_ct(r: u32, subkey: u64) -> u32 {
     for i in 0..8usize {
         let shift = 42 - 6 * i;
         let b6 = ((xored >> shift) & 0x3f) as u8;
-        let sval = sbox_ct(i, b6) as u32;
+        let sval = u32::from(sbox_ct(i, b6));
         pre_p |= sval << (28 - 4 * i);
     }
 
@@ -502,34 +495,34 @@ fn f_ct(r: u32, subkey: u64) -> u32 {
 fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
     let permuted = fast_perm64(block, &IP_TABLE);
 
-    let mut l = (permuted >> 32) as u32;
-    let mut r = permuted as u32;
+    let mut l = u32::try_from((permuted >> 32) & 0xFFFF_FFFF).expect("upper DES half fits in u32");
+    let mut r = u32::try_from(permuted & 0xFFFF_FFFF).expect("lower DES half fits in u32");
 
     // 16 Feistel rounds.
-    for &subkey in schedule.iter() {
+    for &subkey in schedule {
         let tmp = r;
         r = l ^ f(r, subkey);
         l = tmp;
     }
 
     // Pre-output: swap L and R, then apply FP via precomputed byte-table.
-    let pre_output = ((r as u64) << 32) | (l as u64);
+    let pre_output = (u64::from(r) << 32) | u64::from(l);
     fast_perm64(pre_output, &FP_TABLE)
 }
 
 fn des_block_ct(block: u64, schedule: &KeySchedule) -> u64 {
     let permuted = permute64(block, &IP);
 
-    let mut l = (permuted >> 32) as u32;
-    let mut r = permuted as u32;
+    let mut l = u32::try_from((permuted >> 32) & 0xFFFF_FFFF).expect("upper DES half fits in u32");
+    let mut r = u32::try_from(permuted & 0xFFFF_FFFF).expect("lower DES half fits in u32");
 
-    for &subkey in schedule.iter() {
+    for &subkey in schedule {
         let tmp = r;
         r = l ^ f_ct(r, subkey);
         l = tmp;
     }
 
-    let pre_output = ((r as u64) << 32) | (l as u64);
+    let pre_output = (u64::from(r) << 32) | u64::from(l);
     permute64(pre_output, &FP)
 }
 
@@ -555,6 +548,7 @@ pub struct DesCt {
 
 impl Des {
     /// Create a new DES instance from an 8-byte key.
+    #[must_use]
     pub fn new(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
         let enc_schedule = key_schedule(k);
@@ -574,12 +568,14 @@ impl Des {
     }
 
     /// Encrypt a single 64-bit block (ECB mode).
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let b = u64::from_be_bytes(*block);
         des_block(b, &self.enc_schedule).to_be_bytes()
     }
 
     /// Decrypt a single 64-bit block (ECB mode).
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let b = u64::from_be_bytes(*block);
         des_block(b, &self.dec_schedule).to_be_bytes()
@@ -588,6 +584,7 @@ impl Des {
 
 impl DesCt {
     /// Create a new constant-time DES instance from an 8-byte key.
+    #[must_use]
     pub fn new(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
         let enc_schedule = key_schedule(k);
@@ -607,12 +604,14 @@ impl DesCt {
     }
 
     /// Encrypt a single 64-bit block (ECB mode).
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let b = u64::from_be_bytes(*block);
         des_block_ct(b, &self.enc_schedule).to_be_bytes()
     }
 
     /// Decrypt a single 64-bit block (ECB mode).
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let b = u64::from_be_bytes(*block);
         des_block_ct(b, &self.dec_schedule).to_be_bytes()
@@ -660,6 +659,12 @@ pub struct TripleDes {
 
 impl TripleDes {
     /// Construct a 3TDEA instance from a 24-byte key K1 ∥ K2 ∥ K3.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal fixed-size key splits fail, which would only
+    /// happen if this constructor were changed inconsistently with its type.
+    #[must_use]
     pub fn new_3key(key: &[u8; 24]) -> Self {
         Self::from_keys(
             u64::from_be_bytes(key[0..8].try_into().unwrap()),
@@ -676,6 +681,12 @@ impl TripleDes {
     }
 
     /// Construct a 2TDEA instance from a 16-byte key K1 ∥ K2 (K3 = K1).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal fixed-size key splits fail, which would only
+    /// happen if this constructor were changed inconsistently with its type.
+    #[must_use]
     pub fn new_2key(key: &[u8; 16]) -> Self {
         let k1 = u64::from_be_bytes(key[0..8].try_into().unwrap());
         let k2 = u64::from_be_bytes(key[8..16].try_into().unwrap());
@@ -691,6 +702,7 @@ impl TripleDes {
 
     /// Construct from three 8-byte keys.  K1=K2=K3 is valid (degenerates to
     /// single DES) and is used by the NIST CAVP "KEYs" tests.
+    #[must_use]
     pub fn new_single_key(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
         Self::from_keys(k, k, k)
@@ -724,6 +736,7 @@ impl TripleDes {
     }
 
     /// Encrypt a single 64-bit block: C = E(K3, D(K2, E(K1, P)))
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let p = u64::from_be_bytes(*block);
         let t1 = des_block(p, &self.k1_enc); // E with K1
@@ -733,6 +746,7 @@ impl TripleDes {
     }
 
     /// Decrypt a single 64-bit block: P = D(K1, E(K2, D(K3, C)))
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         let c = u64::from_be_bytes(*block);
         let t1 = des_block(c, &self.k3_dec); // D with K3
@@ -825,6 +839,16 @@ mod tests {
 
     fn hex_to_bytes8(s: &str) -> [u8; 8] {
         from_hex(s).to_be_bytes()
+    }
+
+    fn hex_to_bytes24(s: &str) -> [u8; 24] {
+        let mut out = [0u8; 24];
+        for (idx, chunk) in s.as_bytes().chunks_exact(2).enumerate() {
+            let hi = (chunk[0] as char).to_digit(16).unwrap();
+            let lo = (chunk[1] as char).to_digit(16).unwrap();
+            out[idx] = u8::try_from((hi << 4) | lo).expect("decoded hex byte fits in u8");
+        }
+        out
     }
 
     /// Run a single NIST CAVP TDES ECB test vector using the TDES EDE path
@@ -1198,6 +1222,40 @@ mod tests {
             des.encrypt_block(&pt),
             tdes.encrypt_block(&pt),
             "TDES(K,K,K) must equal DES(K) for same key and plaintext"
+        );
+    }
+
+    #[test]
+    fn des_matches_openssl_ecb() {
+        let key_hex = "133457799bbcdff1";
+        let pt_hex = "0123456789abcdef";
+        let Some(expected) =
+            crate::ct::run_openssl_enc("-des-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
+        else {
+            return;
+        };
+
+        let cipher = Des::new(&hex_to_bytes8(key_hex));
+        assert_eq!(
+            cipher.encrypt_block(&hex_to_bytes8(pt_hex)).as_slice(),
+            expected.as_slice()
+        );
+    }
+
+    #[test]
+    fn tdes_matches_openssl_ecb() {
+        let key_hex = "133457799bbcdff100112233445566778899aabbccddeeff";
+        let pt_hex = "0123456789abcdef";
+        let Some(expected) =
+            crate::ct::run_openssl_enc("-des-ede3-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
+        else {
+            return;
+        };
+
+        let cipher = TripleDes::new_3key(&hex_to_bytes24(key_hex));
+        assert_eq!(
+            cipher.encrypt_block(&hex_to_bytes8(pt_hex)).as_slice(),
+            expected.as_slice()
         );
     }
 }

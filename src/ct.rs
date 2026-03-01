@@ -1,10 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::cast_possible_truncation,
-    clippy::inline_always,
-    clippy::ref_as_ptr
-)]
-
 //! Shared helpers for secret handling and software constant-time building
 //! blocks.
 //!
@@ -23,11 +16,16 @@ use std::io::Write;
 #[cfg(test)]
 use std::process::{Command, Stdio};
 
-#[inline(always)]
+#[inline]
 fn eq_mask_u32(a: u8, b: u8) -> u32 {
-    let x = (a ^ b) as u16;
-    let is_zero = ((x.wrapping_sub(1) >> 8) & 1) as u32;
+    let x = u16::from(a ^ b);
+    let is_zero = u32::from((x.wrapping_sub(1) >> 8) & 1);
     0u32.wrapping_sub(is_zero)
+}
+
+#[inline]
+fn eq_mask_u8(a: u8, b: u8) -> u8 {
+    u8::MAX.wrapping_mul(u8::from(a == b))
 }
 
 pub(crate) fn zeroize_slice<T: Copy + Default>(slice: &mut [T]) {
@@ -35,7 +33,7 @@ pub(crate) fn zeroize_slice<T: Copy + Default>(slice: &mut [T]) {
     // keys do not remain in memory longer than necessary.
     for item in slice.iter_mut() {
         // Use volatile writes so the compiler does not elide the wipe.
-        unsafe { ptr::write_volatile(item as *mut T, T::default()) };
+        unsafe { ptr::write_volatile(std::ptr::from_mut::<T>(item), T::default()) };
     }
     compiler_fence(Ordering::SeqCst);
 }
@@ -44,7 +42,8 @@ pub(crate) fn ct_lookup_u32(table: &[u32; 256], idx: u8) -> u32 {
     let mut out = 0u32;
     let mut i = 0usize;
     while i < 256 {
-        out |= table[i] & eq_mask_u32(i as u8, idx);
+        let table_index = u8::try_from(i).expect("byte table index fits in u8");
+        out |= table[i] & eq_mask_u32(table_index, idx);
         i += 1;
     }
     out
@@ -54,7 +53,8 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
     let mut out = 0u8;
     let mut i = 0usize;
     while i < 16 {
-        out |= table[i] & (eq_mask_u32(i as u8, idx) as u8);
+        let table_index = u8::try_from(i).expect("nibble table index fits in u8");
+        out |= table[i] & eq_mask_u8(table_index, idx);
         i += 1;
     }
     out
@@ -87,6 +87,21 @@ pub(crate) fn run_openssl(args: &[&str], stdin: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     Some(out.stdout)
+}
+
+#[cfg(test)]
+pub(crate) fn run_openssl_enc(
+    cipher_name: &str,
+    key_hex: &str,
+    iv_hex: Option<&str>,
+    input: &[u8],
+) -> Option<Vec<u8>> {
+    let mut args = vec!["enc", cipher_name, "-nopad", "-nosalt", "-K", key_hex];
+    if let Some(iv) = iv_hex {
+        args.extend(["-iv", iv]);
+    }
+    args.push("-e");
+    run_openssl(&args, input)
 }
 
 /// Build packed ANF coefficients for an 8-bit S-box.
@@ -170,59 +185,59 @@ pub(crate) const fn build_nibble_sbox_anf(table: &[u8; 16]) -> [u16; 4] {
     out
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) const fn shl_256<const SHIFT: u32>(lo: u128, hi: u128) -> (u128, u128) {
     debug_assert!(SHIFT >= 1 && SHIFT <= 127);
     (lo << SHIFT, (hi << SHIFT) | (lo >> (128 - SHIFT)))
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn subset_mask8(x: u8) -> (u128, u128) {
     let mut lo = 1u128;
     let mut hi = 0u128;
 
-    let mask0 = 0u128.wrapping_sub((x & 1) as u128);
+    let mask0 = 0u128.wrapping_sub(u128::from(x & 1));
     let (add_lo, add_hi) = shl_256::<1>(lo, hi);
     lo |= add_lo & mask0;
     hi |= add_hi & mask0;
 
-    let mask1 = 0u128.wrapping_sub(((x >> 1) & 1) as u128);
+    let mask1 = 0u128.wrapping_sub(u128::from((x >> 1) & 1));
     let (add_lo, add_hi) = shl_256::<2>(lo, hi);
     lo |= add_lo & mask1;
     hi |= add_hi & mask1;
 
-    let mask2 = 0u128.wrapping_sub(((x >> 2) & 1) as u128);
+    let mask2 = 0u128.wrapping_sub(u128::from((x >> 2) & 1));
     let (add_lo, add_hi) = shl_256::<4>(lo, hi);
     lo |= add_lo & mask2;
     hi |= add_hi & mask2;
 
-    let mask3 = 0u128.wrapping_sub(((x >> 3) & 1) as u128);
+    let mask3 = 0u128.wrapping_sub(u128::from((x >> 3) & 1));
     let (add_lo, add_hi) = shl_256::<8>(lo, hi);
     lo |= add_lo & mask3;
     hi |= add_hi & mask3;
 
-    let mask4 = 0u128.wrapping_sub(((x >> 4) & 1) as u128);
+    let mask4 = 0u128.wrapping_sub(u128::from((x >> 4) & 1));
     let (add_lo, add_hi) = shl_256::<16>(lo, hi);
     lo |= add_lo & mask4;
     hi |= add_hi & mask4;
 
-    let mask5 = 0u128.wrapping_sub(((x >> 5) & 1) as u128);
+    let mask5 = 0u128.wrapping_sub(u128::from((x >> 5) & 1));
     let (add_lo, add_hi) = shl_256::<32>(lo, hi);
     lo |= add_lo & mask5;
     hi |= add_hi & mask5;
 
-    let mask6 = 0u128.wrapping_sub(((x >> 6) & 1) as u128);
+    let mask6 = 0u128.wrapping_sub(u128::from((x >> 6) & 1));
     let (add_lo, add_hi) = shl_256::<64>(lo, hi);
     lo |= add_lo & mask6;
     hi |= add_hi & mask6;
 
-    let mask7 = 0u128.wrapping_sub(((x >> 7) & 1) as u128);
+    let mask7 = 0u128.wrapping_sub(u128::from((x >> 7) & 1));
     hi |= lo & mask7;
 
     (lo, hi)
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn parity128(mut x: u128) -> u8 {
     x ^= x >> 64;
     x ^= x >> 32;
@@ -230,10 +245,11 @@ pub(crate) fn parity128(mut x: u128) -> u8 {
     x ^= x >> 8;
     x ^= x >> 4;
     x &= 0x0f;
-    ((0x6996u16 >> (x as u16)) & 1) as u8
+    let nibble = u16::try_from(x).expect("masked parity nibble fits in u16");
+    u8::try_from((0x6996u16 >> nibble) & 1).expect("parity bit fits in u8")
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn eval_byte_sbox(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
     let (active_lo, active_hi) = subset_mask8(input);
     let mut out = 0u8;
@@ -248,26 +264,26 @@ pub(crate) fn eval_byte_sbox(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
     out
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn subset_mask4(x: u8) -> u16 {
     let mut mask = 1u16;
 
-    let b0 = 0u16.wrapping_sub((x & 1) as u16);
+    let b0 = 0u16.wrapping_sub(u16::from(x & 1));
     mask |= (mask << 1) & b0;
 
-    let b1 = 0u16.wrapping_sub(((x >> 1) & 1) as u16);
+    let b1 = 0u16.wrapping_sub(u16::from((x >> 1) & 1));
     mask |= (mask << 2) & b1;
 
-    let b2 = 0u16.wrapping_sub(((x >> 2) & 1) as u16);
+    let b2 = 0u16.wrapping_sub(u16::from((x >> 2) & 1));
     mask |= (mask << 4) & b2;
 
-    let b3 = 0u16.wrapping_sub(((x >> 3) & 1) as u16);
+    let b3 = 0u16.wrapping_sub(u16::from((x >> 3) & 1));
     mask |= (mask << 8) & b3;
 
     mask
 }
 
-#[inline(always)]
+#[inline]
 pub(crate) fn parity16(mut x: u16) -> u8 {
     x ^= x >> 8;
     x ^= x >> 4;
@@ -275,8 +291,8 @@ pub(crate) fn parity16(mut x: u16) -> u8 {
     ((0x6996u16 >> x) & 1) as u8
 }
 
-#[inline(always)]
-pub(crate) fn eval_nibble_sbox(coeffs: &[u16; 4], input: u8) -> u8 {
+#[inline]
+pub(crate) fn eval_nibble_sbox(coeffs: [u16; 4], input: u8) -> u8 {
     let active = subset_mask4(input);
     let mut out = 0u8;
     let mut bit = 0usize;

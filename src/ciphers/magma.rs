@@ -1,12 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::inline_always,
-    clippy::must_use_candidate,
-    clippy::needless_range_loop,
-    clippy::similar_names,
-    clippy::trivially_copy_pass_by_ref
-)]
-
 //! Magma (GOST R 34.12-2015) block cipher — RFC 8891.
 //!
 //! 64-bit block, 256-bit key, 32 Feistel rounds.
@@ -40,12 +31,37 @@ const PI: [[u8; 16]; 8] = [
 #[inline]
 fn t(v: u32) -> u32 {
     let mut r = 0u32;
-    for i in 0..8usize {
+    for (i, sbox) in PI.iter().enumerate() {
         let nibble = ((v >> (4 * i)) & 0xf) as usize;
-        let sub = PI[i][nibble];
-        r |= (sub as u32) << (4 * i);
+        let sub = sbox[nibble];
+        r |= u32::from(sub) << (4 * i);
     }
     r
+}
+
+#[inline]
+fn nibble_monomials(nibble: u8) -> ([u8; 4], [u8; 6], [u8; 4]) {
+    let bits = [
+        nibble & 1,
+        (nibble >> 1) & 1,
+        (nibble >> 2) & 1,
+        (nibble >> 3) & 1,
+    ];
+    let pairs = [
+        bits[0] & bits[1],
+        bits[0] & bits[2],
+        bits[0] & bits[3],
+        bits[1] & bits[2],
+        bits[1] & bits[3],
+        bits[2] & bits[3],
+    ];
+    let triples = [
+        pairs[0] & bits[2],
+        pairs[0] & bits[3],
+        pairs[1] & bits[3],
+        pairs[3] & bits[3],
+    ];
+    (bits, pairs, triples)
 }
 
 // The Ct path uses eight tiny 4->4 circuits. For Magma these are small enough
@@ -55,207 +71,213 @@ fn t(v: u32) -> u32 {
 // the four input bits. Terms like `x01` or `x123` are monomials, and a literal
 // `1` in a `b*` expression is the ANF constant term. The four `b*` wires are
 // then packed back into the substituted nibble.
-#[inline(always)]
+#[inline]
 fn pi0_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = x02 ^ x12 ^ x012 ^ x13 ^ x123;
-    let b1 = x1 ^ x2 ^ x02 ^ x12 ^ x3 ^ x03 ^ x023 ^ x123;
-    let b2 = 1 ^ x01 ^ x2 ^ x02 ^ x03 ^ x123;
-    let b3 = 1 ^ x0 ^ x1 ^ x01 ^ x12 ^ x03 ^ x13 ^ x23;
+    let b0 = pairs[1] ^ pairs[3] ^ triples[0] ^ pairs[4] ^ triples[3];
+    let b1 = bits[1] ^ bits[2] ^ pairs[1] ^ pairs[3] ^ bits[3] ^ pairs[2] ^ triples[2] ^ triples[3];
+    let b2 = 1 ^ pairs[0] ^ bits[2] ^ pairs[1] ^ pairs[2] ^ triples[3];
+    let b3 = 1 ^ bits[0] ^ bits[1] ^ pairs[0] ^ pairs[3] ^ pairs[2] ^ pairs[4] ^ pairs[5];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
-#[inline(always)]
+#[inline]
 fn pi1_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x013 = x01 & x3;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = x01 ^ x2 ^ x02 ^ x012 ^ x3 ^ x03 ^ x13 ^ x013 ^ x23;
-    let b1 = 1 ^ x0 ^ x01 ^ x2 ^ x3 ^ x013 ^ x123;
-    let b2 = 1 ^ x0 ^ x1 ^ x01 ^ x2 ^ x02 ^ x012 ^ x3 ^ x23 ^ x023 ^ x123;
-    let b3 = x0 ^ x01 ^ x2 ^ x02 ^ x12;
+    let b0 = pairs[0]
+        ^ bits[2]
+        ^ pairs[1]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ triples[1]
+        ^ pairs[5];
+    let b1 = 1 ^ bits[0] ^ pairs[0] ^ bits[2] ^ bits[3] ^ triples[1] ^ triples[3];
+    let b2 = 1
+        ^ bits[0]
+        ^ bits[1]
+        ^ pairs[0]
+        ^ bits[2]
+        ^ pairs[1]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[5]
+        ^ triples[2]
+        ^ triples[3];
+    let b3 = bits[0] ^ pairs[0] ^ bits[2] ^ pairs[1] ^ pairs[3];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
-#[inline(always)]
+#[inline]
 fn pi2_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x013 = x01 & x3;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = 1 ^ x01 ^ x2 ^ x02 ^ x012 ^ x3 ^ x03 ^ x13 ^ x013 ^ x23 ^ x023 ^ x123;
-    let b1 = 1 ^ x1 ^ x12 ^ x012 ^ x03 ^ x13 ^ x23 ^ x023;
-    let b2 = x1 ^ x01 ^ x02 ^ x12 ^ x012 ^ x3 ^ x03 ^ x13 ^ x023 ^ x123;
-    let b3 = 1 ^ x0 ^ x1 ^ x2 ^ x012 ^ x013 ^ x23 ^ x023;
+    let b0 = 1
+        ^ pairs[0]
+        ^ bits[2]
+        ^ pairs[1]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ triples[1]
+        ^ pairs[5]
+        ^ triples[2]
+        ^ triples[3];
+    let b1 = 1 ^ bits[1] ^ pairs[3] ^ triples[0] ^ pairs[2] ^ pairs[4] ^ pairs[5] ^ triples[2];
+    let b2 = bits[1]
+        ^ pairs[0]
+        ^ pairs[1]
+        ^ pairs[3]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ triples[2]
+        ^ triples[3];
+    let b3 = 1 ^ bits[0] ^ bits[1] ^ bits[2] ^ triples[0] ^ triples[1] ^ pairs[5] ^ triples[2];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
-#[inline(always)]
+#[inline]
 fn pi3_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x013 = x01 & x3;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = x01 ^ x2 ^ x02 ^ x012 ^ x3 ^ x03 ^ x13 ^ x013 ^ x23 ^ x023 ^ x123;
-    let b1 = x1 ^ x01 ^ x012 ^ x3 ^ x03 ^ x13 ^ x013 ^ x023 ^ x123;
-    let b2 = 1 ^ x0 ^ x1 ^ x01 ^ x02 ^ x12 ^ x012 ^ x013 ^ x23 ^ x023;
-    let b3 = 1 ^ x1 ^ x02 ^ x12 ^ x3 ^ x013 ^ x123;
+    let b0 = pairs[0]
+        ^ bits[2]
+        ^ pairs[1]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ triples[1]
+        ^ pairs[5]
+        ^ triples[2]
+        ^ triples[3];
+    let b1 = bits[1]
+        ^ pairs[0]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ triples[1]
+        ^ triples[2]
+        ^ triples[3];
+    let b2 = 1
+        ^ bits[0]
+        ^ bits[1]
+        ^ pairs[0]
+        ^ pairs[1]
+        ^ pairs[3]
+        ^ triples[0]
+        ^ triples[1]
+        ^ pairs[5]
+        ^ triples[2];
+    let b3 = 1 ^ bits[1] ^ pairs[1] ^ pairs[3] ^ bits[3] ^ triples[1] ^ triples[3];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
-#[inline(always)]
+#[inline]
 fn pi4_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x013 = x01 & x3;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = 1 ^ x01 ^ x2 ^ x02 ^ x012 ^ x3 ^ x03 ^ x13 ^ x013 ^ x023;
-    let b1 = 1 ^ x1 ^ x01 ^ x2 ^ x3 ^ x013 ^ x023 ^ x123;
-    let b2 = 1 ^ x01 ^ x2 ^ x12 ^ x012 ^ x3 ^ x23 ^ x023 ^ x123;
-    let b3 = x0 ^ x2 ^ x12;
+    let b0 = 1
+        ^ pairs[0]
+        ^ bits[2]
+        ^ pairs[1]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ triples[1]
+        ^ triples[2];
+    let b1 = 1 ^ bits[1] ^ pairs[0] ^ bits[2] ^ bits[3] ^ triples[1] ^ triples[2] ^ triples[3];
+    let b2 = 1
+        ^ pairs[0]
+        ^ bits[2]
+        ^ pairs[3]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[5]
+        ^ triples[2]
+        ^ triples[3];
+    let b3 = bits[0] ^ bits[2] ^ pairs[3];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
-#[inline(always)]
+#[inline]
 fn pi5_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x013 = x01 & x3;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = 1 ^ x01 ^ x02 ^ x12 ^ x13 ^ x23;
-    let b1 = x1 ^ x02 ^ x12 ^ x3 ^ x23 ^ x123;
-    let b2 = 1 ^ x2 ^ x12 ^ x012 ^ x3 ^ x03 ^ x013 ^ x123;
-    let b3 = x0 ^ x1 ^ x2 ^ x12 ^ x012 ^ x3 ^ x13 ^ x023;
+    let b0 = 1 ^ pairs[0] ^ pairs[1] ^ pairs[3] ^ pairs[4] ^ pairs[5];
+    let b1 = bits[1] ^ pairs[1] ^ pairs[3] ^ bits[3] ^ pairs[5] ^ triples[3];
+    let b2 = 1 ^ bits[2] ^ pairs[3] ^ triples[0] ^ bits[3] ^ pairs[2] ^ triples[1] ^ triples[3];
+    let b3 = bits[0] ^ bits[1] ^ bits[2] ^ pairs[3] ^ triples[0] ^ bits[3] ^ pairs[4] ^ triples[2];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
-#[inline(always)]
+#[inline]
 fn pi6_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x013 = x01 & x3;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = x01 ^ x02 ^ x12 ^ x012 ^ x3 ^ x03 ^ x013 ^ x023 ^ x123;
-    let b1 = x0 ^ x1 ^ x2 ^ x012 ^ x3 ^ x13 ^ x123;
-    let b2 = x0 ^ x2 ^ x12 ^ x3 ^ x03 ^ x13 ^ x23 ^ x023 ^ x123;
-    let b3 = 1 ^ x1 ^ x2 ^ x02 ^ x12 ^ x03 ^ x13 ^ x23;
+    let b0 = pairs[0]
+        ^ pairs[1]
+        ^ pairs[3]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ triples[1]
+        ^ triples[2]
+        ^ triples[3];
+    let b1 = bits[0] ^ bits[1] ^ bits[2] ^ triples[0] ^ bits[3] ^ pairs[4] ^ triples[3];
+    let b2 = bits[0]
+        ^ bits[2]
+        ^ pairs[3]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ pairs[5]
+        ^ triples[2]
+        ^ triples[3];
+    let b3 = 1 ^ bits[1] ^ bits[2] ^ pairs[1] ^ pairs[3] ^ pairs[2] ^ pairs[4] ^ pairs[5];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
-#[inline(always)]
+#[inline]
 fn pi7_ct(nibble: u8) -> u8 {
-    let x0 = nibble & 1;
-    let x1 = (nibble >> 1) & 1;
-    let x2 = (nibble >> 2) & 1;
-    let x3 = (nibble >> 3) & 1;
-    let x01 = x0 & x1;
-    let x02 = x0 & x2;
-    let x03 = x0 & x3;
-    let x12 = x1 & x2;
-    let x13 = x1 & x3;
-    let x23 = x2 & x3;
-    let x012 = x01 & x2;
-    let x013 = x01 & x3;
-    let x023 = x02 & x3;
-    let x123 = x12 & x3;
+    let (bits, pairs, triples) = nibble_monomials(nibble);
 
-    let b0 = 1 ^ x1 ^ x01 ^ x2 ^ x02 ^ x12 ^ x012 ^ x3 ^ x03 ^ x13 ^ x023 ^ x123;
-    let b1 = x0 ^ x1 ^ x02 ^ x12 ^ x012 ^ x013 ^ x123;
-    let b2 = x0 ^ x1 ^ x01 ^ x12 ^ x3 ^ x03 ^ x23 ^ x023;
-    let b3 = x1 ^ x012 ^ x03 ^ x23 ^ x023 ^ x123;
+    let b0 = 1
+        ^ bits[1]
+        ^ pairs[0]
+        ^ bits[2]
+        ^ pairs[1]
+        ^ pairs[3]
+        ^ triples[0]
+        ^ bits[3]
+        ^ pairs[2]
+        ^ pairs[4]
+        ^ triples[2]
+        ^ triples[3];
+    let b1 = bits[0] ^ bits[1] ^ pairs[1] ^ pairs[3] ^ triples[0] ^ triples[1] ^ triples[3];
+    let b2 = bits[0] ^ bits[1] ^ pairs[0] ^ pairs[3] ^ bits[3] ^ pairs[2] ^ pairs[5] ^ triples[2];
+    let b3 = bits[1] ^ triples[0] ^ pairs[2] ^ pairs[5] ^ triples[2] ^ triples[3];
 
     b0 | (b1 << 1) | (b2 << 2) | (b3 << 3)
 }
 
 #[cfg(test)]
-#[inline(always)]
+#[inline]
 fn pi_ct(box_idx: usize, nibble: u8) -> u8 {
     match box_idx {
         0 => pi0_ct(nibble),
@@ -285,14 +307,14 @@ fn t_ct(v: u32) -> u32 {
     let n6 = ((v >> 24) & 0x0000_000f) as u8;
     let n7 = ((v >> 28) & 0x0000_000f) as u8;
 
-    (pi0_ct(n0) as u32)
-        | ((pi1_ct(n1) as u32) << 4)
-        | ((pi2_ct(n2) as u32) << 8)
-        | ((pi3_ct(n3) as u32) << 12)
-        | ((pi4_ct(n4) as u32) << 16)
-        | ((pi5_ct(n5) as u32) << 20)
-        | ((pi6_ct(n6) as u32) << 24)
-        | ((pi7_ct(n7) as u32) << 28)
+    u32::from(pi0_ct(n0))
+        | (u32::from(pi1_ct(n1)) << 4)
+        | (u32::from(pi2_ct(n2)) << 8)
+        | (u32::from(pi3_ct(n3)) << 12)
+        | (u32::from(pi4_ct(n4)) << 16)
+        | (u32::from(pi5_ct(n5)) << 20)
+        | (u32::from(pi6_ct(n6)) << 24)
+        | (u32::from(pi7_ct(n7)) << 28)
 }
 
 /// g[k](a): wrapping-add key, substitute, rotate left 11 bits.
@@ -346,12 +368,12 @@ fn build_round_keys(key: &[u8; 32]) -> ([u32; 32], [u32; 32]) {
 // Rounds 1–31: G[k](a₁, a₀) = (a₀,  g[k](a₀) ⊕ a₁)  — apply then swap
 // Round 32:   G*[k](a₁, a₀) = (g[k](a₀) ⊕ a₁) || a₀  — apply, no swap
 
-fn magma_core(block: &[u8; 8], rk: &[u32; 32]) -> [u8; 8] {
+fn magma_core(block: [u8; 8], rk: &[u32; 32]) -> [u8; 8] {
     let mut a1 = u32::from_be_bytes(block[0..4].try_into().unwrap()); // upper
     let mut a0 = u32::from_be_bytes(block[4..8].try_into().unwrap()); // lower
 
-    for r in 0..31 {
-        let tmp = g(rk[r], a0) ^ a1;
+    for &round_key in rk.iter().take(31) {
+        let tmp = g(round_key, a0) ^ a1;
         a1 = a0;
         a0 = tmp;
     }
@@ -366,12 +388,12 @@ fn magma_core(block: &[u8; 8], rk: &[u32; 32]) -> [u8; 8] {
     out
 }
 
-fn magma_core_ct(block: &[u8; 8], rk: &[u32; 32]) -> [u8; 8] {
+fn magma_core_ct(block: [u8; 8], rk: &[u32; 32]) -> [u8; 8] {
     let mut a1 = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut a0 = u32::from_be_bytes(block[4..8].try_into().unwrap());
 
-    for r in 0..31 {
-        let tmp = g_ct(rk[r], a0) ^ a1;
+    for &round_key in rk.iter().take(31) {
+        let tmp = g_ct(round_key, a0) ^ a1;
         a1 = a0;
         a0 = tmp;
     }
@@ -397,6 +419,7 @@ pub struct Magma {
 
 impl Magma {
     /// Construct from a 32-byte (256-bit) key.
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let (enc_rk, dec_rk) = build_round_keys(key);
         Magma { enc_rk, dec_rk }
@@ -410,13 +433,15 @@ impl Magma {
     }
 
     /// Encrypt a 64-bit block (ECB mode).
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        magma_core(block, &self.enc_rk)
+        magma_core(*block, &self.enc_rk)
     }
 
     /// Decrypt a 64-bit block (ECB mode).
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        magma_core(block, &self.dec_rk)
+        magma_core(*block, &self.dec_rk)
     }
 }
 
@@ -432,6 +457,7 @@ pub struct MagmaCt {
 
 impl MagmaCt {
     /// Construct from a 32-byte (256-bit) key.
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let (enc_rk, dec_rk) = build_round_keys(key);
         MagmaCt { enc_rk, dec_rk }
@@ -445,13 +471,15 @@ impl MagmaCt {
     }
 
     /// Encrypt a 64-bit block (ECB mode).
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        magma_core_ct(block, &self.enc_rk)
+        magma_core_ct(*block, &self.enc_rk)
     }
 
     /// Decrypt a 64-bit block (ECB mode).
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        magma_core_ct(block, &self.dec_rk)
+        magma_core_ct(*block, &self.dec_rk)
     }
 }
 
@@ -540,9 +568,9 @@ mod tests {
 
     #[test]
     fn ct_sboxes_match_tables() {
-        for box_idx in 0..8usize {
+        for (box_idx, table) in PI.iter().enumerate() {
             for nibble in 0u8..16 {
-                assert_eq!(pi_ct(box_idx, nibble), PI[box_idx][nibble as usize]);
+                assert_eq!(pi_ct(box_idx, nibble), table[nibble as usize]);
             }
         }
     }

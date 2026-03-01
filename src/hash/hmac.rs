@@ -1,5 +1,3 @@
-#![allow(clippy::must_use_candidate)]
-
 //! Hash-based Message Authentication Code (HMAC).
 //!
 //! This is the standard HMAC construction from FIPS 198-1 / RFC 2104, layered
@@ -14,6 +12,7 @@ pub struct Hmac<H: Digest> {
 }
 
 impl<H: Digest> Hmac<H> {
+    #[must_use]
     pub fn new(key: &[u8]) -> Self {
         let mut key_block = vec![0u8; H::BLOCK_LEN];
         if key.len() > H::BLOCK_LEN {
@@ -48,6 +47,7 @@ impl<H: Digest> Hmac<H> {
         self.inner.update(data);
     }
 
+    #[must_use]
     pub fn finalize(mut self) -> Vec<u8> {
         let mut inner_digest = vec![0u8; H::OUTPUT_LEN];
         self.inner.finalize_reset(&mut inner_digest);
@@ -58,12 +58,14 @@ impl<H: Digest> Hmac<H> {
         out
     }
 
+    #[must_use]
     pub fn compute(key: &[u8], data: &[u8]) -> Vec<u8> {
         let mut mac = Self::new(key);
         mac.update(data);
         mac.finalize()
     }
 
+    #[must_use]
     pub fn verify(key: &[u8], data: &[u8], tag: &[u8]) -> bool {
         crate::ct::constant_time_eq(&Self::compute(key, data), tag)
     }
@@ -133,7 +135,7 @@ mod tests {
     fn hmac_sha3_256_matches_openssl() {
         let key = b"key";
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let expected = match crate::ct::run_openssl(
+        let Some(expected) = crate::ct::run_openssl(
             &[
                 "dgst",
                 "-sha3-256",
@@ -144,9 +146,8 @@ mod tests {
                 "-binary",
             ],
             msg,
-        ) {
-            Some(bytes) => bytes,
-            None => return,
+        ) else {
+            return;
         };
 
         let tag = Hmac::<Sha3_256>::compute(key, msg);
@@ -161,5 +162,28 @@ mod tests {
             hex(&tag),
             "b0344c61d8db38535ca8afceaf0bf12b".to_owned() + "881dc200c9833da726e9376c2e32cff7"
         );
+    }
+
+    #[test]
+    fn hmac_sha256_matches_openssl() {
+        let key = b"key";
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(
+            &[
+                "dgst",
+                "-sha256",
+                "-mac",
+                "HMAC",
+                "-macopt",
+                "hexkey:6b6579",
+                "-binary",
+            ],
+            msg,
+        ) else {
+            return;
+        };
+
+        let tag = Hmac::<Sha256>::compute(key, msg);
+        assert_eq!(tag.as_slice(), expected.as_slice());
     }
 }

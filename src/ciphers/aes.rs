@@ -1,41 +1,31 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::doc_markdown,
-    clippy::empty_line_after_doc_comments,
-    clippy::inline_always,
-    clippy::must_use_candidate,
-    clippy::too_many_lines,
-    clippy::unreadable_literal
-)]
-
-/// AES (Rijndael, 128-bit block) — AES-128, AES-192, AES-256.
-///
-/// Implemented from FIPS PUB 197 (2001), the complete Rijndael specification
-/// for a 128-bit block width with 10, 12, or 14 rounds depending on key length.
-///
-/// # Default path — fast software T-tables
-///
-/// The active encrypt/decrypt path uses the classic T-table software design:
-/// each middle round folds SubBytes, ShiftRows, MixColumns, and AddRoundKey
-/// into four 256-entry `u32` lookup tables computed at compile time from the
-/// FIPS 197 S-boxes.
-///
-/// This software path is intentionally optimized for throughput, not
-/// constant-time behavior.  Use `Aes128Ct`, `Aes192Ct`, or `Aes256Ct` for the
-/// software-only Boyar-Peralta path when constant-time behavior matters.
-/// Hardware AES (for example AES-NI or ARMv8 Crypto Extensions) is still the
-/// preferred option when it is available.
-///
-/// # Tests
-/// All vectors are from NIST CAVP KAT_AES.zip (CAVS 11.1, 2011-04-22),
-/// downloaded directly from csrc.nist.gov.
+//! AES (Rijndael, 128-bit block) — AES-128, AES-192, AES-256.
+//!
+//! Implemented from FIPS PUB 197 (2001), the complete Rijndael specification
+//! for a 128-bit block width with 10, 12, or 14 rounds depending on key length.
+//!
+//! # Default path — fast software T-tables
+//!
+//! The active encrypt/decrypt path uses the classic T-table software design:
+//! each middle round folds `SubBytes`, `ShiftRows`, `MixColumns`, and `AddRoundKey`
+//! into four 256-entry `u32` lookup tables computed at compile time from the
+//! FIPS 197 S-boxes.
+//!
+//! This software path is intentionally optimized for throughput, not
+//! constant-time behavior.  Use `Aes128Ct`, `Aes192Ct`, or `Aes256Ct` for the
+//! software-only Boyar-Peralta path when constant-time behavior matters.
+//! Hardware AES (for example AES-NI or `ARMv8` Crypto Extensions) is still the
+//! preferred option when it is available.
+//!
+//! # Tests
+//! All vectors are from NIST CAVP `KAT_AES.zip` (CAVS 11.1, 2011-04-22),
+//! downloaded directly from csrc.nist.gov.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FIPS 197 S-boxes  (§ 4.2.1)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Forward S-box — FIPS 197, Figure 7.
-/// SBOX[x] = affine_transform(gf_inv(x))  in GF(2⁸) mod 0x11b.
+/// SBOX[x] = `affine_transform(gf_inv(x))`  in GF(2⁸) mod 0x11b.
 const SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -78,8 +68,16 @@ const INV_SBOX: [u8; 256] = [
 /// Key schedule round constants — FIPS 197, § 5.2.
 /// RCON[i] = [x^i in GF(2⁸), 0, 0, 0] packed big-endian into a u32.
 const RCON: [u32; 10] = [
-    0x01000000, 0x02000000, 0x04000000, 0x08000000, 0x10000000, 0x20000000, 0x40000000, 0x80000000,
-    0x1b000000, 0x36000000,
+    0x0100_0000,
+    0x0200_0000,
+    0x0400_0000,
+    0x0800_0000,
+    0x1000_0000,
+    0x2000_0000,
+    0x4000_0000,
+    0x8000_0000,
+    0x1b00_0000,
+    0x3600_0000,
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,10 +249,10 @@ const TD3: [u32; 256] = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn sub_word(w: u32) -> u32 {
-    (SBOX[(w >> 24) as usize] as u32) << 24
-        | (SBOX[((w >> 16) & 0xff) as usize] as u32) << 16
-        | (SBOX[((w >> 8) & 0xff) as usize] as u32) << 8
-        | (SBOX[(w & 0xff) as usize] as u32)
+    u32::from(SBOX[(w >> 24) as usize]) << 24
+        | u32::from(SBOX[((w >> 16) & 0xff) as usize]) << 16
+        | u32::from(SBOX[((w >> 8) & 0xff) as usize]) << 8
+        | u32::from(SBOX[(w & 0xff) as usize])
 }
 
 fn expand_128(key: &[u8; 16]) -> [u32; 44] {
@@ -377,22 +375,22 @@ fn aes_encrypt(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
     }
 
     let k = 4 * nr;
-    let c0 = (SBOX[(s0 >> 24) as usize] as u32) << 24
-        | (SBOX[((s1 >> 16) & 0xff) as usize] as u32) << 16
-        | (SBOX[((s2 >> 8) & 0xff) as usize] as u32) << 8
-        | (SBOX[(s3 & 0xff) as usize] as u32);
-    let c1 = (SBOX[(s1 >> 24) as usize] as u32) << 24
-        | (SBOX[((s2 >> 16) & 0xff) as usize] as u32) << 16
-        | (SBOX[((s3 >> 8) & 0xff) as usize] as u32) << 8
-        | (SBOX[(s0 & 0xff) as usize] as u32);
-    let c2 = (SBOX[(s2 >> 24) as usize] as u32) << 24
-        | (SBOX[((s3 >> 16) & 0xff) as usize] as u32) << 16
-        | (SBOX[((s0 >> 8) & 0xff) as usize] as u32) << 8
-        | (SBOX[(s1 & 0xff) as usize] as u32);
-    let c3 = (SBOX[(s3 >> 24) as usize] as u32) << 24
-        | (SBOX[((s0 >> 16) & 0xff) as usize] as u32) << 16
-        | (SBOX[((s1 >> 8) & 0xff) as usize] as u32) << 8
-        | (SBOX[(s2 & 0xff) as usize] as u32);
+    let c0 = u32::from(SBOX[(s0 >> 24) as usize]) << 24
+        | u32::from(SBOX[((s1 >> 16) & 0xff) as usize]) << 16
+        | u32::from(SBOX[((s2 >> 8) & 0xff) as usize]) << 8
+        | u32::from(SBOX[(s3 & 0xff) as usize]);
+    let c1 = u32::from(SBOX[(s1 >> 24) as usize]) << 24
+        | u32::from(SBOX[((s2 >> 16) & 0xff) as usize]) << 16
+        | u32::from(SBOX[((s3 >> 8) & 0xff) as usize]) << 8
+        | u32::from(SBOX[(s0 & 0xff) as usize]);
+    let c2 = u32::from(SBOX[(s2 >> 24) as usize]) << 24
+        | u32::from(SBOX[((s3 >> 16) & 0xff) as usize]) << 16
+        | u32::from(SBOX[((s0 >> 8) & 0xff) as usize]) << 8
+        | u32::from(SBOX[(s1 & 0xff) as usize]);
+    let c3 = u32::from(SBOX[(s3 >> 24) as usize]) << 24
+        | u32::from(SBOX[((s0 >> 16) & 0xff) as usize]) << 16
+        | u32::from(SBOX[((s1 >> 8) & 0xff) as usize]) << 8
+        | u32::from(SBOX[(s2 & 0xff) as usize]);
 
     let mut out = [0u8; 16];
     out[0..4].copy_from_slice(&(c0 ^ rk[k]).to_be_bytes());
@@ -437,22 +435,22 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
     }
 
     let k = 4 * nr;
-    let p0 = (INV_SBOX[(s0 >> 24) as usize] as u32) << 24
-        | (INV_SBOX[((s3 >> 16) & 0xff) as usize] as u32) << 16
-        | (INV_SBOX[((s2 >> 8) & 0xff) as usize] as u32) << 8
-        | (INV_SBOX[(s1 & 0xff) as usize] as u32);
-    let p1 = (INV_SBOX[(s1 >> 24) as usize] as u32) << 24
-        | (INV_SBOX[((s0 >> 16) & 0xff) as usize] as u32) << 16
-        | (INV_SBOX[((s3 >> 8) & 0xff) as usize] as u32) << 8
-        | (INV_SBOX[(s2 & 0xff) as usize] as u32);
-    let p2 = (INV_SBOX[(s2 >> 24) as usize] as u32) << 24
-        | (INV_SBOX[((s1 >> 16) & 0xff) as usize] as u32) << 16
-        | (INV_SBOX[((s0 >> 8) & 0xff) as usize] as u32) << 8
-        | (INV_SBOX[(s3 & 0xff) as usize] as u32);
-    let p3 = (INV_SBOX[(s3 >> 24) as usize] as u32) << 24
-        | (INV_SBOX[((s2 >> 16) & 0xff) as usize] as u32) << 16
-        | (INV_SBOX[((s1 >> 8) & 0xff) as usize] as u32) << 8
-        | (INV_SBOX[(s0 & 0xff) as usize] as u32);
+    let p0 = u32::from(INV_SBOX[(s0 >> 24) as usize]) << 24
+        | u32::from(INV_SBOX[((s3 >> 16) & 0xff) as usize]) << 16
+        | u32::from(INV_SBOX[((s2 >> 8) & 0xff) as usize]) << 8
+        | u32::from(INV_SBOX[(s1 & 0xff) as usize]);
+    let p1 = u32::from(INV_SBOX[(s1 >> 24) as usize]) << 24
+        | u32::from(INV_SBOX[((s0 >> 16) & 0xff) as usize]) << 16
+        | u32::from(INV_SBOX[((s3 >> 8) & 0xff) as usize]) << 8
+        | u32::from(INV_SBOX[(s2 & 0xff) as usize]);
+    let p2 = u32::from(INV_SBOX[(s2 >> 24) as usize]) << 24
+        | u32::from(INV_SBOX[((s1 >> 16) & 0xff) as usize]) << 16
+        | u32::from(INV_SBOX[((s0 >> 8) & 0xff) as usize]) << 8
+        | u32::from(INV_SBOX[(s3 & 0xff) as usize]);
+    let p3 = u32::from(INV_SBOX[(s3 >> 24) as usize]) << 24
+        | u32::from(INV_SBOX[((s2 >> 16) & 0xff) as usize]) << 16
+        | u32::from(INV_SBOX[((s1 >> 8) & 0xff) as usize]) << 8
+        | u32::from(INV_SBOX[(s0 & 0xff) as usize]);
 
     let mut out = [0u8; 16];
     out[0..4].copy_from_slice(&(p0 ^ dk[k]).to_be_bytes());
@@ -483,12 +481,12 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
 // for the output linear layer.
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[inline(always)]
+#[inline]
 fn xnor(a: u8, b: u8) -> u8 {
     (a ^ b) ^ 1
 }
 
-#[inline(always)]
+#[inline]
 fn bit(input: u8, idx: u8) -> u8 {
     (input >> (7 - idx)) & 1
 }
@@ -496,7 +494,7 @@ fn bit(input: u8, idx: u8) -> u8 {
 // The Boyar-Peralta circuit treats one AES byte as eight single-bit wires in
 // MSB-first order. `bit()` extracts those wires, and `pack_bits()` reassembles
 // the resulting output wires into the normal AES byte layout.
-#[inline(always)]
+#[inline]
 fn pack_bits(bits: [u8; 8]) -> u8 {
     (bits[0] << 7)
         | (bits[1] << 6)
@@ -513,129 +511,148 @@ fn pack_bits(bits: [u8; 8]) -> u8 {
 /// The operation is exactly the same S-box as `SBOX[input]`; it is just
 /// represented as boolean logic instead of a lookup table. The `^ 1` terms in
 /// the final output stage encode the affine constant from the AES S-box.
-#[inline(always)]
+#[inline]
 fn sbox_bool(input: u8) -> u8 {
-    let u0 = bit(input, 0);
-    let u1 = bit(input, 1);
-    let u2 = bit(input, 2);
-    let u3 = bit(input, 3);
-    let u4 = bit(input, 4);
-    let u5 = bit(input, 5);
-    let u6 = bit(input, 6);
-    let u7 = bit(input, 7);
+    let (bits, linear_terms) = sbox_bool_linear(input);
+    let non_linear_terms = sbox_bool_nonlinear(bits, linear_terms);
+    sbox_bool_output(non_linear_terms)
+}
 
-    let t1 = u0 ^ u3;
-    let t2 = u0 ^ u5;
-    let t3 = u0 ^ u6;
-    let t4 = u3 ^ u5;
-    let t5 = u4 ^ u6;
-    let t6 = t1 ^ t5;
-    let t7 = u1 ^ u2;
-    let t8 = u7 ^ t6;
-    let t9 = u7 ^ t7;
-    let t10 = t6 ^ t7;
-    let t11 = u1 ^ u5;
-    let t12 = u2 ^ u5;
-    let t13 = t3 ^ t4;
-    let t14 = t6 ^ t11;
-    let t15 = t5 ^ t11;
-    let t16 = t5 ^ t12;
-    let t17 = t9 ^ t16;
-    let t18 = u3 ^ u7;
-    let t19 = t7 ^ t18;
-    let t20 = t1 ^ t19;
-    let t21 = u6 ^ u7;
-    let t22 = t7 ^ t21;
-    let t23 = t2 ^ t22;
-    let t24 = t2 ^ t10;
-    let t25 = t20 ^ t17;
-    let t26 = t3 ^ t16;
-    let t27 = t1 ^ t12;
+fn sbox_bool_linear(input: u8) -> ([u8; 8], [u8; 27]) {
+    let bits = [
+        bit(input, 0),
+        bit(input, 1),
+        bit(input, 2),
+        bit(input, 3),
+        bit(input, 4),
+        bit(input, 5),
+        bit(input, 6),
+        bit(input, 7),
+    ];
+    let [u0, u1, u2, u3, u4, u5, u6, u7] = bits;
 
-    let m1 = t13 & t6;
-    let m2 = t23 & t8;
-    let m3 = t14 ^ m1;
-    let m4 = t19 & u7;
-    let m5 = m4 ^ m1;
-    let m6 = t3 & t16;
-    let m7 = t22 & t9;
-    let m8 = t26 ^ m6;
-    let m9 = t20 & t17;
-    let m10 = m9 ^ m6;
-    let m11 = t1 & t15;
-    let m12 = t4 & t27;
-    let m13 = m12 ^ m11;
-    let m14 = t2 & t10;
-    let m15 = m14 ^ m11;
-    let m16 = m3 ^ m2;
-    let m17 = m5 ^ t24;
-    let m18 = m8 ^ m7;
-    let m19 = m10 ^ m15;
-    let m20 = m16 ^ m13;
-    let m21 = m17 ^ m15;
-    let m22 = m18 ^ m13;
-    let m23 = m19 ^ t25;
-    let m24 = m22 ^ m23;
-    let m25 = m22 & m20;
-    let m26 = m21 ^ m25;
-    let m27 = m20 ^ m21;
-    let m28 = m23 ^ m25;
-    let m29 = m28 & m27;
-    let m30 = m26 & m24;
-    let m31 = m20 & m23;
-    let m32 = m27 & m31;
-    let m33 = m27 ^ m25;
-    let m34 = m21 & m22;
-    let m35 = m24 & m34;
-    let m36 = m24 ^ m25;
-    let m37 = m21 ^ m29;
-    let m38 = m32 ^ m33;
-    let m39 = m23 ^ m30;
-    let m40 = m35 ^ m36;
-    let m41 = m38 ^ m40;
-    let m42 = m37 ^ m39;
-    let m43 = m37 ^ m38;
-    let m44 = m39 ^ m40;
-    let m45 = m42 ^ m41;
-    let m46 = m44 & t6;
-    let m47 = m40 & t8;
-    let m48 = m39 & u7;
-    let m49 = m43 & t16;
-    let m50 = m38 & t9;
-    let m51 = m37 & t17;
-    let m52 = m42 & t15;
-    let m53 = m45 & t27;
-    let m54 = m41 & t10;
-    let m55 = m44 & t13;
-    let m56 = m40 & t23;
-    let m57 = m39 & t19;
-    let m58 = m43 & t3;
-    let m59 = m38 & t22;
-    let m60 = m37 & t20;
-    let m61 = m42 & t1;
-    let m62 = m45 & t4;
-    let m63 = m41 & t2;
+    let mut t = [0u8; 27];
+    t[0] = u0 ^ u3;
+    t[1] = u0 ^ u5;
+    t[2] = u0 ^ u6;
+    t[3] = u3 ^ u5;
+    t[4] = u4 ^ u6;
+    t[5] = t[0] ^ t[4];
+    t[6] = u1 ^ u2;
+    t[7] = u7 ^ t[5];
+    t[8] = u7 ^ t[6];
+    t[9] = t[5] ^ t[6];
+    t[10] = u1 ^ u5;
+    t[11] = u2 ^ u5;
+    t[12] = t[2] ^ t[3];
+    t[13] = t[5] ^ t[10];
+    t[14] = t[4] ^ t[10];
+    t[15] = t[4] ^ t[11];
+    t[16] = t[8] ^ t[15];
+    t[17] = u3 ^ u7;
+    t[18] = t[6] ^ t[17];
+    t[19] = t[0] ^ t[18];
+    t[20] = u6 ^ u7;
+    t[21] = t[6] ^ t[20];
+    t[22] = t[1] ^ t[21];
+    t[23] = t[1] ^ t[9];
+    t[24] = t[19] ^ t[16];
+    t[25] = t[2] ^ t[15];
+    t[26] = t[0] ^ t[11];
 
-    let l0 = m61 ^ m62;
-    let l1 = m50 ^ m56;
-    let l2 = m46 ^ m48;
-    let l3 = m47 ^ m55;
-    let l4 = m54 ^ m58;
-    let l5 = m49 ^ m61;
-    let l6 = m62 ^ l5;
-    let l7 = m46 ^ l3;
-    let l8 = m51 ^ m59;
-    let l9 = m52 ^ m53;
-    let l10 = m53 ^ l4;
-    let l11 = m60 ^ l2;
-    let l12 = m48 ^ m51;
-    let l13 = m50 ^ l0;
-    let l14 = m52 ^ m61;
-    let l15 = m55 ^ l1;
-    let l16 = m56 ^ l0;
-    let l17 = m57 ^ l1;
-    let l18 = m58 ^ l8;
-    let l19 = m63 ^ l4;
+    (bits, t)
+}
+
+fn sbox_bool_nonlinear(bits: [u8; 8], t: [u8; 27]) -> [u8; 63] {
+    let u7 = bits[7];
+    let mut m = [0u8; 63];
+    m[0] = t[12] & t[5];
+    m[1] = t[22] & t[7];
+    m[2] = t[13] ^ m[0];
+    m[3] = t[18] & u7;
+    m[4] = m[3] ^ m[0];
+    m[5] = t[2] & t[15];
+    m[6] = t[21] & t[8];
+    m[7] = t[25] ^ m[5];
+    m[8] = t[19] & t[16];
+    m[9] = m[8] ^ m[5];
+    m[10] = t[0] & t[14];
+    m[11] = t[3] & t[26];
+    m[12] = m[11] ^ m[10];
+    m[13] = t[1] & t[9];
+    m[14] = m[13] ^ m[10];
+    m[15] = m[2] ^ m[1];
+    m[16] = m[4] ^ t[23];
+    m[17] = m[7] ^ m[6];
+    m[18] = m[9] ^ m[14];
+    m[19] = m[15] ^ m[12];
+    m[20] = m[16] ^ m[14];
+    m[21] = m[17] ^ m[12];
+    m[22] = m[18] ^ t[24];
+    m[23] = m[21] ^ m[22];
+    m[24] = m[21] & m[19];
+    m[25] = m[20] ^ m[24];
+    m[26] = m[19] ^ m[20];
+    m[27] = m[22] ^ m[24];
+    m[28] = m[27] & m[26];
+    m[29] = m[25] & m[23];
+    m[30] = m[19] & m[22];
+    m[31] = m[26] & m[30];
+    m[32] = m[26] ^ m[24];
+    m[33] = m[20] & m[21];
+    m[34] = m[23] & m[33];
+    m[35] = m[23] ^ m[24];
+    m[36] = m[20] ^ m[28];
+    m[37] = m[31] ^ m[32];
+    m[38] = m[22] ^ m[29];
+    m[39] = m[34] ^ m[35];
+    m[40] = m[37] ^ m[39];
+    m[41] = m[36] ^ m[38];
+    m[42] = m[36] ^ m[37];
+    m[43] = m[38] ^ m[39];
+    m[44] = m[41] ^ m[40];
+    m[45] = m[43] & t[5];
+    m[46] = m[39] & t[7];
+    m[47] = m[38] & u7;
+    m[48] = m[42] & t[15];
+    m[49] = m[37] & t[8];
+    m[50] = m[36] & t[16];
+    m[51] = m[41] & t[14];
+    m[52] = m[44] & t[26];
+    m[53] = m[40] & t[9];
+    m[54] = m[43] & t[12];
+    m[55] = m[39] & t[22];
+    m[56] = m[38] & t[18];
+    m[57] = m[42] & t[2];
+    m[58] = m[37] & t[21];
+    m[59] = m[36] & t[19];
+    m[60] = m[41] & t[0];
+    m[61] = m[44] & t[3];
+    m[62] = m[40] & t[1];
+    m
+}
+
+fn sbox_bool_output(m: [u8; 63]) -> u8 {
+    let l0 = m[60] ^ m[61];
+    let l1 = m[49] ^ m[55];
+    let l2 = m[45] ^ m[47];
+    let l3 = m[46] ^ m[54];
+    let l4 = m[53] ^ m[57];
+    let l5 = m[48] ^ m[60];
+    let l6 = m[61] ^ l5;
+    let l7 = m[45] ^ l3;
+    let l8 = m[50] ^ m[58];
+    let l9 = m[51] ^ m[52];
+    let l10 = m[52] ^ l4;
+    let l11 = m[59] ^ l2;
+    let l12 = m[47] ^ m[50];
+    let l13 = m[49] ^ l0;
+    let l14 = m[51] ^ m[60];
+    let l15 = m[54] ^ l1;
+    let l16 = m[55] ^ l0;
+    let l17 = m[56] ^ l1;
+    let l18 = m[57] ^ l8;
+    let l19 = m[62] ^ l4;
     let l20 = l0 ^ l1;
     let l21 = l1 ^ l7;
     let l22 = l3 ^ l12;
@@ -664,8 +681,14 @@ fn sbox_bool(input: u8) -> u8 {
 /// As above, this computes the same mapping as `INV_SBOX[input]` without using
 /// a secret-indexed lookup. The variable names follow the published circuit so
 /// the source can be checked against the paper directly.
-#[inline(always)]
+#[inline]
 fn inv_sbox_bool(input: u8) -> u8 {
+    let linear_terms = inv_sbox_bool_linear(input);
+    let non_linear_terms = inv_sbox_bool_nonlinear(linear_terms);
+    inv_sbox_bool_output(non_linear_terms)
+}
+
+fn inv_sbox_bool_linear(input: u8) -> [u8; 27] {
     let u0 = bit(input, 0);
     let u1 = bit(input, 1);
     let u2 = bit(input, 2);
@@ -675,117 +698,125 @@ fn inv_sbox_bool(input: u8) -> u8 {
     let u6 = bit(input, 6);
     let u7 = bit(input, 7);
 
-    let t23 = u0 ^ u3;
-    let t22 = xnor(u1, u3);
-    let t2 = xnor(u0, u1);
-    let t1 = u3 ^ u4;
-    let t24 = xnor(u4, u7);
-    let r5 = u6 ^ u7;
-    let t8 = xnor(u1, t23);
-    let t19 = t22 ^ r5;
-    let t9 = xnor(u7, t1);
-    let t10 = t2 ^ t24;
-    let t13 = t2 ^ r5;
-    let t3 = t1 ^ r5;
-    let t25 = xnor(u2, t1);
-    let r13 = u1 ^ u6;
-    let t17 = xnor(u2, t19);
-    let t20 = t24 ^ r13;
-    let t4 = u4 ^ t8;
-    let r17 = xnor(u2, u5);
-    let r18 = xnor(u5, u6);
-    let r19 = xnor(u2, u4);
-    let y5 = u0 ^ r17;
-    let t6 = t22 ^ r17;
-    let t16 = r13 ^ r19;
-    let t27 = t1 ^ r18;
-    let t15 = t10 ^ t27;
-    let t14 = t10 ^ r18;
-    let t26 = t3 ^ t16;
+    let mut t = [0u8; 27];
+    t[0] = u0 ^ u3;
+    t[1] = xnor(u1, u3);
+    t[2] = xnor(u0, u1);
+    t[3] = u3 ^ u4;
+    t[4] = xnor(u4, u7);
+    t[5] = u6 ^ u7;
+    t[6] = xnor(u1, t[0]);
+    t[7] = t[1] ^ t[5];
+    t[8] = xnor(u7, t[3]);
+    t[9] = t[2] ^ t[4];
+    t[10] = t[2] ^ t[5];
+    t[11] = t[3] ^ t[5];
+    t[12] = xnor(u2, t[3]);
+    t[13] = u1 ^ u6;
+    t[14] = xnor(u2, t[7]);
+    t[15] = t[4] ^ t[13];
+    t[16] = u4 ^ t[6];
+    t[17] = xnor(u2, u5);
+    t[18] = xnor(u5, u6);
+    t[19] = xnor(u2, u4);
+    t[20] = u0 ^ t[17];
+    t[21] = t[1] ^ t[17];
+    t[22] = t[13] ^ t[19];
+    t[23] = t[3] ^ t[18];
+    t[24] = t[9] ^ t[23];
+    t[25] = t[9] ^ t[18];
+    t[26] = t[11] ^ t[22];
+    t
+}
 
-    let m1 = t13 & t6;
-    let m2 = t23 & t8;
-    let m3 = t14 ^ m1;
-    let m4 = t19 & y5;
-    let m5 = m4 ^ m1;
-    let m6 = t3 & t16;
-    let m7 = t22 & t9;
-    let m8 = t26 ^ m6;
-    let m9 = t20 & t17;
-    let m10 = m9 ^ m6;
-    let m11 = t1 & t15;
-    let m12 = t4 & t27;
-    let m13 = m12 ^ m11;
-    let m14 = t2 & t10;
-    let m15 = m14 ^ m11;
-    let m16 = m3 ^ m2;
-    let m17 = m5 ^ t24;
-    let m18 = m8 ^ m7;
-    let m19 = m10 ^ m15;
-    let m20 = m16 ^ m13;
-    let m21 = m17 ^ m15;
-    let m22 = m18 ^ m13;
-    let m23 = m19 ^ t25;
-    let m24 = m22 ^ m23;
-    let m25 = m22 & m20;
-    let m26 = m21 ^ m25;
-    let m27 = m20 ^ m21;
-    let m28 = m23 ^ m25;
-    let m29 = m28 & m27;
-    let m30 = m26 & m24;
-    let m31 = m20 & m23;
-    let m32 = m27 & m31;
-    let m33 = m27 ^ m25;
-    let m34 = m21 & m22;
-    let m35 = m24 & m34;
-    let m36 = m24 ^ m25;
-    let m37 = m21 ^ m29;
-    let m38 = m32 ^ m33;
-    let m39 = m23 ^ m30;
-    let m40 = m35 ^ m36;
-    let m41 = m38 ^ m40;
-    let m42 = m37 ^ m39;
-    let m43 = m37 ^ m38;
-    let m44 = m39 ^ m40;
-    let m45 = m42 ^ m41;
-    let m46 = m44 & t6;
-    let m47 = m40 & t8;
-    let m48 = m39 & y5;
-    let m49 = m43 & t16;
-    let m50 = m38 & t9;
-    let m51 = m37 & t17;
-    let m52 = m42 & t15;
-    let m53 = m45 & t27;
-    let m54 = m41 & t10;
-    let m55 = m44 & t13;
-    let m56 = m40 & t23;
-    let m57 = m39 & t19;
-    let m58 = m43 & t3;
-    let m59 = m38 & t22;
-    let m60 = m37 & t20;
-    let m61 = m42 & t1;
-    let m62 = m45 & t4;
-    let m63 = m41 & t2;
+fn inv_sbox_bool_nonlinear(t: [u8; 27]) -> [u8; 63] {
+    let mut m = [0u8; 63];
+    m[0] = t[10] & t[21];
+    m[1] = t[0] & t[6];
+    m[2] = t[25] ^ m[0];
+    m[3] = t[7] & t[20];
+    m[4] = m[3] ^ m[0];
+    m[5] = t[11] & t[22];
+    m[6] = t[1] & t[8];
+    m[7] = t[26] ^ m[5];
+    m[8] = t[15] & t[14];
+    m[9] = m[8] ^ m[5];
+    m[10] = t[3] & t[24];
+    m[11] = t[16] & t[23];
+    m[12] = m[11] ^ m[10];
+    m[13] = t[2] & t[9];
+    m[14] = m[13] ^ m[10];
+    m[15] = m[2] ^ m[1];
+    m[16] = m[4] ^ t[4];
+    m[17] = m[7] ^ m[6];
+    m[18] = m[9] ^ m[14];
+    m[19] = m[15] ^ m[12];
+    m[20] = m[16] ^ m[14];
+    m[21] = m[17] ^ m[12];
+    m[22] = m[18] ^ t[12];
+    m[23] = m[21] ^ m[22];
+    m[24] = m[21] & m[19];
+    m[25] = m[20] ^ m[24];
+    m[26] = m[19] ^ m[20];
+    m[27] = m[22] ^ m[24];
+    m[28] = m[27] & m[26];
+    m[29] = m[25] & m[23];
+    m[30] = m[19] & m[22];
+    m[31] = m[26] & m[30];
+    m[32] = m[26] ^ m[24];
+    m[33] = m[20] & m[21];
+    m[34] = m[23] & m[33];
+    m[35] = m[23] ^ m[24];
+    m[36] = m[20] ^ m[28];
+    m[37] = m[31] ^ m[32];
+    m[38] = m[22] ^ m[29];
+    m[39] = m[34] ^ m[35];
+    m[40] = m[37] ^ m[39];
+    m[41] = m[36] ^ m[38];
+    m[42] = m[36] ^ m[37];
+    m[43] = m[38] ^ m[39];
+    m[44] = m[41] ^ m[40];
+    m[45] = m[43] & t[21];
+    m[46] = m[39] & t[6];
+    m[47] = m[38] & t[20];
+    m[48] = m[42] & t[22];
+    m[49] = m[37] & t[8];
+    m[50] = m[36] & t[14];
+    m[51] = m[41] & t[24];
+    m[52] = m[44] & t[23];
+    m[53] = m[40] & t[9];
+    m[54] = m[43] & t[10];
+    m[55] = m[39] & t[0];
+    m[56] = m[38] & t[7];
+    m[57] = m[42] & t[11];
+    m[58] = m[37] & t[1];
+    m[59] = m[36] & t[15];
+    m[60] = m[41] & t[3];
+    m[61] = m[44] & t[16];
+    m[62] = m[40] & t[2];
+    m
+}
 
-    let p0 = m52 ^ m61;
-    let p1 = m58 ^ m59;
-    let p2 = m54 ^ m62;
-    let p3 = m47 ^ m50;
-    let p4 = m48 ^ m56;
-    let p5 = m46 ^ m51;
-    let p6 = m49 ^ m60;
+fn inv_sbox_bool_output(m: [u8; 63]) -> u8 {
+    let p0 = m[51] ^ m[60];
+    let p1 = m[57] ^ m[58];
+    let p2 = m[53] ^ m[61];
+    let p3 = m[46] ^ m[49];
+    let p4 = m[47] ^ m[55];
+    let p5 = m[45] ^ m[50];
+    let p6 = m[48] ^ m[59];
     let p7 = p0 ^ p1;
-    let p8 = m50 ^ m53;
-    let p9 = m55 ^ m63;
-    let p10 = m57 ^ p4;
+    let p8 = m[49] ^ m[52];
+    let p9 = m[54] ^ m[62];
+    let p10 = m[56] ^ p4;
     let p11 = p0 ^ p3;
-    let p12 = m46 ^ m48;
-    let p13 = m49 ^ m51;
-    let p14 = m49 ^ m62;
-    let p15 = m54 ^ m59;
-    let p16 = m57 ^ m61;
-    let p17 = m58 ^ p2;
-    let p18 = m63 ^ p5;
+    let p12 = m[45] ^ m[47];
+    let p13 = m[48] ^ m[50];
+    let p14 = m[48] ^ m[61];
+    let p15 = m[53] ^ m[58];
+    let p16 = m[56] ^ m[60];
+    let p17 = m[57] ^ p2;
+    let p18 = m[62] ^ p5;
     let p19 = p2 ^ p3;
     let p20 = p4 ^ p6;
     let p22 = p2 ^ p7;
@@ -812,10 +843,10 @@ fn inv_sbox_bool(input: u8) -> u8 {
 // `SubWord` for the Ct key schedule: identical AES key expansion logic, but
 // with the Boyar-Peralta S-box replacing the table lookup.
 fn sub_word_bool(w: u32) -> u32 {
-    (sbox_bool((w >> 24) as u8) as u32) << 24
-        | (sbox_bool(((w >> 16) & 0xff) as u8) as u32) << 16
-        | (sbox_bool(((w >> 8) & 0xff) as u8) as u32) << 8
-        | (sbox_bool((w & 0xff) as u8) as u32)
+    u32::from(sbox_bool((w >> 24) as u8)) << 24
+        | u32::from(sbox_bool(((w >> 16) & 0xff) as u8)) << 16
+        | u32::from(sbox_bool(((w >> 8) & 0xff) as u8)) << 8
+        | u32::from(sbox_bool((w & 0xff) as u8))
 }
 
 fn expand_128_bool(key: &[u8; 16]) -> [u32; 44] {
@@ -876,7 +907,7 @@ fn make_dec_rk_ct(enc_rk: &[u32], dec_rk: &mut [u32], nr: usize) {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn add_round_key_ct(state: &mut [u8; 16], rk: &[u32]) {
     for c in 0..4 {
         let word = rk[c].to_be_bytes();
@@ -886,21 +917,21 @@ fn add_round_key_ct(state: &mut [u8; 16], rk: &[u32]) {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn sub_bytes_ct(state: &mut [u8; 16]) {
     for b in state.iter_mut() {
         *b = sbox_bool(*b);
     }
 }
 
-#[inline(always)]
+#[inline]
 fn inv_sub_bytes_ct(state: &mut [u8; 16]) {
     for b in state.iter_mut() {
         *b = inv_sbox_bool(*b);
     }
 }
 
-#[inline(always)]
+#[inline]
 fn shift_rows_ct(state: &mut [u8; 16]) {
     let t = *state;
     state[0] = t[0];
@@ -921,7 +952,7 @@ fn shift_rows_ct(state: &mut [u8; 16]) {
     state[15] = t[11];
 }
 
-#[inline(always)]
+#[inline]
 fn inv_shift_rows_ct(state: &mut [u8; 16]) {
     let t = *state;
     state[0] = t[0];
@@ -942,7 +973,7 @@ fn inv_shift_rows_ct(state: &mut [u8; 16]) {
     state[15] = t[3];
 }
 
-#[inline(always)]
+#[inline]
 fn mix_columns_ct(state: &mut [u8; 16]) {
     for c in 0..4 {
         let i = 4 * c;
@@ -959,7 +990,7 @@ fn mix_columns_ct(state: &mut [u8; 16]) {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn inv_mix_columns_ct(state: &mut [u8; 16]) {
     for c in 0..4 {
         let i = 4 * c;
@@ -1018,6 +1049,7 @@ pub struct Aes128 {
     dec_rk: [u32; 44],
 }
 impl Aes128 {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         let enc_rk = expand_128(key);
         let mut dec_rk = [0u32; 44];
@@ -1029,9 +1061,11 @@ impl Aes128 {
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt(block, &self.enc_rk, 10)
     }
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt(block, &self.dec_rk, 10)
     }
@@ -1043,6 +1077,7 @@ pub struct Aes192 {
     dec_rk: [u32; 52],
 }
 impl Aes192 {
+    #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
         let enc_rk = expand_192(key);
         let mut dec_rk = [0u32; 52];
@@ -1054,9 +1089,11 @@ impl Aes192 {
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt(block, &self.enc_rk, 12)
     }
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt(block, &self.dec_rk, 12)
     }
@@ -1068,6 +1105,7 @@ pub struct Aes256 {
     dec_rk: [u32; 60],
 }
 impl Aes256 {
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let enc_rk = expand_256(key);
         let mut dec_rk = [0u32; 60];
@@ -1079,9 +1117,11 @@ impl Aes256 {
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt(block, &self.enc_rk, 14)
     }
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt(block, &self.dec_rk, 14)
     }
@@ -1098,6 +1138,7 @@ pub struct Aes128Ct {
     dec_rk: [u32; 44],
 }
 impl Aes128Ct {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         let enc_rk = expand_128_bool(key);
         let mut dec_rk = [0u32; 44];
@@ -1109,9 +1150,11 @@ impl Aes128Ct {
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt_ct(block, &self.enc_rk, 10)
     }
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt_ct(block, &self.dec_rk, 10)
     }
@@ -1126,6 +1169,7 @@ pub struct Aes192Ct {
     dec_rk: [u32; 52],
 }
 impl Aes192Ct {
+    #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
         let enc_rk = expand_192_bool(key);
         let mut dec_rk = [0u32; 52];
@@ -1137,9 +1181,11 @@ impl Aes192Ct {
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt_ct(block, &self.enc_rk, 12)
     }
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt_ct(block, &self.dec_rk, 12)
     }
@@ -1154,6 +1200,7 @@ pub struct Aes256Ct {
     dec_rk: [u32; 60],
 }
 impl Aes256Ct {
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let enc_rk = expand_256_bool(key);
         let mut dec_rk = [0u32; 60];
@@ -1165,9 +1212,11 @@ impl Aes256Ct {
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt_ct(block, &self.enc_rk, 14)
     }
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt_ct(block, &self.dec_rk, 14)
     }
@@ -1278,11 +1327,119 @@ mod tests {
     #[test]
     fn bool_sbox_matches_tables() {
         for x in 0u16..=255 {
-            let b = x as u8;
+            let b = u8::try_from(x).expect("table index fits in u8");
             assert_eq!(sbox_bool(b), SBOX[x as usize], "sbox {x:02x}");
             assert_eq!(inv_sbox_bool(b), INV_SBOX[x as usize], "inv_sbox {x:02x}");
         }
     }
+
+    const KEYSBOX_128_CASES: [(&str, &str, &str); 21] = [
+        (
+            "10a58869d74be5a374cf867cfb473859",
+            "00000000000000000000000000000000",
+            "6d251e6944b051e04eaa6fb4dbf78465",
+        ),
+        (
+            "caea65cdbb75e9169ecd22ebe6e54675",
+            "00000000000000000000000000000000",
+            "6e29201190152df4ee058139def610bb",
+        ),
+        (
+            "a2e2fa9baf7d20822ca9f0542f764a41",
+            "00000000000000000000000000000000",
+            "c3b44b95d9d2f25670eee9a0de099fa3",
+        ),
+        (
+            "b6364ac4e1de1e285eaf144a2415f7a0",
+            "00000000000000000000000000000000",
+            "5d9b05578fc944b3cf1ccf0e746cd581",
+        ),
+        (
+            "64cf9c7abc50b888af65f49d521944b2",
+            "00000000000000000000000000000000",
+            "f7efc89d5dba578104016ce5ad659c05",
+        ),
+        (
+            "47d6742eefcc0465dc96355e851b64d9",
+            "00000000000000000000000000000000",
+            "0306194f666d183624aa230a8b264ae7",
+        ),
+        (
+            "3eb39790678c56bee34bbcdeccf6cdb5",
+            "00000000000000000000000000000000",
+            "858075d536d79ccee571f7d7204b1f67",
+        ),
+        (
+            "64110a924f0743d500ccadae72c13427",
+            "00000000000000000000000000000000",
+            "35870c6a57e9e92314bcb8087cde72ce",
+        ),
+        (
+            "18d8126516f8a12ab1a36d9f04d68e51",
+            "00000000000000000000000000000000",
+            "6c68e9be5ec41e22c825b7c7affb4363",
+        ),
+        (
+            "f530357968578480b398a3c251cd1093",
+            "00000000000000000000000000000000",
+            "f5df39990fc688f1b07224cc03e86cea",
+        ),
+        (
+            "da84367f325d42d601b4326964802e8e",
+            "00000000000000000000000000000000",
+            "bba071bcb470f8f6586e5d3add18bc66",
+        ),
+        (
+            "e37b1c6aa2846f6fdb413f238b089f23",
+            "00000000000000000000000000000000",
+            "43c9f7e62f5d288bb27aa40ef8fe1ea8",
+        ),
+        (
+            "6c002b682483e0cabcc731c253be5674",
+            "00000000000000000000000000000000",
+            "3580d19cff44f1014a7c966a69059de5",
+        ),
+        (
+            "143ae8ed6555aba96110ab58893a8ae1",
+            "00000000000000000000000000000000",
+            "806da864dd29d48deafbe764f8202aef",
+        ),
+        (
+            "b69418a85332240dc82492353956ae0c",
+            "00000000000000000000000000000000",
+            "a303d940ded8f0baff6f75414cac5243",
+        ),
+        (
+            "71b5c08a1993e1362e4d0ce9b22b78d5",
+            "00000000000000000000000000000000",
+            "c2dabd117f8a3ecabfbb11d12194d9d0",
+        ),
+        (
+            "e234cdca2606b81f29408d5f6da21206",
+            "00000000000000000000000000000000",
+            "fff60a4740086b3b9c56195b98d91a7b",
+        ),
+        (
+            "13237c49074a3da078dc1d828bb78c6f",
+            "00000000000000000000000000000000",
+            "8146a08e2357f0caa30ca8c94d1a0544",
+        ),
+        (
+            "3071a2a48fe6cbd04f1a129098e308f8",
+            "00000000000000000000000000000000",
+            "4b98e06d356deb07ebb824e5713f7be3",
+        ),
+        (
+            "90f42ec0f68385f2ffc5dfc03a654dce",
+            "00000000000000000000000000000000",
+            "7a20a53d460fc9ce0423a7a0764c6cf2",
+        ),
+        (
+            "febd9a24d8b65c1c787d50a4ed3619a9",
+            "00000000000000000000000000000000",
+            "f4a70d8af877f9b02b4c40df57d45b17",
+        ),
+    ];
 
     #[test]
     fn ct_128_kat() {
@@ -1441,114 +1598,7 @@ mod tests {
     // ── ECBKeySbox: plaintext=0, key chosen to stress the key schedule ────────
     #[test]
     fn keysbox_128() {
-        let v = [
-            (
-                "10a58869d74be5a374cf867cfb473859",
-                "00000000000000000000000000000000",
-                "6d251e6944b051e04eaa6fb4dbf78465",
-            ),
-            (
-                "caea65cdbb75e9169ecd22ebe6e54675",
-                "00000000000000000000000000000000",
-                "6e29201190152df4ee058139def610bb",
-            ),
-            (
-                "a2e2fa9baf7d20822ca9f0542f764a41",
-                "00000000000000000000000000000000",
-                "c3b44b95d9d2f25670eee9a0de099fa3",
-            ),
-            (
-                "b6364ac4e1de1e285eaf144a2415f7a0",
-                "00000000000000000000000000000000",
-                "5d9b05578fc944b3cf1ccf0e746cd581",
-            ),
-            (
-                "64cf9c7abc50b888af65f49d521944b2",
-                "00000000000000000000000000000000",
-                "f7efc89d5dba578104016ce5ad659c05",
-            ),
-            (
-                "47d6742eefcc0465dc96355e851b64d9",
-                "00000000000000000000000000000000",
-                "0306194f666d183624aa230a8b264ae7",
-            ),
-            (
-                "3eb39790678c56bee34bbcdeccf6cdb5",
-                "00000000000000000000000000000000",
-                "858075d536d79ccee571f7d7204b1f67",
-            ),
-            (
-                "64110a924f0743d500ccadae72c13427",
-                "00000000000000000000000000000000",
-                "35870c6a57e9e92314bcb8087cde72ce",
-            ),
-            (
-                "18d8126516f8a12ab1a36d9f04d68e51",
-                "00000000000000000000000000000000",
-                "6c68e9be5ec41e22c825b7c7affb4363",
-            ),
-            (
-                "f530357968578480b398a3c251cd1093",
-                "00000000000000000000000000000000",
-                "f5df39990fc688f1b07224cc03e86cea",
-            ),
-            (
-                "da84367f325d42d601b4326964802e8e",
-                "00000000000000000000000000000000",
-                "bba071bcb470f8f6586e5d3add18bc66",
-            ),
-            (
-                "e37b1c6aa2846f6fdb413f238b089f23",
-                "00000000000000000000000000000000",
-                "43c9f7e62f5d288bb27aa40ef8fe1ea8",
-            ),
-            (
-                "6c002b682483e0cabcc731c253be5674",
-                "00000000000000000000000000000000",
-                "3580d19cff44f1014a7c966a69059de5",
-            ),
-            (
-                "143ae8ed6555aba96110ab58893a8ae1",
-                "00000000000000000000000000000000",
-                "806da864dd29d48deafbe764f8202aef",
-            ),
-            (
-                "b69418a85332240dc82492353956ae0c",
-                "00000000000000000000000000000000",
-                "a303d940ded8f0baff6f75414cac5243",
-            ),
-            (
-                "71b5c08a1993e1362e4d0ce9b22b78d5",
-                "00000000000000000000000000000000",
-                "c2dabd117f8a3ecabfbb11d12194d9d0",
-            ),
-            (
-                "e234cdca2606b81f29408d5f6da21206",
-                "00000000000000000000000000000000",
-                "fff60a4740086b3b9c56195b98d91a7b",
-            ),
-            (
-                "13237c49074a3da078dc1d828bb78c6f",
-                "00000000000000000000000000000000",
-                "8146a08e2357f0caa30ca8c94d1a0544",
-            ),
-            (
-                "3071a2a48fe6cbd04f1a129098e308f8",
-                "00000000000000000000000000000000",
-                "4b98e06d356deb07ebb824e5713f7be3",
-            ),
-            (
-                "90f42ec0f68385f2ffc5dfc03a654dce",
-                "00000000000000000000000000000000",
-                "7a20a53d460fc9ce0423a7a0764c6cf2",
-            ),
-            (
-                "febd9a24d8b65c1c787d50a4ed3619a9",
-                "00000000000000000000000000000000",
-                "f4a70d8af877f9b02b4c40df57d45b17",
-            ),
-        ];
-        for (k, p, c) in v {
+        for (k, p, c) in KEYSBOX_128_CASES {
             kat128(k, p, c);
         }
     }
@@ -1829,14 +1879,31 @@ mod tests {
     fn te0_spot_check() {
         // SBOX[0]=0x63; xtime(0x63)=0xc6; mul3(0x63)=0xc6^0x63=0xa5
         // TE0[0] = 0xc6_63_63_a5
-        assert_eq!(TE0[0], 0xc66363a5);
+        assert_eq!(TE0[0], 0xc663_63a5);
         // SBOX[1]=0x7c; xtime(0x7c)=0xf8; mul3(0x7c)=0xf8^0x7c=0x84
-        assert_eq!(TE0[1], 0xf87c7c84);
+        assert_eq!(TE0[1], 0xf87c_7c84);
     }
 
     #[test]
     fn td0_spot_check() {
         // INV_SBOX[0]=0x52; mul14=0x51, mul9=0xf4, mul13=0xa7, mul11=0x50
-        assert_eq!(TD0[0], 0x51f4a750);
+        assert_eq!(TD0[0], 0x51f4_a750);
+    }
+
+    #[test]
+    fn aes128_matches_openssl_ecb() {
+        let key_hex = "000102030405060708090a0b0c0d0e0f";
+        let pt_hex = "00112233445566778899aabbccddeeff";
+        let Some(expected) =
+            crate::ct::run_openssl_enc("-aes-128-ecb", key_hex, None, &parse::<16>(pt_hex))
+        else {
+            return;
+        };
+
+        let cipher = Aes128::new(&parse(key_hex));
+        assert_eq!(
+            cipher.encrypt_block(&parse(pt_hex)).as_slice(),
+            expected.as_slice()
+        );
     }
 }

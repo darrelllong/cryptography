@@ -1,5 +1,3 @@
-#![allow(clippy::missing_panics_doc, clippy::must_use_candidate)]
-
 //! Blum Blum Shub (BBS) pseudorandom bit generator.
 //!
 //! This is the classic quadratic-residue generator:
@@ -15,32 +13,8 @@
 //! This implementation is intentionally small and uses `u128`, which keeps it
 //! practical as a reference tool but not as a serious large-parameter BBS.
 
+use super::primes::{gcd, is_probable_prime, mul_mod};
 use crate::Csprng;
-
-#[inline]
-fn gcd(mut a: u128, mut b: u128) -> u128 {
-    while b != 0 {
-        let r = a % b;
-        a = b;
-        b = r;
-    }
-    a
-}
-
-#[inline]
-fn mul_mod(mut a: u128, mut b: u128, m: u128) -> u128 {
-    let mut out = 0u128;
-    a %= m;
-    b %= m;
-    while b != 0 {
-        if b & 1 != 0 {
-            out = (out + a) % m;
-        }
-        a = (a << 1) % m;
-        b >>= 1;
-    }
-    out
-}
 
 /// Blum Blum Shub over a `u128` modulus.
 pub struct BlumBlumShub {
@@ -53,12 +27,26 @@ impl BlumBlumShub {
     ///
     /// Preconditions:
     /// - `p != q`
+    /// - `p` and `q` are probable primes
     /// - `p % 4 == 3`
     /// - `q % 4 == 3`
     /// - `gcd(seed, p*q) == 1`
+    ///
+    /// # Panics
+    ///
+    /// Panics if the modulus overflows `u128`, if the modulus is too large for
+    /// this reference implementation's `mul_mod` helper, or if the parameters
+    /// violate the stated Blum Blum Shub preconditions.
+    #[must_use]
     pub fn new(p: u128, q: u128, seed: u128) -> Self {
         assert!(p > 3 && q > 3, "p and q must be > 3");
         assert!(p != q, "p and q must be distinct");
+        assert!(
+            p < (1u128 << 127) && q < (1u128 << 127),
+            "p and q must be < 2^127 for the u128 mul_mod helper"
+        );
+        assert!(is_probable_prime(p), "p must be a probable prime");
+        assert!(is_probable_prime(q), "q must be a probable prime");
         assert_eq!(p % 4, 3, "p must be congruent to 3 mod 4");
         assert_eq!(q % 4, 3, "q must be congruent to 3 mod 4");
         let n = p.checked_mul(q).expect("modulus overflow");
@@ -76,6 +64,7 @@ impl BlumBlumShub {
     }
 
     /// Current internal state `x_i`.
+    #[must_use]
     pub fn state(&self) -> u128 {
         self.state
     }
@@ -127,7 +116,7 @@ mod tests {
     #[test]
     fn large_modulus_above_u64_still_advances() {
         let p = (1u128 << 32) + 15;
-        let q = (1u128 << 32) + 63;
+        let q = (1u128 << 32) + 75;
         let mut bbs = BlumBlumShub::new(p, q, 3);
         let n = p * q;
 
@@ -135,5 +124,11 @@ mod tests {
             let _ = bbs.next_bit();
             assert!(bbs.state() < n);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "p must be a probable prime")]
+    fn rejects_composite_factor() {
+        let _ = BlumBlumShub::new(15, 23, 2);
     }
 }

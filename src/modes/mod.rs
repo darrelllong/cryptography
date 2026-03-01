@@ -1,5 +1,3 @@
-#![allow(clippy::doc_markdown, clippy::missing_panics_doc)]
-
 //! Generic block-cipher modes of operation.
 //!
 //! Implemented in this layer:
@@ -272,6 +270,10 @@ impl<C> Cbc<C> {
 }
 
 impl<C: BlockCipher> Cbc<C> {
+    /// # Panics
+    ///
+    /// Panics if `iv.len()` does not match the block size, or if `data.len()`
+    /// is not an exact multiple of the block size.
     pub fn encrypt_nopad(&self, iv: &[u8], data: &mut [u8]) {
         assert_eq!(iv.len(), C::BLOCK_LEN, "wrong IV length");
         assert_block_multiple::<C>(data);
@@ -284,6 +286,10 @@ impl<C: BlockCipher> Cbc<C> {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if `iv.len()` does not match the block size, or if `data.len()`
+    /// is not an exact multiple of the block size.
     pub fn decrypt_nopad(&self, iv: &[u8], data: &mut [u8]) {
         assert_eq!(iv.len(), C::BLOCK_LEN, "wrong IV length");
         assert_block_multiple::<C>(data);
@@ -316,6 +322,10 @@ impl<C> Cfb<C> {
 }
 
 impl<C: BlockCipher> Cfb<C> {
+    /// # Panics
+    ///
+    /// Panics if `iv.len()` does not match the block size, or if `data.len()`
+    /// is not an exact multiple of the block size.
     pub fn encrypt_nopad(&self, iv: &[u8], data: &mut [u8]) {
         assert_eq!(iv.len(), C::BLOCK_LEN, "wrong IV length");
         assert_block_multiple::<C>(data);
@@ -331,6 +341,10 @@ impl<C: BlockCipher> Cfb<C> {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if `iv.len()` does not match the block size, or if `data.len()`
+    /// is not an exact multiple of the block size.
     pub fn decrypt_nopad(&self, iv: &[u8], data: &mut [u8]) {
         assert_eq!(iv.len(), C::BLOCK_LEN, "wrong IV length");
         assert_block_multiple::<C>(data);
@@ -365,6 +379,9 @@ impl<C> Ofb<C> {
 }
 
 impl<C: BlockCipher> Ofb<C> {
+    /// # Panics
+    ///
+    /// Panics if `iv.len()` does not match the block size.
     pub fn apply_keystream(&self, iv: &[u8], data: &mut [u8]) {
         assert_eq!(iv.len(), C::BLOCK_LEN, "wrong IV length");
 
@@ -392,6 +409,9 @@ impl<C> Ctr<C> {
 }
 
 impl<C: BlockCipher> Ctr<C> {
+    /// # Panics
+    ///
+    /// Panics if `counter.len()` does not match the block size.
     pub fn apply_keystream(&self, counter: &[u8], data: &mut [u8]) {
         assert_eq!(counter.len(), C::BLOCK_LEN, "wrong counter length");
 
@@ -434,6 +454,10 @@ impl<C> Xts<C> {
 }
 
 impl<C: BlockCipher> Xts<C> {
+    /// # Panics
+    ///
+    /// Panics if the wrapped cipher does not have a 128-bit block size, or if
+    /// `data` is shorter than one complete block.
     pub fn encrypt_sector(&self, tweak_value: &[u8; 16], data: &mut [u8]) {
         assert_block_128::<C>();
         assert!(
@@ -482,6 +506,10 @@ impl<C: BlockCipher> Xts<C> {
         data[last_full_start..last_full_start + 16].copy_from_slice(&pp);
     }
 
+    /// # Panics
+    ///
+    /// Panics if the wrapped cipher does not have a 128-bit block size, or if
+    /// `data` is shorter than one complete block.
     pub fn decrypt_sector(&self, tweak_value: &[u8; 16], data: &mut [u8]) {
         assert_block_128::<C>();
         assert!(
@@ -943,7 +971,7 @@ mod tests {
         let plaintext =
             parse::<31>("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e");
 
-        let expected = match crate::ct::run_openssl(
+        let Some(expected) = crate::ct::run_openssl(
             &[
                 "enc",
                 "-aes-128-xts",
@@ -955,9 +983,8 @@ mod tests {
                 "00000000000000000000000000000000",
             ],
             &plaintext,
-        ) {
-            Some(bytes) => bytes,
-            None => return,
+        ) else {
+            return;
         };
 
         let mut data = plaintext;

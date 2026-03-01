@@ -1,11 +1,3 @@
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::doc_markdown,
-    clippy::inline_always,
-    clippy::must_use_candidate,
-    clippy::trivially_copy_pass_by_ref
-)]
-
 //! Salsa20 stream cipher — Daniel J. Bernstein's original Snuffle design.
 //!
 //! This is the standard 20-round Salsa20 core with an 8-byte nonce and a
@@ -15,14 +7,14 @@
 const SIGMA: [u8; 16] = *b"expand 32-byte k";
 const TAU: [u8; 16] = *b"expand 16-byte k";
 
-#[inline(always)]
+#[inline]
 fn load_u32_le(bytes: &[u8]) -> u32 {
     let mut tmp = [0u8; 4];
     tmp.copy_from_slice(bytes);
     u32::from_le_bytes(tmp)
 }
 
-#[inline(always)]
+#[inline]
 fn quarter_round(y0: &mut u32, y1: &mut u32, y2: &mut u32, y3: &mut u32) {
     *y1 ^= y0.wrapping_add(*y3).rotate_left(7);
     *y2 ^= y1.wrapping_add(*y0).rotate_left(9);
@@ -76,7 +68,7 @@ fn salsa20_block(state: &[u32; 16]) -> [u8; 64] {
 }
 
 #[inline]
-fn key_setup(key: &[u8], nonce: &[u8; 8], counter: u64) -> [u32; 16] {
+fn key_setup(key: &[u8], nonce: [u8; 8], counter: u64) -> [u32; 16] {
     assert!(
         key.len() == 16 || key.len() == 32,
         "Salsa20 key length must be 16 or 32 bytes, got {}",
@@ -91,6 +83,20 @@ fn key_setup(key: &[u8], nonce: &[u8; 8], counter: u64) -> [u32; 16] {
         &key[..16]
     };
 
+    let counter_bytes = counter.to_le_bytes();
+    let counter_low = u32::from_le_bytes([
+        counter_bytes[0],
+        counter_bytes[1],
+        counter_bytes[2],
+        counter_bytes[3],
+    ]);
+    let counter_high = u32::from_le_bytes([
+        counter_bytes[4],
+        counter_bytes[5],
+        counter_bytes[6],
+        counter_bytes[7],
+    ]);
+
     [
         load_u32_le(&constants[0..4]),
         load_u32_le(&k0[0..4]),
@@ -100,8 +106,8 @@ fn key_setup(key: &[u8], nonce: &[u8; 8], counter: u64) -> [u32; 16] {
         load_u32_le(&constants[4..8]),
         load_u32_le(&nonce[0..4]),
         load_u32_le(&nonce[4..8]),
-        counter as u32,
-        (counter >> 32) as u32,
+        counter_low,
+        counter_high,
         load_u32_le(&constants[8..12]),
         load_u32_le(&k1[0..4]),
         load_u32_le(&k1[4..8]),
@@ -124,19 +130,22 @@ pub struct Salsa20 {
 
 impl Salsa20 {
     /// Create a Salsa20 instance with a 32-byte key and 8-byte nonce.
+    #[must_use]
     pub fn new(key: &[u8; 32], nonce: &[u8; 8]) -> Self {
         Self::with_key_bytes(key, nonce)
     }
 
     /// Create a Salsa20 instance with either a 16-byte or 32-byte key.
+    #[must_use]
     pub fn with_key_bytes(key: &[u8], nonce: &[u8; 8]) -> Self {
         Self::with_counter(key, nonce, 0)
     }
 
     /// Create a Salsa20 instance at an arbitrary 64-byte block counter.
+    #[must_use]
     pub fn with_counter(key: &[u8], nonce: &[u8; 8], counter: u64) -> Self {
         Self {
-            state: key_setup(key, nonce, counter),
+            state: key_setup(key, *nonce, counter),
             block: [0u8; 64],
             offset: 64,
         }
@@ -184,7 +193,7 @@ impl Salsa20 {
         }
     }
 
-    /// Fill `buf` with keystream bytes by XORing into the existing contents.
+    /// Fill `buf` with keystream bytes by `XORing` into the existing contents.
     pub fn fill(&mut self, buf: &mut [u8]) {
         self.apply_keystream(buf);
     }
@@ -198,8 +207,19 @@ impl Salsa20 {
 
     /// Seek to a 64-byte block boundary.
     pub fn set_counter(&mut self, counter: u64) {
-        self.state[8] = counter as u32;
-        self.state[9] = (counter >> 32) as u32;
+        let counter_bytes = counter.to_le_bytes();
+        self.state[8] = u32::from_le_bytes([
+            counter_bytes[0],
+            counter_bytes[1],
+            counter_bytes[2],
+            counter_bytes[3],
+        ]);
+        self.state[9] = u32::from_le_bytes([
+            counter_bytes[4],
+            counter_bytes[5],
+            counter_bytes[6],
+            counter_bytes[7],
+        ]);
         crate::ct::zeroize_slice(self.block.as_mut_slice());
         self.offset = 64;
     }

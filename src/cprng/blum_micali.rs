@@ -1,9 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate
-)]
-
 //! Blum-Micali pseudorandom bit generator.
 //!
 //! This is the original discrete-log based one-bit generator:
@@ -18,36 +12,8 @@
 //! arithmetic, so it is intended for experimentation and testing, not for
 //! modern deployment.
 
+use super::primes::{is_probable_prime, mod_pow};
 use crate::Csprng;
-
-#[inline]
-fn mul_mod(mut a: u128, mut b: u128, m: u128) -> u128 {
-    let mut out = 0u128;
-    a %= m;
-    b %= m;
-    while b != 0 {
-        if b & 1 != 0 {
-            out = (out + a) % m;
-        }
-        a = (a << 1) % m;
-        b >>= 1;
-    }
-    out
-}
-
-#[inline]
-fn mod_pow(mut base: u128, mut exp: u128, modulus: u128) -> u128 {
-    let mut out = 1u128;
-    base %= modulus;
-    while exp != 0 {
-        if exp & 1 != 0 {
-            out = mul_mod(out, base, modulus);
-        }
-        base = mul_mod(base, base, modulus);
-        exp >>= 1;
-    }
-    out
-}
 
 /// Blum-Micali over a `u128` prime field.
 pub struct BlumMicali {
@@ -57,19 +23,28 @@ pub struct BlumMicali {
 }
 
 impl BlumMicali {
-    /// Construct a generator with prime modulus `p`, base `g`, and seed `x0`.
+    /// Construct a generator with probable-prime modulus `p`, base `g`, and seed `x0`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the parameters violate the documented Blum-Micali
+    /// preconditions or if `p` is too large for this reference
+    /// implementation's `mul_mod` helper.
+    #[must_use]
     pub fn new(p: u128, g: u128, seed: u128) -> Self {
         assert!(p > 2, "p must be > 2");
         assert!(
             p < (1u128 << 127),
             "modulus must be < 2^127 for the u128 mul_mod helper"
         );
+        assert!(is_probable_prime(p), "p must be a probable prime");
         assert!(g > 1 && g < p, "g must be in 2..p");
         assert!(seed > 0 && seed < p, "seed must be in 1..p");
         Self { p, g, state: seed }
     }
 
     /// Current internal exponent state `x_i`.
+    #[must_use]
     pub fn state(&self) -> u128 {
         self.state
     }
@@ -77,7 +52,7 @@ impl BlumMicali {
     /// Advance once and return the next output bit.
     pub fn next_bit(&mut self) -> u8 {
         self.state = mod_pow(self.g, self.state, self.p);
-        (self.state <= (self.p - 1) / 2) as u8
+        u8::from(self.state <= (self.p - 1) / 2)
     }
 }
 
@@ -114,5 +89,11 @@ mod tests {
         let mut out = [0u8; 2];
         bm.fill_bytes(&mut out);
         assert_eq!(out, [0xec, 0x6f]);
+    }
+
+    #[test]
+    #[should_panic(expected = "p must be a probable prime")]
+    fn rejects_composite_modulus() {
+        let _ = BlumMicali::new(21, 2, 3);
     }
 }

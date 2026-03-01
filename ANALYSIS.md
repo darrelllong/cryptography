@@ -205,7 +205,9 @@ feature constructions, or stronger dataset controls.
 
 ## Cipher Families
 
-### SIMON
+### Block Ciphers
+
+#### SIMON
 
 - Reference: `simon-speck-2013`.
 - History: published by the NSA in 2013 as a lightweight block cipher family optimized for hardware.
@@ -254,7 +256,7 @@ it selects a compile-time constant expression; no runtime dispatch occurs.
 
 ---
 
-### SPECK
+#### SPECK
 
 - Reference: `simon-speck-2013`.
 - History: published alongside SIMON by the NSA in 2013 as the software-oriented member of the lightweight pair.
@@ -293,7 +295,7 @@ maximum across all variants) and no heap allocation.  `ℓ` stores only the
 
 ---
 
-### AES
+#### AES
 
 - Reference: `fips197` (primary standard); `daemen-rijmen-2002` (design reference).
 - History: standardized by NIST as FIPS 197 in 2001 after the Rijndael competition; it is the dominant general-purpose block cipher in modern protocols and software.
@@ -341,7 +343,7 @@ keeps the core implementation portable and safe across processors instead.
 
 ---
 
-### Serpent
+#### Serpent
 
 - Reference: `anderson-biham-knudsen-1998-serpent`.
 - History: designed by Ross Anderson, Eli Biham, and Lars Knudsen for the AES competition in the late 1990s. It reached the AES final round and remains one of the best-known conservative wide-round AES candidates.
@@ -380,7 +382,7 @@ keys by applying the Serpent S-box sequence to each group of four prekeys.
 
 ---
 
-### Twofish
+#### Twofish
 
 - Reference: `twofish-1998`.
 - History: designed by Bruce Schneier, John Kelsey, Doug Whiting, David Wagner, Chris Hall, and Niels Ferguson for the AES competition in 1998. It was one of the AES finalists and remains one of the best-known AES-era alternative block ciphers.
@@ -427,7 +429,7 @@ the published zero-key vectors for all three standard key sizes.
 
 ---
 
-### Camellia
+#### Camellia
 
 - Reference: `camellia-spec` (primary specification); `rfc3713` (IETF algorithm text); `rfc4312` (IPsec profile).
 - History: developed by NTT and Mitsubishi Electric in 2000, later adopted by CRYPTREC and standardized in ISO/IEC 18033-3. It is the best-known Japanese general-purpose block cipher of the AES era.
@@ -455,7 +457,7 @@ rule directly by using the same structure with subkeys in reverse order.
 
 ---
 
-### DES and Triple-DES
+#### DES and Triple-DES
 
 - Reference: `fips46-3` (DES); `sp800-67r2` (Triple-DES/TDEA).
 - History: DES was standardized in the 1970s and later reaffirmed in FIPS 46-3. It descends from IBM's Lucifer family; Triple-DES extended its life by applying DES three times in EDE form.
@@ -536,7 +538,7 @@ both comfortably in L1 cache.  The 43 NIST CAVP vectors still pass unchanged.
 
 ---
 
-### CAST-128 / CAST5
+#### CAST-128 / CAST5
 
 - Reference: `rfc2144`.
 - History: designed by Carlisle Adams in the mid-1990s and published as RFC 2144. The algorithm is also commonly referred to as CAST5, especially when a specific key size such as CAST5-128 is intended.
@@ -580,7 +582,7 @@ supports the published 40-, 80-, and 128-bit known-answer vectors.
 
 ---
 
-### PRESENT
+#### PRESENT
 
 - Reference: `bogdanov-2007-present`.
 - History: introduced in the CHES 2007 paper as an ultra-lightweight block cipher for constrained hardware. It was later standardized in ISO/IEC 29192-2 as one of the reference lightweight block ciphers.
@@ -614,7 +616,7 @@ key.
 
 ---
 
-### SEED
+#### SEED
 
 - Reference: `rfc4009` (algorithm text); `rfc4196` (IPsec usage profile).
 - History: developed by KISA and standardized in South Korea in the late 1990s; widely used in Korean electronic commerce and finance, then documented for IETF use in RFC 4009 and RFC 4196.
@@ -654,7 +656,7 @@ published intermediate values.
 
 ---
 
-### MAGMA
+#### MAGMA
 
 - Reference: `rfc8891`.
 - History: standardized as GOST R 34.12-2015 and documented in RFC 8891; it descends from the older GOST 28147-89 cipher.
@@ -713,7 +715,7 @@ round count roughly offsetting its simpler round function.
 
 ---
 
-### GRASSHOPPER
+#### GRASSHOPPER
 
 - Reference: `rfc7801`.
 - History: standardized as GOST R 34.12-2015 and published for the IETF as RFC 7801; also known as Kuznyechik.
@@ -721,7 +723,7 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: appropriate for GOST interoperability and for comparing non-AES 128-bit block ciphers. It is the more modern Russian standard choice in this repository. It is not broadly deployed like AES, so most non-GOST applications should still prefer AES.
 - Known issues: the fast `Grasshopper` type uses table lookups and is not constant-time; `GrasshopperCt` is substantially slower. Its software implementation is comparatively slow even on the fast path because the linear layer is expensive.
 
-### SM4
+#### SM4
 
 - Reference: `gm-t-0002-2012` (standard); `liu-2024-sm4-linear` (local PDF currently checked in under `pubs/`).
 - History: standardized in China as GM/T 0002-2012 and GB/T 32907-2016; widely used in Chinese commercial and government cryptographic profiles.
@@ -729,7 +731,9 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: appropriate for SM4 interoperability, standards conformance, and comparative study. It is not deprecated, but it is primarily a regional standards cipher rather than a global default.
 - Known issues: the fast SM4 type (`Sm4`) uses direct S-box table loads and is not constant-time; `Sm4Ct` exists but is much slower because its S-box is evaluated in a generic constant-time form. Generic block modes are available in the crate, but there is no SM4-specific protocol wrapper here.
 
-### ChaCha20 / XChaCha20
+### Stream Ciphers
+
+#### ChaCha20 / XChaCha20
 
 - Reference: `chacha-2008`, `rfc8439`, `draft-irtf-cfrg-xchacha-03`.
 - History: ChaCha was introduced by Daniel J. Bernstein in 2008 as a software-tuned Salsa20 variant; XChaCha extends it with HChaCha20-derived subkeys and a 192-bit nonce for safer large-scale nonce management.
@@ -737,7 +741,7 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: `ChaCha20` is the modern general-purpose ARX stream cipher to prefer over Salsa20 for most new software designs, especially when RFC 8439 interoperability matters. `XChaCha20` is the better fit when random nonces are easier operationally than global nonce coordination.
 - Known issues: there is no separate `Ct` type because the core is already table-free ARX, but nonce reuse with the same key is still catastrophic. `ChaCha20`'s 96-bit nonce is adequate for protocol-framed use; `XChaCha20` exists specifically to give callers a much larger nonce space when they need safer random-nonce operation.
 
-### Salsa20
+#### Salsa20
 
 - Reference: `salsafamily-2007`.
 - History: designed by Daniel J. Bernstein in 2005 as the original 20-round member of the Salsa20 family, later becoming one of the best-known software-oriented ARX stream ciphers and the direct predecessor of ChaCha.
@@ -745,7 +749,7 @@ round count roughly offsetting its simpler round function.
 - Usage and deprecation: appropriate for Salsa20 interoperability, comparative study, and software-oriented stream-cipher use. It is not deprecated as a primitive, but modern protocol ecosystems more often standardize ChaCha20 than Salsa20.
 - Known issues: Salsa20 is naturally closer to constant-time than the table-driven ciphers here because its core is ARX, so there is no separate `Ct` type. As with any stream cipher, nonce reuse with the same key is catastrophic, and the original 64-bit nonce is smaller than newer designs such as XChaCha.
 
-### ZUC-128
+#### ZUC-128
 
 - Reference: `etsi-sage-zuc-v16`.
 - History: designed by Chinese cryptographers and standardized for LTE/5G use; used in 3GPP as the basis for 128-EEA3 and 128-EIA3.
@@ -786,27 +790,27 @@ cost of removing secret-indexed table reads in pure portable Rust.
 
 | Cipher | Fast path | Ct path | Slowdown |
 |--------|----------:|--------:|---------:|
-| AES-128 | 542.7 MiB/s | 60.6 MiB/s | 8.9x |
-| AES-192 | 444.4 MiB/s | 50.4 MiB/s | 8.8x |
-| AES-256 | 374.8 MiB/s | 42.9 MiB/s | 8.7x |
-| CAST-128 | 246.5 MiB/s | 3.9 MiB/s | 62.9x |
-| Camellia-128 | 121.9 MiB/s | 5.8 MiB/s | 20.9x |
-| Camellia-192 | 65.0 MiB/s | 4.2 MiB/s | 15.6x |
-| Camellia-256 | 91.6 MiB/s | 4.4 MiB/s | 20.7x |
-| DES | 81.1 MiB/s | 8.3 MiB/s | 9.8x |
-| PRESENT-80 | 12.4 MiB/s | 3.9 MiB/s | 3.1x |
-| PRESENT-128 | 12.3 MiB/s | 3.9 MiB/s | 3.2x |
-| Serpent-128 | 11.9 MiB/s | 7.5 MiB/s | 1.6x |
-| Serpent-192 | 11.8 MiB/s | 7.5 MiB/s | 1.6x |
-| Serpent-256 | 11.9 MiB/s | 7.6 MiB/s | 1.6x |
-| Magma-256 | 62.0 MiB/s | 14.3 MiB/s | 4.3x |
-| Grasshopper-256 | 26.1 MiB/s | 4.1 MiB/s | 6.3x |
-| SM4-128 | 122.7 MiB/s | 7.6 MiB/s | 16.1x |
-| SEED-128 | 68.7 MiB/s | 4.5 MiB/s | 15.4x |
-| Twofish-128 | 13.1 MiB/s | 2.3 MiB/s | 5.6x |
-| Twofish-192 | 13.3 MiB/s | 2.0 MiB/s | 6.8x |
-| Twofish-256 | 13.1 MiB/s | 1.7 MiB/s | 7.6x |
-| ZUC-128 | 551.1 MiB/s | 28.3 MiB/s | 19.5x |
+| AES-128 | 522.7 MiB/s | 62.1 MiB/s | 8.4x |
+| AES-192 | 437.5 MiB/s | 51.0 MiB/s | 8.6x |
+| AES-256 | 366.8 MiB/s | 42.8 MiB/s | 8.6x |
+| CAST-128 | 244.3 MiB/s | 4.0 MiB/s | 61.6x |
+| Camellia-128 | 129.6 MiB/s | 5.6 MiB/s | 23.1x |
+| Camellia-192 | 95.0 MiB/s | 4.2 MiB/s | 22.8x |
+| Camellia-256 | 93.9 MiB/s | 4.2 MiB/s | 22.5x |
+| DES | 78.9 MiB/s | 7.8 MiB/s | 10.1x |
+| PRESENT-80 | 12.3 MiB/s | 4.0 MiB/s | 3.1x |
+| PRESENT-128 | 12.4 MiB/s | 4.0 MiB/s | 3.1x |
+| Serpent-128 | 11.0 MiB/s | 7.1 MiB/s | 1.5x |
+| Serpent-192 | 11.1 MiB/s | 7.2 MiB/s | 1.5x |
+| Serpent-256 | 11.1 MiB/s | 7.2 MiB/s | 1.5x |
+| Magma-256 | 59.1 MiB/s | 14.2 MiB/s | 4.2x |
+| Grasshopper-256 | 25.9 MiB/s | 4.1 MiB/s | 6.3x |
+| SM4-128 | 115.2 MiB/s | 5.8 MiB/s | 19.9x |
+| SEED-128 | 71.4 MiB/s | 4.7 MiB/s | 15.4x |
+| Twofish-128 | 13.4 MiB/s | 3.0 MiB/s | 4.5x |
+| Twofish-192 | 13.3 MiB/s | 2.5 MiB/s | 5.3x |
+| Twofish-256 | 13.5 MiB/s | 2.3 MiB/s | 6.0x |
+| ZUC-128 | 552.3 MiB/s | 27.8 MiB/s | 19.8x |
 
 Radar view (representative `Ct`-capable families; log-scaled, 4 MiB/s to 1024 MiB/s):
 
@@ -819,8 +823,8 @@ xychart-beta
     title "Fast vs Ct throughput (MiB/s, higher-throughput families)"
     x-axis ["AES-128", "AES-192", "AES-256", "CAST-128", "Camellia-128", "SM4", "ZUC"]
     y-axis "MiB/s" 0 --> 560
-    bar [542.7, 444.4, 374.8, 246.5, 121.9, 122.7, 551.1]
-    bar [60.6, 50.4, 42.9, 4.0, 5.8, 7.6, 28.3]
+    bar [522.7, 437.5, 366.8, 244.3, 129.6, 115.2, 552.3]
+    bar [62.1, 51.0, 42.8, 4.0, 5.6, 5.8, 27.8]
 ```
 
 ```mermaid
@@ -828,8 +832,8 @@ xychart-beta
     title "Fast vs Ct throughput (MiB/s, middle-throughput families)"
     x-axis ["DES", "SEED-128", "Magma", "Grasshopper"]
     y-axis "MiB/s" 0 --> 100
-    bar [81.1, 68.7, 62.0, 26.1]
-    bar [8.3, 4.5, 14.3, 4.1]
+    bar [78.9, 71.4, 59.1, 25.9]
+    bar [7.8, 4.7, 14.2, 4.1]
 ```
 
 ```mermaid
@@ -837,8 +841,8 @@ xychart-beta
     title "Fast vs Ct throughput (MiB/s, lower-throughput families)"
     x-axis ["PRESENT-80", "PRESENT-128", "Twofish-128", "Twofish-192", "Twofish-256"]
     y-axis "MiB/s" 0 --> 16
-    bar [12.4, 12.3, 13.1, 13.3, 13.1]
-    bar [3.9, 3.9, 2.3, 2.0, 1.7]
+    bar [12.3, 12.4, 13.4, 13.3, 13.5]
+    bar [4.0, 4.0, 3.0, 2.5, 2.3]
 ```
 
 Simon and Speck are intentionally omitted from this radar because they do not
@@ -876,20 +880,22 @@ These ratios line up with the implementation strategy:
   is already slow in absolute terms because this implementation computes the
   keyed `h()` function directly instead of precomputing large keyed MDS tables.
 
-### Simon
+### Block Ciphers
+
+#### Simon
 
 | Variant | Block | Key | Throughput | 1 GiB |
 |---------|------:|----:|-----------:|------:|
-| Simon32/64 | 32 b | 64 b | 90 MiB/s | 11.4 s |
-| Simon48/72 | 48 b | 72 b | 116 MiB/s | 8.8 s |
-| Simon48/96 | 48 b | 96 b | 116 MiB/s | 8.8 s |
-| Simon64/96 | 64 b | 96 b | 149 MiB/s | 6.9 s |
-| Simon64/128 | 64 b | 128 b | 143 MiB/s | 7.2 s |
-| Simon96/96 | 96 b | 96 b | 145 MiB/s | 7.1 s |
-| Simon96/144 | 96 b | 144 b | 138 MiB/s | 7.4 s |
-| Simon128/128 | 128 b | 128 b | 265 MiB/s | 3.9 s |
-| Simon128/192 | 128 b | 192 b | 263 MiB/s | 3.9 s |
-| Simon128/256 | 128 b | 256 b | 248 MiB/s | 4.1 s |
+| Simon32/64 | 32 b | 64 b | 82.4 MiB/s | 12.4 s |
+| Simon48/72 | 48 b | 72 b | 107.5 MiB/s | 9.5 s |
+| Simon48/96 | 48 b | 96 b | 106.4 MiB/s | 9.6 s |
+| Simon64/96 | 64 b | 96 b | 139.9 MiB/s | 7.3 s |
+| Simon64/128 | 64 b | 128 b | 131.7 MiB/s | 7.8 s |
+| Simon96/96 | 96 b | 96 b | 134.2 MiB/s | 7.6 s |
+| Simon96/144 | 96 b | 144 b | 129.0 MiB/s | 7.9 s |
+| Simon128/128 | 128 b | 128 b | 247.9 MiB/s | 4.1 s |
+| Simon128/192 | 128 b | 192 b | 240.8 MiB/s | 4.3 s |
+| Simon128/256 | 128 b | 256 b | 232.8 MiB/s | 4.4 s |
 
 Simon throughput increases with word size, because the same three
 rotation-and-XOR operations process more bits per instruction as `n` grows
@@ -897,20 +903,20 @@ from 16 to 64.  The 128-bit variants (64-bit words) are 3× faster than the
 32-bit variant (16-bit words).  Extra key words (Simon64/96 vs Simon64/128:
 42 vs 44 rounds) cause a modest throughput penalty.
 
-### Speck
+#### Speck
 
 | Variant | Block | Key | Throughput | 1 GiB |
 |---------|------:|----:|-----------:|------:|
-| Speck32/64 | 32 b | 64 b | 222 MiB/s | 4.6 s |
-| Speck48/72 | 48 b | 72 b | 318 MiB/s | 3.2 s |
-| Speck48/96 | 48 b | 96 b | 280 MiB/s | 3.7 s |
-| Speck64/96 | 64 b | 96 b | 329 MiB/s | 3.1 s |
-| Speck64/128 | 64 b | 128 b | 323 MiB/s | 3.2 s |
-| Speck96/96 | 96 b | 96 b | 415 MiB/s | 2.5 s |
-| Speck96/144 | 96 b | 144 b | 390 MiB/s | 2.6 s |
-| Speck128/128 | 128 b | 128 b | 1068 MiB/s | 1.0 s |
-| Speck128/192 | 128 b | 192 b | 1021 MiB/s | 1.0 s |
-| Speck128/256 | 128 b | 256 b | 974 MiB/s | 1.1 s |
+| Speck32/64 | 32 b | 64 b | 206.4 MiB/s | 5.0 s |
+| Speck48/72 | 48 b | 72 b | 299.8 MiB/s | 3.4 s |
+| Speck48/96 | 48 b | 96 b | 265.0 MiB/s | 3.9 s |
+| Speck64/96 | 64 b | 96 b | 320.0 MiB/s | 3.2 s |
+| Speck64/128 | 64 b | 128 b | 302.7 MiB/s | 3.4 s |
+| Speck96/96 | 96 b | 96 b | 397.0 MiB/s | 2.6 s |
+| Speck96/144 | 96 b | 144 b | 379.4 MiB/s | 2.7 s |
+| Speck128/128 | 128 b | 128 b | 1004.6 MiB/s | 1.0 s |
+| Speck128/192 | 128 b | 192 b | 964.4 MiB/s | 1.1 s |
+| Speck128/256 | 128 b | 256 b | 933.4 MiB/s | 1.1 s |
 
 Speck is uniformly 2–4× faster than Simon at the same block/key size.  The
 ARX round function uses no AND operations and compiles to three instructions
@@ -918,27 +924,27 @@ on a 64-bit target; Simon's `f` requires two extra rotations and an AND.
 Speck128/128 exceeds 1 GiB/s, reflecting that the M4 Pro's 64-bit integer
 pipeline can sustain roughly one ARX round per cycle at 32 rounds depth.
 
-### AES (pure Rust, T-table)
+#### AES (pure Rust, T-table)
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| AES-128 | 128 b | 128 b | 10 | 543 MiB/s | 1.9 s |
-| AES-192 | 128 b | 192 b | 12 | 444 MiB/s | 2.3 s |
-| AES-256 | 128 b | 256 b | 14 | 375 MiB/s | 2.7 s |
+| AES-128 | 128 b | 128 b | 10 | 523 MiB/s | 2.0 s |
+| AES-192 | 128 b | 192 b | 12 | 437 MiB/s | 2.3 s |
+| AES-256 | 128 b | 256 b | 14 | 367 MiB/s | 2.8 s |
 
 AES throughput decreases linearly with round count (10/12/14): the T-table
 implementation is round-dominated, with each round costing roughly the same
 16 lookups + 12 XORs regardless of variant.  AES-128 is 43% faster than
-AES-256 (543 vs 375 MiB/s), close to the 14/10 = 1.4 ratio predicted by
+AES-256 (523 vs 367 MiB/s), close to the 14/10 = 1.4 ratio predicted by
 round-count scaling.
 
-AES-128 at 543 MiB/s is 2.0× faster than Simon128/128 (265 MiB/s) and
-roughly 2× slower than Speck128/128 (1068 MiB/s).  These relative positions reflect
+AES-128 at 523 MiB/s is 2.1× faster than Simon128/128 (248 MiB/s) and
+roughly 1.9× slower than Speck128/128 (1005 MiB/s). These relative positions reflect
 the cost of the 256-entry table lookups (with potential cache pressure at 4
 tables × 1 KiB = 4 KiB): the table-driven nonlinearity costs more than Speck's
 arithmetic nonlinearity but far less than Simon's multi-rotation AND structure.
 
-### AES-focused comparison (`aes_bench`)
+#### AES-focused comparison (`aes_bench`)
 
 The separate `aes_bench` target compares short-message AES throughput against
 the `Ct` path and libsodium:
@@ -952,16 +958,16 @@ Current midpoint throughputs on this host:
 
 | Benchmark | Throughput |
 |-----------|-----------:|
-| `Aes128` (16-byte block) | 502.5 MiB/s |
-| `Aes192` (16-byte block) | 433.8 MiB/s |
-| `Aes256` (16-byte block) | 351.6 MiB/s |
-| `Aes256` (1 KiB) | 365.5 MiB/s |
-| `Aes128Ct` (16-byte block) | 63.1 MiB/s |
-| `Aes192Ct` (16-byte block) | 52.4 MiB/s |
-| `Aes256Ct` (16-byte block) | 43.6 MiB/s |
-| `Aes256Ct` (1 KiB) | 43.8 MiB/s |
-| libsodium XSalsa20-Poly1305 (16-byte message) | 84.3 MiB/s |
-| libsodium XSalsa20-Poly1305 (1 KiB message) | 685.6 MiB/s |
+| `Aes128` (16-byte block) | 479.5 MiB/s |
+| `Aes192` (16-byte block) | 383.0 MiB/s |
+| `Aes256` (16-byte block) | 314.5 MiB/s |
+| `Aes256` (1 KiB) | 324.4 MiB/s |
+| `Aes128Ct` (16-byte block) | 40.4 MiB/s |
+| `Aes192Ct` (16-byte block) | 49.3 MiB/s |
+| `Aes256Ct` (16-byte block) | 43.2 MiB/s |
+| `Aes256Ct` (1 KiB) | 39.8 MiB/s |
+| libsodium XSalsa20-Poly1305 (16-byte message) | 79.0 MiB/s |
+| libsodium XSalsa20-Poly1305 (1 KiB message) | 627.6 MiB/s |
 
 This comparison is intentionally a calibration exercise, not a strict
 apples-to-apples algorithm match. The `AES` rows are this crate's raw block
@@ -970,37 +976,37 @@ stream-cipher-plus-MAC construction. The point is to compare this crate's
 portable software primitives to a widely used optimized cryptographic library,
 not to claim identical semantics.
 
-### DES / Triple-DES
+#### DES / Triple-DES
 
 | Variant | Block | Effective key | Throughput | 1 GiB |
 |---------|------:|--------------:|-----------:|------:|
-| DES | 64 b | 56 b | 81 MiB/s | 12.6 s |
-| 3DES-2key (EDE) | 64 b | 80 b | 24 MiB/s | 42.2 s |
-| 3DES-3key (EDE) | 64 b | 112 b | 24 MiB/s | 42.2 s |
+| DES | 64 b | 56 b | 78.9 MiB/s | 13.0 s |
+| 3DES-2key (EDE) | 64 b | 80 b | 23.3 MiB/s | 43.9 s |
+| 3DES-3key (EDE) | 64 b | 112 b | 23.0 MiB/s | 44.5 s |
 
-DES at 81 MiB/s is the result of two successive compile-time table optimisations:
+DES at 78.9 MiB/s is the result of two successive compile-time table optimisations:
 
 1. **Byte-level permutation tables** for IP, FP, and E reduce 1408 bit-by-bit
    operations to table lookups (18 → 47 MiB/s, 2.6×).
 2. **Fused S+P table** (`SP_TABLE[8][64]`) combines all eight S-boxes and the
    P permutation into a single 2 KiB table: 8 lookups per round instead of
-   8 S-box + 4 P lookups (47 → 78 MiB/s, 1.66×).
+   8 S-box + 4 P lookups (47 → 79 MiB/s, 1.68×).
 
 Both sets of tables are computed at compile time via `const fn`; neither adds
 runtime allocation or unsafe code.  The total speedup from raw bit-by-bit is
-78 / 18 ≈ 4.3×.
+79 / 18 ≈ 4.4×.
 
-3DES-2key and 3DES-3key run at the same throughput (23 MiB/s) because both
+3DES-2key and 3DES-3key run at nearly the same throughput (23 MiB/s) because both
 perform exactly three DES block operations per plaintext block regardless of
 key option.  The 3× overhead gives approximately 1/3 the DES rate
-(81 / 3 ≈ 27 MiB/s theoretical; measured ~24 MiB/s).
+(79 / 3 ≈ 26 MiB/s theoretical; measured ~23 MiB/s).
 
-### PRESENT
+#### PRESENT
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| PRESENT-80 | 64 b | 80 b | 31 | 12.4 MiB/s | 82.6 s |
-| PRESENT-128 | 64 b | 128 b | 31 | 12.3 MiB/s | 83.0 s |
+| PRESENT-80 | 64 b | 80 b | 31 | 12.3 MiB/s | 83.3 s |
+| PRESENT-128 | 64 b | 128 b | 31 | 12.4 MiB/s | 82.7 s |
 
 PRESENT is now the slowest block cipher in the repository's fast-path suite.
 That is not surprising: it trades large tables and wide-word arithmetic for a
@@ -1009,13 +1015,13 @@ substitution plus a dense 64-bit bit permutation. The `Ct` path is only about
 3× slower because the fast path's S-box is already only a tiny 4-bit lookup;
 most of the cost is in the shared permutation layer, not in the substitution.
 
-### Serpent
+#### Serpent
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| Serpent-128 | 128 b | 128 b | 32 | 11.9 MiB/s | 86.0 s |
-| Serpent-192 | 128 b | 192 b | 32 | 11.8 MiB/s | 86.8 s |
-| Serpent-256 | 128 b | 256 b | 32 | 11.9 MiB/s | 86.0 s |
+| Serpent-128 | 128 b | 128 b | 32 | 11.0 MiB/s | 93.2 s |
+| Serpent-192 | 128 b | 192 b | 32 | 11.1 MiB/s | 92.2 s |
+| Serpent-256 | 128 b | 256 b | 32 | 11.1 MiB/s | 92.3 s |
 
 Serpent is slow in absolute terms but notably stable across key sizes because
 all three variants keep the same 32-round encryption core; only the key
@@ -1024,13 +1030,13 @@ the implementation is already bitslice-oriented: both variants spend most of
 their time in the shared linear transform and key XOR layers, not in large
 table lookups.
 
-### Camellia
+#### Camellia
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| Camellia-128 | 128 b | 128 b | 18 | 121.9 MiB/s | 8.4 s |
-| Camellia-192 | 128 b | 192 b | 24 | 65.0 MiB/s | 15.8 s |
-| Camellia-256 | 128 b | 256 b | 24 | 91.6 MiB/s | 11.2 s |
+| Camellia-128 | 128 b | 128 b | 18 | 129.6 MiB/s | 7.9 s |
+| Camellia-192 | 128 b | 192 b | 24 | 95.0 MiB/s | 10.8 s |
+| Camellia-256 | 128 b | 256 b | 24 | 93.9 MiB/s | 10.9 s |
 
 Camellia lands in the same broad software class as SM4 and SEED: clearly
 slower than AES, but still much faster than DES-class 64-bit designs. The
@@ -1040,11 +1046,11 @@ and drops into the single-digit MiB/s range. On this host, Camellia-128 is the
 best-performing variant; Camellia-192 and Camellia-256 both add the extra
 round groups and `FL` / `FL^{-1}` layers that widen the gap versus AES.
 
-### CAST-128 / CAST5
+#### CAST-128 / CAST5
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| CAST-128 | 64 b | 128 b | 16 | 246.5 MiB/s | 4.2 s |
+| CAST-128 | 64 b | 128 b | 16 | 244.3 MiB/s | 4.2 s |
 
 CAST-128 is much faster than the other 64-bit Feistel designs in this crate.
 That is mostly a consequence of its RFC design choices: the round function
@@ -1053,13 +1059,13 @@ word-level mixing from only four table reads and a handful of arithmetic
 operations. The downside is visible in the `Ct` path: replacing those table
 loads with fixed-scan selection drops throughput to about 4.0 MiB/s.
 
-### Twofish
+#### Twofish
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| Twofish-128 | 128 b | 128 b | 16 | 13.1 MiB/s | 78.2 s |
-| Twofish-192 | 128 b | 192 b | 16 | 13.3 MiB/s | 76.9 s |
-| Twofish-256 | 128 b | 256 b | 16 | 13.1 MiB/s | 78.3 s |
+| Twofish-128 | 128 b | 128 b | 16 | 13.4 MiB/s | 76.4 s |
+| Twofish-192 | 128 b | 192 b | 16 | 13.3 MiB/s | 76.7 s |
+| Twofish-256 | 128 b | 256 b | 16 | 13.5 MiB/s | 75.6 s |
 
 Twofish is still one of the slowest 128-bit block ciphers in the current
 fast-path suite, but removing the extra per-block copies in the `BlockCipher`
@@ -1070,11 +1076,11 @@ multiplies, instead of precomputing the large keyed tables that
 high-performance Twofish software usually relies on. The result is simple and
 faithful, but still expensive.
 
-### SEED
+#### SEED
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| SEED-128 | 128 b | 128 b | 16 | 68.7 MiB/s | 14.9 s |
+| SEED-128 | 128 b | 128 b | 16 | 71.4 MiB/s | 14.3 s |
 
 SEED sits between the 64-bit legacy designs and the faster modern 128-bit
 software ciphers. Its 16-round Feistel structure is not extreme, but each round
@@ -1083,57 +1089,59 @@ still trails Camellia and SM4. The `Ct` path is much slower because both S-box
 layers become packed ANF bitset evaluations in the round function and the key
 schedule.
 
-### MAGMA
+#### MAGMA
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| Magma-256 | 64 b | 256 b | 32 | 62 MiB/s | 16.5 s |
+| Magma-256 | 64 b | 256 b | 32 | 59.1 MiB/s | 17.3 s |
 
-Magma achieves ~62 MiB/s — comparable to DES (81 MiB/s) despite a 256-bit key
+Magma achieves ~59 MiB/s — comparable to DES (79 MiB/s) despite a 256-bit key
 and 32 rounds.  The round function has no bit permutations: just a wrapping add,
 8 nibble-level table lookups, and a 32-bit rotate.  The 2× round count relative
 to DES is nearly offset by the simpler per-round work.
 
-### GRASSHOPPER
+#### GRASSHOPPER
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| Grasshopper-256 | 128 b | 256 b | 10 | 26 MiB/s | 39.2 s |
+| Grasshopper-256 | 128 b | 256 b | 10 | 25.9 MiB/s | 39.5 s |
 
 Grasshopper is the slowest fast-path block cipher in the suite. Its round
 function mixes a byte S-box with a 16-byte linear transform over GF(2^8), and
 the software implementation leans on precomputed tables to keep that tractable.
 Even with those tables, the linear layer dominates relative to Magma or AES.
 
-### SM4
+#### SM4
 
 | Variant | Block | Key | Rounds | Throughput | 1 GiB |
 |---------|------:|----:|-------:|-----------:|------:|
-| SM4-128 | 128 b | 128 b | 32 | 123 MiB/s | 8.3 s |
+| SM4-128 | 128 b | 128 b | 32 | 115.2 MiB/s | 8.9 s |
 
 SM4 sits between Simon/Speck's lightweight ARX designs and the older 64-bit
 block ciphers. Its 32 rounds are expensive, but each round is still just four
 byte S-boxes plus a linear transform on one 32-bit word, so the fast path lands
 well ahead of DES and Magma on this host.
 
-### ChaCha20 / XChaCha20
+### Stream Ciphers
+
+#### ChaCha20 / XChaCha20
 
 | Variant | Key | Nonce | Throughput | 1 GiB |
 |---------|----:|------:|-----------:|------:|
-| ChaCha20 | 256 b | 96 b | 810 MiB/s | 1.3 s |
-| XChaCha20 | 256 b | 192 b | 794 MiB/s | 1.3 s |
+| ChaCha20 | 256 b | 96 b | 838.1 MiB/s | 1.2 s |
+| XChaCha20 | 256 b | 192 b | 840.6 MiB/s | 1.2 s |
 
-ChaCha20 is essentially in the same throughput tier as Salsa20 on this host,
-while XChaCha20 pays only a small one-time setup cost for the HChaCha20
-subkey derivation. That makes XChaCha20 the more forgiving default when callers
-want a modern software stream cipher with a large nonce space and do not want
-to hand-manage 96-bit nonce uniqueness.
+ChaCha20 and XChaCha20 are effectively tied on this host. The one-time
+HChaCha20 subkey derivation cost is drowned out by long-buffer throughput in
+this benchmark, which is exactly what you want for a practical stream cipher:
+XChaCha20 buys a much larger nonce space with no meaningful sustained-speed
+penalty.
 
-### Salsa20
+#### Salsa20
 
 | Variant | Key | Nonce | Throughput | 1 GiB |
 |---------|----:|------:|-----------:|------:|
-| Salsa20 | 256 b | 64 b | 836 MiB/s | 1.2 s |
+| Salsa20 | 256 b | 64 b | 856.7 MiB/s | 1.2 s |
 
 Salsa20 is the fastest stream cipher currently implemented in the crate. Its
 20-round ARX core is table-free and software-friendly, so on this M4 Pro it
@@ -1141,11 +1149,11 @@ outruns ZUC and lands in the same general throughput tier as the faster
 software-oriented block ciphers. The tradeoff is the original 64-bit nonce
 size, which is smaller than newer extended-nonce descendants such as XChaCha.
 
-### ZUC-128
+#### ZUC-128
 
 | Variant | Key | IV | Throughput | 1 GiB |
 |---------|----:|---:|-----------:|------:|
-| ZUC-128 | 128 b | 128 b | 551 MiB/s | 1.9 s |
+| ZUC-128 | 128 b | 128 b | 552.3 MiB/s | 1.9 s |
 
 ZUC is a stream cipher, so the benchmark fills a 1 MiB buffer rather than
 walking block boundaries. On this M4 Pro, the fast path is the single fastest
@@ -1157,32 +1165,33 @@ evaluation of two separate 8-bit S-boxes.
 
 | Cipher | Best throughput | Worst throughput |
 |--------|----------------:|-----------------:|
-| Speck | 1068 MiB/s (128/128) | 222 MiB/s (32/64) |
-| Salsa20 | 836 MiB/s | — |
-| ChaCha20 | 810 MiB/s | 794 MiB/s (XChaCha20) |
-| ZUC | 551 MiB/s | — |
-| AES | 543 MiB/s (128) | 375 MiB/s (256) |
-| Simon | 265 MiB/s (128/128) | 90 MiB/s (32/64) |
-| SM4 | 123 MiB/s | — |
-| Camellia | 122 MiB/s (128) | 65 MiB/s (192) |
-| CAST-128 | 247 MiB/s | — |
-| DES | 81 MiB/s | — |
-| SEED | 69 MiB/s | — |
-| Magma | 62 MiB/s | — |
-| Grasshopper | 26 MiB/s | — |
-| 3DES | — | 24 MiB/s (2-key or 3-key) |
-| PRESENT | 12.4 MiB/s (80) | 12.3 MiB/s (128) |
-| Twofish | 13.3 MiB/s (192) | 13.1 MiB/s (128/256) |
+| Speck | 1005 MiB/s (128/128) | 206 MiB/s (32/64) |
+| Salsa20 | 856.7 MiB/s | — |
+| ChaCha20 | 840.6 MiB/s (XChaCha20) | 838.1 MiB/s |
+| ZUC | 552.3 MiB/s | — |
+| AES | 523 MiB/s (128) | 367 MiB/s (256) |
+| Simon | 248 MiB/s (128/128) | 82 MiB/s (32/64) |
+| CAST-128 | 244.3 MiB/s | — |
+| Camellia | 129.6 MiB/s (128) | 93.9 MiB/s (256) |
+| SM4 | 115.2 MiB/s | — |
+| DES | 78.9 MiB/s | — |
+| SEED | 71.4 MiB/s | — |
+| Magma | 59.1 MiB/s | — |
+| Grasshopper | 25.9 MiB/s | — |
+| 3DES | — | 23.0 MiB/s (3-key) |
+| PRESENT | 12.4 MiB/s (128) | 12.3 MiB/s (80) |
+| Twofish | 13.5 MiB/s (256) | 13.3 MiB/s (192) |
 
-Speck128/128 remains the fastest block cipher in the suite. Salsa20 is still
-the fastest stream cipher by a small margin, with ChaCha20 and XChaCha20 just
-behind it and well ahead of ZUC. AES-128 remains the fastest conventional
-standardized block cipher. CAST-128 is the fastest 64-bit block cipher in the
-repository, while Camellia, SM4, and SEED form a middle tier of standardized
-128-bit designs that are still usable in pure software, but materially slower
-than AES. At the other end, Grasshopper, 3DES, PRESENT, and the current
-table-light Twofish implementation are expensive in pure software because they
-pair heavier round structures or dense internal transforms with comparatively
+Speck128/128 remains the fastest block cipher in the suite. Among the stream
+ciphers, Salsa20, XChaCha20, and ChaCha20 are effectively clustered together,
+with ZUC well behind them but still very fast in absolute terms. AES-128
+remains the fastest conventional standardized block cipher. CAST-128 is still
+the fastest 64-bit block cipher in the repository, while Camellia, SM4, and
+SEED form a middle tier of standardized 128-bit designs that are still usable
+in pure software, but materially slower than AES. At the other end,
+Grasshopper, 3DES, PRESENT, and the current table-light Twofish implementation
+are expensive in pure software because they pair heavier round structures or
+dense internal transforms with comparatively
 modest word-level parallelism.
 
 ---

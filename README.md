@@ -35,6 +35,38 @@ benchmark numbers for this host.
 
 ## HOWTO
 
+### Keys, IVs, nonces, and counters
+
+Most constructors encode the required key size in the type signature, so the
+expected size is visible in the API:
+
+- `Aes128`, `Sm4`, `Seed`, `Camellia128`, `Serpent128`, `Twofish128`, and many
+  others take `&[u8; 16]`
+- `Aes192`, `Camellia192`, `Serpent192`, `Twofish192` take `&[u8; 24]`
+- `Aes256`, `Camellia256`, `Serpent256`, `Twofish256` take `&[u8; 32]`
+- `Present80` takes `&[u8; 10]`; `Present128` takes `&[u8; 16]`
+- `Des` uses an 8-byte DES key; `TripleDes::new_2key` uses 16 bytes; `TripleDes::new_3key` uses 24 bytes
+
+The main variable-length exceptions are:
+
+- `Cast128::with_key_bytes(&key)` for 5..=16-byte keys
+- `Salsa20::with_key_bytes(&key, &nonce)` for 16- or 32-byte keys
+
+Stream-cipher nonce/IV sizes are fixed by the constructor:
+
+- `Salsa20`: 8-byte nonce
+- `ChaCha20`: 12-byte nonce, optional 32-bit block counter via `with_counter`
+- `XChaCha20`: 24-byte nonce, optional 32-bit block counter via `with_counter`
+- `Zuc128`: 16-byte key and 16-byte IV
+
+The mode wrappers follow the block size or the standard profile:
+
+- `Cbc`, `Cfb`, `Ofb`, and block-cipher `Ctr` take an IV/counter block exactly
+  one cipher block long
+- `Gcm` uses a 12-byte nonce in the standard fast path shown here
+- `Xts` takes a 16-byte tweak value and two independent 128-bit block-cipher
+  keys (for example two separate `Aes128` instances)
+
 ### Generic block-cipher example
 
 All block ciphers implement the shared `BlockCipher` trait for in-place
@@ -43,7 +75,8 @@ operation on a mutable byte slice:
 ```rust
 use cryptography::{Aes128, BlockCipher};
 
-let cipher = Aes128::new(&[0u8; 16]);
+let key = [0u8; 16]; // AES-128 = 16-byte key
+let cipher = Aes128::new(&key);
 let mut block = [0u8; 16];
 
 cipher.encrypt(&mut block);
@@ -58,7 +91,8 @@ at compile time:
 ```rust
 use cryptography::Sm4;
 
-let cipher = Sm4::new(&[0u8; 16]);
+let key = [0u8; 16]; // SM4 = 16-byte key
+let cipher = Sm4::new(&key);
 let block = [0u8; 16];
 
 let ct = cipher.encrypt_block(&block);
@@ -73,7 +107,8 @@ If you need the software constant-time path, use the dedicated `Ct` type:
 ```rust
 use cryptography::Aes128Ct;
 
-let cipher = Aes128Ct::new(&[0u8; 16]);
+let key = [0u8; 16];
+let cipher = Aes128Ct::new(&key);
 let block = [0u8; 16];
 
 let ct = cipher.encrypt_block(&block);
@@ -88,28 +123,31 @@ The generic mode wrappers accept any `BlockCipher` in the crate:
 ```rust
 use cryptography::{Aes128, Cbc, Cmac, Ctr, Gcm, Xts};
 
-let cipher = Aes128::new(&[0u8; 16]);
+let key = [0u8; 16];
+let cipher = Aes128::new(&key);
 
 let mut cbc_buf = [0u8; 32];
-let iv = [0u8; 16];
+let iv = [0u8; 16]; // one AES block
 Cbc::new(cipher).encrypt_nopad(&iv, &mut cbc_buf);
 
 let mut ctr_buf = [0u8; 37];
-let counter = [0u8; 16];
-Ctr::new(Aes128::new(&[0u8; 16])).apply_keystream(&counter, &mut ctr_buf);
+let counter = [0u8; 16]; // one AES block
+Ctr::new(Aes128::new(&key)).apply_keystream(&counter, &mut ctr_buf);
 
-let tag = Cmac::new(Aes128::new(&[0u8; 16])).compute(b"header and body");
+let tag = Cmac::new(Aes128::new(&key)).compute(b"header and body");
 assert_eq!(tag.len(), 16);
 
 let mut gcm_buf = [0u8; 23];
-let nonce = [0u8; 12];
+let nonce = [0u8; 12]; // standard 96-bit GCM nonce
 let aad = b"header";
-let tag = Gcm::new(Aes128::new(&[0u8; 16])).encrypt(&nonce, aad, &mut gcm_buf);
-assert!(Gcm::new(Aes128::new(&[0u8; 16])).decrypt(&nonce, aad, &mut gcm_buf, &tag));
+let tag = Gcm::new(Aes128::new(&key)).encrypt(&nonce, aad, &mut gcm_buf);
+assert!(Gcm::new(Aes128::new(&key)).decrypt(&nonce, aad, &mut gcm_buf, &tag));
 
 let mut sector = [0u8; 32];
-let tweak = [0u8; 16];
-Xts::new(Aes128::new(&[0u8; 16]), Aes128::new(&[1u8; 16])).encrypt_sector(&tweak, &mut sector);
+let tweak = [0u8; 16]; // one 16-byte tweak block
+let data_key = [0u8; 16];
+let tweak_key = [1u8; 16];
+Xts::new(Aes128::new(&data_key), Aes128::new(&tweak_key)).encrypt_sector(&tweak, &mut sector);
 ```
 
 The current mode layer implements:
@@ -134,11 +172,11 @@ or ciphertext:
 use cryptography::{ChaCha20, Salsa20, XChaCha20, Zuc128};
 
 let mut msg = *b"example message...";
-let mut salsa = Salsa20::new(&[0u8; 32], &[0u8; 8]);
-let mut chacha = ChaCha20::new(&[1u8; 32], &[0u8; 12]);
-let mut xchacha = XChaCha20::new(&[2u8; 32], &[0u8; 24]);
+let mut salsa = Salsa20::new(&[0u8; 32], &[0u8; 8]); // 32-byte key, 8-byte nonce
+let mut chacha = ChaCha20::with_counter(&[1u8; 32], &[0u8; 12], 7); // 32-byte key, 12-byte nonce, u32 counter
+let mut xchacha = XChaCha20::with_counter(&[2u8; 32], &[0u8; 24], 7); // 32-byte key, 24-byte nonce, u32 counter
 let mut buf = [0u8; 64];
-let mut zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]);
+let mut zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]); // 16-byte key, 16-byte IV
 
 salsa.apply_keystream(&mut msg);
 chacha.apply_keystream(&mut msg);
@@ -176,7 +214,8 @@ which generator is underneath:
 ```rust
 use cryptography::{Csprng, CtrDrbgAes256};
 
-let mut drbg = CtrDrbgAes256::new(&[0u8; 48]);
+let seed_material = [0u8; 48]; // 32-byte AES key + 16-byte V
+let mut drbg = CtrDrbgAes256::new(&seed_material);
 let mut out = [0u8; 32];
 drbg.fill_bytes(&mut out);
 ```

@@ -1,9 +1,3 @@
-#![allow(
-    clippy::inline_always,
-    clippy::many_single_char_names,
-    clippy::new_without_default
-)]
-
 //! SHA-2 family from FIPS 180-4.
 
 use super::Digest;
@@ -158,116 +152,124 @@ const K64: [u64; 80] = [
     0x6c44_198c_4a47_5817,
 ];
 
-#[inline(always)]
+#[inline]
 fn compress32(state: &mut [u32; 8], block: &[u8; 64]) {
-    let mut w = [0u32; 64];
+    let mut schedule = [0u32; 64];
     for (i, chunk) in block.chunks_exact(4).enumerate() {
-        w[i] = u32::from_be_bytes(chunk.try_into().unwrap());
+        schedule[i] = u32::from_be_bytes(chunk.try_into().unwrap());
     }
-    for t in 16..64 {
-        let s0 = w[t - 15].rotate_right(7) ^ w[t - 15].rotate_right(18) ^ (w[t - 15] >> 3);
-        let s1 = w[t - 2].rotate_right(17) ^ w[t - 2].rotate_right(19) ^ (w[t - 2] >> 10);
-        w[t] = w[t - 16]
-            .wrapping_add(s0)
-            .wrapping_add(w[t - 7])
-            .wrapping_add(s1);
-    }
-
-    let mut a = state[0];
-    let mut b = state[1];
-    let mut c = state[2];
-    let mut d = state[3];
-    let mut e = state[4];
-    let mut f = state[5];
-    let mut g = state[6];
-    let mut h = state[7];
-
-    for t in 0..64 {
-        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-        let ch = (e & f) ^ ((!e) & g);
-        let temp1 = h
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(K32[t])
-            .wrapping_add(w[t]);
-        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let temp2 = s0.wrapping_add(maj);
-
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(temp1);
-        d = c;
-        c = b;
-        b = a;
-        a = temp1.wrapping_add(temp2);
+    for word_idx in 16..64 {
+        let sigma0 = schedule[word_idx - 15].rotate_right(7)
+            ^ schedule[word_idx - 15].rotate_right(18)
+            ^ (schedule[word_idx - 15] >> 3);
+        let sigma1 = schedule[word_idx - 2].rotate_right(17)
+            ^ schedule[word_idx - 2].rotate_right(19)
+            ^ (schedule[word_idx - 2] >> 10);
+        schedule[word_idx] = schedule[word_idx - 16]
+            .wrapping_add(sigma0)
+            .wrapping_add(schedule[word_idx - 7])
+            .wrapping_add(sigma1);
     }
 
-    state[0] = state[0].wrapping_add(a);
-    state[1] = state[1].wrapping_add(b);
-    state[2] = state[2].wrapping_add(c);
-    state[3] = state[3].wrapping_add(d);
-    state[4] = state[4].wrapping_add(e);
-    state[5] = state[5].wrapping_add(f);
-    state[6] = state[6].wrapping_add(g);
-    state[7] = state[7].wrapping_add(h);
+    let mut a_reg = state[0];
+    let mut b_reg = state[1];
+    let mut c_reg = state[2];
+    let mut d_reg = state[3];
+    let mut e_reg = state[4];
+    let mut f_reg = state[5];
+    let mut g_reg = state[6];
+    let mut h_reg = state[7];
+
+    for (round_idx, &schedule_word) in schedule.iter().enumerate() {
+        let sigma1 = e_reg.rotate_right(6) ^ e_reg.rotate_right(11) ^ e_reg.rotate_right(25);
+        let choose = (e_reg & f_reg) ^ ((!e_reg) & g_reg);
+        let temp1 = h_reg
+            .wrapping_add(sigma1)
+            .wrapping_add(choose)
+            .wrapping_add(K32[round_idx])
+            .wrapping_add(schedule_word);
+        let sigma0 = a_reg.rotate_right(2) ^ a_reg.rotate_right(13) ^ a_reg.rotate_right(22);
+        let majority = (a_reg & b_reg) ^ (a_reg & c_reg) ^ (b_reg & c_reg);
+        let temp2 = sigma0.wrapping_add(majority);
+
+        h_reg = g_reg;
+        g_reg = f_reg;
+        f_reg = e_reg;
+        e_reg = d_reg.wrapping_add(temp1);
+        d_reg = c_reg;
+        c_reg = b_reg;
+        b_reg = a_reg;
+        a_reg = temp1.wrapping_add(temp2);
+    }
+
+    state[0] = state[0].wrapping_add(a_reg);
+    state[1] = state[1].wrapping_add(b_reg);
+    state[2] = state[2].wrapping_add(c_reg);
+    state[3] = state[3].wrapping_add(d_reg);
+    state[4] = state[4].wrapping_add(e_reg);
+    state[5] = state[5].wrapping_add(f_reg);
+    state[6] = state[6].wrapping_add(g_reg);
+    state[7] = state[7].wrapping_add(h_reg);
 }
 
-#[inline(always)]
+#[inline]
 fn compress64(state: &mut [u64; 8], block: &[u8; 128]) {
-    let mut w = [0u64; 80];
+    let mut schedule = [0u64; 80];
     for (i, chunk) in block.chunks_exact(8).enumerate() {
-        w[i] = u64::from_be_bytes(chunk.try_into().unwrap());
+        schedule[i] = u64::from_be_bytes(chunk.try_into().unwrap());
     }
-    for t in 16..80 {
-        let s0 = w[t - 15].rotate_right(1) ^ w[t - 15].rotate_right(8) ^ (w[t - 15] >> 7);
-        let s1 = w[t - 2].rotate_right(19) ^ w[t - 2].rotate_right(61) ^ (w[t - 2] >> 6);
-        w[t] = w[t - 16]
-            .wrapping_add(s0)
-            .wrapping_add(w[t - 7])
-            .wrapping_add(s1);
-    }
-
-    let mut a = state[0];
-    let mut b = state[1];
-    let mut c = state[2];
-    let mut d = state[3];
-    let mut e = state[4];
-    let mut f = state[5];
-    let mut g = state[6];
-    let mut h = state[7];
-
-    for t in 0..80 {
-        let s1 = e.rotate_right(14) ^ e.rotate_right(18) ^ e.rotate_right(41);
-        let ch = (e & f) ^ ((!e) & g);
-        let temp1 = h
-            .wrapping_add(s1)
-            .wrapping_add(ch)
-            .wrapping_add(K64[t])
-            .wrapping_add(w[t]);
-        let s0 = a.rotate_right(28) ^ a.rotate_right(34) ^ a.rotate_right(39);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let temp2 = s0.wrapping_add(maj);
-
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(temp1);
-        d = c;
-        c = b;
-        b = a;
-        a = temp1.wrapping_add(temp2);
+    for word_idx in 16..80 {
+        let sigma0 = schedule[word_idx - 15].rotate_right(1)
+            ^ schedule[word_idx - 15].rotate_right(8)
+            ^ (schedule[word_idx - 15] >> 7);
+        let sigma1 = schedule[word_idx - 2].rotate_right(19)
+            ^ schedule[word_idx - 2].rotate_right(61)
+            ^ (schedule[word_idx - 2] >> 6);
+        schedule[word_idx] = schedule[word_idx - 16]
+            .wrapping_add(sigma0)
+            .wrapping_add(schedule[word_idx - 7])
+            .wrapping_add(sigma1);
     }
 
-    state[0] = state[0].wrapping_add(a);
-    state[1] = state[1].wrapping_add(b);
-    state[2] = state[2].wrapping_add(c);
-    state[3] = state[3].wrapping_add(d);
-    state[4] = state[4].wrapping_add(e);
-    state[5] = state[5].wrapping_add(f);
-    state[6] = state[6].wrapping_add(g);
-    state[7] = state[7].wrapping_add(h);
+    let mut a_reg = state[0];
+    let mut b_reg = state[1];
+    let mut c_reg = state[2];
+    let mut d_reg = state[3];
+    let mut e_reg = state[4];
+    let mut f_reg = state[5];
+    let mut g_reg = state[6];
+    let mut h_reg = state[7];
+
+    for (round_idx, &schedule_word) in schedule.iter().enumerate() {
+        let sigma1 = e_reg.rotate_right(14) ^ e_reg.rotate_right(18) ^ e_reg.rotate_right(41);
+        let choose = (e_reg & f_reg) ^ ((!e_reg) & g_reg);
+        let temp1 = h_reg
+            .wrapping_add(sigma1)
+            .wrapping_add(choose)
+            .wrapping_add(K64[round_idx])
+            .wrapping_add(schedule_word);
+        let sigma0 = a_reg.rotate_right(28) ^ a_reg.rotate_right(34) ^ a_reg.rotate_right(39);
+        let majority = (a_reg & b_reg) ^ (a_reg & c_reg) ^ (b_reg & c_reg);
+        let temp2 = sigma0.wrapping_add(majority);
+
+        h_reg = g_reg;
+        g_reg = f_reg;
+        f_reg = e_reg;
+        e_reg = d_reg.wrapping_add(temp1);
+        d_reg = c_reg;
+        c_reg = b_reg;
+        b_reg = a_reg;
+        a_reg = temp1.wrapping_add(temp2);
+    }
+
+    state[0] = state[0].wrapping_add(a_reg);
+    state[1] = state[1].wrapping_add(b_reg);
+    state[2] = state[2].wrapping_add(c_reg);
+    state[3] = state[3].wrapping_add(d_reg);
+    state[4] = state[4].wrapping_add(e_reg);
+    state[5] = state[5].wrapping_add(f_reg);
+    state[6] = state[6].wrapping_add(g_reg);
+    state[7] = state[7].wrapping_add(h_reg);
 }
 
 #[derive(Clone)]
@@ -461,10 +463,17 @@ macro_rules! define_sha2_32 {
             inner: Sha2_32Core,
         }
 
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
         impl $name {
             pub const BLOCK_LEN: usize = 64;
             pub const OUTPUT_LEN: usize = $out_len;
 
+            #[must_use]
             pub fn new() -> Self {
                 Self {
                     inner: Sha2_32Core::new($iv),
@@ -475,10 +484,12 @@ macro_rules! define_sha2_32 {
                 self.inner.update(data);
             }
 
+            #[must_use]
             pub fn finalize(self) -> [u8; $out_len] {
                 self.inner.finalize::<$out_len>()
             }
 
+            #[must_use]
             pub fn digest(data: &[u8]) -> [u8; $out_len] {
                 let mut h = Self::new();
                 h.update(data);
@@ -522,10 +533,17 @@ macro_rules! define_sha2_64 {
             inner: Sha2_64Core,
         }
 
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
         impl $name {
             pub const BLOCK_LEN: usize = 128;
             pub const OUTPUT_LEN: usize = $out_len;
 
+            #[must_use]
             pub fn new() -> Self {
                 Self {
                     inner: Sha2_64Core::new($iv),
@@ -536,10 +554,12 @@ macro_rules! define_sha2_64 {
                 self.inner.update(data);
             }
 
+            #[must_use]
             pub fn finalize(self) -> [u8; $out_len] {
                 self.inner.finalize::<$out_len>()
             }
 
+            #[must_use]
             pub fn digest(data: &[u8]) -> [u8; $out_len] {
                 let mut h = Self::new();
                 h.update(data);
@@ -812,10 +832,56 @@ mod tests {
     #[test]
     fn sha256_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let expected = match crate::ct::run_openssl(&["dgst", "-sha256", "-binary"], msg) {
-            Some(bytes) => bytes,
-            None => return,
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha256", "-binary"], msg) else {
+            return;
         };
         assert_eq!(Sha256::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha224_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha224", "-binary"], msg) else {
+            return;
+        };
+        assert_eq!(Sha224::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha384_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha384", "-binary"], msg) else {
+            return;
+        };
+        assert_eq!(Sha384::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha512_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha512", "-binary"], msg) else {
+            return;
+        };
+        assert_eq!(Sha512::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha512_224_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha512-224", "-binary"], msg)
+        else {
+            return;
+        };
+        assert_eq!(Sha512_224::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha512_256_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha512-256", "-binary"], msg)
+        else {
+            return;
+        };
+        assert_eq!(Sha512_256::digest(msg).as_slice(), expected.as_slice());
     }
 }

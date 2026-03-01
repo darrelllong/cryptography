@@ -1,10 +1,3 @@
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::inline_always,
-    clippy::many_single_char_names,
-    clippy::trivially_copy_pass_by_ref
-)]
-
 //! Twofish block cipher — AES submission (1998).
 //!
 //! 128-bit block cipher with the three standard key sizes:
@@ -49,12 +42,12 @@ const MDS: [[u8; 4]; 4] = [
     [0xEF, 0x01, 0xEF, 0x5B],
 ];
 
-#[inline(always)]
+#[inline]
 const fn nibble_lookup(table: &[u8; 16], idx: u8) -> u8 {
     table[idx as usize]
 }
 
-#[inline(always)]
+#[inline]
 const fn ror4(x: u8) -> u8 {
     ((x >> 1) | ((x & 1) << 3)) & 0x0f
 }
@@ -84,10 +77,13 @@ const fn q_perm_const(x: u8, which: usize) -> u8 {
 
 const fn build_q(which: usize) -> [u8; 256] {
     let mut out = [0u8; 256];
-    let mut i = 0usize;
-    while i < 256 {
-        out[i] = q_perm_const(i as u8, which);
-        i += 1;
+    let mut i = 0u8;
+    loop {
+        out[i as usize] = q_perm_const(i, which);
+        if i == u8::MAX {
+            break;
+        }
+        i = i.wrapping_add(1);
     }
     out
 }
@@ -95,7 +91,7 @@ const fn build_q(which: usize) -> [u8; 256] {
 const Q0: [u8; 256] = build_q(0);
 const Q1: [u8; 256] = build_q(1);
 
-#[inline(always)]
+#[inline]
 fn q_perm_ct(x: u8, which: usize) -> u8 {
     let (t0, t1, t2, t3) = if which == 0 {
         (&Q0_T0, &Q0_T1, &Q0_T2, &Q0_T3)
@@ -116,7 +112,7 @@ fn q_perm_ct(x: u8, which: usize) -> u8 {
     (b4 << 4) | a4
 }
 
-#[inline(always)]
+#[inline]
 fn q_perm(x: u8, which: usize, use_ct: bool) -> u8 {
     if use_ct {
         q_perm_ct(x, which)
@@ -127,7 +123,7 @@ fn q_perm(x: u8, which: usize, use_ct: bool) -> u8 {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn gf_mul(mut a: u8, mut b: u8) -> u8 {
     let mut out = 0u8;
     for _ in 0..8 {
@@ -141,7 +137,7 @@ fn gf_mul(mut a: u8, mut b: u8) -> u8 {
     out
 }
 
-fn rs_mds_encode(bytes: &[u8; 8]) -> u32 {
+fn rs_mds_encode(bytes: [u8; 8]) -> u32 {
     // The RS matrix compresses each 64-bit key chunk into one S-box key word.
     let mut out = [0u8; 4];
     let mut row = 0usize;
@@ -158,7 +154,7 @@ fn rs_mds_encode(bytes: &[u8; 8]) -> u32 {
     u32::from_le_bytes(out)
 }
 
-#[inline(always)]
+#[inline]
 fn b(word: u32, idx: usize) -> u8 {
     ((word >> (idx * 8)) & 0xff) as u8
 }
@@ -230,36 +226,41 @@ fn expand_key<const N: usize>(key: &[u8; N], use_ct: bool) -> ([u32; 40], [u32; 
 
     let mut me = [0u32; 4];
     let mut mo = [0u32; 4];
-    let mut s = [0u32; 4];
+    let mut s_words = [0u32; 4];
 
-    let mut i = 0usize;
-    while i < words {
+    let mut word_idx = 0usize;
+    while word_idx < words {
         // Even and odd 32-bit words feed separate `h()` calls in the subkey
         // schedule, while the RS matrix derives the S-box key words in reverse
         // chunk order.
-        me[i] = u32::from_le_bytes(key[i * 8..i * 8 + 4].try_into().unwrap());
-        mo[i] = u32::from_le_bytes(key[i * 8 + 4..i * 8 + 8].try_into().unwrap());
-        let chunk: &[u8; 8] = key[i * 8..i * 8 + 8].try_into().unwrap();
-        s[words - 1 - i] = rs_mds_encode(chunk);
-        i += 1;
+        me[word_idx] = u32::from_le_bytes(key[word_idx * 8..word_idx * 8 + 4].try_into().unwrap());
+        mo[word_idx] =
+            u32::from_le_bytes(key[word_idx * 8 + 4..word_idx * 8 + 8].try_into().unwrap());
+        let chunk: &[u8; 8] = key[word_idx * 8..word_idx * 8 + 8].try_into().unwrap();
+        s_words[words - 1 - word_idx] = rs_mds_encode(*chunk);
+        word_idx += 1;
     }
 
     let mut sub = [0u32; 40];
-    let mut j = 0usize;
-    while j < 20 {
+    let mut subkey_idx = 0usize;
+    while subkey_idx < 20 {
         // K[0..3] are input whitening, K[4..7] output whitening, and the
         // remaining 32 words supply the 16 rounds.
-        let a = h((2 * j as u32).wrapping_mul(RHO), &me, words, use_ct);
-        let b = h((2 * j as u32 + 1).wrapping_mul(RHO), &mo, words, use_ct).rotate_left(8);
-        sub[2 * j] = a.wrapping_add(b);
-        sub[2 * j + 1] = a.wrapping_add(b.wrapping_add(b)).rotate_left(9);
-        j += 1;
+        let even_input = u32::try_from(2 * subkey_idx).expect("subkey index fits in u32");
+        let odd_input = even_input + 1;
+        let even_g = h(even_input.wrapping_mul(RHO), &me, words, use_ct);
+        let odd_g = h(odd_input.wrapping_mul(RHO), &mo, words, use_ct).rotate_left(8);
+        sub[2 * subkey_idx] = even_g.wrapping_add(odd_g);
+        sub[2 * subkey_idx + 1] = even_g
+            .wrapping_add(odd_g.wrapping_add(odd_g))
+            .rotate_left(9);
+        subkey_idx += 1;
     }
 
-    (sub, s, words)
+    (sub, s_words, words)
 }
 
-#[inline(always)]
+#[inline]
 fn round_f(
     x0: u32,
     x1: u32,
@@ -519,8 +520,10 @@ mod tests {
         let bytes = s.as_bytes();
         let mut i = 0usize;
         while i < N {
-            let hi = (bytes[2 * i] as char).to_digit(16).unwrap() as u8;
-            let lo = (bytes[2 * i + 1] as char).to_digit(16).unwrap() as u8;
+            let hi = u8::try_from((bytes[2 * i] as char).to_digit(16).unwrap())
+                .expect("decoded hex nibble fits in u8");
+            let lo = u8::try_from((bytes[2 * i + 1] as char).to_digit(16).unwrap())
+                .expect("decoded hex nibble fits in u8");
             out[i] = (hi << 4) | lo;
             i += 1;
         }
@@ -570,8 +573,9 @@ mod tests {
     fn q_tables_match_ct_path() {
         let mut i = 0usize;
         while i < 256 {
-            assert_eq!(Q0[i], q_perm_ct(i as u8, 0));
-            assert_eq!(Q1[i], q_perm_ct(i as u8, 1));
+            let idx = u8::try_from(i).expect("Q table index fits in u8");
+            assert_eq!(Q0[i], q_perm_ct(idx, 0));
+            assert_eq!(Q1[i], q_perm_ct(idx, 1));
             i += 1;
         }
     }

@@ -1,11 +1,4 @@
-#![allow(
-    clippy::doc_markdown,
-    clippy::inline_always,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate
-)]
-
-//! CTR_DRBG from NIST SP 800-90A Rev. 1 using AES-256 without a derivation
+//! `CTR_DRBG` from NIST SP 800-90A Rev. 1 using AES-256 without a derivation
 //! function.
 //!
 //! This implementation intentionally starts with the simplest approved AES
@@ -28,7 +21,7 @@ const SEED_LEN: usize = KEY_LEN + BLOCK_LEN;
 const MAX_REQUEST_BYTES: usize = 1 << 16; // 2^19 bits
 const RESEED_INTERVAL: u64 = 1 << 48;
 
-#[inline(always)]
+#[inline]
 fn increment_be(counter: &mut [u8; BLOCK_LEN]) {
     for b in counter.iter_mut().rev() {
         let (next, carry) = b.overflowing_add(1);
@@ -39,7 +32,7 @@ fn increment_be(counter: &mut [u8; BLOCK_LEN]) {
     }
 }
 
-/// CTR_DRBG with AES-256 and no derivation function.
+/// `CTR_DRBG` with AES-256 and no derivation function.
 pub struct CtrDrbgAes256 {
     key: [u8; KEY_LEN],
     v: [u8; BLOCK_LEN],
@@ -51,6 +44,7 @@ impl CtrDrbgAes256 {
     ///
     /// This is the SP 800-90A "no derivation function" form, so the seed
     /// material must already be fully conditioned to the required seed length.
+    #[must_use]
     pub fn new(seed_material: &[u8; SEED_LEN]) -> Self {
         let mut out = Self {
             key: [0u8; KEY_LEN],
@@ -86,6 +80,8 @@ impl CtrDrbgAes256 {
     /// rule as instantiate and reseed: if present, it must already be exactly
     /// one seed-length block of conditioned material.
     ///
+    /// # Panics
+    ///
     /// Panics if the request exceeds the SP 800-90A per-call limit or if the
     /// reseed counter has reached the mandated reseed interval.
     pub fn generate(&mut self, out: &mut [u8], additional_input: Option<&[u8; SEED_LEN]>) {
@@ -115,6 +111,7 @@ impl CtrDrbgAes256 {
     }
 
     /// Current reseed counter.
+    #[must_use]
     pub fn reseed_counter(&self) -> u64 {
         self.reseed_counter
     }
@@ -164,7 +161,9 @@ mod tests {
 
     #[test]
     fn same_seed_same_stream() {
-        let seed = core::array::from_fn::<u8, SEED_LEN, _>(|i| i as u8);
+        let seed = core::array::from_fn::<u8, SEED_LEN, _>(|i| {
+            u8::try_from(i).expect("seed byte index fits in u8")
+        });
         let mut a = CtrDrbgAes256::new(&seed);
         let mut b = CtrDrbgAes256::new(&seed);
 
@@ -178,8 +177,12 @@ mod tests {
 
     #[test]
     fn additional_input_changes_stream() {
-        let seed = core::array::from_fn::<u8, SEED_LEN, _>(|i| i as u8);
-        let add = core::array::from_fn::<u8, SEED_LEN, _>(|i| (255 - i) as u8);
+        let seed = core::array::from_fn::<u8, SEED_LEN, _>(|i| {
+            u8::try_from(i).expect("seed byte index fits in u8")
+        });
+        let add = core::array::from_fn::<u8, SEED_LEN, _>(|i| {
+            u8::try_from(255usize - i).expect("masked additional-input byte fits in u8")
+        });
 
         let mut plain = CtrDrbgAes256::new(&seed);
         let mut mixed = CtrDrbgAes256::new(&seed);

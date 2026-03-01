@@ -1,12 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::cast_possible_truncation,
-    clippy::inline_always,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate,
-    clippy::similar_names
-)]
-
 //! Camellia block cipher — CRYPTREC / ISO/IEC 18033-3 / RFC 3713.
 //!
 //! 128-bit block cipher with three standard key sizes:
@@ -66,47 +57,47 @@ struct Subkeys24 {
     ke: [u64; 6],
 }
 
-#[inline(always)]
+#[inline]
 fn sbox1(x: u8) -> u8 {
     SBOX1[x as usize]
 }
 
-#[inline(always)]
+#[inline]
 fn sbox1_ct(x: u8) -> u8 {
     crate::ct::eval_byte_sbox(&SBOX1_ANF, x)
 }
 
-#[inline(always)]
+#[inline]
 fn sbox2(x: u8) -> u8 {
     sbox1(x).rotate_left(1)
 }
 
-#[inline(always)]
+#[inline]
 fn sbox3(x: u8) -> u8 {
     sbox1(x).rotate_left(7)
 }
 
-#[inline(always)]
+#[inline]
 fn sbox4(x: u8) -> u8 {
     sbox1(x.rotate_left(1))
 }
 
-#[inline(always)]
+#[inline]
 fn sbox2_ct(x: u8) -> u8 {
     sbox1_ct(x).rotate_left(1)
 }
 
-#[inline(always)]
+#[inline]
 fn sbox3_ct(x: u8) -> u8 {
     sbox1_ct(x).rotate_left(7)
 }
 
-#[inline(always)]
+#[inline]
 fn sbox4_ct(x: u8) -> u8 {
     sbox1_ct(x.rotate_left(1))
 }
 
-#[inline(always)]
+#[inline]
 fn camellia_f(input: u64, subkey: u64) -> u64 {
     let x = (input ^ subkey).to_be_bytes();
 
@@ -131,7 +122,7 @@ fn camellia_f(input: u64, subkey: u64) -> u64 {
     ])
 }
 
-#[inline(always)]
+#[inline]
 fn camellia_f_ct(input: u64, subkey: u64) -> u64 {
     let x = (input ^ subkey).to_be_bytes();
 
@@ -156,44 +147,55 @@ fn camellia_f_ct(input: u64, subkey: u64) -> u64 {
     ])
 }
 
-#[inline(always)]
+#[inline]
 fn fl(x: u64, ke: u64) -> u64 {
-    let mut x1 = (x >> 32) as u32;
-    let mut x2 = x as u32;
-    let k1 = (ke >> 32) as u32;
-    let k2 = ke as u32;
+    let (mut x1, mut x2) = split_u64_words(x);
+    let (k1, k2) = split_u64_words(ke);
     x2 ^= (x1 & k1).rotate_left(1);
     x1 ^= x2 | k2;
-    ((x1 as u64) << 32) | (x2 as u64)
+    (u64::from(x1) << 32) | u64::from(x2)
 }
 
-#[inline(always)]
+#[inline]
 fn fl_inv(x: u64, ke: u64) -> u64 {
-    let mut y1 = (x >> 32) as u32;
-    let mut y2 = x as u32;
-    let k1 = (ke >> 32) as u32;
-    let k2 = ke as u32;
+    let (mut y1, mut y2) = split_u64_words(x);
+    let (k1, k2) = split_u64_words(ke);
     y1 ^= y2 | k2;
     y2 ^= (y1 & k1).rotate_left(1);
-    ((y1 as u64) << 32) | (y2 as u64)
+    (u64::from(y1) << 32) | u64::from(y2)
 }
 
-#[inline(always)]
+#[inline]
 fn halves(x: u128) -> (u64, u64) {
-    ((x >> 64) as u64, x as u64)
+    let bytes = x.to_be_bytes();
+    (
+        u64::from_be_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]),
+        u64::from_be_bytes([
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        ]),
+    )
 }
 
-#[inline(always)]
+#[inline]
+fn split_u64_words(x: u64) -> (u32, u32) {
+    let bytes = x.to_be_bytes();
+    (
+        u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+    )
+}
+
+#[inline]
 fn rot_pair(x: u128, bits: u32) -> (u64, u64) {
     halves(x.rotate_left(bits))
 }
 
 fn derive_ka(kl: u128, kr: u128, use_ct: bool) -> u128 {
     let x = kl ^ kr;
-    let mut d1 = (x >> 64) as u64;
-    let mut d2 = x as u64;
-    let kl_l = (kl >> 64) as u64;
-    let kl_r = kl as u64;
+    let (mut d1, mut d2) = halves(x);
+    let (kl_l, kl_r) = halves(kl);
 
     let f = if use_ct { camellia_f_ct } else { camellia_f };
 
@@ -204,7 +206,7 @@ fn derive_ka(kl: u128, kr: u128, use_ct: bool) -> u128 {
     d2 ^= f(d1, SIGMA[2]);
     d1 ^= f(d2, SIGMA[3]);
 
-    ((d1 as u128) << 64) | (d2 as u128)
+    (u128::from(d1) << 64) | u128::from(d2)
 }
 
 fn derive_kb(ka: u128, kr: u128, use_ct: bool) -> u128 {
@@ -218,28 +220,31 @@ fn derive_kb(ka: u128, kr: u128, use_ct: bool) -> u128 {
     d2 ^= f(d1, SIGMA[4]);
     d1 ^= f(d2, SIGMA[5]);
 
-    ((d1 as u128) << 64) | (d2 as u128)
+    (u128::from(d1) << 64) | u128::from(d2)
 }
 
 fn expand_128(key: &[u8; 16], use_ct: bool) -> Subkeys18 {
     let kl = u128::from_be_bytes(*key);
     let ka = derive_ka(kl, 0, use_ct);
 
-    let kl0 = rot_pair(kl, 0);
-    let kl15 = rot_pair(kl, 15);
-    let kl45 = rot_pair(kl, 45);
-    let kl60 = rot_pair(kl, 60);
-    let kl77 = rot_pair(kl, 77);
-    let kl94 = rot_pair(kl, 94);
-    let kl111 = rot_pair(kl, 111);
-
-    let ka0 = rot_pair(ka, 0);
-    let ka15 = rot_pair(ka, 15);
-    let ka30 = rot_pair(ka, 30);
-    let ka45 = rot_pair(ka, 45);
-    let ka60 = rot_pair(ka, 60);
-    let ka94 = rot_pair(ka, 94);
-    let ka111 = rot_pair(ka, 111);
+    let left_key_rotations = [
+        rot_pair(kl, 0),
+        rot_pair(kl, 15),
+        rot_pair(kl, 45),
+        rot_pair(kl, 60),
+        rot_pair(kl, 77),
+        rot_pair(kl, 94),
+        rot_pair(kl, 111),
+    ];
+    let aux_key_rotations = [
+        rot_pair(ka, 0),
+        rot_pair(ka, 15),
+        rot_pair(ka, 30),
+        rot_pair(ka, 45),
+        rot_pair(ka, 60),
+        rot_pair(ka, 94),
+        rot_pair(ka, 111),
+    ];
 
     let mut out = Subkeys18 {
         kw: [0; 4],
@@ -247,33 +252,33 @@ fn expand_128(key: &[u8; 16], use_ct: bool) -> Subkeys18 {
         ke: [0; 4],
     };
 
-    out.kw[0] = kl0.0;
-    out.kw[1] = kl0.1;
-    out.kw[2] = ka111.0;
-    out.kw[3] = ka111.1;
+    out.kw[0] = left_key_rotations[0].0;
+    out.kw[1] = left_key_rotations[0].1;
+    out.kw[2] = aux_key_rotations[6].0;
+    out.kw[3] = aux_key_rotations[6].1;
 
-    out.k[0] = ka0.0;
-    out.k[1] = ka0.1;
-    out.k[2] = kl15.0;
-    out.k[3] = kl15.1;
-    out.k[4] = ka15.0;
-    out.k[5] = ka15.1;
-    out.ke[0] = ka30.0;
-    out.ke[1] = ka30.1;
-    out.k[6] = kl45.0;
-    out.k[7] = kl45.1;
-    out.k[8] = ka45.0;
-    out.k[9] = kl60.1;
-    out.k[10] = ka60.0;
-    out.k[11] = ka60.1;
-    out.ke[2] = kl77.0;
-    out.ke[3] = kl77.1;
-    out.k[12] = kl94.0;
-    out.k[13] = kl94.1;
-    out.k[14] = ka94.0;
-    out.k[15] = ka94.1;
-    out.k[16] = kl111.0;
-    out.k[17] = kl111.1;
+    out.k[0] = aux_key_rotations[0].0;
+    out.k[1] = aux_key_rotations[0].1;
+    out.k[2] = left_key_rotations[1].0;
+    out.k[3] = left_key_rotations[1].1;
+    out.k[4] = aux_key_rotations[1].0;
+    out.k[5] = aux_key_rotations[1].1;
+    out.ke[0] = aux_key_rotations[2].0;
+    out.ke[1] = aux_key_rotations[2].1;
+    out.k[6] = left_key_rotations[2].0;
+    out.k[7] = left_key_rotations[2].1;
+    out.k[8] = aux_key_rotations[3].0;
+    out.k[9] = left_key_rotations[3].1;
+    out.k[10] = aux_key_rotations[4].0;
+    out.k[11] = aux_key_rotations[4].1;
+    out.ke[2] = left_key_rotations[4].0;
+    out.ke[3] = left_key_rotations[4].1;
+    out.k[12] = left_key_rotations[5].0;
+    out.k[13] = left_key_rotations[5].1;
+    out.k[14] = aux_key_rotations[5].0;
+    out.k[15] = aux_key_rotations[5].1;
+    out.k[16] = left_key_rotations[6].0;
+    out.k[17] = left_key_rotations[6].1;
 
     out
 }
@@ -282,26 +287,31 @@ fn expand_192_256(kl: u128, kr: u128, use_ct: bool) -> Subkeys24 {
     let ka = derive_ka(kl, kr, use_ct);
     let kb = derive_kb(ka, kr, use_ct);
 
-    let kl0 = rot_pair(kl, 0);
-    let kl45 = rot_pair(kl, 45);
-    let kl60 = rot_pair(kl, 60);
-    let kl77 = rot_pair(kl, 77);
-    let kl111 = rot_pair(kl, 111);
-
-    let kr15 = rot_pair(kr, 15);
-    let kr30 = rot_pair(kr, 30);
-    let kr60 = rot_pair(kr, 60);
-    let kr94 = rot_pair(kr, 94);
-
-    let ka15 = rot_pair(ka, 15);
-    let ka45 = rot_pair(ka, 45);
-    let ka77 = rot_pair(ka, 77);
-    let ka94 = rot_pair(ka, 94);
-
-    let kb0 = rot_pair(kb, 0);
-    let kb30 = rot_pair(kb, 30);
-    let kb60 = rot_pair(kb, 60);
-    let kb111 = rot_pair(kb, 111);
+    let left_key_rotations = [
+        rot_pair(kl, 0),
+        rot_pair(kl, 45),
+        rot_pair(kl, 60),
+        rot_pair(kl, 77),
+        rot_pair(kl, 111),
+    ];
+    let right_key_rotations = [
+        rot_pair(kr, 15),
+        rot_pair(kr, 30),
+        rot_pair(kr, 60),
+        rot_pair(kr, 94),
+    ];
+    let aux_key_rotations = [
+        rot_pair(ka, 15),
+        rot_pair(ka, 45),
+        rot_pair(ka, 77),
+        rot_pair(ka, 94),
+    ];
+    let secondary_key_rotations = [
+        rot_pair(kb, 0),
+        rot_pair(kb, 30),
+        rot_pair(kb, 60),
+        rot_pair(kb, 111),
+    ];
 
     let mut out = Subkeys24 {
         kw: [0; 4],
@@ -309,41 +319,41 @@ fn expand_192_256(kl: u128, kr: u128, use_ct: bool) -> Subkeys24 {
         ke: [0; 6],
     };
 
-    out.kw[0] = kl0.0;
-    out.kw[1] = kl0.1;
-    out.kw[2] = kb111.0;
-    out.kw[3] = kb111.1;
+    out.kw[0] = left_key_rotations[0].0;
+    out.kw[1] = left_key_rotations[0].1;
+    out.kw[2] = secondary_key_rotations[3].0;
+    out.kw[3] = secondary_key_rotations[3].1;
 
-    out.k[0] = kb0.0;
-    out.k[1] = kb0.1;
-    out.k[2] = kr15.0;
-    out.k[3] = kr15.1;
-    out.k[4] = ka15.0;
-    out.k[5] = ka15.1;
-    out.ke[0] = kr30.0;
-    out.ke[1] = kr30.1;
-    out.k[6] = kb30.0;
-    out.k[7] = kb30.1;
-    out.k[8] = kl45.0;
-    out.k[9] = kl45.1;
-    out.k[10] = ka45.0;
-    out.k[11] = ka45.1;
-    out.ke[2] = kl60.0;
-    out.ke[3] = kl60.1;
-    out.k[12] = kr60.0;
-    out.k[13] = kr60.1;
-    out.k[14] = kb60.0;
-    out.k[15] = kb60.1;
-    out.k[16] = kl77.0;
-    out.k[17] = kl77.1;
-    out.ke[4] = ka77.0;
-    out.ke[5] = ka77.1;
-    out.k[18] = kr94.0;
-    out.k[19] = kr94.1;
-    out.k[20] = ka94.0;
-    out.k[21] = ka94.1;
-    out.k[22] = kl111.0;
-    out.k[23] = kl111.1;
+    out.k[0] = secondary_key_rotations[0].0;
+    out.k[1] = secondary_key_rotations[0].1;
+    out.k[2] = right_key_rotations[0].0;
+    out.k[3] = right_key_rotations[0].1;
+    out.k[4] = aux_key_rotations[0].0;
+    out.k[5] = aux_key_rotations[0].1;
+    out.ke[0] = right_key_rotations[1].0;
+    out.ke[1] = right_key_rotations[1].1;
+    out.k[6] = secondary_key_rotations[1].0;
+    out.k[7] = secondary_key_rotations[1].1;
+    out.k[8] = left_key_rotations[1].0;
+    out.k[9] = left_key_rotations[1].1;
+    out.k[10] = aux_key_rotations[1].0;
+    out.k[11] = aux_key_rotations[1].1;
+    out.ke[2] = left_key_rotations[2].0;
+    out.ke[3] = left_key_rotations[2].1;
+    out.k[12] = right_key_rotations[2].0;
+    out.k[13] = right_key_rotations[2].1;
+    out.k[14] = secondary_key_rotations[2].0;
+    out.k[15] = secondary_key_rotations[2].1;
+    out.k[16] = left_key_rotations[3].0;
+    out.k[17] = left_key_rotations[3].1;
+    out.ke[4] = aux_key_rotations[2].0;
+    out.ke[5] = aux_key_rotations[2].1;
+    out.k[18] = right_key_rotations[3].0;
+    out.k[19] = right_key_rotations[3].1;
+    out.k[20] = aux_key_rotations[3].0;
+    out.k[21] = aux_key_rotations[3].1;
+    out.k[22] = left_key_rotations[4].0;
+    out.k[23] = left_key_rotations[4].1;
 
     out
 }
@@ -512,6 +522,7 @@ pub struct Camellia128 {
 }
 
 impl Camellia128 {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             subkeys: expand_128(key, false),
@@ -524,10 +535,12 @@ impl Camellia128 {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_18(*block, &self.subkeys, false)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_18(*block, &self.subkeys, false)
     }
@@ -539,6 +552,7 @@ pub struct Camellia128Ct {
 }
 
 impl Camellia128Ct {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             subkeys: expand_128(key, true),
@@ -551,10 +565,12 @@ impl Camellia128Ct {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_18(*block, &self.subkeys, true)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_18(*block, &self.subkeys, true)
     }
@@ -566,10 +582,15 @@ pub struct Camellia192 {
 }
 
 impl Camellia192 {
+    #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
-        let kl = u128::from_be_bytes(key[..16].try_into().unwrap());
-        let tail = u64::from_be_bytes(key[16..].try_into().unwrap());
-        let kr = ((tail as u128) << 64) | ((!tail) as u128);
+        let mut kl_bytes = [0u8; 16];
+        kl_bytes.copy_from_slice(&key[..16]);
+        let kl = u128::from_be_bytes(kl_bytes);
+        let mut tail_bytes = [0u8; 8];
+        tail_bytes.copy_from_slice(&key[16..]);
+        let tail = u64::from_be_bytes(tail_bytes);
+        let kr = (u128::from(tail) << 64) | u128::from(!tail);
         Self {
             subkeys: expand_192_256(kl, kr, false),
         }
@@ -581,10 +602,12 @@ impl Camellia192 {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, false)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, false)
     }
@@ -596,10 +619,15 @@ pub struct Camellia192Ct {
 }
 
 impl Camellia192Ct {
+    #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
-        let kl = u128::from_be_bytes(key[..16].try_into().unwrap());
-        let tail = u64::from_be_bytes(key[16..].try_into().unwrap());
-        let kr = ((tail as u128) << 64) | ((!tail) as u128);
+        let mut kl_bytes = [0u8; 16];
+        kl_bytes.copy_from_slice(&key[..16]);
+        let kl = u128::from_be_bytes(kl_bytes);
+        let mut tail_bytes = [0u8; 8];
+        tail_bytes.copy_from_slice(&key[16..]);
+        let tail = u64::from_be_bytes(tail_bytes);
+        let kr = (u128::from(tail) << 64) | u128::from(!tail);
         Self {
             subkeys: expand_192_256(kl, kr, true),
         }
@@ -611,10 +639,12 @@ impl Camellia192Ct {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, true)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, true)
     }
@@ -626,9 +656,14 @@ pub struct Camellia256 {
 }
 
 impl Camellia256 {
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
-        let kl = u128::from_be_bytes(key[..16].try_into().unwrap());
-        let kr = u128::from_be_bytes(key[16..].try_into().unwrap());
+        let mut left_key_bytes = [0u8; 16];
+        left_key_bytes.copy_from_slice(&key[..16]);
+        let kl = u128::from_be_bytes(left_key_bytes);
+        let mut right_key_bytes = [0u8; 16];
+        right_key_bytes.copy_from_slice(&key[16..]);
+        let kr = u128::from_be_bytes(right_key_bytes);
         Self {
             subkeys: expand_192_256(kl, kr, false),
         }
@@ -640,10 +675,12 @@ impl Camellia256 {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, false)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, false)
     }
@@ -655,9 +692,14 @@ pub struct Camellia256Ct {
 }
 
 impl Camellia256Ct {
+    #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
-        let kl = u128::from_be_bytes(key[..16].try_into().unwrap());
-        let kr = u128::from_be_bytes(key[16..].try_into().unwrap());
+        let mut left_key_bytes = [0u8; 16];
+        left_key_bytes.copy_from_slice(&key[..16]);
+        let kl = u128::from_be_bytes(left_key_bytes);
+        let mut right_key_bytes = [0u8; 16];
+        right_key_bytes.copy_from_slice(&key[16..]);
+        let kr = u128::from_be_bytes(right_key_bytes);
         Self {
             subkeys: expand_192_256(kl, kr, true),
         }
@@ -669,10 +711,12 @@ impl Camellia256Ct {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, true)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, true)
     }
@@ -847,5 +891,22 @@ mod tests {
         let cipher = Camellia256Ct::new(&key);
         assert_eq!(cipher.encrypt_block(&pt), ct);
         assert_eq!(cipher.decrypt_block(&ct), pt);
+    }
+
+    #[test]
+    fn camellia128_matches_openssl_ecb() {
+        let key_hex = "0123456789abcdeffedcba9876543210";
+        let pt_hex = "0123456789abcdeffedcba9876543210";
+        let Some(expected) =
+            crate::ct::run_openssl_enc("-camellia-128-ecb", key_hex, None, &h16(pt_hex))
+        else {
+            return;
+        };
+
+        let cipher = Camellia128::new(&h16(key_hex));
+        assert_eq!(
+            cipher.encrypt_block(&h16(pt_hex)).as_slice(),
+            expected.as_slice()
+        );
     }
 }

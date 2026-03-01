@@ -1,9 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::cast_possible_truncation,
-    clippy::inline_always
-)]
-
 //! Serpent block cipher — AES submission / FSE 1998.
 //!
 //! 128-bit block cipher with three standard key sizes:
@@ -62,12 +56,12 @@ const fn build_sboxes_anf(sboxes: &[[u8; 16]; 8]) -> [[u16; 4]; 8] {
 const SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&SBOXES);
 const INV_SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&INV_SBOXES);
 
-#[inline(always)]
-fn sbox_ct_nibble(input: u8, sbox_anf: &[u16; 4]) -> u8 {
+#[inline]
+fn sbox_ct_nibble(input: u8, sbox_anf: [u16; 4]) -> u8 {
     crate::ct::eval_nibble_sbox(sbox_anf, input)
 }
 
-#[inline(always)]
+#[inline]
 fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
     let [x0, x1, x2, x3] = words;
     let mut out = [0u32; 4];
@@ -78,54 +72,57 @@ fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
             | (((x2 >> bit) & 1) << 2)
             | (((x3 >> bit) & 1) << 3)) as usize;
         let s = table[nibble];
-        out[0] |= ((s & 1) as u32) << bit;
-        out[1] |= (((s >> 1) & 1) as u32) << bit;
-        out[2] |= (((s >> 2) & 1) as u32) << bit;
-        out[3] |= (((s >> 3) & 1) as u32) << bit;
+        out[0] |= u32::from(s & 1) << bit;
+        out[1] |= u32::from((s >> 1) & 1) << bit;
+        out[2] |= u32::from((s >> 2) & 1) << bit;
+        out[3] |= u32::from((s >> 3) & 1) << bit;
         bit += 1;
     }
     out
 }
 
-#[inline(always)]
-fn apply_sbox_ct(words: [u32; 4], sbox_anf: &[u16; 4]) -> [u32; 4] {
+#[inline]
+fn apply_sbox_ct(words: [u32; 4], sbox_anf: [u16; 4]) -> [u32; 4] {
     let [x0, x1, x2, x3] = words;
     let mut out = [0u32; 4];
     let mut bit = 0u32;
     while bit < 32 {
-        let nibble = (((x0 >> bit) & 1)
-            | (((x1 >> bit) & 1) << 1)
-            | (((x2 >> bit) & 1) << 2)
-            | (((x3 >> bit) & 1) << 3)) as u8;
+        let nibble = u8::try_from(
+            ((x0 >> bit) & 1)
+                | (((x1 >> bit) & 1) << 1)
+                | (((x2 >> bit) & 1) << 2)
+                | (((x3 >> bit) & 1) << 3),
+        )
+        .expect("bit-packed nibble fits in u8");
         let s = sbox_ct_nibble(nibble, sbox_anf);
-        out[0] |= ((s & 1) as u32) << bit;
-        out[1] |= (((s >> 1) & 1) as u32) << bit;
-        out[2] |= (((s >> 2) & 1) as u32) << bit;
-        out[3] |= (((s >> 3) & 1) as u32) << bit;
+        out[0] |= u32::from(s & 1) << bit;
+        out[1] |= u32::from((s >> 1) & 1) << bit;
+        out[2] |= u32::from((s >> 2) & 1) << bit;
+        out[3] |= u32::from((s >> 3) & 1) << bit;
         bit += 1;
     }
     out
 }
 
-#[inline(always)]
+#[inline]
 fn apply_sbox_round(words: [u32; 4], round: usize, use_ct: bool) -> [u32; 4] {
     if use_ct {
-        apply_sbox_ct(words, &SBOXES_ANF[round & 7])
+        apply_sbox_ct(words, SBOXES_ANF[round & 7])
     } else {
         apply_sbox_table(words, &SBOXES[round & 7])
     }
 }
 
-#[inline(always)]
+#[inline]
 fn apply_inv_sbox_round(words: [u32; 4], round: usize, use_ct: bool) -> [u32; 4] {
     if use_ct {
-        apply_sbox_ct(words, &INV_SBOXES_ANF[round & 7])
+        apply_sbox_ct(words, INV_SBOXES_ANF[round & 7])
     } else {
         apply_sbox_table(words, &INV_SBOXES[round & 7])
     }
 }
 
-#[inline(always)]
+#[inline]
 fn lt(words: [u32; 4]) -> [u32; 4] {
     let mut x0 = words[0].rotate_left(13);
     let mut x2 = words[2].rotate_left(3);
@@ -140,7 +137,7 @@ fn lt(words: [u32; 4]) -> [u32; 4] {
     [x0, x1, x2, x3]
 }
 
-#[inline(always)]
+#[inline]
 fn inv_lt(words: [u32; 4]) -> [u32; 4] {
     let mut x0 = words[0].rotate_right(5);
     let mut x1 = words[1];
@@ -157,7 +154,7 @@ fn inv_lt(words: [u32; 4]) -> [u32; 4] {
     [x0, x1, x2, x3]
 }
 
-#[inline(always)]
+#[inline]
 fn reverse_bytes<const N: usize>(input: &[u8; N]) -> [u8; N] {
     let mut out = [0u8; N];
     let mut i = 0usize;
@@ -168,7 +165,7 @@ fn reverse_bytes<const N: usize>(input: &[u8; N]) -> [u8; N] {
     out
 }
 
-#[inline(always)]
+#[inline]
 fn words_from_block_internal(block: &[u8; 16]) -> [u32; 4] {
     [
         u32::from_le_bytes(block[0..4].try_into().unwrap()),
@@ -178,7 +175,7 @@ fn words_from_block_internal(block: &[u8; 16]) -> [u32; 4] {
     ]
 }
 
-#[inline(always)]
+#[inline]
 fn block_from_words_internal(words: [u32; 4]) -> [u8; 16] {
     let mut out = [0u8; 16];
     out[0..4].copy_from_slice(&words[0].to_le_bytes());
@@ -204,9 +201,13 @@ fn expand_round_keys<const N: usize>(user_key: &[u8; N], use_ct: bool) -> [[u32;
         i += 1;
     }
     while i < 140 {
-        words[i] =
-            (words[i - 8] ^ words[i - 5] ^ words[i - 3] ^ words[i - 1] ^ PHI ^ ((i - 8) as u32))
-                .rotate_left(11);
+        words[i] = (words[i - 8]
+            ^ words[i - 5]
+            ^ words[i - 3]
+            ^ words[i - 1]
+            ^ PHI
+            ^ u32::try_from(i - 8).expect("round-key index fits in u32"))
+        .rotate_left(11);
         i += 1;
     }
 
@@ -221,7 +222,7 @@ fn expand_round_keys<const N: usize>(user_key: &[u8; N], use_ct: bool) -> [[u32;
             words[8 + 4 * round + 3],
         ];
         out[round] = if use_ct {
-            apply_sbox_ct(input, &SBOXES_ANF[sbox_idx])
+            apply_sbox_ct(input, SBOXES_ANF[sbox_idx])
         } else {
             apply_sbox_table(input, &SBOXES[sbox_idx])
         };
@@ -445,7 +446,7 @@ mod tests {
         while i < bytes.len() {
             let hi = (bytes[i] as char).to_digit(16).unwrap();
             let lo = (bytes[i + 1] as char).to_digit(16).unwrap();
-            out.push(((hi << 4) | lo) as u8);
+            out.push(u8::try_from((hi << 4) | lo).expect("decoded hex byte fits in u8"));
             i += 2;
         }
         out
@@ -457,11 +458,11 @@ mod tests {
             for x in 0u8..16 {
                 assert_eq!(
                     SBOXES[sbox][x as usize],
-                    sbox_ct_nibble(x, &SBOXES_ANF[sbox])
+                    sbox_ct_nibble(x, SBOXES_ANF[sbox])
                 );
                 assert_eq!(
                     INV_SBOXES[sbox][x as usize],
-                    sbox_ct_nibble(x, &INV_SBOXES_ANF[sbox])
+                    sbox_ct_nibble(x, INV_SBOXES_ANF[sbox])
                 );
             }
         }

@@ -1,5 +1,3 @@
-#![allow(clippy::inline_always, clippy::new_without_default)]
-
 //! SHA-3 (Keccak-f[1600]) from FIPS 202.
 //!
 //! This module implements the fixed-output SHA-3 family:
@@ -49,7 +47,7 @@ const RC: [u64; 24] = [
     0x8000_0000_8000_8008,
 ];
 
-#[inline(always)]
+#[inline]
 fn keccak_f1600(state: &mut [u64; 25]) {
     for &rc in &RC {
         let mut c = [0u64; 5];
@@ -84,7 +82,7 @@ fn keccak_f1600(state: &mut [u64; 25]) {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn absorb_block<const RATE: usize>(state: &mut [u64; 25], block: &[u8; RATE]) {
     debug_assert_eq!(RATE % 8, 0, "Keccak rate must be lane-aligned");
     let lanes = RATE / 8;
@@ -134,7 +132,7 @@ impl<const RATE: usize> XofState<RATE> {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn state_to_rate_bytes<const RATE: usize>(state: &[u64; 25]) -> [u8; RATE] {
     let mut rate_bytes = [0u8; RATE];
     let lanes = RATE / 8;
@@ -235,10 +233,17 @@ macro_rules! define_sha3 {
             inner: Keccak<$rate>,
         }
 
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
         impl $name {
             pub const BLOCK_LEN: usize = $rate;
             pub const OUTPUT_LEN: usize = $out_len;
 
+            #[must_use]
             pub fn new() -> Self {
                 Self {
                     inner: Keccak::new(),
@@ -249,10 +254,12 @@ macro_rules! define_sha3 {
                 self.inner.update(data);
             }
 
+            #[must_use]
             pub fn finalize(self) -> [u8; $out_len] {
                 self.inner.finalize()
             }
 
+            #[must_use]
             pub fn digest(data: &[u8]) -> [u8; $out_len] {
                 let mut h = Self::new();
                 h.update(data);
@@ -306,9 +313,16 @@ macro_rules! define_shake {
             inner: XofState<$rate>,
         }
 
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
         impl $name {
             pub const BLOCK_LEN: usize = $rate;
 
+            #[must_use]
             pub fn new() -> Self {
                 Self {
                     inner: XofState::Absorbing(Keccak::new()),
@@ -473,5 +487,41 @@ mod tests {
                 + "d75dc4ddd8c0f200cb05019d67b592f6"
                 + "fc821c49479ab48640292eacb3b7c4be"
         );
+    }
+
+    #[test]
+    fn sha3_224_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-224", "-binary"], msg) else {
+            return;
+        };
+        assert_eq!(Sha3_224::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha3_256_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-256", "-binary"], msg) else {
+            return;
+        };
+        assert_eq!(Sha3_256::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha3_384_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-384", "-binary"], msg) else {
+            return;
+        };
+        assert_eq!(Sha3_384::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    #[test]
+    fn sha3_512_matches_openssl() {
+        let msg = b"The quick brown fox jumps over the lazy dog";
+        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-512", "-binary"], msg) else {
+            return;
+        };
+        assert_eq!(Sha3_512::digest(msg).as_slice(), expected.as_slice());
     }
 }

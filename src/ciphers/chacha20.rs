@@ -1,28 +1,20 @@
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::doc_markdown,
-    clippy::inline_always,
-    clippy::must_use_candidate,
-    clippy::trivially_copy_pass_by_ref
-)]
-
-//! ChaCha20 and XChaCha20 stream ciphers.
+//! `ChaCha20` and `XChaCha20` stream ciphers.
 //!
 //! `ChaCha20` follows RFC 8439: 20 rounds, 32-byte key, 12-byte nonce, and a
-//! 32-bit block counter. `XChaCha20` derives a one-time subkey with HChaCha20
+//! 32-bit block counter. `XChaCha20` derives a one-time subkey with `HChaCha20`
 //! from the first 16 bytes of a 24-byte nonce, then uses the remaining 8 bytes
-//! in the IETF ChaCha20 layout.
+//! in the IETF `ChaCha20` layout.
 
 const CONSTANTS: [u8; 16] = *b"expand 32-byte k";
 
-#[inline(always)]
+#[inline]
 fn load_u32_le(bytes: &[u8]) -> u32 {
     let mut tmp = [0u8; 4];
     tmp.copy_from_slice(bytes);
     u32::from_le_bytes(tmp)
 }
 
-#[inline(always)]
+#[inline]
 fn quarter_round(state: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
     let (mut xa, mut xb, mut xc, mut xd) = (state[a], state[b], state[c], state[d]);
 
@@ -143,7 +135,7 @@ fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     out
 }
 
-/// ChaCha20 stream cipher (RFC 8439 / IETF variant).
+/// `ChaCha20` stream cipher (RFC 8439 / IETF variant).
 pub struct ChaCha20 {
     state: [u32; 16],
     block: [u8; 64],
@@ -151,12 +143,14 @@ pub struct ChaCha20 {
 }
 
 impl ChaCha20 {
-    /// Create a ChaCha20 instance with a 32-byte key, 12-byte nonce, and counter 0.
+    /// Create a `ChaCha20` instance with a 32-byte key, 12-byte nonce, and counter 0.
+    #[must_use]
     pub fn new(key: &[u8; 32], nonce: &[u8; 12]) -> Self {
         Self::with_counter(key, nonce, 0)
     }
 
-    /// Create a ChaCha20 instance at an arbitrary 64-byte block counter.
+    /// Create a `ChaCha20` instance at an arbitrary 64-byte block counter.
+    #[must_use]
     pub fn with_counter(key: &[u8; 32], nonce: &[u8; 12], counter: u32) -> Self {
         Self {
             state: state_from_key_nonce(key, nonce, counter),
@@ -180,7 +174,7 @@ impl ChaCha20 {
         self.state[12] = self.state[12].wrapping_add(1);
     }
 
-    /// XOR the ChaCha20 keystream into `buf` in place.
+    /// XOR the `ChaCha20` keystream into `buf` in place.
     pub fn apply_keystream(&mut self, buf: &mut [u8]) {
         let mut done = 0usize;
         while done < buf.len() {
@@ -196,7 +190,7 @@ impl ChaCha20 {
         }
     }
 
-    /// Fill `buf` with keystream bytes by XORing into the existing contents.
+    /// Fill `buf` with keystream bytes by `XORing` into the existing contents.
     pub fn fill(&mut self, buf: &mut [u8]) {
         self.apply_keystream(buf);
     }
@@ -224,18 +218,20 @@ impl Drop for ChaCha20 {
     }
 }
 
-/// XChaCha20 stream cipher using HChaCha20-derived subkeys.
+/// `XChaCha20` stream cipher using HChaCha20-derived subkeys.
 pub struct XChaCha20 {
     inner: ChaCha20,
 }
 
 impl XChaCha20 {
-    /// Create an XChaCha20 instance with a 32-byte key and 24-byte nonce.
+    /// Create an `XChaCha20` instance with a 32-byte key and 24-byte nonce.
+    #[must_use]
     pub fn new(key: &[u8; 32], nonce: &[u8; 24]) -> Self {
         Self::with_counter(key, nonce, 0)
     }
 
-    /// Create an XChaCha20 instance at an arbitrary 64-byte block counter.
+    /// Create an `XChaCha20` instance at an arbitrary 64-byte block counter.
+    #[must_use]
     pub fn with_counter(key: &[u8; 32], nonce: &[u8; 24], counter: u32) -> Self {
         let mut prefix = [0u8; 16];
         prefix.copy_from_slice(&nonce[..16]);
@@ -257,12 +253,12 @@ impl XChaCha20 {
         out
     }
 
-    /// XOR the XChaCha20 keystream into `buf` in place.
+    /// XOR the `XChaCha20` keystream into `buf` in place.
     pub fn apply_keystream(&mut self, buf: &mut [u8]) {
         self.inner.apply_keystream(buf);
     }
 
-    /// Fill `buf` with keystream bytes by XORing into the existing contents.
+    /// Fill `buf` with keystream bytes by `XORing` into the existing contents.
     pub fn fill(&mut self, buf: &mut [u8]) {
         self.inner.fill(buf);
     }

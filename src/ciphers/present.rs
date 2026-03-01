@@ -1,9 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::inline_always,
-    clippy::must_use_candidate
-)]
-
 //! PRESENT lightweight block cipher — CHES 2007 / ISO/IEC 29192-2.
 //!
 //! 64-bit block cipher with two standard key schedules:
@@ -34,65 +28,65 @@ const INV_SBOX: [u8; 16] = [
 const SBOX_ANF: [u16; 4] = crate::ct::build_nibble_sbox_anf(&SBOX);
 const INV_SBOX_ANF: [u16; 4] = crate::ct::build_nibble_sbox_anf(&INV_SBOX);
 
-#[inline(always)]
+#[inline]
 fn sbox_ct_nibble(input: u8) -> u8 {
-    crate::ct::eval_nibble_sbox(&SBOX_ANF, input)
+    crate::ct::eval_nibble_sbox(SBOX_ANF, input)
 }
 
-#[inline(always)]
+#[inline]
 fn inv_sbox_ct_nibble(input: u8) -> u8 {
-    crate::ct::eval_nibble_sbox(&INV_SBOX_ANF, input)
+    crate::ct::eval_nibble_sbox(INV_SBOX_ANF, input)
 }
 
-#[inline(always)]
+#[inline]
 fn sbox_layer(state: u64) -> u64 {
     let mut out = 0u64;
     let mut i = 0usize;
     while i < 16 {
         let nibble = ((state >> (4 * i)) & 0x0f) as usize;
-        out |= (SBOX[nibble] as u64) << (4 * i);
+        out |= u64::from(SBOX[nibble]) << (4 * i);
         i += 1;
     }
     out
 }
 
-#[inline(always)]
+#[inline]
 fn inv_sbox_layer(state: u64) -> u64 {
     let mut out = 0u64;
     let mut i = 0usize;
     while i < 16 {
         let nibble = ((state >> (4 * i)) & 0x0f) as usize;
-        out |= (INV_SBOX[nibble] as u64) << (4 * i);
+        out |= u64::from(INV_SBOX[nibble]) << (4 * i);
         i += 1;
     }
     out
 }
 
-#[inline(always)]
+#[inline]
 fn sbox_layer_ct(state: u64) -> u64 {
     let mut out = 0u64;
     let mut i = 0usize;
     while i < 16 {
         let nibble = ((state >> (4 * i)) & 0x0f) as u8;
-        out |= (sbox_ct_nibble(nibble) as u64) << (4 * i);
+        out |= u64::from(sbox_ct_nibble(nibble)) << (4 * i);
         i += 1;
     }
     out
 }
 
-#[inline(always)]
+#[inline]
 fn inv_sbox_layer_ct(state: u64) -> u64 {
     let mut out = 0u64;
     let mut i = 0usize;
     while i < 16 {
         let nibble = ((state >> (4 * i)) & 0x0f) as u8;
-        out |= (inv_sbox_ct_nibble(nibble) as u64) << (4 * i);
+        out |= u64::from(inv_sbox_ct_nibble(nibble)) << (4 * i);
         i += 1;
     }
     out
 }
 
-#[inline(always)]
+#[inline]
 fn p_layer(state: u64) -> u64 {
     let mut out = 0u64;
     let mut bit = 0usize;
@@ -105,7 +99,7 @@ fn p_layer(state: u64) -> u64 {
     out
 }
 
-#[inline(always)]
+#[inline]
 fn inv_p_layer(state: u64) -> u64 {
     let mut out = 0u64;
     let mut bit = 0usize;
@@ -169,7 +163,7 @@ fn present_decrypt_ct(state: u64, round_keys: &[u64; 32]) -> u64 {
 fn expand_round_keys_80(key: &[u8; 10]) -> [u64; 32] {
     let mut reg = 0u128;
     for &b in key {
-        reg = (reg << 8) | (b as u128);
+        reg = (reg << 8) | u128::from(b);
     }
 
     let mask80 = (1u128 << 80) - 1;
@@ -184,8 +178,8 @@ fn expand_round_keys_80(key: &[u8; 10]) -> [u64; 32] {
         reg = ((reg << 61) | (reg >> 19)) & mask80;
         let top = ((reg >> 76) & 0x0f) as usize;
         reg &= !(0x0fu128 << 76);
-        reg |= (SBOX[top] as u128) << 76;
-        reg ^= (round as u128) << 15;
+        reg |= u128::from(SBOX[top]) << 76;
+        reg ^= u128::from(round) << 15;
     }
 
     out
@@ -205,13 +199,13 @@ fn expand_round_keys_128(key: &[u8; 16]) -> [u64; 32] {
 
         let top = ((reg >> 124) & 0x0f) as usize;
         reg &= !(0x0fu128 << 124);
-        reg |= (SBOX[top] as u128) << 124;
+        reg |= u128::from(SBOX[top]) << 124;
 
         let next = ((reg >> 120) & 0x0f) as usize;
         reg &= !(0x0fu128 << 120);
-        reg |= (SBOX[next] as u128) << 120;
+        reg |= u128::from(SBOX[next]) << 120;
 
-        reg ^= (round as u128) << 62;
+        reg ^= u128::from(round) << 62;
     }
 
     out
@@ -223,6 +217,7 @@ pub struct Present80 {
 }
 
 impl Present80 {
+    #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
         Self {
             round_keys: expand_round_keys_80(key),
@@ -235,10 +230,12 @@ impl Present80 {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
@@ -250,6 +247,7 @@ pub struct Present80Ct {
 }
 
 impl Present80Ct {
+    #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
         Self {
             round_keys: expand_round_keys_80(key),
@@ -262,10 +260,12 @@ impl Present80Ct {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
@@ -277,6 +277,7 @@ pub struct Present128 {
 }
 
 impl Present128 {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             round_keys: expand_round_keys_128(key),
@@ -289,10 +290,12 @@ impl Present128 {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
@@ -304,6 +307,7 @@ pub struct Present128Ct {
 }
 
 impl Present128Ct {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             round_keys: expand_round_keys_128(key),
@@ -316,10 +320,12 @@ impl Present128Ct {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }

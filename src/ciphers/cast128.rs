@@ -1,10 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::inline_always,
-    clippy::must_use_candidate,
-    clippy::trivially_copy_pass_by_ref
-)]
-
 //! CAST-128 / CAST5 block cipher — RFC 2144.
 //!
 //! 64-bit block cipher with variable key sizes from 40 to 128 bits in 8-bit
@@ -22,7 +15,7 @@ use crate::BlockCipher;
 
 include!("cast128_tables.rs");
 
-#[inline(always)]
+#[inline]
 fn sbox(table: &[u32; 256], idx: u8, use_ct: bool) -> u32 {
     if use_ct {
         ct_lookup_u32(table, idx)
@@ -31,12 +24,12 @@ fn sbox(table: &[u32; 256], idx: u8, use_ct: bool) -> u32 {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn pack(bytes: &[u8; 16], a: usize, b: usize, c: usize, d: usize) -> u32 {
     u32::from_be_bytes([bytes[a], bytes[b], bytes[c], bytes[d]])
 }
 
-#[inline(always)]
+#[inline]
 fn unpack(bytes: &mut [u8; 16], start: usize, value: u32) {
     bytes[start..start + 4].copy_from_slice(&value.to_be_bytes());
 }
@@ -222,9 +215,9 @@ fn round_f(data: u32, km: u32, kr: u8, round: usize, use_ct: bool) -> u32 {
     // CAST cycles through three different mixing formulas. The modulo on the
     // round index is the exact RFC rule for selecting F1 / F2 / F3.
     let i = match round % 3 {
-        0 => km.wrapping_add(data).rotate_left(kr as u32),
-        1 => (km ^ data).rotate_left(kr as u32),
-        _ => km.wrapping_sub(data).rotate_left(kr as u32),
+        0 => km.wrapping_add(data).rotate_left(u32::from(kr)),
+        1 => (km ^ data).rotate_left(u32::from(kr)),
+        _ => km.wrapping_sub(data).rotate_left(u32::from(kr)),
     };
     let [ia, ib, ic, id] = i.to_be_bytes();
     match round % 3 {
@@ -290,7 +283,7 @@ fn expand_subkeys(key: &[u8], use_ct: bool) -> Subkeys {
     Subkeys { km, kr, rounds }
 }
 
-fn cast_encrypt(block: &[u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
+fn cast_encrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
     let mut l = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut r = u32::from_be_bytes(block[4..8].try_into().unwrap());
 
@@ -311,7 +304,7 @@ fn cast_encrypt(block: &[u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
     out
 }
 
-fn cast_decrypt(block: &[u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
+fn cast_decrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
     let mut l = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut r = u32::from_be_bytes(block[4..8].try_into().unwrap());
 
@@ -337,12 +330,14 @@ pub struct Cast128 {
 }
 
 impl Cast128 {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             subkeys: expand_subkeys(key, false),
         }
     }
 
+    #[must_use]
     pub fn with_key_bytes(key: &[u8]) -> Self {
         Self {
             subkeys: expand_subkeys(key, false),
@@ -361,12 +356,14 @@ impl Cast128 {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        cast_encrypt(block, &self.subkeys, false)
+        cast_encrypt(*block, &self.subkeys, false)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        cast_decrypt(block, &self.subkeys, false)
+        cast_decrypt(*block, &self.subkeys, false)
     }
 }
 
@@ -398,12 +395,14 @@ pub struct Cast128Ct {
 }
 
 impl Cast128Ct {
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
             subkeys: expand_subkeys(key, true),
         }
     }
 
+    #[must_use]
     pub fn with_key_bytes(key: &[u8]) -> Self {
         Self {
             subkeys: expand_subkeys(key, true),
@@ -422,12 +421,14 @@ impl Cast128Ct {
         out
     }
 
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        cast_encrypt(block, &self.subkeys, true)
+        cast_encrypt(*block, &self.subkeys, true)
     }
 
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
-        cast_decrypt(block, &self.subkeys, true)
+        cast_decrypt(*block, &self.subkeys, true)
     }
 }
 
@@ -469,7 +470,7 @@ mod tests {
         while i < bytes.len() {
             let hi = (bytes[i] as char).to_digit(16).unwrap();
             let lo = (bytes[i + 1] as char).to_digit(16).unwrap();
-            out.push(((hi << 4) | lo) as u8);
+            out.push(u8::try_from((hi << 4) | lo).expect("decoded hex byte fits in u8"));
             i += 2;
         }
         out
@@ -514,5 +515,19 @@ mod tests {
         let cipher_ct = Cast128Ct::with_key_bytes(&key);
         assert_eq!(cipher_ct.encrypt_block(&pt), ct);
         assert_eq!(cipher_ct.decrypt_block(&ct), pt);
+    }
+
+    #[test]
+    fn cast128_matches_openssl_ecb() {
+        let key_hex = "0123456712345678234567893456789a";
+        let pt_hex = "0123456789abcdef";
+        let pt: [u8; 8] = decode_hex(pt_hex).try_into().unwrap();
+        let Some(expected) = crate::ct::run_openssl_enc("-cast5-ecb", key_hex, None, &pt) else {
+            return;
+        };
+
+        let key: [u8; 16] = decode_hex(key_hex).try_into().unwrap();
+        let cipher = Cast128::new(&key);
+        assert_eq!(cipher.encrypt_block(&pt).as_slice(), expected.as_slice());
     }
 }

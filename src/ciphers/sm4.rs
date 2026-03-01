@@ -1,11 +1,3 @@
-#![allow(
-    clippy::cast_lossless,
-    clippy::doc_markdown,
-    clippy::explicit_iter_loop,
-    clippy::inline_always,
-    clippy::must_use_candidate
-)]
-
 //! SM4 block cipher (formerly SMS4) — GM/T 0002-2012 / GB/T 32907-2016.
 //!
 //! 128-bit block, 128-bit key, 32 rounds.
@@ -88,53 +80,53 @@ const CK: [u32; 32] = [
     0x646b_7279,
 ];
 
-#[inline(always)]
+#[inline]
 fn tau(x: u32) -> u32 {
-    ((SBOX[(x >> 24) as usize] as u32) << 24)
-        | ((SBOX[((x >> 16) & 0xff) as usize] as u32) << 16)
-        | ((SBOX[((x >> 8) & 0xff) as usize] as u32) << 8)
-        | (SBOX[(x & 0xff) as usize] as u32)
+    (u32::from(SBOX[(x >> 24) as usize]) << 24)
+        | (u32::from(SBOX[((x >> 16) & 0xff) as usize]) << 16)
+        | (u32::from(SBOX[((x >> 8) & 0xff) as usize]) << 8)
+        | u32::from(SBOX[(x & 0xff) as usize])
 }
 
-#[inline(always)]
+#[inline]
 fn sbox_ct_byte(input: u8) -> u8 {
     crate::ct::eval_byte_sbox(&SBOX_ANF, input)
 }
 
-#[inline(always)]
+#[inline]
 fn tau_ct(x: u32) -> u32 {
-    ((sbox_ct_byte((x >> 24) as u8) as u32) << 24)
-        | ((sbox_ct_byte(((x >> 16) & 0xff) as u8) as u32) << 16)
-        | ((sbox_ct_byte(((x >> 8) & 0xff) as u8) as u32) << 8)
-        | (sbox_ct_byte((x & 0xff) as u8) as u32)
+    (u32::from(sbox_ct_byte((x >> 24) as u8)) << 24)
+        | (u32::from(sbox_ct_byte(((x >> 16) & 0xff) as u8)) << 16)
+        | (u32::from(sbox_ct_byte(((x >> 8) & 0xff) as u8)) << 8)
+        | u32::from(sbox_ct_byte((x & 0xff) as u8))
 }
 
-#[inline(always)]
+#[inline]
 fn l(x: u32) -> u32 {
     x ^ x.rotate_left(2) ^ x.rotate_left(10) ^ x.rotate_left(18) ^ x.rotate_left(24)
 }
 
-#[inline(always)]
+#[inline]
 fn l_prime(x: u32) -> u32 {
     x ^ x.rotate_left(13) ^ x.rotate_left(23)
 }
 
-#[inline(always)]
+#[inline]
 fn t(x: u32) -> u32 {
     l(tau(x))
 }
 
-#[inline(always)]
+#[inline]
 fn t_prime(x: u32) -> u32 {
     l_prime(tau(x))
 }
 
-#[inline(always)]
+#[inline]
 fn t_ct(x: u32) -> u32 {
     l(tau_ct(x))
 }
 
-#[inline(always)]
+#[inline]
 fn t_prime_ct(x: u32) -> u32 {
     l_prime(tau_ct(x))
 }
@@ -182,7 +174,7 @@ fn sm4_core(block: &[u8; 16], rk: &[u32; 32]) -> [u8; 16] {
     let mut x2 = u32::from_be_bytes(block[8..12].try_into().unwrap());
     let mut x3 = u32::from_be_bytes(block[12..16].try_into().unwrap());
 
-    for &rki in rk.iter() {
+    for &rki in rk {
         let x4 = x0 ^ t(x1 ^ x2 ^ x3 ^ rki);
         x0 = x1;
         x1 = x2;
@@ -205,7 +197,7 @@ fn sm4_core_ct(block: &[u8; 16], rk: &[u32; 32]) -> [u8; 16] {
     let mut x2 = u32::from_be_bytes(block[8..12].try_into().unwrap());
     let mut x3 = u32::from_be_bytes(block[12..16].try_into().unwrap());
 
-    for &rki in rk.iter() {
+    for &rki in rk {
         let x4 = x0 ^ t_ct(x1 ^ x2 ^ x3 ^ rki);
         x0 = x1;
         x1 = x2;
@@ -240,6 +232,7 @@ pub type Sms4Ct = Sm4Ct;
 
 impl Sm4 {
     /// Construct SM4 from a 128-bit key.
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         let (enc_rk, dec_rk) = expand_round_keys(key);
         Self { enc_rk, dec_rk }
@@ -253,24 +246,27 @@ impl Sm4 {
     }
 
     /// Encrypt one 128-bit block.
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         sm4_core(block, &self.enc_rk)
     }
 
     /// Decrypt one 128-bit block.
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         sm4_core(block, &self.dec_rk)
     }
 }
 
 impl Sm4Ct {
-    /// Construct SM4Ct from a 128-bit key.
+    /// Construct `SM4Ct` from a 128-bit key.
+    #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         let (enc_rk, dec_rk) = expand_round_keys_ct(key);
         Self { enc_rk, dec_rk }
     }
 
-    /// Construct SM4Ct and wipe the caller-provided key buffer.
+    /// Construct `SM4Ct` and wipe the caller-provided key buffer.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
@@ -278,11 +274,13 @@ impl Sm4Ct {
     }
 
     /// Encrypt one 128-bit block.
+    #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         sm4_core_ct(block, &self.enc_rk)
     }
 
     /// Decrypt one 128-bit block.
+    #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         sm4_core_ct(block, &self.dec_rk)
     }
@@ -421,7 +419,7 @@ mod tests {
     #[test]
     fn ct_sbox_matches_table() {
         for x in 0u16..=255 {
-            let b = x as u8;
+            let b = u8::try_from(x).expect("table index fits in u8");
             assert_eq!(sbox_ct_byte(b), SBOX[x as usize], "sbox {x:02x}");
         }
     }
@@ -433,5 +431,22 @@ mod tests {
         let fast = Sm4::new(&key);
         let slow = Sm4Ct::new(&key);
         assert_eq!(fast.encrypt_block(&pt), slow.encrypt_block(&pt));
+    }
+
+    #[test]
+    fn sm4_matches_openssl_ecb() {
+        let key_hex = "0123456789abcdeffedcba9876543210";
+        let pt_hex = "0123456789abcdeffedcba9876543210";
+        let Some(expected) =
+            crate::ct::run_openssl_enc("-sm4-ecb", key_hex, None, &parse::<16>(pt_hex))
+        else {
+            return;
+        };
+
+        let cipher = Sm4::new(&parse(key_hex));
+        assert_eq!(
+            cipher.encrypt_block(&parse(pt_hex)).as_slice(),
+            expected.as_slice()
+        );
     }
 }

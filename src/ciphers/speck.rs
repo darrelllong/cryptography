@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 //! Speck family of lightweight block ciphers.
 //!
 //! Implemented from "The SIMON and SPECK Families of Lightweight Block Ciphers"
@@ -38,25 +36,31 @@ use super::simon_speck_util::{load_le, rotl, rotr, store_le};
 // A 40-entry stack buffer covers every variant.
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn speck_expand(
-    key: &[u8],
+#[derive(Clone, Copy)]
+struct SpeckParams {
     alpha: u32,
     beta: u32,
-    n: u32,
-    m: usize,
-    t: usize,
+    word_bits: u32,
+    key_words: usize,
+    rounds: usize,
     mask: u64,
-    rk: &mut [u64],
-) {
-    let wb = (n / 8) as usize;
+}
+
+fn speck_expand(key: &[u8], params: SpeckParams, rk: &mut [u64]) {
+    let wb = (params.word_bits / 8) as usize;
     let mut l = [0u64; 40];
     rk[0] = load_le(&key[0..wb]);
-    for j in 0..m - 1 {
+    for j in 0..params.key_words - 1 {
         l[j] = load_le(&key[(j + 1) * wb..(j + 2) * wb]);
     }
-    for i in 0..t - 1 {
-        l[i + m - 1] = (rk[i].wrapping_add(rotr(l[i], alpha, n, mask)) ^ (i as u64)) & mask;
-        rk[i + 1] = (rotl(rk[i], beta, n, mask) ^ l[i + m - 1]) & mask;
+    for i in 0..params.rounds - 1 {
+        l[i + params.key_words - 1] =
+            (rk[i].wrapping_add(rotr(l[i], params.alpha, params.word_bits, params.mask))
+                ^ u64::try_from(i).expect("round index fits in u64"))
+                & params.mask;
+        rk[i + 1] = (rotl(rk[i], params.beta, params.word_bits, params.mask)
+            ^ l[i + params.key_words - 1])
+            & params.mask;
     }
 }
 
@@ -121,7 +125,18 @@ macro_rules! speck_variant {
         impl $Name {
             pub fn new(key: &[u8; $key_len]) -> Self {
                 let mut rk = [0u64; $T];
-                speck_expand(key, $alpha, $beta, $n, $m, $T, $mask, &mut rk);
+                speck_expand(
+                    key,
+                    SpeckParams {
+                        alpha: $alpha,
+                        beta: $beta,
+                        word_bits: $n,
+                        key_words: $m,
+                        rounds: $T,
+                        mask: $mask,
+                    },
+                    &mut rk,
+                );
                 Self { round_keys: rk }
             }
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
