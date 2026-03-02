@@ -283,7 +283,7 @@ Representative current 1024-bit latencies on this host:
 
 The existing chart is the public-key encrypt/decrypt radar:
 
-![Public-key encrypt/decrypt radar chart](/Users/darrell/cryptography/assets/public-key-encdec-radar.svg)
+![Public-key encrypt/decrypt radar chart](assets/public-key-encdec-radar.svg)
 
 ## Practical Guidance
 
