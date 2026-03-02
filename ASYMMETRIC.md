@@ -156,7 +156,9 @@ avoiding the pathological key-generation cost that came from insisting on
 
 The public key stores the real ephemeral bound used for encryption, so the
 random ephemeral exponent is sampled from the right range instead of from the
-full `p - 1` interval.
+full `p - 1` interval. Generated keys use the actual subgroup order `q` for
+that bound; explicitly constructed keys fall back to `p - 1` when the subgroup
+order is not derivable from the supplied parameters.
 
 ### Cocks
 
@@ -191,6 +193,22 @@ the Chinese remainder theorem to recover the four square roots modulo `n`.
 Because plain Rabin is ambiguous, this crate uses a tagged-message variant: the
 tag is carried inside the encoded plaintext and is used to select the intended
 root deterministically at decrypt time.
+
+The implementation requires Blum primes:
+
+```math
+p \equiv q \equiv 3 \pmod 4
+```
+
+That condition makes square-root extraction cheap, because a square root of
+`c` modulo `p` can be written directly as:
+
+```math
+c^{(p + 1)/4} \bmod p
+```
+
+and likewise modulo `q`, avoiding a heavier general-purpose square-root
+algorithm during decryption.
 
 Rabin is historically important because it is one of the earliest public-key
 trapdoor constructions with a tight reduction story: in the plain setting,
@@ -242,7 +260,8 @@ stay linkable across ciphertext refreshes.
 
 ### Schmidt-Samoa
 
-Reference: `schmidt-samoa-2005`
+Reference: Katja Schmidt-Samoa (2005); see `pubs/schmidt-samoa.pdf` and the
+matching BibTeX entry in the repository references.
 
 Core arithmetic:
 

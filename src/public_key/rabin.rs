@@ -1,8 +1,9 @@
 //! Rabin public-key primitive (Michael O. Rabin, 1979).
 //!
 //! This uses the tagged/disambiguated variant rather than the pure square map:
-//! encryption prepends a fixed CRC tag and adds `n / 2` before squaring so the
-//! decryptor can distinguish the intended square root among the four CRT roots.
+//! encryption prepends a fixed disambiguation tag and adds `n / 2` before
+//! squaring so the decryptor can distinguish the intended square root among
+//! the four CRT roots.
 
 use core::fmt;
 
@@ -13,6 +14,9 @@ use crate::public_key::io::{
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
 
+// Arbitrary 32-bit disambiguation tag. It is not a checksum; it is just a
+// recognizable marker carried inside the encoded plaintext so decryption can
+// identify the intended root.
 const TAG: u32 = 0x7c6d_6a7f;
 const RABIN_PUBLIC_LABEL: &str = "CRYPTOGRAPHY RABIN PUBLIC KEY";
 const RABIN_PRIVATE_LABEL: &str = "CRYPTOGRAPHY RABIN PRIVATE KEY";
@@ -130,7 +134,7 @@ impl RabinPrivateKey {
     }
 
     /// Decrypt the raw Rabin ciphertext and recover the tagged message, if any
-    /// of the four square roots carries the embedded CRC tag.
+    /// of the four square roots carries the embedded disambiguation tag.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> Option<BigUint> {
         let half = half_modulus(&self.n);
@@ -151,17 +155,11 @@ impl RabinPrivateKey {
 
         let p_coeff = mod_inverse(&self.p, &self.q)?;
         let q_coeff = mod_inverse(&self.q, &self.p)?;
-        let (term_from_q, term_from_p) = if let Some(ctx) = MontgomeryCtx::new(&self.n) {
-            (
-                ctx.mul(&ctx.mul(&p_coeff, &self.p), &m_q),
-                ctx.mul(&ctx.mul(&q_coeff, &self.q), &m_p),
-            )
-        } else {
-            (
-                BigUint::mod_mul(&BigUint::mod_mul(&p_coeff, &self.p, &self.n), &m_q, &self.n),
-                BigUint::mod_mul(&BigUint::mod_mul(&q_coeff, &self.q, &self.n), &m_p, &self.n),
-            )
-        };
+        // Standard CRT lifting: rebuild the root that is congruent to `m_p`
+        // modulo `p` and to `m_q` modulo `q`.
+        let ctx = MontgomeryCtx::new(&self.n)?;
+        let term_from_q = ctx.mul(&ctx.mul(&p_coeff, &self.p), &m_q);
+        let term_from_p = ctx.mul(&ctx.mul(&q_coeff, &self.q), &m_p);
 
         let x = term_from_q.add_ref(&term_from_p).modulo(&self.n);
         let y = sub_mod(&term_from_q, &term_from_p, &self.n);
@@ -172,6 +170,8 @@ impl RabinPrivateKey {
             y.clone(),
             neg_mod(&y, &self.n),
         ] {
+            // The encoder added `n / 2`, so the intended root is the one that
+            // lands in the upper half of the residue range.
             if root < half {
                 continue;
             }
@@ -227,6 +227,9 @@ impl RabinPrivateKey {
         {
             return None;
         }
+        if p.mul_ref(&q) != n {
+            return None;
+        }
         Some(Self { n, p, q })
     }
 
@@ -264,6 +267,9 @@ impl RabinPrivateKey {
             || p <= BigUint::one()
             || q <= BigUint::one()
         {
+            return None;
+        }
+        if p.mul_ref(&q) != n {
             return None;
         }
         Some(Self { n, p, q })
@@ -341,6 +347,8 @@ fn tagged_payload(message: &BigUint, modulus: &BigUint) -> Option<BigUint> {
     let half = half_modulus(modulus);
     let tag_modulus = BigUint::from_u64(1u64 << 32);
     let tag = BigUint::from_u64(u64::from(TAG));
+    // Encode `message || tag` and then shift by `n / 2` so the intended root
+    // always lands in the upper half of the residue space.
     let payload = message.mul_ref(&tag_modulus).add_ref(&tag).add_ref(&half);
     if &payload >= modulus {
         None
@@ -373,6 +381,7 @@ fn sub_mod(lhs: &BigUint, rhs: &BigUint, modulus: &BigUint) -> BigUint {
 mod tests {
     use super::{Rabin, RabinPrivateKey, RabinPublicKey};
     use crate::public_key::bigint::BigUint;
+    use crate::public_key::io::encode_biguints;
     use crate::CtrDrbgAes256;
 
     fn reference_primes() -> (BigUint, BigUint) {
@@ -488,5 +497,14 @@ mod tests {
         let (public, private) = Rabin::from_primes(&p, &q).expect("valid Rabin key");
         let ciphertext = public.encrypt_bytes(&[0x01]).expect("message fits");
         assert_eq!(private.decrypt_bytes(&ciphertext), Some(vec![0x01]));
+    }
+
+    #[test]
+    fn rejects_malformed_serialized_private_key() {
+        let bogus_n = BigUint::from_u64(95);
+        let p = BigUint::from_u64(7);
+        let q = BigUint::from_u64(13);
+        let blob = encode_biguints(&[&bogus_n, &p, &q]);
+        assert!(RabinPrivateKey::from_binary(&blob).is_none());
     }
 }

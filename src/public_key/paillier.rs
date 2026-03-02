@@ -27,7 +27,9 @@ const PAILLIER_PRIVATE_LABEL: &str = "CRYPTOGRAPHY PAILLIER PRIVATE KEY";
 /// direct.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaillierPublicKey {
+    /// Public modulus `n = p * q`.
     n: BigUint,
+    /// Public encryption base, typically `n + 1`.
     zeta: BigUint,
 }
 
@@ -38,8 +40,11 @@ pub struct PaillierPublicKey {
 /// recompute it for every ciphertext.
 #[derive(Clone, Eq, PartialEq)]
 pub struct PaillierPrivateKey {
+    /// Public modulus `n = p * q`.
     n: BigUint,
+    /// Carmichael exponent `lambda = lcm(p - 1, q - 1)`.
     lambda: BigUint,
+    /// Precomputed inverse of `L(zeta^lambda mod n^2)` modulo `n`.
     u: BigUint,
 }
 
@@ -221,9 +226,10 @@ impl PaillierPrivateKey {
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         let n_squared = self.n.mul_ref(&self.n);
         let value = mod_pow(ciphertext, &self.lambda, &n_squared);
-        // Valid Paillier ciphertexts produce values congruent to 1 mod n here,
-        // so `L(value)` is defined and extracts the linear term that still
-        // carries the plaintext.
+        // Valid Paillier ciphertexts produce values of the form `1 + k*n`
+        // here, so `L(value)` is defined and extracts the linear term that
+        // still carries the plaintext. Multiplying by `u` then cancels the
+        // fixed decryption factor left by `zeta^lambda`.
         let lifted = paillier_l(&value, &self.n);
         if let Some(ctx) = MontgomeryCtx::new(&self.n) {
             ctx.mul(&lifted, &self.u)

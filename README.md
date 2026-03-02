@@ -441,6 +441,8 @@ Encrypt and decrypt with `RSAES-OAEP`:
 use cryptography::{CtrDrbgAes256, RsaOaep, Sha1};
 
 let mut drbg = CtrDrbgAes256::new(&[0x11; 48]);
+// The OAEP label is an optional context string. The empty label is the
+// standard default when you do not need domain separation.
 let ciphertext =
     RsaOaep::<Sha1>::encrypt_rng(&public, b"", b"hello", &mut drbg).expect("OAEP");
 let plaintext = RsaOaep::<Sha1>::decrypt(&private, b"", &ciphertext).expect("OAEP");
