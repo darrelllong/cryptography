@@ -21,7 +21,7 @@
 //! - `CocksPrivateKey`: `[pi, q]`
 //! - `DsaPublicKey`: `[p, q, g, y]`
 //! - `DsaPrivateKey`: `[p, q, g, x]`
-//! - `ElGamalPublicKey`: `[p, exponent_bound, r, b]`
+//! - `ElGamalPublicKey`: `[p, exponent_bound, g, b]`
 //! - `ElGamalPrivateKey`: `[p, exponent_modulus, a]`
 //! - `PaillierPublicKey`: `[n, zeta]`
 //! - `PaillierPrivateKey`: `[n, lambda, u]`

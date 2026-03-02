@@ -92,6 +92,9 @@ impl PaillierPublicKey {
         let n_squared = self.n.mul_ref(&self.n);
         let left = mod_pow(&self.zeta, message, &n_squared);
         let right = mod_pow(nonce, &self.n, &n_squared);
+        // Valid Paillier keys always use odd `n`, so `n^2` stays on the
+        // Montgomery fast path. Keep the slow path as a defensive fallback for
+        // malformed caller-supplied state.
         let product = if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
             ctx.mul(&left, &right)
         } else {
@@ -168,7 +171,7 @@ impl PaillierPublicKey {
         let mut fields = decode_biguints(blob)?.into_iter();
         let n = fields.next()?;
         let zeta = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() || zeta <= BigUint::one() {
+        if fields.next().is_some() || n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
             return None;
         }
         Some(Self { n, zeta })
@@ -199,7 +202,7 @@ impl PaillierPublicKey {
         let mut fields = xml_unwrap("PaillierPublicKey", &["n", "zeta"], xml)?.into_iter();
         let n = fields.next()?;
         let zeta = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() || zeta <= BigUint::one() {
+        if fields.next().is_some() || n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
             return None;
         }
         Some(Self { n, zeta })
@@ -274,7 +277,12 @@ impl PaillierPrivateKey {
         let n = fields.next()?;
         let lambda = fields.next()?;
         let u = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() || lambda.is_zero() || u.is_zero() {
+        if fields.next().is_some()
+            || n <= BigUint::one()
+            || !n.is_odd()
+            || lambda.is_zero()
+            || u.is_zero()
+        {
             return None;
         }
         Some(Self { n, lambda, u })
@@ -309,7 +317,12 @@ impl PaillierPrivateKey {
         let n = fields.next()?;
         let lambda = fields.next()?;
         let u = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() || lambda.is_zero() || u.is_zero() {
+        if fields.next().is_some()
+            || n <= BigUint::one()
+            || !n.is_odd()
+            || lambda.is_zero()
+            || u.is_zero()
+        {
             return None;
         }
         Some(Self { n, lambda, u })

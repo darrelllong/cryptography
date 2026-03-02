@@ -32,8 +32,8 @@ pub struct ElGamalPublicKey {
     /// order is unknown.
     exponent_bound: BigUint,
     /// Generator of the active multiplicative group or subgroup.
-    r: BigUint,
-    /// Public component `b = r^a mod p`.
+    g: BigUint,
+    /// Public component `b = g^a mod p`.
     b: BigUint,
 }
 
@@ -71,7 +71,7 @@ impl ElGamalPublicKey {
     /// Return the caller-supplied generator/base.
     #[must_use]
     pub fn generator(&self) -> &BigUint {
-        &self.r
+        &self.g
     }
 
     /// Return the exclusive upper bound for the ephemeral exponent.
@@ -84,7 +84,7 @@ impl ElGamalPublicKey {
         &self.exponent_bound
     }
 
-    /// Return `b = r^a mod p`.
+    /// Return `b = g^a mod p`.
     #[must_use]
     pub fn public_component(&self) -> &BigUint {
         &self.b
@@ -112,8 +112,11 @@ impl ElGamalPublicKey {
             return None;
         }
 
-        let gamma = mod_pow(&self.r, ephemeral, &self.p);
+        let gamma = mod_pow(&self.g, ephemeral, &self.p);
         let shared = mod_pow(&self.b, ephemeral, &self.p);
+        // Valid `ElGamal` keys always use an odd prime modulus, so the
+        // Montgomery path is the normal case. Keep the slow fallback as a
+        // defensive backstop if a caller somehow constructs a malformed key.
         let delta = if let Some(ctx) = MontgomeryCtx::new(&self.p) {
             ctx.mul(message, &shared)
         } else {
@@ -151,7 +154,7 @@ impl ElGamalPublicKey {
     /// Encode the public key in the crate-defined binary format.
     #[must_use]
     pub fn to_binary(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.exponent_bound, &self.r, &self.b])
+        encode_biguints(&[&self.p, &self.exponent_bound, &self.g, &self.b])
     }
 
     /// Decode the public key from the crate-defined binary format.
@@ -160,20 +163,24 @@ impl ElGamalPublicKey {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let exponent_bound = fields.next()?;
-        let r = fields.next()?;
+        let g = fields.next()?;
         let b = fields.next()?;
         if fields.next().is_some()
             || p <= BigUint::one()
+            || !p.is_odd()
             || exponent_bound <= BigUint::one()
-            || r <= BigUint::one()
+            || exponent_bound >= p
+            || g <= BigUint::one()
+            || g >= p
             || b.is_zero()
+            || b >= p
         {
             return None;
         }
         Some(Self {
             p,
             exponent_bound,
-            r,
+            g,
             b,
         })
     }
@@ -192,7 +199,7 @@ impl ElGamalPublicKey {
             &[
                 ("p", &self.p),
                 ("exponent-bound", &self.exponent_bound),
-                ("generator", &self.r),
+                ("generator", &self.g),
                 ("public-component", &self.b),
             ],
         )
@@ -216,20 +223,24 @@ impl ElGamalPublicKey {
         .into_iter();
         let p = fields.next()?;
         let exponent_bound = fields.next()?;
-        let r = fields.next()?;
+        let g = fields.next()?;
         let b = fields.next()?;
         if fields.next().is_some()
             || p <= BigUint::one()
+            || !p.is_odd()
             || exponent_bound <= BigUint::one()
-            || r <= BigUint::one()
+            || exponent_bound >= p
+            || g <= BigUint::one()
+            || g >= p
             || b.is_zero()
+            || b >= p
         {
             return None;
         }
         Some(Self {
             p,
             exponent_bound,
-            r,
+            g,
             b,
         })
     }
@@ -308,7 +319,9 @@ impl ElGamalPrivateKey {
         let a = fields.next()?;
         if fields.next().is_some()
             || p <= BigUint::one()
+            || !p.is_odd()
             || exponent_modulus <= BigUint::one()
+            || exponent_modulus >= p
             || a.is_zero()
             || a >= exponent_modulus
         {
@@ -357,7 +370,9 @@ impl ElGamalPrivateKey {
         let a = fields.next()?;
         if fields.next().is_some()
             || p <= BigUint::one()
+            || !p.is_odd()
             || exponent_modulus <= BigUint::one()
+            || exponent_modulus >= p
             || a.is_zero()
             || a >= exponent_modulus
         {
@@ -412,7 +427,7 @@ impl ElGamalCiphertext {
 impl ElGamal {
     /// Derive a raw `ElGamal` key pair from explicit parameters.
     ///
-    /// Returns `None` if `p` is composite, `r` is not in `[2, p)`, or the
+    /// Returns `None` if `p` is composite, `g` is not in `[2, p)`, or the
     /// secret exponent is not in `[1, p - 2]`.
     #[must_use]
     pub fn from_secret_exponent(
@@ -428,7 +443,7 @@ impl ElGamal {
         }
 
         let p_minus_one = prime.sub_ref(&BigUint::one());
-        // `a = 0` makes `b = r^a = 1`, and `a = p - 1` does the same by
+        // `a = 0` makes `b = g^a = 1`, and `a = p - 1` does the same by
         // Fermat. Both give a trivially useless public key, so the secret must
         // live strictly inside the non-zero exponent range.
         if secret.is_zero() || secret >= &p_minus_one {
@@ -440,7 +455,7 @@ impl ElGamal {
             ElGamalPublicKey {
                 p: prime.clone(),
                 exponent_bound: p_minus_one.clone(),
-                r: generator.clone(),
+                g: generator.clone(),
                 b: public_component,
             },
             ElGamalPrivateKey {
@@ -470,7 +485,7 @@ impl ElGamal {
             ElGamalPublicKey {
                 p: prime.clone(),
                 exponent_bound: q.clone(),
-                r: generator,
+                g: generator,
                 b: public_component,
             },
             ElGamalPrivateKey {
@@ -491,10 +506,10 @@ mod tests {
     #[test]
     fn derive_small_reference_key() {
         let p = BigUint::from_u64(23);
-        let r = BigUint::from_u64(5);
+        let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
         let (public, private) =
-            ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+            ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
         assert_eq!(public.modulus(), &BigUint::from_u64(23));
         assert_eq!(public.generator(), &BigUint::from_u64(5));
         assert_eq!(public.public_component(), &BigUint::from_u64(17));
@@ -505,11 +520,11 @@ mod tests {
     #[test]
     fn roundtrip_small_messages() {
         let p = BigUint::from_u64(23);
-        let r = BigUint::from_u64(5);
+        let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
         let k = BigUint::from_u64(3);
         let (public, private) =
-            ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+            ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
 
         for msg in [0u64, 1, 2, 11, 22] {
             let message = BigUint::from_u64(msg);
@@ -524,11 +539,11 @@ mod tests {
     #[test]
     fn exact_small_ciphertext_matches_reference() {
         let p = BigUint::from_u64(23);
-        let r = BigUint::from_u64(5);
+        let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
         let k = BigUint::from_u64(3);
         let (public, private) =
-            ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+            ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
         let message = BigUint::from_u64(11);
         let ciphertext = public
             .encrypt_with_ephemeral(&message, &k)
@@ -553,9 +568,9 @@ mod tests {
     #[test]
     fn rejects_invalid_ephemeral_exponent() {
         let p = BigUint::from_u64(23);
-        let r = BigUint::from_u64(5);
+        let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
-        let (public, _) = ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+        let (public, _) = ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
         let message = BigUint::from_u64(11);
         assert!(public
             .encrypt_with_ephemeral(&message, &BigUint::zero())
@@ -579,10 +594,10 @@ mod tests {
     #[test]
     fn byte_wrapper_roundtrip() {
         let p = BigUint::from_u64(65_537);
-        let r = BigUint::from_u64(3);
+        let g = BigUint::from_u64(3);
         let a = BigUint::from_u64(7);
         let (public, private) =
-            ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+            ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
         let mut drbg = CtrDrbgAes256::new(&[0x44; 48]);
         let message = [0x12, 0x34];
         let ciphertext = public.encrypt(&message, &mut drbg).expect("message fits");
@@ -614,9 +629,9 @@ mod tests {
     #[test]
     fn key_serialization_roundtrip() {
         let p = BigUint::from_u64(23);
-        let r = BigUint::from_u64(5);
+        let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
-        let (public, private) = ElGamal::from_secret_exponent(&p, &r, &a).expect("valid key");
+        let (public, private) = ElGamal::from_secret_exponent(&p, &g, &a).expect("valid key");
 
         let public_blob = public.to_binary();
         let private_blob = private.to_binary();
@@ -664,10 +679,10 @@ mod tests {
     #[test]
     fn byte_ciphertext_roundtrip() {
         let p = BigUint::from_u64(65_537);
-        let r = BigUint::from_u64(3);
+        let g = BigUint::from_u64(3);
         let a = BigUint::from_u64(7);
         let (public, private) =
-            ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+            ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
         let mut drbg = CtrDrbgAes256::new(&[0x45; 48]);
         let message = [0x12, 0x34];
         let ciphertext = public
