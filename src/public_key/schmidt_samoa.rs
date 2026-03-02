@@ -7,7 +7,8 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::primes::{is_probable_prime, lcm, mod_inverse, mod_pow};
+use crate::public_key::primes::{is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime};
+use crate::Csprng;
 
 /// Public key for the raw Schmidt-Samoa primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,6 +33,16 @@ impl SchmidtSamoaPublicKey {
         &self.n
     }
 
+    /// Return a conservative public upper bound for byte-oriented plaintexts.
+    ///
+    /// For `n = p^2 q`, the private reduction modulus `gamma = p q` always
+    /// satisfies `gamma > floor(sqrt(n))`, so any message below this bound is
+    /// guaranteed to round-trip through the private map.
+    #[must_use]
+    pub fn max_plaintext_exclusive(&self) -> BigUint {
+        self.n.sqrt_floor()
+    }
+
     /// Apply the raw public map `m^n mod n`.
     ///
     /// Unlike textbook RSA, the public exponent is the modulus `n` itself.
@@ -40,6 +51,16 @@ impl SchmidtSamoaPublicKey {
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         mod_pow(message, &self.n, &self.n)
+    }
+
+    /// Encrypt a byte string using the conservative public plaintext bound.
+    #[must_use]
+    pub fn encrypt(&self, message: &[u8]) -> Option<BigUint> {
+        let message_int = BigUint::from_be_bytes(message);
+        if message_int >= self.max_plaintext_exclusive() {
+            return None;
+        }
+        Some(self.encrypt_raw(&message_int))
     }
 }
 
@@ -63,6 +84,13 @@ impl SchmidtSamoaPrivateKey {
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         mod_pow(ciphertext, &self.d, &self.gamma)
+    }
+
+    /// Decrypt a ciphertext back into the big-endian byte string that was
+    /// interpreted as the plaintext integer.
+    #[must_use]
+    pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
+        self.decrypt_raw(ciphertext).to_be_bytes()
     }
 }
 
@@ -106,12 +134,36 @@ impl SchmidtSamoa {
             SchmidtSamoaPrivateKey { d, gamma },
         ))
     }
+
+    /// Generate a teaching-sized Schmidt-Samoa key pair.
+    #[must_use]
+    pub fn generate<R: Csprng>(
+        rng: &mut R,
+        bits: usize,
+    ) -> Option<(SchmidtSamoaPublicKey, SchmidtSamoaPrivateKey)> {
+        if bits < 4 {
+            return None;
+        }
+
+        let p_bits = bits / 3;
+        let q_bits = bits.saturating_sub(2 * p_bits);
+        let p_bits = p_bits.max(2);
+        let q_bits = q_bits.max(2);
+        loop {
+            let p = random_probable_prime(rng, p_bits)?;
+            let q = random_probable_prime(rng, q_bits)?;
+            if let Some(keypair) = Self::from_primes(&p, &q) {
+                return Some(keypair);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::SchmidtSamoa;
     use crate::public_key::bigint::BigUint;
+    use crate::CtrDrbgAes256;
 
     #[test]
     fn derive_small_reference_key() {
@@ -162,5 +214,23 @@ mod tests {
 
         let p = BigUint::from_u64(5);
         assert!(SchmidtSamoa::from_primes(&p, &p).is_none());
+    }
+
+    #[test]
+    fn byte_wrapper_roundtrip() {
+        let p = BigUint::from_u64(3);
+        let q = BigUint::from_u64(5);
+        let (public, private) = SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
+        let ciphertext = public.encrypt(&[0x05]).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x05]);
+    }
+
+    #[test]
+    fn generate_teaching_keypair() {
+        let mut drbg = CtrDrbgAes256::new(&[0x71; 48]);
+        let (public, private) =
+            SchmidtSamoa::generate(&mut drbg, 48).expect("Schmidt-Samoa key generation");
+        let ciphertext = public.encrypt(&[0x2a]).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x2a]);
     }
 }
