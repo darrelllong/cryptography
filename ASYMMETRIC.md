@@ -242,6 +242,8 @@ stay linkable across ciphertext refreshes.
 
 ### Schmidt-Samoa
 
+Reference: `schmidt-samoa-2005`
+
 Core arithmetic:
 
 ```math
