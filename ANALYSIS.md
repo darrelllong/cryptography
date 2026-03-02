@@ -144,355 +144,6 @@ trait shape, but they are not substitutes for modern DRBG deployments.
 
 ---
 
-## Public-Key Primitives
-
-- References: `cocks-1973`, `rsa-1978`, `elgamal-1985`, `rabin-1979`,
-  `paillier-1999`, `schmidt-samoa-2005`, `rfc8017`, `sp800-56b-r2`,
-  `fips186-5`.
-- Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, and
-  `SchmidtSamoa`, plus `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA
-  encryption and signatures, modern RSA key externalization via the PKCS /
-  X.509 stack, optional flat XML key export/import for every implemented
-  scheme, plus crate-defined key externalization, byte-oriented wrappers, and
-  teaching-sized key generation for the remaining schemes.
-- Scope: the raw arithmetic primitives are still exposed directly, but all of
-  the currently implemented schemes now also have a usable front door:
-  standards-based RSA wrappers, and thin byte-oriented wrappers for `Cocks`,
-  `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa`.
-
-The standards path is clear primarily for RSA:
-
-- `RFC 8017` for `RSAES-OAEP`, `RSASSA-PSS`, and the legacy PKCS #1 v1.5
-  formats
-- `SP 800-56B Rev. 2` for NIST-approved RSA key-establishment usage
-- `FIPS 186-5` for current RSA signature requirements
-
-The other currently implemented public-key schemes do not have the same level
-of mainstream NIST/RFC padding guidance, so the practical wrapper work is
-standards-driven for RSA first and deliberately scheme-specific for the rest.
-That distinction matters for both message framing and key storage:
-
-- `RSA` should use the real standards stack:
-  - `PKCS #8` or raw PKCS #1 for private-key serialization
-  - `SubjectPublicKeyInfo` (`SPKI`) for public-key serialization
-  - `DER` or `PEM` as the outer container
-  - optional flat XML only as a convenience export, not as the primary
-    interoperable format
-- `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa` do not have an
-  equally universal file-format story for the exact primitive forms exposed
-  here, so any persistent key format for them should be explicitly crate-defined
-  rather than mislabeled as "PKCS" or "SSH". The current crate therefore uses
-  a simple crate-defined binary body that still mirrors the RSA structures: a
-  DER `SEQUENCE` of positive `INTEGER`s, optionally wrapped in a scheme-
-  specific PEM armor label, plus the same flat XML convenience form, while
-  keeping RSA on the real PKCS / X.509 path for its canonical serialization.
-
-The public-key layer is intentionally separated into:
-
-- `bigint`: a simple limb-based `BigUint` / `BigInt` substrate plus the
-  reusable `MontgomeryCtx` for odd-modulus arithmetic
-- `primes`: repeated-squaring modular exponentiation, Miller-Rabin, `gcd`,
-  `lcm`, modular inverse, and small teaching key-generation helpers
-- one file per raw scheme
-- `rsa_pkcs1`: standards-based RSA wrappers (`OAEP` and `PSS`)
-- `rsa_io`: standards-based RSA key serialization (`PKCS #8`, PKCS #1, and
-  `SPKI` in `DER` / `PEM`), plus the optional flat XML form
-- internal `io`: crate-defined binary / XML helpers for the non-RSA public-key
-  schemes (DER `SEQUENCE` of `INTEGER`s, custom PEM labels, and flat fixed-
-  schema XML)
-
-That mirrors the earlier cipher layering: get the math right first, then add
-protocol-safe framing. The current code is therefore best read as a reference
-implementation of the core trapdoor operations, with RSA as the first scheme
-that has a standards-compliant wrapper layer and the other schemes now exposed
-through deliberately thin "usable" wrappers that still stay close to the
-companion Python algorithms. Paillier's wrapper also exposes the natural
-homomorphic helper operations (ciphertext addition and rerandomization) rather
-than hiding them.
-
-### Arithmetic Foundation
-
-The arithmetic substrate is a teaching-oriented limb-based `BigUint` / `BigInt`
-pair with `u64` limbs in little-endian order. The important design choice is
-that it uses a reusable Montgomery context for odd moduli:
-
-```math
-\mathrm{Mont}(a, b) = a b R^{-1} \bmod n
-```
-
-with
-
-```math
-R = 2^{64w}
-```
-
-for a modulus stored in `w` machine-word limbs. That keeps repeated modular
-multiplication and repeated squaring fast in the public-key common case (odd
-moduli), while the code retains the simpler division-based reducer as a fallback
-for even moduli where Montgomery arithmetic does not apply.
-
-This matters operationally because every implemented public-key scheme here is
-dominated by modular arithmetic. Without Montgomery, repeated-squaring
-exponentiation was the bottleneck. With it, steady-state encrypt/decrypt/sign
-costs are reasonable at teaching sizes, and the remaining latency is mostly in
-parameter generation and primality testing.
-
-### RSA
-
-`Rsa` is the raw trapdoor permutation:
-
-```math
-c = m^e \bmod n,\qquad m = c^d \bmod n
-```
-
-with
-
-```math
-n = pq,\qquad d \equiv e^{-1} \pmod{\lambda(n)}
-```
-
-and
-
-```math
-\lambda(n) = \mathrm{lcm}(p-1, q-1)
-```
-
-rather than Euler's totient. That matches the companion Python code and the
-usual RSA optimization that the private exponent only needs to invert modulo
-the exponent cycle length.
-
-The usable RSA surface is the only standards-based public-key wrapper in the
-crate today:
-
-- `RsaOaep<H>` implements `RSAES-OAEP`
-- `RsaPss<H>` implements `RSASSA-PSS`
-
-Both follow `RFC 8017`, and the implementation has been hardened so the OAEP
-and PSS padding scans run to completion instead of returning early on the first
-bad byte. That keeps the high-level wrapper aligned with the crate's
-constant-time discipline as far as pure portable Rust reasonably allows.
-
-### Cocks
-
-`Cocks` keeps the original unusual public map:
-
-```math
-c = m^n \bmod n
-```
-
-where the public exponent is the modulus `n` itself. The private map is:
-
-```math
-m = c^{\pi} \bmod q,\qquad \pi \equiv p^{-1} \pmod{q-1}
-```
-
-That means the decryptor naturally recovers messages modulo the private prime
-`q`, not modulo `n`. The usable wrapper therefore restricts byte-oriented
-plaintexts to a public conservative bound:
-
-```math
-0 \le m < \lfloor \sqrt{n} \rfloor
-```
-
-because the key generator enforces `p < q`, which guarantees
-`$\lfloor \sqrt{n} \rfloor < q$`.
-
-### ElGamal
-
-`ElGamal` uses the standard multiplicative finite-field form:
-
-```math
-\gamma = g^k \bmod p,\qquad \delta = m \cdot y^k \bmod p
-```
-
-with private recovery:
-
-```math
-m = \delta \cdot \gamma^{p-1-a} \bmod p
-```
-
-where `a` is the secret exponent and `y = g^a mod p`.
-
-The important engineering choice here is that generated keys no longer insist on
-an expensive safe-prime field. Instead, the crate now generates a prime-order
-subgroup:
-
-```math
-p = kq + 1
-```
-
-with prime `q`, then derives a generator of the order-`q` subgroup. That is the
-same structural idea used in DSA/DH parameter generation, and it avoids the
-pathological safe-prime search cost while still ensuring the subgroup order has
-a large prime factor. Generated public keys store this `q`, so ephemeral
-exponents are sampled uniformly from `[1, q)` rather than wasting work over the
-full `[1, p-1)` range.
-
-### Rabin
-
-`Rabin` is not the bare squaring map. It intentionally follows the tagged
-variant from the companion Python code. The public operation is still:
-
-```math
-c = x^2 \bmod n
-```
-
-but the plaintext integer is first embedded into a tagged payload and shifted by
-`n / 2`, so the decryptor can distinguish the intended root among the four CRT
-square roots. The private side uses the Blum-prime shortcut:
-
-```math
-m_p = c^{(p+1)/4} \bmod p,\qquad m_q = c^{(q+1)/4} \bmod q
-```
-
-which is why the key generator insists on primes congruent to `3 mod 4`.
-
-The wrapper is therefore usable, but intentionally scheme-specific: it is a
-tagged-message Rabin envelope, not a standardized Rabin padding profile.
-
-### Paillier
-
-`Paillier` exposes both the raw arithmetic and the homomorphic operations that
-make the scheme interesting. Encryption is:
-
-```math
-c = \zeta^m r^n \bmod n^2
-```
-
-with decryption:
-
-```math
-m = L(c^{\lambda} \bmod n^2)\,u \bmod n
-```
-
-where
-
-```math
-L(x) = \frac{x - 1}{n}
-```
-
-and
-
-```math
-u = L(\zeta^\lambda \bmod n^2)^{-1} \bmod n
-```
-
-The wrapper keeps the usual plaintext bound `m < n`, samples `r` from
-`$\mathbb{Z}_n^*$`, and explicitly exposes:
-
-- ciphertext rerandomization
-- ciphertext multiplication modulo `n^2` as homomorphic plaintext addition
-
-Those helper operations now validate that their inputs are actually in the
-ciphertext range `[0, n^2)`, which keeps the byte-oriented wrapper honest about
-what counts as a valid ciphertext.
-
-### Schmidt-Samoa
-
-`SchmidtSamoa` uses another unusual "modulus as exponent" public map:
-
-```math
-c = m^n \bmod n,\qquad n = p^2 q
-```
-
-with the private inverse:
-
-```math
-m = c^d \bmod \gamma,\qquad \gamma = pq
-```
-
-and
-
-```math
-d \equiv n^{-1} \pmod{\lambda(pq)}
-```
-
-As with `Cocks`, the wrapper uses a conservative public bound
-`$m < \lfloor \sqrt{n} \rfloor$` so the public side can guarantee that the
-private reduction modulo `gamma = pq` will recover the original message.
-
-### Practical Guidance
-
-The current public-key surface is intentionally split into three layers:
-
-1. Raw arithmetic primitives (`encrypt_raw`, `decrypt_raw`, direct modular maps).
-2. Thin usable wrappers for the nonstandard schemes (byte-to-integer framing plus
-   the minimal randomness needed by the scheme).
-3. Standards-based wrappers where the standards are clear (`RSAES-OAEP`,
-   `RSASSA-PSS`).
-
-That means the public-key code is already useful for real interoperability and
-file processing experiments, but only `RSA` has a true RFC/NIST padding story
-today. The other schemes are still "honest wrappers around the textbook
-primitive," not protocol profiles. That is the right level of explicitness: it
-avoids pretending that a crate-defined byte wrapper is somehow a standardized
-wire format.
-
-The current latency probe is the small helper binary:
-
-```text
-cargo run --release --bin bench_public_key -- 1024
-```
-
-Add `--skip-elgamal` if you want to omit the ElGamal parameter-generation path
-from a longer run.
-
-On this machine, the current 1024-bit run on the hand-rolled bigint backend
-lands at:
-
-| Operation | Latency |
-|-----------|---------|
-| RSA-1024 keygen | 22.1 ms |
-| RSA-1024 OAEP encrypt | 0.071 ms |
-| RSA-1024 OAEP decrypt | 1.08 ms |
-| RSA-1024 PSS sign | 1.00 ms |
-| RSA-1024 PSS verify | 0.048 ms |
-| ElGamal-1024 keygen | 101 ms |
-| ElGamal-1024 encrypt | 0.429 ms |
-| ElGamal-1024 decrypt | 0.729 ms |
-| Paillier-1024 keygen | 15.9 ms |
-| Paillier-1024 encrypt | 6.57 ms |
-| Paillier-1024 decrypt | 2.29 ms |
-| Paillier-1024 rerandomize | 4.21 ms |
-| Paillier-1024 ciphertext add | 0.082 ms |
-| Cocks-1024 keygen | 15.4 ms |
-| Cocks-1024 encrypt | 0.782 ms |
-| Cocks-1024 decrypt | 0.142 ms |
-| Rabin-1024 keygen | 19.0 ms |
-| Rabin-1024 encrypt | 0.039 ms |
-| Rabin-1024 decrypt | 1.44 ms |
-| Schmidt-Samoa-1024 keygen | 5.21 ms |
-| Schmidt-Samoa-1024 encrypt | 0.753 ms |
-| Schmidt-Samoa-1024 decrypt | 0.228 ms |
-
-The encrypt/decrypt chart below uses the same 1024-bit measurements, converted
-to operations per second on a log scale so the faster methods are not crushed
-against the center by the slower homomorphic schemes.
-
-![Public-key encrypt/decrypt radar chart](/Users/darrell/cryptography/assets/public-key-encdec-radar.svg)
-
-Only `RSA` currently has a standards-based signing wrapper (`RSASSA-PSS`), so
-the signing data stays in the table above for now rather than forcing a
-degenerate one-method radar chart.
-
-That split is informative: Montgomery fixed the steady-state modular arithmetic,
-so the raw encrypt/decrypt/sign work is already usable at teaching sizes. The
-big change from the original PK pass is `ElGamal`: moving from a pathological
-safe-prime search to a subgroup-based generator (`p = kq + 1` with an order-`q`
-generator) plus a larger small-prime sieve in the bigint Miller-Rabin path
-brings 1024-bit keygen down from tens of seconds to roughly a tenth of a
-second, and storing that subgroup order in the public key cuts the encryption
-path down to the right exponent size as well. The latency split also makes the
-scheme differences visible: `Rabin` is the fastest encryptor because the public
-map is just squaring, while `Paillier` is the slowest encryptor because it pays
-for work modulo $n^2$ and a randomizer term; `Cocks` and `Schmidt\text{-}Samoa`
-sit in between with public exponents equal to the modulus. A 2048-bit RSA run
-was still slow enough in the first key-generation stage that it was aborted
-after it had already made the point, so the current backend remains a reference
-implementation first and a practical large-key engine second.
-
----
-
 ## Coverage Matrix
 
 There are no standalone correctness scripts in this repository. Correctness is
@@ -521,7 +172,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
 | Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
 | CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
-| Public-key primitives | `BigUint`, `BigInt`, `MontgomeryCtx`, `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, Montgomery regression tests, wrapper round-trips and teaching keygen tests for every implemented scheme, RSA OAEP/PSS tests, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | `bench_public_key` latency probe |
+| Public-key primitives | `BigUint`, `BigInt`, `MontgomeryCtx`, `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, Montgomery regression tests, wrapper round-trips and generated-key tests for every implemented scheme, RSA OAEP/PSS tests, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | `bench_public_key` latency probe |
 
 ---
 
@@ -564,7 +215,7 @@ controls.
 
 ---
 
-## Cipher Families
+## Symmetric Cipher Families
 
 ### Block Ciphers
 
@@ -1245,7 +896,361 @@ but it still lands well ahead of AES-128 on this host.
 
 ---
 
-## Performance benchmarks
+## Public-Key APIs and Primitives
+
+- References: `cocks-1973`, `rsa-1978`, `elgamal-1985`, `rabin-1979`,
+  `paillier-1999`, `schmidt-samoa-2005`, `rfc8017`, `sp800-56b-r2`,
+  `fips186-5`.
+- Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, and
+  `SchmidtSamoa`, plus `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA
+  encryption and signatures, modern RSA key externalization via the PKCS /
+  X.509 stack, optional flat XML key export/import for every implemented
+  scheme, plus crate-defined key externalization, byte-oriented wrappers, and
+  small-scale built-in key generation for the remaining schemes.
+- Scope: the raw arithmetic primitives are still exposed directly, but all of
+  the currently implemented schemes now also have a usable front door:
+  standards-based RSA wrappers, and thin byte-oriented wrappers for `Cocks`,
+  `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa`.
+
+The standards path is clear primarily for RSA:
+
+- `RFC 8017` for `RSAES-OAEP`, `RSASSA-PSS`, and the legacy PKCS #1 v1.5
+  formats
+- `SP 800-56B Rev. 2` for NIST-approved RSA key-establishment usage
+- `FIPS 186-5` for current RSA signature requirements
+
+The other currently implemented public-key schemes do not have the same level
+of mainstream NIST/RFC padding guidance, so the practical wrapper work is
+standards-driven for RSA first and deliberately scheme-specific for the rest.
+That distinction matters for both message framing and key storage:
+
+- `RSA` should use the real standards stack:
+  - `PKCS #8` or raw PKCS #1 for private-key serialization
+  - `SubjectPublicKeyInfo` (`SPKI`) for public-key serialization
+  - `DER` or `PEM` as the outer container
+  - optional flat XML only as a convenience export, not as the primary
+    interoperable format
+- `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa` do not have an
+  equally universal file-format story for the exact primitive forms exposed
+  here, so any persistent key format for them should be explicitly crate-defined
+  rather than mislabeled as "PKCS" or "SSH". The crate therefore uses
+  a simple crate-defined binary body that still mirrors the RSA structures: a
+  DER `SEQUENCE` of positive `INTEGER`s, optionally wrapped in a scheme-
+  specific PEM armor label, plus the same flat XML convenience form, while
+  keeping RSA on the real PKCS / X.509 path for its canonical serialization.
+
+The public-key layer is intentionally separated into:
+
+- `bigint`: a simple limb-based `BigUint` / `BigInt` substrate plus the
+  reusable `MontgomeryCtx` for odd-modulus arithmetic
+- `primes`: repeated-squaring modular exponentiation, Miller-Rabin, `gcd`,
+  `lcm`, modular inverse, and built-in key-generation helpers
+- one file per raw scheme
+- `rsa_pkcs1`: standards-based RSA wrappers (`OAEP` and `PSS`)
+- `rsa_io`: standards-based RSA key serialization (`PKCS #8`, PKCS #1, and
+  `SPKI` in `DER` / `PEM`), plus the optional flat XML form
+- internal `io`: crate-defined binary / XML helpers for the non-RSA public-key
+  schemes (DER `SEQUENCE` of `INTEGER`s, custom PEM labels, and flat fixed-
+  schema XML)
+
+The public-key layer follows the same staged design as the symmetric side: raw arithmetic first, then serialization and message framing. `RSA` is the first scheme with a standards-based wrapper layer, while the other schemes expose deliberately thin usable wrappers that stay close to the companion Python algorithms. `Paillier` also exposes its natural homomorphic helper operations (ciphertext addition and rerandomization) rather than hiding them.
+
+### API Surface
+
+The intended public-key workflow is:
+
+1. Generate or import a key pair.
+2. Serialize it in a standard or crate-defined format.
+3. Use the byte-oriented wrapper for encrypt/decrypt or sign/verify.
+
+Concretely:
+
+- every implemented scheme exposes key generation or explicit key construction
+- `RSA` exposes standards-based serialization (`PKCS #1`, `PKCS #8`, `SPKI`,
+  `DER`, `PEM`) plus optional XML convenience export/import
+- the non-RSA schemes expose crate-defined DER/PEM/XML key serialization
+- `RSA` exposes standards-based `OAEP` encryption and `PSS` signatures
+- `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa` expose
+  byte-oriented encrypt/decrypt wrappers
+- `Paillier` additionally exposes ciphertext addition and rerandomization
+
+### Arithmetic Foundation
+
+The arithmetic substrate is an in-tree limb-based `BigUint` / `BigInt` pair with `u64` limbs in little-endian order. The important design choice is
+that it uses a reusable Montgomery context for odd moduli:
+
+```math
+\mathrm{Mont}(a, b) = a b R^{-1} \bmod n
+```
+
+with
+
+```math
+R = 2^{64w}
+```
+
+for a modulus stored in `w` machine-word limbs. That keeps repeated modular
+multiplication and repeated squaring fast in the public-key common case (odd
+moduli), while the code retains the simpler division-based reducer as a fallback
+for even moduli where Montgomery arithmetic does not apply.
+
+This matters operationally because every implemented public-key scheme here is
+dominated by modular arithmetic. Without Montgomery, repeated-squaring
+exponentiation was the bottleneck. With it, steady-state encrypt/decrypt/sign costs are reasonable at the current implementation scale, and the remaining latency is mostly in parameter generation and primality testing.
+
+### RSA
+
+`Rsa` is the raw trapdoor permutation:
+
+```math
+c = m^e \bmod n,\qquad m = c^d \bmod n
+```
+
+with
+
+```math
+n = pq,\qquad d \equiv e^{-1} \pmod{\lambda(n)}
+```
+
+and
+
+```math
+\lambda(n) = \mathrm{lcm}(p-1, q-1)
+```
+
+rather than Euler's totient. That matches the companion Python code and the
+usual RSA optimization that the private exponent only needs to invert modulo
+the exponent cycle length.
+
+The usable RSA surface is the only standards-based public-key wrapper in the
+crate today:
+
+- `RsaOaep<H>` implements `RSAES-OAEP`
+- `RsaPss<H>` implements `RSASSA-PSS`
+
+Both follow `RFC 8017`, and the implementation has been hardened so the OAEP
+and PSS padding scans run to completion instead of returning early on the first
+bad byte. That keeps the high-level wrapper aligned with the crate's
+constant-time discipline as far as pure portable Rust reasonably allows.
+
+### Cocks
+
+`Cocks` keeps the original unusual public map:
+
+```math
+c = m^n \bmod n
+```
+
+where the public exponent is the modulus `n` itself. The private map is:
+
+```math
+m = c^{\pi} \bmod q,\qquad \pi \equiv p^{-1} \pmod{q-1}
+```
+
+That means the decryptor naturally recovers messages modulo the private prime
+`q`, not modulo `n`. The usable wrapper therefore restricts byte-oriented
+plaintexts to a public conservative bound:
+
+```math
+0 \le m < \lfloor \sqrt{n} \rfloor
+```
+
+because the key generator enforces `p < q`, which guarantees
+`$\lfloor \sqrt{n} \rfloor < q$`.
+
+### ElGamal
+
+`ElGamal` uses the standard multiplicative finite-field form:
+
+```math
+\gamma = g^k \bmod p,\qquad \delta = m \cdot y^k \bmod p
+```
+
+with private recovery:
+
+```math
+m = \delta \cdot \gamma^{p-1-a} \bmod p
+```
+
+where `a` is the secret exponent and `y = g^a mod p`.
+
+The important engineering choice here is that generated keys no longer insist on
+an expensive safe-prime field. Instead, the crate now generates a prime-order
+subgroup:
+
+```math
+p = kq + 1
+```
+
+with prime `q`, then derives a generator of the order-`q` subgroup. That is the
+same structural idea used in DSA/DH parameter generation, and it avoids the
+pathological safe-prime search cost while still ensuring the subgroup order has
+a large prime factor. Generated public keys store this `q`, so ephemeral
+exponents are sampled uniformly from `[1, q)` rather than wasting work over the
+full `[1, p-1)` range.
+
+### Rabin
+
+`Rabin` is not the bare squaring map. It intentionally follows the tagged
+variant from the companion Python code. The public operation is still:
+
+```math
+c = x^2 \bmod n
+```
+
+but the plaintext integer is first embedded into a tagged payload and shifted by
+`n / 2`, so the decryptor can distinguish the intended root among the four CRT
+square roots. The private side uses the Blum-prime shortcut:
+
+```math
+m_p = c^{(p+1)/4} \bmod p,\qquad m_q = c^{(q+1)/4} \bmod q
+```
+
+which is why the key generator insists on primes congruent to `3 mod 4`.
+
+The wrapper is therefore usable, but intentionally scheme-specific: it is a
+tagged-message Rabin envelope, not a standardized Rabin padding profile.
+
+### Paillier
+
+`Paillier` exposes both the raw arithmetic and the homomorphic operations that
+make the scheme interesting. Encryption is:
+
+```math
+c = \zeta^m r^n \bmod n^2
+```
+
+with decryption:
+
+```math
+m = L(c^{\lambda} \bmod n^2)\,u \bmod n
+```
+
+where
+
+```math
+L(x) = \frac{x - 1}{n}
+```
+
+and
+
+```math
+u = L(\zeta^\lambda \bmod n^2)^{-1} \bmod n
+```
+
+The wrapper keeps the usual plaintext bound `m < n`, samples `r` from
+`$\mathbb{Z}_n^*$`, and explicitly exposes:
+
+- ciphertext rerandomization
+- ciphertext multiplication modulo `n^2` as homomorphic plaintext addition
+
+Those helper operations now validate that their inputs are actually in the
+ciphertext range `[0, n^2)`, which keeps the byte-oriented wrapper honest about
+what counts as a valid ciphertext.
+
+### Schmidt-Samoa
+
+`SchmidtSamoa` uses another unusual "modulus as exponent" public map:
+
+```math
+c = m^n \bmod n,\qquad n = p^2 q
+```
+
+with the private inverse:
+
+```math
+m = c^d \bmod \gamma,\qquad \gamma = pq
+```
+
+and
+
+```math
+d \equiv n^{-1} \pmod{\lambda(pq)}
+```
+
+As with `Cocks`, the wrapper uses a conservative public bound
+`$m < \lfloor \sqrt{n} \rfloor$` so the public side can guarantee that the
+private reduction modulo `gamma = pq` will recover the original message.
+
+### Practical Guidance
+
+The public-key surface is split into three layers:
+
+1. Raw arithmetic primitives (`encrypt_raw`, `decrypt_raw`, direct modular maps).
+2. Thin usable wrappers for the nonstandard schemes (byte-to-integer framing plus
+   the minimal randomness needed by the scheme).
+3. Standards-based wrappers where the standards are clear (`RSAES-OAEP`,
+   `RSASSA-PSS`).
+
+The public-key code is already usable for real interoperability and file processing, but only `RSA` has a true RFC/NIST padding story today. The other schemes are still thin wrappers around their textbook primitives, not protocol profiles. That is the right level of explicitness: it
+avoids pretending that a crate-defined byte wrapper is somehow a standardized
+wire format.
+
+### Public-Key Latency
+
+The latency probe for the public-key layer is the helper binary:
+
+```text
+cargo run --release --bin bench_public_key -- 1024
+```
+
+Add `--skip-elgamal` if you want to omit the ElGamal parameter-generation path
+from a longer run.
+
+On this machine, the current 1024-bit run on the in-tree bigint backend lands at:
+
+| Operation | Latency |
+|-----------|---------|
+| RSA-1024 keygen | 22.1 ms |
+| RSA-1024 OAEP encrypt | 0.071 ms |
+| RSA-1024 OAEP decrypt | 1.08 ms |
+| RSA-1024 PSS sign | 1.00 ms |
+| RSA-1024 PSS verify | 0.048 ms |
+| ElGamal-1024 keygen | 101 ms |
+| ElGamal-1024 encrypt | 0.429 ms |
+| ElGamal-1024 decrypt | 0.729 ms |
+| Paillier-1024 keygen | 15.9 ms |
+| Paillier-1024 encrypt | 6.57 ms |
+| Paillier-1024 decrypt | 2.29 ms |
+| Paillier-1024 rerandomize | 4.21 ms |
+| Paillier-1024 ciphertext add | 0.082 ms |
+| Cocks-1024 keygen | 15.4 ms |
+| Cocks-1024 encrypt | 0.782 ms |
+| Cocks-1024 decrypt | 0.142 ms |
+| Rabin-1024 keygen | 19.0 ms |
+| Rabin-1024 encrypt | 0.039 ms |
+| Rabin-1024 decrypt | 1.44 ms |
+| Schmidt-Samoa-1024 keygen | 5.21 ms |
+| Schmidt-Samoa-1024 encrypt | 0.753 ms |
+| Schmidt-Samoa-1024 decrypt | 0.228 ms |
+
+The encrypt/decrypt chart below uses the same 1024-bit measurements, converted
+to operations per second on a log scale so the faster methods are not crushed
+against the center by the slower homomorphic schemes.
+
+![Public-key encrypt/decrypt radar chart](assets/public-key-encdec-radar.svg)
+
+Only `RSA` currently has a standards-based signing wrapper (`RSASSA-PSS`), so
+the signing data stays in the table above for now rather than forcing a
+degenerate one-method radar chart.
+
+That split is informative: Montgomery fixed the steady-state modular arithmetic,
+so the raw encrypt/decrypt/sign work is already usable at the current measured
+key sizes. The
+big change from the original PK pass is `ElGamal`: moving from a pathological
+safe-prime search to a subgroup-based generator (`p = kq + 1` with an order-`q`
+generator) plus a larger small-prime sieve in the bigint Miller-Rabin path
+brings 1024-bit keygen down from tens of seconds to roughly a tenth of a
+second, and storing that subgroup order in the public key cuts the encryption
+path down to the right exponent size as well. The latency split also makes the
+scheme differences visible: `Rabin` is the fastest encryptor because the public
+map is just squaring, while `Paillier` is the slowest encryptor because it pays
+for work modulo $n^2$ and a randomizer term; `Cocks` and `Schmidt\text{-}Samoa`
+sit in between with public exponents equal to the modulus. A 2048-bit RSA run was still slow enough in the first key-generation stage that it was aborted after it had already made the point, so large-key deployments remain the place where a future `num-bigint` backend may make sense.
+
+---
+
+## Symmetric-Cipher Performance Benchmarks
 
 ### Measurement methodology
 

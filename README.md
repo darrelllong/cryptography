@@ -280,11 +280,16 @@ cargo test speck::tests
 cargo test twofish::tests
 cargo test salsa20::tests
 cargo test zuc::tests
+cargo test public_key::
 ```
 
 Coverage is in-module, not in separate test scripts. Each cipher family ships
 its own known-answer vectors and fast-vs-`Ct` equivalence tests where both
 paths exist.
+
+The public-key tests cover raw arithmetic vectors, wrapper round-trips, RSA
+OAEP/PSS behavior, key serialization, and OpenSSL interoperability checks where
+real standards exist.
 
 The generic mode layer is covered in-module too:
 
@@ -316,20 +321,20 @@ Run the AES-focused comparison benchmark:
 cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
 ```
 
+Run the public-key latency probe:
+
+```text
+cargo run --release --bin bench_public_key -- 1024
+```
+
+Unlike the symmetric-cipher Criterion benches, `bench_public_key` reports
+latency for key generation and single encrypt/decrypt/sign/verify operations.
+
 `aes_bench` compares the crate's AES implementations against libsodium
 `secretbox`. This is a calibration benchmark, not a strict apples-to-apples
 comparison: the crate's rows are raw AES block-cipher throughput, while the
 libsodium row is a complete XSalsa20-Poly1305 authenticated-encryption
 construction.
-
-## ML Distinguisher Experiment
-
-The repository also includes a PyTorch experiment under `ml/` for testing
-whether a deep network can distinguish raw cipher output from chance.
-
-The dataset uses only the fast cipher implementations. The `Ct` variants are
-not separate classes because they should emit exactly the same bits as the fast
-path for the same key and input.
 
 ## Public-Key How To
 
@@ -348,10 +353,10 @@ standards-based usage layer:
     wrapped in a scheme-specific PEM label, plus the same fixed-schema XML form
   - byte-oriented `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and
     `SchmidtSamoa` encrypt/decrypt helpers
-  - teaching-sized key generation for all of the implemented public-key schemes
+  - built-in key generation for all of the implemented public-key schemes
   - Paillier helper operations: ciphertext addition and rerandomization
 
-Generate a teaching-sized RSA key pair from a CSPRNG:
+Generate an RSA key pair from a CSPRNG:
 
 ```rust
 use cryptography::{CtrDrbgAes256, Rsa};
@@ -444,7 +449,7 @@ let signature = RsaPss::<Sha256>::sign(&private, b"message", &salt).expect("PSS"
 assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
 ```
 
-Generate and use a teaching-sized `ElGamal` key pair:
+Generate and use an `ElGamal` key pair:
 
 ```rust
 use cryptography::{CtrDrbgAes256, ElGamal};
@@ -478,10 +483,16 @@ let combined = public
 assert_eq!(private.decrypt(&combined), b"\x46");
 ```
 
-The raw primitives still expose the bare modular maps for teaching and direct
-comparison with the companion Python code. The wrapper layer is where
-standards-compliant formatting lives, and the Montgomery toolkit is where the
-fast odd-modulus arithmetic now lives.
+The same byte-oriented APIs work for file contents: read the file into a byte
+buffer, pass that buffer to the scheme wrapper, and write the returned bytes
+back out. `RSA` is the only scheme with an RFC/NIST padding layer today; the
+other public-key schemes intentionally expose thin crate-defined wrappers around
+their textbook primitives.
+
+The raw primitives still expose the bare modular maps for direct comparison
+with the companion Python code. The wrapper layer is where standards-compliant
+formatting lives, and the Montgomery toolkit is where the fast odd-modulus
+arithmetic now lives.
 
 There is also a simple latency tool for the public-key layer:
 
@@ -494,7 +505,7 @@ to wait for ElGamal parameter generation on larger inputs.
 
 Pass a larger bit length (for example `2048`) to probe the current bigint
 backend at practical sizes. This is the quickest way to decide whether the
-in-tree teaching backend is still acceptable or whether it is time to swap to
+in-tree bigint backend is still acceptable or whether it is time to swap to
 `num-bigint`.
 
 Generate a balanced dataset of raw samples:
@@ -553,6 +564,15 @@ This writes the trained model and weights to `ml/out/`:
 
 For the fuller ML workflow, including the adaptive overnight runner and dataset
 auditing, see [ml/README.md](ml/README.md).
+
+## ML Distinguisher Experiment
+
+The repository also includes a PyTorch experiment under `ml/` for testing
+whether a deep network can distinguish raw cipher output from chance.
+
+The dataset uses only the fast cipher implementations. The `Ct` variants are
+not separate classes because they should emit exactly the same bits as the fast
+path for the same key and input.
 
 ## Design Notes
 
