@@ -12,3 +12,4 @@ path = "src/lib.rs"
 # `cargo test` on this package does not need to resolve benchmark-only crates.
 
 [dependencies]
+quick-xml = "0.38"

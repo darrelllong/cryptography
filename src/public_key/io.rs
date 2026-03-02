@@ -31,6 +31,8 @@
 //! The PEM label selects the scheme and key role. The DER body is shared.
 
 use crate::public_key::bigint::BigUint;
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::{Reader, Writer};
 
 const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
 
@@ -183,55 +185,82 @@ pub(crate) fn pem_unwrap(label: &str, pem: &str) -> Option<Vec<u8>> {
 }
 
 pub(crate) fn xml_wrap(root: &str, fields: &[(&str, &BigUint)]) -> String {
-    let mut out = String::new();
-    out.push('<');
-    out.push_str(root);
-    out.push('>');
+    let mut writer = Writer::new(Vec::new());
+    writer
+        .write_event(Event::Start(BytesStart::new(root)))
+        .expect("in-memory XML write cannot fail");
 
     for (name, value) in fields {
-        out.push('<');
-        out.push_str(name);
-        out.push('>');
-        out.push_str(&hex_encode_upper(value));
-        out.push_str("</");
-        out.push_str(name);
-        out.push('>');
+        writer
+            .write_event(Event::Start(BytesStart::new(*name)))
+            .expect("in-memory XML write cannot fail");
+        writer
+            .write_event(Event::Text(BytesText::new(&hex_encode_upper(value))))
+            .expect("in-memory XML write cannot fail");
+        writer
+            .write_event(Event::End(BytesEnd::new(*name)))
+            .expect("in-memory XML write cannot fail");
     }
 
-    out.push_str("</");
-    out.push_str(root);
-    out.push('>');
-    out
+    writer
+        .write_event(Event::End(BytesEnd::new(root)))
+        .expect("in-memory XML write cannot fail");
+
+    String::from_utf8(writer.into_inner()).expect("XML output is valid UTF-8")
 }
 
 pub(crate) fn xml_unwrap(root: &str, field_names: &[&str], xml: &str) -> Option<Vec<BigUint>> {
-    let bytes = xml.as_bytes();
-    let mut pos = 0usize;
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
 
-    skip_ws(bytes, &mut pos);
-    expect_open_tag(bytes, &mut pos, root)?;
+    let mut buf = Vec::new();
+
+    match reader.read_event_into(&mut buf).ok()? {
+        Event::Start(start) if start.name().as_ref() == root.as_bytes() => {
+            if start.attributes().with_checks(false).next().is_some() {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+    buf.clear();
 
     let mut out = Vec::with_capacity(field_names.len());
     for &field_name in field_names {
-        skip_ws(bytes, &mut pos);
-        expect_open_tag(bytes, &mut pos, field_name)?;
-        let start = pos;
-        while pos < bytes.len() && bytes[pos] != b'<' {
-            pos += 1;
+        match reader.read_event_into(&mut buf).ok()? {
+            Event::Start(start) if start.name().as_ref() == field_name.as_bytes() => {
+                if start.attributes().with_checks(false).next().is_some() {
+                    return None;
+                }
+            }
+            _ => return None,
         }
-        let body = core::str::from_utf8(bytes.get(start..pos)?).ok()?;
-        out.push(hex_decode_biguint(body.trim())?);
-        expect_close_tag(bytes, &mut pos, field_name)?;
+        buf.clear();
+
+        let text = match reader.read_event_into(&mut buf).ok()? {
+            Event::Text(text) => text.decode().ok()?.into_owned(),
+            _ => return None,
+        };
+        out.push(hex_decode_biguint(text.trim())?);
+        buf.clear();
+
+        match reader.read_event_into(&mut buf).ok()? {
+            Event::End(end) if end.name().as_ref() == field_name.as_bytes() => {}
+            _ => return None,
+        }
+        buf.clear();
     }
 
-    skip_ws(bytes, &mut pos);
-    expect_close_tag(bytes, &mut pos, root)?;
-    skip_ws(bytes, &mut pos);
-    if pos != bytes.len() {
-        return None;
+    match reader.read_event_into(&mut buf).ok()? {
+        Event::End(end) if end.name().as_ref() == root.as_bytes() => {}
+        _ => return None,
     }
+    buf.clear();
 
-    Some(out)
+    match reader.read_event_into(&mut buf).ok()? {
+        Event::Eof => Some(out),
+        _ => None,
+    }
 }
 
 fn base64_encode(input: &[u8]) -> String {
@@ -327,38 +356,6 @@ fn decode_base64_char(ch: u8) -> Option<u8> {
     }
 }
 
-fn expect_open_tag(input: &[u8], pos: &mut usize, name: &str) -> Option<()> {
-    let mut tag = String::with_capacity(name.len() + 2);
-    tag.push('<');
-    tag.push_str(name);
-    tag.push('>');
-    let tag_bytes = tag.as_bytes();
-    if input.get(*pos..(*pos + tag_bytes.len()))? != tag_bytes {
-        return None;
-    }
-    *pos += tag_bytes.len();
-    Some(())
-}
-
-fn expect_close_tag(input: &[u8], pos: &mut usize, name: &str) -> Option<()> {
-    let mut tag = String::with_capacity(name.len() + 3);
-    tag.push_str("</");
-    tag.push_str(name);
-    tag.push('>');
-    let tag_bytes = tag.as_bytes();
-    if input.get(*pos..(*pos + tag_bytes.len()))? != tag_bytes {
-        return None;
-    }
-    *pos += tag_bytes.len();
-    Some(())
-}
-
-fn skip_ws(input: &[u8], pos: &mut usize) {
-    while *pos < input.len() && input[*pos].is_ascii_whitespace() {
-        *pos += 1;
-    }
-}
-
 fn hex_encode_upper(value: &BigUint) -> String {
     let bytes = value.to_be_bytes();
     if bytes.is_empty() {
@@ -439,6 +436,18 @@ mod tests {
     #[test]
     fn xml_rejects_wrong_root() {
         let xml = "<Wrong><n>BB</n></Wrong>";
+        assert!(xml_unwrap("TestKey", &["n"], xml).is_none());
+    }
+
+    #[test]
+    fn xml_rejects_wrong_field_name() {
+        let xml = "<TestKey><wrong>BB</wrong></TestKey>";
+        assert!(xml_unwrap("TestKey", &["n"], xml).is_none());
+    }
+
+    #[test]
+    fn xml_rejects_trailing_content() {
+        let xml = "<TestKey><n>BB</n></TestKey>junk";
         assert!(xml_unwrap("TestKey", &["n"], xml).is_none());
     }
 }
