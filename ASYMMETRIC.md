@@ -155,9 +155,11 @@ Core arithmetic:
 ```
 
 The key-generation path uses a prime-order subgroup construction instead of the
-older safe-prime search. That keeps the subgroup structure explicit while
-avoiding the pathological key-generation cost that came from insisting on
-`p = 2q + 1`.
+older safe-prime search. A safe prime is a modulus of the form `p = 2q + 1`
+with `q` prime; it gives simple subgroup structure, but searching for those
+moduli is much slower than generating `p = kq + 1` directly. The current
+implementation keeps the subgroup structure explicit while avoiding that
+pathological key-generation cost.
 
 The public key stores the real ephemeral bound used for encryption, so the
 random ephemeral exponent is sampled from the right range instead of from the
@@ -202,7 +204,7 @@ wider than the subgroup order.
 Core arithmetic:
 
 ```math
-c = m^n \bmod n,\qquad n = pq,\qquad \pi \equiv n^{-1} \pmod{q - 1}
+c = m^n \bmod n,\qquad n = pq,\qquad \pi \equiv p^{-1} \pmod{q - 1}
 ```
 
 with the private recovery map:
@@ -216,6 +218,16 @@ in 1973, five years before RSA. The scheme is unusual because the public
 exponent is the modulus itself. The crate keeps that arithmetic intact and adds
 the byte-level serialization layer on top instead of inventing a modernized
 padding story that the literature does not standardize.
+
+The private exponent is:
+
+```math
+\pi \equiv p^{-1} \pmod{q - 1}
+```
+
+and the key observation is the CRT reduction modulo `q`: when
+`c = m^{pq} \bmod n`, raising `c` to `\pi` modulo `q` reduces the exponent
+from `pq\pi` to `q`, so Fermat brings the result back to `m`.
 
 ### Rabin
 
@@ -250,15 +262,18 @@ algorithm during decryption.
 Rabin is historically important because it is one of the earliest public-key
 trapdoor constructions with a tight reduction story: in the plain setting,
 inverting the squaring map modulo `n = pq` is essentially equivalent to
-factoring `n`. That direct connection is part of why the scheme still matters
-pedagogically even though modern deployments usually prefer RSA.
+factoring `n`. The fixed disambiguation tag used here is what lets the code
+identify the intended root among the four CRT roots and turn the raw squaring
+trapdoor into a deterministic decryptor. That direct connection is part of why
+the scheme still matters pedagogically even though modern deployments usually
+prefer RSA.
 
 ### Paillier
 
 Core arithmetic:
 
 ```math
-c = g^m r^n \bmod n^2
+c = \zeta^m r^n \bmod n^2
 ```
 
 with decryption:
@@ -317,6 +332,11 @@ and decryption:
 ```math
 m = c^d \bmod \gamma
 ```
+
+The unusual choice `n = p^2 q` is the point of the construction: it gives the
+scheme enough structure to choose `d = n^{-1} mod lcm(p-1, q-1)` and recover
+the plaintext modulo `\gamma = pq`, rather than modulo the full public
+modulus.
 
 Like Cocks, Schmidt-Samoa uses the modulus itself as the public exponent. It
 is mathematically neat and implemented faithfully here, but it does not have

@@ -157,6 +157,8 @@ impl RabinPrivateKey {
         let q_coeff = mod_inverse(&self.q, &self.p)?;
         // Standard CRT lifting: rebuild the root that is congruent to `m_p`
         // modulo `p` and to `m_q` modulo `q`.
+        // Valid Rabin keys always have an odd modulus, so the Montgomery path
+        // is the normal case here.
         let ctx = MontgomeryCtx::new(&self.n)?;
         let term_from_q = ctx.mul(&ctx.mul(&p_coeff, &self.p), &m_q);
         let term_from_p = ctx.mul(&ctx.mul(&q_coeff, &self.q), &m_p);
@@ -358,6 +360,9 @@ fn tagged_payload(message: &BigUint, modulus: &BigUint) -> Option<BigUint> {
 }
 
 fn half_modulus(modulus: &BigUint) -> BigUint {
+    // The encoder shifts by `n / 2`, and decryption keeps only roots in the
+    // upper half `[n/2, n)`, so `n / 2` is the threshold that makes the
+    // disambiguation work.
     modulus.div_rem(&BigUint::from_u64(2)).0
 }
 

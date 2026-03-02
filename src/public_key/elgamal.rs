@@ -23,17 +23,31 @@ const ELGAMAL_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ELGAMAL PRIVATE KEY";
 /// Public key for the `ElGamal` primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ElGamalPublicKey {
+    /// Prime modulus `p`.
     p: BigUint,
+    /// Exclusive upper bound for the ephemeral exponent.
+    ///
+    /// Generated keys store the subgroup order `q`. Explicit caller-built
+    /// keys fall back to `p - 1`, which is always safe when the subgroup
+    /// order is unknown.
     exponent_bound: BigUint,
+    /// Generator of the active multiplicative group or subgroup.
     r: BigUint,
+    /// Public component `b = r^a mod p`.
     b: BigUint,
 }
 
 /// Private key for the `ElGamal` primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct ElGamalPrivateKey {
+    /// Prime modulus `p`.
     p: BigUint,
+    /// Exponent cycle used during decryption.
+    ///
+    /// Generated keys store the subgroup order `q`; explicit caller-built
+    /// keys conservatively use `p - 1`.
     exponent_modulus: BigUint,
+    /// Secret exponent `a`.
     a: BigUint,
 }
 
@@ -249,8 +263,11 @@ impl ElGamalPrivateKey {
     ///
     /// This avoids an explicit modular inverse by multiplying `delta` by
     /// `gamma^(q-a)` (or conservatively `gamma^(p-1-a)` when the subgroup
-    /// order is unknown). Inside the order-`q` subgroup,
-    /// `gamma^(q-a) * delta = g^(k(q-a)) * m * g^(ak) = m`.
+    /// order is unknown). In the generated-key case, `gamma` lives in the
+    /// order-`q` subgroup, so `g^q = 1` and
+    /// `gamma^(q-a) * delta = g^(k(q-a)) * m * g^(ak) = g^(kq) * m = m`.
+    /// In the fallback case, the exponent cycle is `p - 1`, so Fermat's
+    /// little theorem gives the same cancellation.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &ElGamalCiphertext) -> BigUint {
         let exponent = self.exponent_modulus.sub_ref(&self.a);

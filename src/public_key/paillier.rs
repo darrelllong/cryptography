@@ -85,6 +85,10 @@ impl PaillierPublicKey {
             return None;
         }
 
+        // `n^2` is a fixed public parameter. The implementation recomputes it
+        // here instead of storing it so the key structs keep only the minimal
+        // algebraic state; callers doing heavy batching can cache it
+        // externally if this multiply shows up in profiles.
         let n_squared = self.n.mul_ref(&self.n);
         let left = mod_pow(&self.zeta, message, &n_squared);
         let right = mod_pow(nonce, &self.n, &n_squared);
@@ -228,8 +232,9 @@ impl PaillierPrivateKey {
         let value = mod_pow(ciphertext, &self.lambda, &n_squared);
         // Valid Paillier ciphertexts produce values of the form `1 + k*n`
         // here, so `L(value)` is defined and extracts the linear term that
-        // still carries the plaintext. Multiplying by `u` then cancels the
-        // fixed decryption factor left by `zeta^lambda`.
+        // still carries the plaintext. `u` was precomputed as
+        // `L(zeta^lambda mod n^2)^-1 mod n`, so multiplying by it cancels the
+        // fixed factor left by `zeta^lambda` and recovers `m`.
         let lifted = paillier_l(&value, &self.n);
         if let Some(ctx) = MontgomeryCtx::new(&self.n) {
             ctx.mul(&lifted, &self.u)
@@ -398,7 +403,9 @@ impl Paillier {
 
 fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
     // The Paillier `L` function is only defined on values of the form
-    // `1 + k*n`; valid decryption inputs satisfy exactly that congruence.
+    // `1 + k*n`; valid decryption inputs satisfy exactly that congruence
+    // because the binomial expansion of `(n + 1)^m` modulo `n^2` leaves only
+    // the linear `m*n` term.
     let shifted = value.sub_ref(&BigUint::one());
     let (quotient, remainder) = shifted.div_rem(modulus);
     debug_assert!(

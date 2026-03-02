@@ -439,14 +439,14 @@ assert_eq!(private_again, private);
 Encrypt and decrypt with `RSAES-OAEP`:
 
 ```rust
-use cryptography::{CtrDrbgAes256, RsaOaep, Sha1};
+use cryptography::{CtrDrbgAes256, RsaOaep, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x11; 48]);
 // The OAEP label is an optional context string. The empty label is the
 // standard default when you do not need domain separation.
 let ciphertext =
-    RsaOaep::<Sha1>::encrypt_rng(&public, b"", b"hello", &mut drbg).expect("OAEP");
-let plaintext = RsaOaep::<Sha1>::decrypt(&private, b"", &ciphertext).expect("OAEP");
+    RsaOaep::<Sha256>::encrypt_rng(&public, b"", b"hello", &mut drbg).expect("OAEP");
+let plaintext = RsaOaep::<Sha256>::decrypt(&private, b"", &ciphertext).expect("OAEP");
 
 assert_eq!(plaintext, b"hello");
 ```
@@ -536,6 +536,13 @@ Pass a larger bit length (for example `2048`) to probe the current bigint
 backend at practical sizes. This is the quickest way to decide whether the
 in-tree bigint backend is still acceptable or whether it is time to swap to
 `num-bigint`.
+
+Production note:
+- The standards-backed RSA wrappers (`OAEP`, `PSS`, and standard key
+  formats) are the intended path for modern use in this crate.
+- The historical schemes and the exposed raw primitives are included as
+  reference implementations. Treat them as specialized tools, not as the
+  default choice for new deployments.
 
 Generate a balanced dataset of raw samples:
 

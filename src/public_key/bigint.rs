@@ -227,6 +227,9 @@ impl BigUint {
 
         let mut low = Self::one();
         let mut high = Self::zero();
+        // Choose `high` so the search starts with `low^2 <= self < high^2`.
+        // Setting bit `ceil(bits(self)/2)` makes `high` a strict upper bound
+        // on the square root.
         high.set_bit(self.bits().div_ceil(2));
 
         while {
@@ -448,6 +451,8 @@ impl BigUint {
         }
 
         let mut remainder = 0u128;
+        // Horner's method in base 2^64: carry the remainder of the already
+        // processed high limbs, then append the next limb.
         for &limb in self.limbs.iter().rev() {
             let acc = (remainder << 64) | u128::from(limb);
             remainder = acc % u128::from(modulus);
@@ -725,6 +730,8 @@ impl MontgomeryCtx {
             power = BigUint::montgomery_mul_odd(&power, &power, &self.modulus, self.n0_inv);
         }
 
+        // `result` is still encoded (`aR mod n`). Multiplying by the ordinary
+        // integer 1 applies the final `R^-1` and decodes it.
         BigUint::montgomery_mul_odd(&result, &one, &self.modulus, self.n0_inv)
     }
 }

@@ -12,8 +12,16 @@
 use super::bigint::{BigInt, BigUint, MontgomeryCtx};
 use crate::Csprng;
 
+/// Fixed Miller-Rabin witness set used by the bigint probable-prime test.
+///
+/// These twelve small prime bases give a deterministic, repeatable witness
+/// schedule for the prime sizes this crate targets.
 const MR_BASES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
 
+/// Trial-division sieve primes checked before the Miller-Rabin stage.
+///
+/// Cheap remainders here discard most composites before the code pays for any
+/// modular exponentiation.
 const SMALL_TRIAL_PRIMES: [u16; 168] = [
     2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97,
     101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193,
@@ -138,8 +146,10 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         let prime = u64::from(prime);
         let remainder = candidate.rem_u64(prime);
         if remainder == 0 {
-            // A small prime divides itself; this preserves that case without
-            // allocating a temporary BigUint for each sieve entry.
+            // A small prime divides itself as well as its composite
+            // multiples. For candidates below 2^10, the residue modulo 2^10
+            // distinguishes the identity case without allocating a temporary
+            // BigUint for every sieve entry.
             if candidate.bits() <= 10 && candidate.rem_u64(1u64 << 10) == prime {
                 return true;
             }
@@ -186,7 +196,8 @@ pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option
         rng.fill_bytes(&mut bytes);
         // Rejection sampling from the next power-of-two range. The buffer is
         // big-endian, so masking byte 0 constrains only the most significant
-        // partial byte and keeps the candidate below `2^bits`.
+        // partial byte and keeps the candidate below `2^bits`; the loop then
+        // retries until the draw lands below `upper_exclusive`.
         bytes[0] &= top_mask;
         let candidate = BigUint::from_be_bytes(&bytes);
         crate::ct::zeroize_slice(bytes.as_mut_slice());
@@ -212,6 +223,9 @@ pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -
 }
 
 /// Draw a random integer in `[1, upper_exclusive)` that is coprime to `coprime_to`.
+///
+/// This is the nonce sampler used by schemes such as Paillier that need a
+/// fresh random unit modulo `n`.
 #[must_use]
 pub fn random_coprime_below<R: Csprng>(
     rng: &mut R,

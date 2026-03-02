@@ -202,6 +202,10 @@ pub(crate) fn pem_unwrap(label: &str, pem: &str) -> Option<Vec<u8>> {
     None
 }
 
+/// Encode the crate's flat XML representation for one key or ciphertext.
+///
+/// `root` is the outer element name and `fields` supplies the fixed child
+/// elements in order.
 pub(crate) fn xml_wrap(root: &str, fields: &[(&str, &BigUint)]) -> String {
     let mut writer = Writer::new(Vec::new());
     writer
@@ -227,6 +231,11 @@ pub(crate) fn xml_wrap(root: &str, fields: &[(&str, &BigUint)]) -> String {
     String::from_utf8(writer.into_inner()).expect("XML output is valid UTF-8")
 }
 
+/// Parse the crate's flat XML representation for one key or ciphertext.
+///
+/// The parser is intentionally strict: the root tag must match, the field
+/// names must appear in the expected order, and extra trailing content is
+/// rejected.
 pub(crate) fn xml_unwrap(root: &str, field_names: &[&str], xml: &str) -> Option<Vec<BigUint>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);

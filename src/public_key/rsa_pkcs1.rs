@@ -16,6 +16,7 @@ use crate::hash::Digest;
 use crate::public_key::bigint::BigUint;
 use crate::{Csprng, RsaPrivateKey, RsaPublicKey};
 
+// RFC 8017's `k`: the octet length of the RSA modulus `n`.
 fn modulus_len_bytes(modulus: &BigUint) -> usize {
     modulus.bits().div_ceil(8)
 }
@@ -157,7 +158,8 @@ impl<H: Digest> RsaOaep<H> {
 
         let l_hash = H::digest(label);
         // Full-scan OAEP validation: keep the whole parse branchless so a
-        // malformed ciphertext does not become a timing oracle.
+        // malformed ciphertext does not become a timing oracle (the classic
+        // Manger-style padding-oracle failure mode).
         let mut saw_separator = 0u8;
         let mut bad_padding = u8::from(encoded[0] != 0);
         bad_padding |= u8::from(!crate::ct::constant_time_eq(&db[..h_len], &l_hash));
@@ -291,7 +293,7 @@ impl<H: Digest> RsaPss<H> {
 
         // Full-scan PSS validation mirrors the OAEP approach: do not stop at
         // the first malformed byte, because verification should not leak where
-        // the separator structure failed.
+        // the separator structure failed or turn into a format oracle.
         let mut saw_separator = 0u8;
         let mut one_index = 0usize;
         for (idx, &byte) in masked_db.iter().enumerate() {
