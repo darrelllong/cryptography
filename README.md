@@ -415,6 +415,17 @@ comparison with the companion Python code. The wrapper layer is where
 standards-compliant formatting lives, and the Montgomery toolkit is where the
 fast odd-modulus arithmetic now lives.
 
+There is also a simple latency tool for the public-key layer:
+
+```text
+cargo run --release --bin bench_public_key -- 1024
+```
+
+Pass a larger bit length (for example `2048`) to probe the current bigint
+backend at practical sizes. This is the quickest way to decide whether the
+in-tree teaching backend is still acceptable or whether it is time to swap to
+`num-bigint`.
+
 Generate a balanced dataset of raw samples:
 
 ```text

@@ -187,6 +187,39 @@ companion Python algorithms. Paillier's wrapper also exposes the natural
 homomorphic helper operations (ciphertext addition and rerandomization) rather
 than hiding them.
 
+The current latency probe is the small helper binary:
+
+```text
+cargo run --release --bin bench_public_key -- 1024
+```
+
+On this machine, the first 1024-bit run on the hand-rolled bigint backend
+lands at roughly:
+
+| Operation | Latency |
+|-----------|---------|
+| RSA-1024 keygen | 29.4 ms |
+| RSA-1024 OAEP encrypt | 0.066 ms |
+| RSA-1024 OAEP decrypt | 0.935 ms |
+| RSA-1024 PSS sign | 0.913 ms |
+| RSA-1024 PSS verify | 0.046 ms |
+| ElGamal-1024 keygen | 56.9 s |
+| ElGamal-1024 encrypt | 1.45 ms |
+| ElGamal-1024 decrypt | 0.79 ms |
+| Paillier-1024 keygen | 24.1 ms |
+| Paillier-1024 encrypt | 6.70 ms |
+| Paillier-1024 decrypt | 2.38 ms |
+| Paillier-1024 rerandomize | 4.41 ms |
+| Paillier-1024 ciphertext add | 0.076 ms |
+
+That split is informative: Montgomery fixed the steady-state modular arithmetic,
+so the raw encrypt/decrypt/sign work is already usable at teaching sizes, but
+safe-prime search and repeated probable-prime testing still make key generation
+the pressure point. A 2048-bit RSA run was slow enough in the first key
+generation stage that it was aborted after it had already made the point, so
+the current backend remains a reference implementation first and a practical
+large-key engine second.
+
 ---
 
 ## Coverage Matrix
@@ -217,7 +250,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
 | Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
 | CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
-| Public-key primitives | `BigUint`, `BigInt`, `MontgomeryCtx`, `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, Montgomery regression tests, wrapper round-trips and teaching keygen tests for every implemented scheme, RSA OAEP/PSS tests, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
+| Public-key primitives | `BigUint`, `BigInt`, `MontgomeryCtx`, `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, Montgomery regression tests, wrapper round-trips and teaching keygen tests for every implemented scheme, RSA OAEP/PSS tests, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | `bench_public_key` latency probe |
 
 ---
 
