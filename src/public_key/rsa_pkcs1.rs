@@ -131,22 +131,25 @@ impl<H: Digest> RsaOaep<H> {
         }
 
         let l_hash = H::digest(label);
-        if !crate::ct::constant_time_eq(&db[..h_len], &l_hash) {
+        let mut saw_separator = 0u8;
+        let mut bad_padding = u8::from(!crate::ct::constant_time_eq(&db[..h_len], &l_hash));
+        let mut msg_idx = 0usize;
+        for (idx, &byte) in db[h_len..].iter().enumerate() {
+            let is_zero = u8::from(byte == 0);
+            let is_one = u8::from(byte == 0x01);
+            let before_separator = saw_separator ^ 1;
+            bad_padding |= before_separator & (is_zero ^ 1) & (is_one ^ 1);
+
+            let take_separator = before_separator & is_one;
+            let mask = 0usize.wrapping_sub(usize::from(take_separator));
+            let candidate_idx = h_len + idx + 1;
+            msg_idx = (msg_idx & !mask) | (candidate_idx & mask);
+            saw_separator |= take_separator;
+        }
+
+        if saw_separator == 0 || bad_padding != 0 {
             return None;
         }
-
-        let mut msg_idx = None;
-        for (idx, &byte) in db[h_len..].iter().enumerate() {
-            if byte == 0x01 {
-                msg_idx = Some(h_len + idx + 1);
-                break;
-            }
-            if byte != 0 {
-                return None;
-            }
-        }
-
-        let msg_idx = msg_idx?;
         Some(db[msg_idx..].to_vec())
     }
 }

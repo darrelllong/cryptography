@@ -92,8 +92,10 @@ impl ElGamalPublicKey {
     ///
     /// This is the minimal "usable" layer for textbook `ElGamal`: it samples
     /// the ephemeral exponent from `[1, p - 2]`, interprets the message as one
-    /// big-endian integer, and applies the raw group operation. Callers that
-    /// need hybrid encryption or padding should build that on top.
+    /// big-endian integer, and applies the raw group operation. The encoded
+    /// integer must be strictly smaller than `p`, so the practical message
+    /// capacity is at most `floor((bits(p) - 1) / 8)` bytes. Callers that need
+    /// hybrid encryption or padding should build that on top.
     #[must_use]
     pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<ElGamalCiphertext> {
         let message_int = BigUint::from_be_bytes(message);

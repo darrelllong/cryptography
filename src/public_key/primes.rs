@@ -180,6 +180,10 @@ pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option
 /// Draw a random integer in `[1, upper_exclusive)`.
 #[must_use]
 pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option<BigUint> {
+    if upper_exclusive <= &BigUint::one() {
+        return None;
+    }
+
     loop {
         let candidate = random_below(rng, upper_exclusive)?;
         if !candidate.is_zero() {
@@ -259,8 +263,20 @@ pub fn mod_inverse(a: &BigUint, n: &BigUint) -> Option<BigUint> {
 
 #[cfg(test)]
 mod tests {
-    use super::{gcd, is_probable_prime, is_probable_prime_with_bases, lcm, mod_inverse, mod_pow};
+    use super::{
+        gcd, is_probable_prime, is_probable_prime_with_bases, lcm, mod_inverse, mod_pow,
+        random_nonzero_below,
+    };
     use crate::public_key::bigint::BigUint;
+    use crate::Csprng;
+
+    struct ZeroRng;
+
+    impl Csprng for ZeroRng {
+        fn fill_bytes(&mut self, out: &mut [u8]) {
+            out.fill(0);
+        }
+    }
 
     #[test]
     fn gcd_small_values() {
@@ -317,5 +333,11 @@ mod tests {
             mod_inverse(&BigUint::from_u64(23), &BigUint::from_u64(46)),
             None
         );
+    }
+
+    #[test]
+    fn random_nonzero_below_rejects_unit_bound() {
+        let mut rng = ZeroRng;
+        assert_eq!(random_nonzero_below(&mut rng, &BigUint::one()), None);
     }
 }

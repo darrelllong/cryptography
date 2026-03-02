@@ -21,6 +21,7 @@ pub struct RabinPublicKey {
 /// Private key for the raw Rabin primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct RabinPrivateKey {
+    n: BigUint,
     p: BigUint,
     q: BigUint,
 }
@@ -70,8 +71,7 @@ impl RabinPrivateKey {
     /// of the four square roots carries the embedded CRC tag.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> Option<BigUint> {
-        let n = self.p.mul_ref(&self.q);
-        let half = half_modulus(&n);
+        let half = half_modulus(&self.n);
         let tag_modulus = BigUint::from_u64(1u64 << 32);
 
         let p_exponent = self
@@ -89,22 +89,27 @@ impl RabinPrivateKey {
 
         let p_coeff = mod_inverse(&self.p, &self.q)?;
         let q_coeff = mod_inverse(&self.q, &self.p)?;
-        let (term_p, term_q) = if let Some(ctx) = MontgomeryCtx::new(&n) {
+        let (term_from_q, term_from_p) = if let Some(ctx) = MontgomeryCtx::new(&self.n) {
             (
                 ctx.mul(&ctx.mul(&p_coeff, &self.p), &m_q),
                 ctx.mul(&ctx.mul(&q_coeff, &self.q), &m_p),
             )
         } else {
             (
-                BigUint::mod_mul(&BigUint::mod_mul(&p_coeff, &self.p, &n), &m_q, &n),
-                BigUint::mod_mul(&BigUint::mod_mul(&q_coeff, &self.q, &n), &m_p, &n),
+                BigUint::mod_mul(&BigUint::mod_mul(&p_coeff, &self.p, &self.n), &m_q, &self.n),
+                BigUint::mod_mul(&BigUint::mod_mul(&q_coeff, &self.q, &self.n), &m_p, &self.n),
             )
         };
 
-        let x = term_p.add_ref(&term_q).modulo(&n);
-        let y = sub_mod(&term_p, &term_q, &n);
+        let x = term_from_q.add_ref(&term_from_p).modulo(&self.n);
+        let y = sub_mod(&term_from_q, &term_from_p, &self.n);
 
-        for root in [x.clone(), neg_mod(&x, &n), y.clone(), neg_mod(&y, &n)] {
+        for root in [
+            x.clone(),
+            neg_mod(&x, &self.n),
+            y.clone(),
+            neg_mod(&y, &self.n),
+        ] {
             if root < half {
                 continue;
             }
@@ -151,9 +156,12 @@ impl Rabin {
             return None;
         }
 
+        let n = p.mul_ref(q);
+
         Some((
-            RabinPublicKey { n: p.mul_ref(q) },
+            RabinPublicKey { n: n.clone() },
             RabinPrivateKey {
+                n,
                 p: p.clone(),
                 q: q.clone(),
             },
@@ -163,7 +171,10 @@ impl Rabin {
     /// Generate a teaching-sized Rabin key pair with primes congruent to `3`
     /// modulo `4`.
     #[must_use]
-    pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(RabinPublicKey, RabinPrivateKey)> {
+    pub fn generate<R: Csprng>(
+        rng: &mut R,
+        bits: usize,
+    ) -> Option<(RabinPublicKey, RabinPrivateKey)> {
         if bits < 4 {
             return None;
         }
