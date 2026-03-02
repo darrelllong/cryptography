@@ -6,7 +6,7 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
+use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow};
 
 const TAG: u32 = 0x7c6d_6a7f;
@@ -81,9 +81,17 @@ impl RabinPrivateKey {
 
         let p_coeff = mod_inverse(&self.p, &self.q)?;
         let q_coeff = mod_inverse(&self.q, &self.p)?;
-
-        let term_p = BigUint::mod_mul(&BigUint::mod_mul(&p_coeff, &self.p, &n), &m_q, &n);
-        let term_q = BigUint::mod_mul(&BigUint::mod_mul(&q_coeff, &self.q, &n), &m_p, &n);
+        let (term_p, term_q) = if let Some(ctx) = MontgomeryCtx::new(&n) {
+            (
+                ctx.mul(&ctx.mul(&p_coeff, &self.p), &m_q),
+                ctx.mul(&ctx.mul(&q_coeff, &self.q), &m_p),
+            )
+        } else {
+            (
+                BigUint::mod_mul(&BigUint::mod_mul(&p_coeff, &self.p, &n), &m_q, &n),
+                BigUint::mod_mul(&BigUint::mod_mul(&q_coeff, &self.q, &n), &m_p, &n),
+            )
+        };
 
         let x = term_p.add_ref(&term_q).modulo(&n);
         let y = sub_mod(&term_p, &term_q, &n);

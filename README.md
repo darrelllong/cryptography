@@ -337,7 +337,9 @@ The public-key module keeps the raw arithmetic primitives separate from the
 standards-based usage layer:
 
 - raw math: `Rsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
-- standards-facing RSA wrappers: `RsaOaep<H>` and `RsaPss<H>`
+- reusable arithmetic toolkit: `BigUint`, `BigInt`, and `MontgomeryCtx`
+- usable wrappers today: `RsaOaep<H>`, `RsaPss<H>`, and the byte-oriented
+  `ElGamalPublicKey::encrypt(...)` / `ElGamalPrivateKey::decrypt(...)`
 
 Generate a teaching-sized RSA key pair from a CSPRNG:
 
@@ -372,9 +374,23 @@ let signature = RsaPss::<Sha256>::sign(&private, b"message", &salt).expect("PSS"
 assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
 ```
 
+Generate and use a teaching-sized `ElGamal` key pair:
+
+```rust
+use cryptography::{CtrDrbgAes256, ElGamal};
+
+let mut drbg = CtrDrbgAes256::new(&[0x33u8; 48]);
+let (public, private) = ElGamal::generate(&mut drbg, 256).expect("ElGamal key");
+let ciphertext = public.encrypt(b"hi", &mut drbg).expect("message fits in F_p");
+let plaintext = private.decrypt(&ciphertext);
+
+assert_eq!(plaintext, b"hi");
+```
+
 The raw primitives still expose the bare modular maps for teaching and direct
-comparison with the companion Python code. The wrapper layer is where the
-standards-compliant formatting lives.
+comparison with the companion Python code. The wrapper layer is where
+standards-compliant formatting lives, and the Montgomery toolkit is where the
+fast odd-modulus arithmetic now lives.
 
 Generate a balanced dataset of raw samples:
 

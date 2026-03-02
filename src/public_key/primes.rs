@@ -9,7 +9,8 @@
 //! `crate::cprng::primes`; the duplication is intentional because the
 //! arithmetic types and intended use-cases differ.
 
-use super::bigint::{BigInt, BigUint};
+use super::bigint::{BigInt, BigUint, MontgomeryCtx};
+use crate::Csprng;
 
 const SMALL_PRIMES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
 
@@ -55,8 +56,8 @@ pub fn mod_pow(base: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigUint
     if modulus == &BigUint::one() {
         return BigUint::zero();
     }
-    if modulus.is_odd() {
-        return BigUint::mod_pow_odd(base, exponent, modulus);
+    if let Some(ctx) = MontgomeryCtx::new(modulus) {
+        return ctx.pow(base, exponent);
     }
 
     let mut result = BigUint::one();
@@ -82,16 +83,16 @@ fn decompose_n_minus_one(n: &BigUint) -> (BigUint, usize) {
 
 fn is_witness(
     base: &BigUint,
-    candidate: &BigUint,
+    ctx: &MontgomeryCtx,
     odd_factor: &BigUint,
     two_adic_exponent: usize,
 ) -> bool {
     let one = BigUint::one();
-    let n_minus_one = candidate.sub_ref(&one);
-    let mut value = mod_pow(base, odd_factor, candidate);
+    let n_minus_one = ctx.modulus().sub_ref(&one);
+    let mut value = ctx.pow(base, odd_factor);
 
     for _ in 0..two_adic_exponent {
-        let next = BigUint::mod_mul(&value, &value, candidate);
+        let next = ctx.square(&value);
         if next == one && value != one && value != n_minus_one {
             return true;
         }
@@ -134,6 +135,9 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         return false;
     }
 
+    let Some(ctx) = MontgomeryCtx::new(candidate) else {
+        return false;
+    };
     let n_minus_one = candidate.sub_ref(&BigUint::one());
     let (odd_factor, two_adic_exponent) = decompose_n_minus_one(candidate);
 
@@ -142,12 +146,72 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         if witness >= n_minus_one {
             continue;
         }
-        if is_witness(&witness, candidate, &odd_factor, two_adic_exponent) {
+        if is_witness(&witness, &ctx, &odd_factor, two_adic_exponent) {
             return false;
         }
     }
 
     true
+}
+
+/// Draw a random integer in `[0, upper_exclusive)`.
+#[must_use]
+pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option<BigUint> {
+    if upper_exclusive.is_zero() {
+        return None;
+    }
+
+    let bits = upper_exclusive.bits();
+    let mut bytes = vec![0u8; bits.div_ceil(8)];
+    let excess_bits = bytes.len() * 8 - bits;
+    let top_mask = 0xff_u8 >> excess_bits;
+
+    loop {
+        rng.fill_bytes(&mut bytes);
+        bytes[0] &= top_mask;
+        let candidate = BigUint::from_be_bytes(&bytes);
+        if candidate < *upper_exclusive {
+            crate::ct::zeroize_slice(bytes.as_mut_slice());
+            return Some(candidate);
+        }
+    }
+}
+
+/// Draw a random integer in `[1, upper_exclusive)`.
+#[must_use]
+pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option<BigUint> {
+    loop {
+        let candidate = random_below(rng, upper_exclusive)?;
+        if !candidate.is_zero() {
+            return Some(candidate);
+        }
+    }
+}
+
+/// Draw a teaching-sized probable prime with the requested bit length.
+#[must_use]
+pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
+    if bits < 2 {
+        return None;
+    }
+
+    let mut bytes = vec![0u8; bits.div_ceil(8)];
+    let top_bit = (bits - 1) % 8;
+    let excess_bits = bytes.len() * 8 - bits;
+    let top_mask = 0xff_u8 >> excess_bits;
+    loop {
+        rng.fill_bytes(&mut bytes);
+        bytes[0] &= top_mask;
+        bytes[0] |= 1u8 << top_bit;
+        let last = bytes.len() - 1;
+        bytes[last] |= 1;
+
+        let candidate = BigUint::from_be_bytes(&bytes);
+        if is_probable_prime(&candidate) {
+            crate::ct::zeroize_slice(bytes.as_mut_slice());
+            return Some(candidate);
+        }
+    }
 }
 
 /// Multiplicative inverse `a^{-1} mod n`, if it exists.
@@ -180,7 +244,7 @@ pub fn mod_inverse(a: &BigUint, n: &BigUint) -> Option<BigUint> {
 
 #[cfg(test)]
 mod tests {
-    use super::{gcd, is_probable_prime, lcm, mod_inverse, mod_pow};
+    use super::{gcd, is_probable_prime, is_probable_prime_with_bases, lcm, mod_inverse, mod_pow};
     use crate::public_key::bigint::BigUint;
 
     #[test]
@@ -218,6 +282,14 @@ mod tests {
         assert!(is_probable_prime(&BigUint::from_be_bytes(&[
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc5
         ])));
+    }
+
+    #[test]
+    fn miller_rabin_rejects_empty_witness_sets() {
+        assert!(!is_probable_prime_with_bases(
+            &BigUint::from_u64(65_537),
+            &[]
+        ));
     }
 
     #[test]

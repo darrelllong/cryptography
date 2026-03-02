@@ -6,8 +6,11 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
-use crate::public_key::primes::{is_probable_prime, mod_pow};
+use crate::public_key::bigint::{BigUint, MontgomeryCtx};
+use crate::public_key::primes::{
+    is_probable_prime, mod_pow, random_nonzero_below, random_probable_prime,
+};
+use crate::Csprng;
 
 /// Public key for the raw `ElGamal` primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,6 +66,9 @@ impl ElGamalPublicKey {
         message: &BigUint,
         ephemeral: &BigUint,
     ) -> Option<ElGamalCiphertext> {
+        if message >= &self.p {
+            return None;
+        }
         if ephemeral.is_zero() {
             return None;
         }
@@ -74,8 +80,26 @@ impl ElGamalPublicKey {
 
         let gamma = mod_pow(&self.r, ephemeral, &self.p);
         let shared = mod_pow(&self.b, ephemeral, &self.p);
-        let delta = BigUint::mod_mul(message, &shared, &self.p);
+        let delta = if let Some(ctx) = MontgomeryCtx::new(&self.p) {
+            ctx.mul(message, &shared)
+        } else {
+            BigUint::mod_mul(message, &shared, &self.p)
+        };
         Some(ElGamalCiphertext { gamma, delta })
+    }
+
+    /// Encrypt a byte string with a fresh random ephemeral exponent.
+    ///
+    /// This is the minimal "usable" layer for textbook `ElGamal`: it samples
+    /// the ephemeral exponent from `[1, p - 2]`, interprets the message as one
+    /// big-endian integer, and applies the raw group operation. Callers that
+    /// need hybrid encryption or padding should build that on top.
+    #[must_use]
+    pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<ElGamalCiphertext> {
+        let message_int = BigUint::from_be_bytes(message);
+        let upper = self.p.sub_ref(&BigUint::one());
+        let ephemeral = random_nonzero_below(rng, &upper)?;
+        self.encrypt_with_ephemeral(&message_int, &ephemeral)
     }
 }
 
@@ -101,7 +125,18 @@ impl ElGamalPrivateKey {
     pub fn decrypt_raw(&self, ciphertext: &ElGamalCiphertext) -> BigUint {
         let exponent = self.p.sub_ref(&BigUint::one()).sub_ref(&self.a);
         let factor = mod_pow(&ciphertext.gamma, &exponent, &self.p);
-        BigUint::mod_mul(&factor, &ciphertext.delta, &self.p)
+        if let Some(ctx) = MontgomeryCtx::new(&self.p) {
+            ctx.mul(&factor, &ciphertext.delta)
+        } else {
+            BigUint::mod_mul(&factor, &ciphertext.delta, &self.p)
+        }
+    }
+
+    /// Decrypt a ciphertext back into the big-endian byte string that was
+    /// interpreted as the plaintext integer.
+    #[must_use]
+    pub fn decrypt(&self, ciphertext: &ElGamalCiphertext) -> Vec<u8> {
+        self.decrypt_raw(ciphertext).to_be_bytes()
     }
 }
 
@@ -161,12 +196,62 @@ impl ElGamal {
             },
         ))
     }
+
+    /// Generate a teaching-sized `ElGamal` key pair over a safe-prime field.
+    ///
+    /// This chooses a probable prime `q`, sets `p = 2q + 1`, accepts only
+    /// safe-prime candidates where `p` is also probably prime, then chooses a
+    /// generator of the full multiplicative group modulo `p`. The resulting
+    /// parameters are suitable for the raw textbook primitive and the minimal
+    /// byte-oriented wrapper above.
+    #[must_use]
+    pub fn generate<R: Csprng>(
+        rng: &mut R,
+        bits: usize,
+    ) -> Option<(ElGamalPublicKey, ElGamalPrivateKey)> {
+        if bits < 4 {
+            return None;
+        }
+
+        loop {
+            let q = random_probable_prime(rng, bits - 1)?;
+            let prime = q.add_ref(&q).add_ref(&BigUint::one());
+            if !is_probable_prime(&prime) {
+                continue;
+            }
+
+            let generator = find_safe_prime_generator(&prime, &q)?;
+            let upper = prime.sub_ref(&BigUint::one());
+            let secret = random_nonzero_below(rng, &upper)?;
+            if let Some(keypair) = Self::from_secret_exponent(&prime, &generator, &secret) {
+                return Some(keypair);
+            }
+        }
+    }
+}
+
+fn find_safe_prime_generator(prime: &BigUint, q: &BigUint) -> Option<BigUint> {
+    let one = BigUint::one();
+    let two = BigUint::from_u64(2);
+    let ctx = MontgomeryCtx::new(prime)?;
+    let upper = prime.sub_ref(&one);
+    let mut candidate = BigUint::from_u64(2);
+
+    while candidate < upper {
+        if ctx.pow(&candidate, &two) != one && ctx.pow(&candidate, q) != one {
+            return Some(candidate);
+        }
+        candidate = candidate.add_ref(&one);
+    }
+
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::ElGamal;
     use crate::public_key::bigint::BigUint;
+    use crate::CtrDrbgAes256;
 
     #[test]
     fn derive_small_reference_key() {
@@ -243,5 +328,29 @@ mod tests {
         assert!(public
             .encrypt_with_ephemeral(&message, &BigUint::from_u64(22))
             .is_none());
+    }
+
+    #[test]
+    fn generate_teaching_keypair() {
+        let mut drbg = CtrDrbgAes256::new(&[0x33; 48]);
+        let (public, private) = ElGamal::generate(&mut drbg, 32).expect("ElGamal key generation");
+        let message = BigUint::from_u64(42);
+        let ciphertext = public
+            .encrypt_with_ephemeral(&message, &BigUint::from_u64(3))
+            .expect("valid ephemeral exponent");
+        assert_eq!(private.decrypt_raw(&ciphertext), message);
+    }
+
+    #[test]
+    fn byte_wrapper_roundtrip() {
+        let p = BigUint::from_u64(65_537);
+        let r = BigUint::from_u64(3);
+        let a = BigUint::from_u64(7);
+        let (public, private) =
+            ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+        let mut drbg = CtrDrbgAes256::new(&[0x44; 48]);
+        let message = [0x12, 0x34];
+        let ciphertext = public.encrypt(&message, &mut drbg).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), message.to_vec());
     }
 }

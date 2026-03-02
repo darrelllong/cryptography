@@ -7,7 +7,7 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
+use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::primes::{gcd, is_probable_prime, lcm, mod_inverse, mod_pow};
 
 /// Public key for the raw Paillier primitive.
@@ -54,7 +54,12 @@ impl PaillierPublicKey {
         let n_squared = self.n.mul_ref(&self.n);
         let left = mod_pow(&self.zeta, message, &n_squared);
         let right = mod_pow(nonce, &self.n, &n_squared);
-        Some(BigUint::mod_mul(&left, &right, &n_squared))
+        let product = if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
+            ctx.mul(&left, &right)
+        } else {
+            BigUint::mod_mul(&left, &right, &n_squared)
+        };
+        Some(product)
     }
 }
 
@@ -83,7 +88,11 @@ impl PaillierPrivateKey {
         let n_squared = self.n.mul_ref(&self.n);
         let value = mod_pow(ciphertext, &self.lambda, &n_squared);
         let lifted = paillier_l(&value, &self.n);
-        BigUint::mod_mul(&lifted, &self.u, &self.n)
+        if let Some(ctx) = MontgomeryCtx::new(&self.n) {
+            ctx.mul(&lifted, &self.u)
+        } else {
+            BigUint::mod_mul(&lifted, &self.u, &self.n)
+        }
     }
 }
 

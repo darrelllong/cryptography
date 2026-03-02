@@ -31,6 +31,20 @@ pub struct BigInt {
     magnitude: BigUint,
 }
 
+/// Montgomery arithmetic context for a fixed odd modulus.
+///
+/// Public-key schemes spend most of their time doing repeated modular
+/// multiplication under one long-lived odd modulus. Precomputing the
+/// Montgomery constants once avoids paying the setup cost on every multiply
+/// while keeping the scheme code readable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MontgomeryCtx {
+    modulus: BigUint,
+    n0_inv: u64,
+    r2_mod: BigUint,
+    one_mont: BigUint,
+}
+
 impl Ord for BigUint {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.limbs.len().cmp(&other.limbs.len()) {
@@ -410,12 +424,11 @@ impl BigUint {
         u64::try_from(remainder).expect("remainder modulo u64 fits into u64")
     }
 
-    /// Compute `(lhs * rhs) mod modulus` using double-and-add.
+    /// Compute `(lhs * rhs) mod modulus`.
     ///
-    /// This is intentionally the simple teaching implementation. It keeps the
-    /// value reduced at each step so intermediate products never explode in
-    /// size, but the repeated division-based reductions make it much slower
-    /// than Montgomery multiplication for real public-key sizes.
+    /// Odd moduli use a fresh Montgomery context so the common public-key path
+    /// avoids the division-heavy teaching fallback. Even moduli keep the old
+    /// double-and-add reducer because Montgomery requires an odd modulus.
     ///
     /// # Panics
     ///
@@ -423,6 +436,23 @@ impl BigUint {
     #[must_use]
     pub fn mod_mul(lhs: &Self, rhs: &Self, modulus: &Self) -> Self {
         assert!(!modulus.is_zero(), "modulus must be non-zero");
+        if modulus == &Self::one() {
+            return Self::zero();
+        }
+        if let Some(ctx) = MontgomeryCtx::new(modulus) {
+            return ctx.mul(lhs, rhs);
+        }
+        Self::mod_mul_plain(lhs, rhs, modulus)
+    }
+
+    /// Compute `(lhs * rhs) mod modulus` using the simple double-and-add
+    /// teaching implementation.
+    ///
+    /// The result is mathematically correct, but repeated division-based
+    /// reduction makes it much slower than Montgomery multiplication for the
+    /// odd moduli that dominate public-key code.
+    #[must_use]
+    pub(crate) fn mod_mul_plain(lhs: &Self, rhs: &Self, modulus: &Self) -> Self {
         if lhs.is_zero() || rhs.is_zero() {
             return Self::zero();
         }
@@ -438,34 +468,6 @@ impl BigUint {
             b.shr1();
         }
         out
-    }
-
-    /// Compute `base^exponent mod modulus` using Montgomery multiplication.
-    ///
-    /// This path applies only to odd moduli, where Montgomery reduction
-    /// replaces the repeated division-heavy reduction used by `mod_mul`.
-    /// The arithmetic stays mathematically identical; only the reduction
-    /// engine changes.
-    #[must_use]
-    pub(crate) fn mod_pow_odd(base: &Self, exponent: &Self, modulus: &Self) -> Self {
-        debug_assert!(modulus.is_odd(), "Montgomery path requires an odd modulus");
-        if modulus == &Self::one() {
-            return Self::zero();
-        }
-
-        let n0_inv = montgomery_n0_inv(modulus.limbs[0]);
-        let one = Self::one();
-        let mut result = Self::montgomery_encode(&one, modulus);
-        let mut power = Self::montgomery_encode(&base.modulo(modulus), modulus);
-
-        for bit in 0..exponent.bits() {
-            if exponent.bit(bit) {
-                result = Self::montgomery_mul_odd(&result, &power, modulus, n0_inv);
-            }
-            power = Self::montgomery_mul_odd(&power, &power, modulus, n0_inv);
-        }
-
-        Self::montgomery_mul_odd(&result, &one, modulus, n0_inv)
     }
 
     /// Return `(quotient, remainder)` for Euclidean division. Panics on zero divisor.
@@ -510,18 +512,6 @@ impl BigUint {
 
     fn limb_or_zero(&self, idx: usize) -> u64 {
         self.limbs.get(idx).copied().unwrap_or(0)
-    }
-
-    fn montgomery_encode(value: &Self, modulus: &Self) -> Self {
-        if value.is_zero() {
-            return Self::zero();
-        }
-
-        let mut limbs = vec![0u64; modulus.limbs.len()];
-        limbs.extend_from_slice(&value.limbs);
-        let mut shifted = Self { limbs };
-        shifted.normalize();
-        shifted.modulo(modulus)
     }
 
     fn montgomery_mul_odd(lhs: &Self, rhs: &Self, modulus: &Self, n0_inv: u64) -> Self {
@@ -579,6 +569,97 @@ impl BigUint {
             out.sub_assign_ref(modulus);
         }
         out
+    }
+}
+
+impl MontgomeryCtx {
+    /// Build a Montgomery context for a non-zero odd modulus.
+    #[must_use]
+    pub fn new(modulus: &BigUint) -> Option<Self> {
+        if modulus.is_zero() || !modulus.is_odd() {
+            return None;
+        }
+
+        let n0_inv = montgomery_n0_inv(modulus.limbs[0]);
+
+        let mut r2 = BigUint::zero();
+        r2.set_bit(modulus.limbs.len() * 128);
+        let r2_mod = r2.modulo(modulus);
+
+        let mut r = BigUint::zero();
+        r.set_bit(modulus.limbs.len() * 64);
+        let one_mont = r.modulo(modulus);
+
+        Some(Self {
+            modulus: modulus.clone(),
+            n0_inv,
+            r2_mod,
+            one_mont,
+        })
+    }
+
+    /// Return the odd modulus this context was built for.
+    #[must_use]
+    pub fn modulus(&self) -> &BigUint {
+        &self.modulus
+    }
+
+    /// Convert an ordinary residue into Montgomery form.
+    #[must_use]
+    pub fn encode(&self, value: &BigUint) -> BigUint {
+        if value.is_zero() {
+            return BigUint::zero();
+        }
+
+        BigUint::montgomery_mul_odd(
+            &value.modulo(&self.modulus),
+            &self.r2_mod,
+            &self.modulus,
+            self.n0_inv,
+        )
+    }
+
+    /// Convert a Montgomery residue back to the ordinary representation.
+    #[must_use]
+    pub fn decode(&self, value: &BigUint) -> BigUint {
+        BigUint::montgomery_mul_odd(value, &BigUint::one(), &self.modulus, self.n0_inv)
+    }
+
+    /// Multiply two ordinary residues modulo the context modulus.
+    #[must_use]
+    pub fn mul(&self, lhs: &BigUint, rhs: &BigUint) -> BigUint {
+        let lhs_mont = self.encode(lhs);
+        let rhs_mont = self.encode(rhs);
+        let product_mont =
+            BigUint::montgomery_mul_odd(&lhs_mont, &rhs_mont, &self.modulus, self.n0_inv);
+        self.decode(&product_mont)
+    }
+
+    /// Square one ordinary residue modulo the context modulus.
+    #[must_use]
+    pub fn square(&self, value: &BigUint) -> BigUint {
+        self.mul(value, value)
+    }
+
+    /// Compute `base^exponent mod modulus` inside the context.
+    #[must_use]
+    pub fn pow(&self, base: &BigUint, exponent: &BigUint) -> BigUint {
+        if self.modulus == BigUint::one() {
+            return BigUint::zero();
+        }
+
+        let one = BigUint::one();
+        let mut result = self.one_mont.clone();
+        let mut power = self.encode(&base.modulo(&self.modulus));
+
+        for bit in 0..exponent.bits() {
+            if exponent.bit(bit) {
+                result = BigUint::montgomery_mul_odd(&result, &power, &self.modulus, self.n0_inv);
+            }
+            power = BigUint::montgomery_mul_odd(&power, &power, &self.modulus, self.n0_inv);
+        }
+
+        BigUint::montgomery_mul_odd(&result, &one, &self.modulus, self.n0_inv)
     }
 }
 
@@ -747,7 +828,7 @@ impl BigInt {
 
 #[cfg(test)]
 mod tests {
-    use super::{BigInt, BigUint, Sign};
+    use super::{BigInt, BigUint, MontgomeryCtx, Sign};
 
     #[test]
     fn bytes_roundtrip() {
@@ -794,13 +875,20 @@ mod tests {
 
     #[test]
     fn montgomery_mod_pow_matches_small_arithmetic() {
+        let ctx = MontgomeryCtx::new(&BigUint::from_u64(1_000_000_007))
+            .expect("odd modulus builds a context");
         let base = BigUint::from_u64(123_456_789);
         let exponent = BigUint::from_u64(65_537);
-        let modulus = BigUint::from_u64(1_000_000_007);
-        assert_eq!(
-            BigUint::mod_pow_odd(&base, &exponent, &modulus),
-            BigUint::from_u64(560_583_526)
-        );
+        assert_eq!(ctx.pow(&base, &exponent), BigUint::from_u64(560_583_526));
+    }
+
+    #[test]
+    fn montgomery_ctx_mul_matches_small_arithmetic() {
+        let ctx = MontgomeryCtx::new(&BigUint::from_u64(1_000_000_007))
+            .expect("odd modulus builds a context");
+        let a = BigUint::from_u64(123_456_789);
+        let b = BigUint::from_u64(987_654_321);
+        assert_eq!(ctx.mul(&a, &b), BigUint::from_u64(259_106_859));
     }
 
     #[test]

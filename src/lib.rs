@@ -86,7 +86,7 @@ pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
 pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, Gmac, Ofb, Xts};
-pub use public_key::bigint::{BigInt, BigUint, Sign};
+pub use public_key::bigint::{BigInt, BigUint, MontgomeryCtx, Sign};
 pub use public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
 pub use public_key::elgamal::{ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey};
 pub use public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};

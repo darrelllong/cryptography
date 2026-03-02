@@ -8,7 +8,9 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::primes::{gcd, is_probable_prime, lcm, mod_inverse, mod_pow};
+use crate::public_key::primes::{
+    gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime,
+};
 use crate::Csprng;
 
 /// Public key for the raw RSA primitive.
@@ -162,8 +164,8 @@ impl Rsa {
         let p_bits = bits / 2;
         let q_bits = bits - p_bits;
         loop {
-            let p = random_probable_prime(rng, p_bits);
-            let q = random_probable_prime(rng, q_bits);
+            let p = random_probable_prime(rng, p_bits)?;
+            let q = random_probable_prime(rng, q_bits)?;
             if let Some(keypair) = Self::from_primes_with_exponent(&p, &q, exponent) {
                 return Some(keypair);
             }
@@ -181,31 +183,11 @@ impl Rsa {
         let p_bits = bits / 2;
         let q_bits = bits - p_bits;
         loop {
-            let p = random_probable_prime(rng, p_bits);
-            let q = random_probable_prime(rng, q_bits);
+            let p = random_probable_prime(rng, p_bits)?;
+            let q = random_probable_prime(rng, q_bits)?;
             if let Some(keypair) = Self::from_primes(&p, &q) {
                 return Some(keypair);
             }
-        }
-    }
-}
-
-fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> BigUint {
-    let mut bytes = vec![0u8; bits.div_ceil(8)];
-    let top_bit = (bits - 1) % 8;
-    let excess_bits = bytes.len() * 8 - bits;
-    let top_mask = 0xff_u8 >> excess_bits;
-    loop {
-        rng.fill_bytes(&mut bytes);
-        bytes[0] &= top_mask;
-        bytes[0] |= 1u8 << top_bit;
-        let last = bytes.len() - 1;
-        bytes[last] |= 1;
-
-        let candidate = BigUint::from_be_bytes(&bytes);
-        if is_probable_prime(&candidate) {
-            crate::ct::zeroize_slice(bytes.as_mut_slice());
-            return candidate;
         }
     }
 }

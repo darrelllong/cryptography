@@ -151,10 +151,12 @@ trait shape, but they are not substitutes for modern DRBG deployments.
   `fips186-5`.
 - Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, and
   `SchmidtSamoa`, plus `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA
-  encryption and signatures.
-- Scope: the non-RSA schemes are still the naked arithmetic primitives from
-  the companion Python code. RSA now has a separate standards-facing wrapper
-  layer above the raw trapdoor permutation.
+  encryption and signatures, plus a byte-oriented `ElGamal` convenience layer
+  (`ElGamal::generate`, `ElGamalPublicKey::encrypt`, `ElGamalPrivateKey::decrypt`).
+- Scope: most non-RSA schemes still expose the naked arithmetic primitives
+  from the companion Python code. RSA now has a separate standards-facing
+  wrapper layer above the raw trapdoor permutation, and ElGamal has the first
+  minimal "usable" wrapper for the non-RSA family.
 
 The standards path is clear primarily for RSA:
 
@@ -169,16 +171,18 @@ standards-driven for RSA first and much more scheme-specific for the rest.
 
 The public-key layer is intentionally separated into:
 
-- `bigint`: a simple limb-based `BigUint` / `BigInt` substrate
+- `bigint`: a simple limb-based `BigUint` / `BigInt` substrate plus the
+  reusable `MontgomeryCtx` for odd-modulus arithmetic
 - `primes`: repeated-squaring modular exponentiation, Miller-Rabin, `gcd`,
-  `lcm`, and modular inverse
+  `lcm`, modular inverse, and small teaching key-generation helpers
 - one file per raw scheme
 - `rsa_pkcs1`: standards-based RSA wrappers (`OAEP` and `PSS`)
 
 That mirrors the earlier cipher layering: get the math right first, then add
 protocol-safe framing. The current code is therefore best read as a reference
 implementation of the core trapdoor operations, with RSA as the first scheme
-that also has an immediately usable standards-compliant layer.
+that also has an immediately usable standards-compliant layer and ElGamal as
+the first non-RSA scheme with a small RNG-backed byte wrapper.
 
 ---
 
@@ -210,7 +214,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
 | Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
 | CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
-| Public-key primitives | `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, RSA OAEP/PSS wrapper tests, round-trips, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
+| Public-key primitives | `BigUint`, `BigInt`, `MontgomeryCtx`, `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, Montgomery regression tests, RSA OAEP/PSS wrapper tests, ElGamal byte-wrapper tests, round-trips, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
 
 ---
 
