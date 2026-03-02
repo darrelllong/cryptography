@@ -111,6 +111,8 @@ impl<H: Digest> RsaOaep<H> {
 
         let ciphertext_int = os2ip(ciphertext);
         let encoded_int = private.decrypt_raw(&ciphertext_int);
+        // Always `Some`: raw RSA decryption returns a value in `[0, n)`, and
+        // the modulus occupies exactly `k` bytes.
         let encoded = i2osp(&encoded_int, k)?;
 
         let (masked_seed, masked_db) = encoded[1..].split_at(h_len);
@@ -191,7 +193,7 @@ impl<H: Digest> RsaPss<H> {
 
         let mut encoded = db;
         encoded.extend_from_slice(&h);
-       encoded.push(0xbc);
+        encoded.push(0xbc);
 
         let encoded_int = os2ip(&encoded);
         let signature_int = private.decrypt_raw(&encoded_int);
@@ -211,6 +213,8 @@ impl<H: Digest> RsaPss<H> {
 
         let signature_int = os2ip(signature);
         let encoded_int = public.encrypt_raw(&signature_int);
+        // Always `Some`: raw RSA encryption returns a value in `[0, n)`, and
+        // the modulus is chosen so that the encoded message fits into `em_len`.
         let Some(mut encoded) = i2osp(&encoded_int, em_len) else {
             return false;
         };
@@ -220,6 +224,8 @@ impl<H: Digest> RsaPss<H> {
         let h = encoded[h_index..h_index + h_len].to_vec();
         let masked_db = &mut encoded[..h_index];
         let unused_bits = (8 * em_len) - em_bits;
+        // RFC 8017 §9.1.2 step 6 checks the unused top bits in `maskedDB`
+        // before the MGF1 mask is removed.
         if unused_bits != 0 {
             bad_padding |= masked_db[0] >> (8 - unused_bits);
         }
@@ -300,11 +306,25 @@ mod tests {
     }
 
     #[test]
+    fn oaep_rejects_wrong_length_inputs() {
+        let (public, private) = large_reference_key();
+        assert!(RsaOaep::<Sha1>::encrypt(&public, b"", b"hello", &[0x55; 19]).is_none());
+        assert!(RsaOaep::<Sha1>::decrypt(&private, b"", &[0u8; 3]).is_none());
+    }
+
+    #[test]
     fn pss_sign_and_verify() {
         let (public, private) = large_reference_key();
         let salt = [0x33u8; 8];
         let signature = RsaPss::<Sha1>::sign(&private, b"abc", &salt).expect("message fits");
         assert!(RsaPss::<Sha1>::verify(&public, b"abc", &signature));
         assert!(!RsaPss::<Sha1>::verify(&public, b"abd", &signature));
+    }
+
+    #[test]
+    fn pss_rejects_bad_lengths() {
+        let (public, private) = large_reference_key();
+        assert!(RsaPss::<Sha1>::sign(&private, b"abc", &[0x44; 26]).is_none());
+        assert!(!RsaPss::<Sha1>::verify(&public, b"abc", &[0u8; 3]));
     }
 }

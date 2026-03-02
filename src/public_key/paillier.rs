@@ -8,10 +8,14 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
+use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::{
     gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_coprime_below, random_probable_prime,
 };
 use crate::Csprng;
+
+const PAILLIER_PUBLIC_LABEL: &str = "CRYPTOGRAPHY PAILLIER PUBLIC KEY";
+const PAILLIER_PRIVATE_LABEL: &str = "CRYPTOGRAPHY PAILLIER PRIVATE KEY";
 
 /// Public key for the raw Paillier primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -116,6 +120,37 @@ impl PaillierPublicKey {
             Some(BigUint::mod_mul(lhs, rhs, &n_squared))
         }
     }
+
+    /// Encode the public key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.n, &self.zeta])
+    }
+
+    /// Decode the public key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let n = fields.next()?;
+        let zeta = fields.next()?;
+        if fields.next().is_some() || n <= BigUint::one() || zeta <= BigUint::one() {
+            return None;
+        }
+        Some(Self { n, zeta })
+    }
+
+    /// Encode the public key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(PAILLIER_PUBLIC_LABEL, &self.to_binary())
+    }
+
+    /// Decode the public key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(PAILLIER_PUBLIC_LABEL, pem)?;
+        Self::from_binary(&blob)
+    }
 }
 
 impl PaillierPrivateKey {
@@ -155,6 +190,38 @@ impl PaillierPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
+    }
+
+    /// Encode the private key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.n, &self.lambda, &self.u])
+    }
+
+    /// Decode the private key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let n = fields.next()?;
+        let lambda = fields.next()?;
+        let u = fields.next()?;
+        if fields.next().is_some() || n <= BigUint::one() || lambda.is_zero() || u.is_zero() {
+            return None;
+        }
+        Some(Self { n, lambda, u })
+    }
+
+    /// Encode the private key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(PAILLIER_PRIVATE_LABEL, &self.to_binary())
+    }
+
+    /// Decode the private key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(PAILLIER_PRIVATE_LABEL, pem)?;
+        Self::from_binary(&blob)
     }
 }
 
@@ -257,7 +324,7 @@ fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
 
 #[cfg(test)]
 mod tests {
-    use super::Paillier;
+    use super::{Paillier, PaillierPrivateKey, PaillierPublicKey};
     use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
 
@@ -408,5 +475,22 @@ mod tests {
             .encrypt_with_nonce(&BigUint::from_u64(7), &BigUint::from_u64(2))
             .expect("valid nonce");
         assert!(public.add_ciphertexts(&valid, &invalid).is_none());
+    }
+
+    #[test]
+    fn key_serialization_roundtrip() {
+        let p = BigUint::from_u64(3);
+        let q = BigUint::from_u64(5);
+        let (public, private) = Paillier::from_primes(&p, &q).expect("valid key");
+
+        let public_blob = public.to_binary();
+        let private_blob = private.to_binary();
+        assert_eq!(PaillierPublicKey::from_binary(&public_blob), Some(public.clone()));
+        assert_eq!(PaillierPrivateKey::from_binary(&private_blob), Some(private.clone()));
+
+        let public_pem = public.to_pem();
+        let private_pem = private.to_pem();
+        assert_eq!(PaillierPublicKey::from_pem(&public_pem), Some(public));
+        assert_eq!(PaillierPrivateKey::from_pem(&private_pem), Some(private));
     }
 }

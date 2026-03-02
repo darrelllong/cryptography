@@ -669,7 +669,10 @@ impl MontgomeryCtx {
     /// Square one ordinary residue modulo the context modulus.
     #[must_use]
     pub fn square(&self, value: &BigUint) -> BigUint {
-        self.mul(value, value)
+        let value_mont = self.encode(value);
+        let square_mont =
+            BigUint::montgomery_mul_odd(&value_mont, &value_mont, &self.modulus, self.n0_inv);
+        self.decode(&square_mont)
     }
 
     /// Compute `base^exponent mod modulus` inside the context.

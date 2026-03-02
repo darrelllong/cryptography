@@ -7,10 +7,13 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
+use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
 
 const TAG: u32 = 0x7c6d_6a7f;
+const RABIN_PUBLIC_LABEL: &str = "CRYPTOGRAPHY RABIN PUBLIC KEY";
+const RABIN_PRIVATE_LABEL: &str = "CRYPTOGRAPHY RABIN PRIVATE KEY";
 
 /// Public key for the raw Rabin primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,6 +54,36 @@ impl RabinPublicKey {
     pub fn encrypt(&self, message: &[u8]) -> Option<BigUint> {
         let message_int = BigUint::from_be_bytes(message);
         self.encrypt_raw(&message_int)
+    }
+
+    /// Encode the public key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.n])
+    }
+
+    /// Decode the public key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let n = fields.next()?;
+        if fields.next().is_some() || n <= BigUint::one() {
+            return None;
+        }
+        Some(Self { n })
+    }
+
+    /// Encode the public key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(RABIN_PUBLIC_LABEL, &self.to_binary())
+    }
+
+    /// Decode the public key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(RABIN_PUBLIC_LABEL, pem)?;
+        Self::from_binary(&blob)
     }
 }
 
@@ -132,6 +165,38 @@ impl RabinPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Option<Vec<u8>> {
         Some(self.decrypt_raw(ciphertext)?.to_be_bytes())
+    }
+
+    /// Encode the private key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.n, &self.p, &self.q])
+    }
+
+    /// Decode the private key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let n = fields.next()?;
+        let p = fields.next()?;
+        let q = fields.next()?;
+        if fields.next().is_some() || n <= BigUint::one() || p <= BigUint::one() || q <= BigUint::one() {
+            return None;
+        }
+        Some(Self { n, p, q })
+    }
+
+    /// Encode the private key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(RABIN_PRIVATE_LABEL, &self.to_binary())
+    }
+
+    /// Decode the private key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(RABIN_PRIVATE_LABEL, pem)?;
+        Self::from_binary(&blob)
     }
 }
 
@@ -237,7 +302,7 @@ fn sub_mod(lhs: &BigUint, rhs: &BigUint, modulus: &BigUint) -> BigUint {
 
 #[cfg(test)]
 mod tests {
-    use super::Rabin;
+    use super::{Rabin, RabinPrivateKey, RabinPublicKey};
     use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
 
@@ -317,5 +382,21 @@ mod tests {
     fn generate_rejects_too_few_bits() {
         let mut drbg = CtrDrbgAes256::new(&[0x92; 48]);
         assert!(Rabin::generate(&mut drbg, 7).is_none());
+    }
+
+    #[test]
+    fn key_serialization_roundtrip() {
+        let mut drbg = CtrDrbgAes256::new(&[0xa2; 48]);
+        let (public, private) = Rabin::generate(&mut drbg, 48).expect("Rabin key generation");
+
+        let public_blob = public.to_binary();
+        let private_blob = private.to_binary();
+        assert_eq!(RabinPublicKey::from_binary(&public_blob), Some(public.clone()));
+        assert_eq!(RabinPrivateKey::from_binary(&private_blob), Some(private.clone()));
+
+        let public_pem = public.to_pem();
+        let private_pem = private.to_pem();
+        assert_eq!(RabinPublicKey::from_pem(&public_pem), Some(public));
+        assert_eq!(RabinPrivateKey::from_pem(&private_pem), Some(private));
     }
 }

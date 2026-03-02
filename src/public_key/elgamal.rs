@@ -9,16 +9,20 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
+use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::{
     is_probable_prime, mod_pow, random_nonzero_below, random_probable_prime,
 };
 use crate::Csprng;
 
+const ELGAMAL_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ELGAMAL PUBLIC KEY";
+const ELGAMAL_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ELGAMAL PRIVATE KEY";
+
 /// Public key for the raw `ElGamal` primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ElGamalPublicKey {
     p: BigUint,
-    q: BigUint,
+    exponent_bound: BigUint,
     r: BigUint,
     b: BigUint,
 }
@@ -27,6 +31,7 @@ pub struct ElGamalPublicKey {
 #[derive(Clone, Eq, PartialEq)]
 pub struct ElGamalPrivateKey {
     p: BigUint,
+    exponent_modulus: BigUint,
     a: BigUint,
 }
 
@@ -61,7 +66,7 @@ impl ElGamalPublicKey {
     /// alone.
     #[must_use]
     pub fn ephemeral_exclusive_bound(&self) -> &BigUint {
-        &self.q
+        &self.exponent_bound
     }
 
     /// Return `b = r^a mod p`.
@@ -87,7 +92,7 @@ impl ElGamalPublicKey {
             return None;
         }
 
-        if ephemeral >= &self.q {
+        if ephemeral >= &self.exponent_bound {
             return None;
         }
 
@@ -112,8 +117,51 @@ impl ElGamalPublicKey {
     #[must_use]
     pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<ElGamalCiphertext> {
         let message_int = BigUint::from_be_bytes(message);
-        let ephemeral = random_nonzero_below(rng, &self.q)?;
+        let ephemeral = random_nonzero_below(rng, &self.exponent_bound)?;
         self.encrypt_with_ephemeral(&message_int, &ephemeral)
+    }
+
+    /// Encode the public key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.p, &self.exponent_bound, &self.r, &self.b])
+    }
+
+    /// Decode the public key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let p = fields.next()?;
+        let exponent_bound = fields.next()?;
+        let r = fields.next()?;
+        let b = fields.next()?;
+        if fields.next().is_some()
+            || p <= BigUint::one()
+            || exponent_bound <= BigUint::one()
+            || r <= BigUint::one()
+            || b.is_zero()
+        {
+            return None;
+        }
+        Some(Self {
+            p,
+            exponent_bound,
+            r,
+            b,
+        })
+    }
+
+    /// Encode the public key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(ELGAMAL_PUBLIC_LABEL, &self.to_binary())
+    }
+
+    /// Decode the public key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(ELGAMAL_PUBLIC_LABEL, pem)?;
+        Self::from_binary(&blob)
     }
 }
 
@@ -130,14 +178,26 @@ impl ElGamalPrivateKey {
         &self.a
     }
 
+    /// Return the exponent-cycle modulus used during decryption.
+    ///
+    /// Generated teaching keys store the subgroup order here, so decryption
+    /// can reduce the exponent to `q - a`. Caller-supplied keys fall back to
+    /// `p - 1`, which is always valid by Fermat's little theorem even when the
+    /// subgroup order is unknown.
+    #[must_use]
+    pub fn exponent_modulus(&self) -> &BigUint {
+        &self.exponent_modulus
+    }
+
     /// Decrypt the raw ciphertext.
     ///
-    /// This matches the Python source exactly: instead of an explicit modular
-    /// inverse, it uses Fermat's little theorem and multiplies by
-    /// `gamma^(p - 1 - a) mod p`.
+    /// This uses Fermat's little theorem instead of an explicit modular
+    /// inverse: for generated teaching keys the exponent reduces to `q - a`
+    /// inside the order-`q` subgroup, while caller-supplied keys conservatively
+    /// fall back to `p - 1 - a`.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &ElGamalCiphertext) -> BigUint {
-        let exponent = self.p.sub_ref(&BigUint::one()).sub_ref(&self.a);
+        let exponent = self.exponent_modulus.sub_ref(&self.a);
         let factor = mod_pow(&ciphertext.gamma, &exponent, &self.p);
         if let Some(ctx) = MontgomeryCtx::new(&self.p) {
             ctx.mul(&factor, &ciphertext.delta)
@@ -151,6 +211,47 @@ impl ElGamalPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &ElGamalCiphertext) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
+    }
+
+    /// Encode the private key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.p, &self.exponent_modulus, &self.a])
+    }
+
+    /// Decode the private key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let p = fields.next()?;
+        let exponent_modulus = fields.next()?;
+        let a = fields.next()?;
+        if fields.next().is_some()
+            || p <= BigUint::one()
+            || exponent_modulus <= BigUint::one()
+            || a.is_zero()
+            || a >= exponent_modulus
+        {
+            return None;
+        }
+        Some(Self {
+            p,
+            exponent_modulus,
+            a,
+        })
+    }
+
+    /// Encode the private key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(ELGAMAL_PRIVATE_LABEL, &self.to_binary())
+    }
+
+    /// Decode the private key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(ELGAMAL_PRIVATE_LABEL, pem)?;
+        Self::from_binary(&blob)
     }
 }
 
@@ -201,12 +302,13 @@ impl ElGamal {
         Some((
             ElGamalPublicKey {
                 p: prime.clone(),
-                q: p_minus_one.clone(),
+                exponent_bound: p_minus_one.clone(),
                 r: generator.clone(),
                 b: public_component,
             },
             ElGamalPrivateKey {
                 p: prime.clone(),
+                exponent_modulus: p_minus_one,
                 a: secret.clone(),
             },
         ))
@@ -224,13 +326,17 @@ impl ElGamal {
         rng: &mut R,
         bits: usize,
     ) -> Option<(ElGamalPublicKey, ElGamalPrivateKey)> {
-        if bits < 18 {
+        // With the current teaching split, the subgroup order is at least
+        // 16 bits. We therefore need at least 3 bits left for the even
+        // cofactor `k` in `p = kq + 1`; otherwise `k` collapses to a fixed
+        // tiny value and the requested bit length can never be reached.
+        if bits < 19 {
             return None;
         }
 
         let subgroup_bits = (bits / 4).clamp(16, 256);
         let cofactor_bits = bits.saturating_sub(subgroup_bits);
-        if cofactor_bits < 2 {
+        if cofactor_bits < 3 {
             return None;
         }
         let one = BigUint::one();
@@ -251,12 +357,13 @@ impl ElGamal {
                 return Some((
                     ElGamalPublicKey {
                         p: prime.clone(),
-                        q,
+                        exponent_bound: q.clone(),
                         r: generator,
                         b: public_component,
                     },
                     ElGamalPrivateKey {
                         p: prime,
+                        exponent_modulus: q,
                         a: secret,
                     },
                 ));
@@ -281,8 +388,11 @@ fn random_even_with_bits<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint>
         let last = bytes.len() - 1;
         bytes[last] &= !1;
         let candidate = BigUint::from_be_bytes(&bytes);
+        // The resulting cofactor is public, but clearing the temporary random
+        // buffer keeps the helper's hygiene consistent with the rest of the
+        // prime-generation code.
+        crate::ct::zeroize_slice(bytes.as_mut_slice());
         if !candidate.is_zero() {
-            crate::ct::zeroize_slice(bytes.as_mut_slice());
             return Some(candidate);
         }
     }
@@ -296,7 +406,8 @@ fn find_subgroup_generator<R: Csprng>(
     let one = BigUint::one();
     let upper = prime.sub_ref(&one);
     loop {
-        let candidate = random_nonzero_below(rng, &upper)?;
+        let candidate = random_nonzero_below(rng, &upper)
+            .expect("prime > 2 leaves a non-zero subgroup-generator search range");
         let generator = mod_pow(&candidate, cofactor, prime);
         if generator != one {
             return Some(generator);
@@ -306,7 +417,7 @@ fn find_subgroup_generator<R: Csprng>(
 
 #[cfg(test)]
 mod tests {
-    use super::ElGamal;
+    use super::{ElGamal, ElGamalPrivateKey, ElGamalPublicKey};
     use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
 
@@ -415,5 +526,36 @@ mod tests {
     fn generate_rejects_too_few_bits() {
         let mut drbg = CtrDrbgAes256::new(&[0x94; 48]);
         assert!(ElGamal::generate(&mut drbg, 15).is_none());
+        assert!(ElGamal::generate(&mut drbg, 16).is_none());
+        assert!(ElGamal::generate(&mut drbg, 17).is_none());
+        assert!(ElGamal::generate(&mut drbg, 18).is_none());
+    }
+
+    #[test]
+    fn generate_then_random_encrypt_roundtrip() {
+        let mut key_rng = CtrDrbgAes256::new(&[0x53; 48]);
+        let mut enc_rng = CtrDrbgAes256::new(&[0x54; 48]);
+        let (public, private) = ElGamal::generate(&mut key_rng, 32).expect("ElGamal key generation");
+        let message = [0x2a];
+        let ciphertext = public.encrypt(&message, &mut enc_rng).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), message.to_vec());
+    }
+
+    #[test]
+    fn key_serialization_roundtrip() {
+        let p = BigUint::from_u64(23);
+        let r = BigUint::from_u64(5);
+        let a = BigUint::from_u64(7);
+        let (public, private) = ElGamal::from_secret_exponent(&p, &r, &a).expect("valid key");
+
+        let public_blob = public.to_binary();
+        let private_blob = private.to_binary();
+        assert_eq!(ElGamalPublicKey::from_binary(&public_blob), Some(public.clone()));
+        assert_eq!(ElGamalPrivateKey::from_binary(&private_blob), Some(private.clone()));
+
+        let public_pem = public.to_pem();
+        let private_pem = private.to_pem();
+        assert_eq!(ElGamalPublicKey::from_pem(&public_pem), Some(public));
+        assert_eq!(ElGamalPrivateKey::from_pem(&private_pem), Some(private));
     }
 }

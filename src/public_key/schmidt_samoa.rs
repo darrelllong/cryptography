@@ -7,8 +7,12 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
+use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::{is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
+
+const SCHMIDT_SAMOA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PUBLIC KEY";
+const SCHMIDT_SAMOA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PRIVATE KEY";
 
 /// Public key for the raw Schmidt-Samoa primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,6 +66,36 @@ impl SchmidtSamoaPublicKey {
         }
         Some(self.encrypt_raw(&message_int))
     }
+
+    /// Encode the public key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.n])
+    }
+
+    /// Decode the public key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let n = fields.next()?;
+        if fields.next().is_some() || n <= BigUint::one() {
+            return None;
+        }
+        Some(Self { n })
+    }
+
+    /// Encode the public key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(SCHMIDT_SAMOA_PUBLIC_LABEL, &self.to_binary())
+    }
+
+    /// Decode the public key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(SCHMIDT_SAMOA_PUBLIC_LABEL, pem)?;
+        Self::from_binary(&blob)
+    }
 }
 
 impl SchmidtSamoaPrivateKey {
@@ -91,6 +125,37 @@ impl SchmidtSamoaPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
+    }
+
+    /// Encode the private key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.d, &self.gamma])
+    }
+
+    /// Decode the private key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let d = fields.next()?;
+        let gamma = fields.next()?;
+        if fields.next().is_some() || d.is_zero() || gamma <= BigUint::one() {
+            return None;
+        }
+        Some(Self { d, gamma })
+    }
+
+    /// Encode the private key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(SCHMIDT_SAMOA_PRIVATE_LABEL, &self.to_binary())
+    }
+
+    /// Decode the private key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(SCHMIDT_SAMOA_PRIVATE_LABEL, pem)?;
+        Self::from_binary(&blob)
     }
 }
 
@@ -163,7 +228,7 @@ impl SchmidtSamoa {
 
 #[cfg(test)]
 mod tests {
-    use super::SchmidtSamoa;
+    use super::{SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey};
     use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
 
@@ -240,5 +305,28 @@ mod tests {
     fn generate_rejects_too_few_bits() {
         let mut drbg = CtrDrbgAes256::new(&[0x93; 48]);
         assert!(SchmidtSamoa::generate(&mut drbg, 7).is_none());
+    }
+
+    #[test]
+    fn key_serialization_roundtrip() {
+        let mut drbg = CtrDrbgAes256::new(&[0xb3; 48]);
+        let (public, private) =
+            SchmidtSamoa::generate(&mut drbg, 48).expect("Schmidt-Samoa key generation");
+
+        let public_blob = public.to_binary();
+        let private_blob = private.to_binary();
+        assert_eq!(
+            SchmidtSamoaPublicKey::from_binary(&public_blob),
+            Some(public.clone())
+        );
+        assert_eq!(
+            SchmidtSamoaPrivateKey::from_binary(&private_blob),
+            Some(private.clone())
+        );
+
+        let public_pem = public.to_pem();
+        let private_pem = private.to_pem();
+        assert_eq!(SchmidtSamoaPublicKey::from_pem(&public_pem), Some(public));
+        assert_eq!(SchmidtSamoaPrivateKey::from_pem(&private_pem), Some(private));
     }
 }

@@ -23,14 +23,22 @@ pub struct RsaPublicKey {
 /// Private key for the raw RSA primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct RsaPrivateKey {
+    e: BigUint,
     d: BigUint,
     n: BigUint,
+    p: BigUint,
+    q: BigUint,
 }
 
 /// Namespace wrapper for the raw RSA construction.
 pub struct Rsa;
 
 impl RsaPublicKey {
+    #[must_use]
+    pub(crate) fn from_components(e: BigUint, n: BigUint) -> Self {
+        Self { e, n }
+    }
+
     /// Return the public exponent.
     #[must_use]
     pub fn exponent(&self) -> &BigUint {
@@ -54,6 +62,12 @@ impl RsaPublicKey {
 }
 
 impl RsaPrivateKey {
+    /// Return the public exponent paired with this private key.
+    #[must_use]
+    pub(crate) fn public_exponent(&self) -> &BigUint {
+        &self.e
+    }
+
     /// Return the private exponent.
     #[must_use]
     pub fn exponent(&self) -> &BigUint {
@@ -64,6 +78,18 @@ impl RsaPrivateKey {
     #[must_use]
     pub fn modulus(&self) -> &BigUint {
         &self.n
+    }
+
+    /// Return the first prime factor.
+    #[must_use]
+    pub(crate) fn prime1(&self) -> &BigUint {
+        &self.p
+    }
+
+    /// Return the second prime factor.
+    #[must_use]
+    pub(crate) fn prime2(&self) -> &BigUint {
+        &self.q
     }
 
     /// Apply the raw private operation `c^d mod n`.
@@ -113,7 +139,13 @@ impl Rsa {
                 e: exponent.clone(),
                 n: n.clone(),
             },
-            RsaPrivateKey { d, n },
+            RsaPrivateKey {
+                e: exponent.clone(),
+                d,
+                n,
+                p: p.clone(),
+                q: q.clone(),
+            },
         ))
     }
 

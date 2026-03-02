@@ -8,8 +8,12 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
+use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
+
+const COCKS_PUBLIC_LABEL: &str = "CRYPTOGRAPHY COCKS PUBLIC KEY";
+const COCKS_PRIVATE_LABEL: &str = "CRYPTOGRAPHY COCKS PRIVATE KEY";
 
 /// Public key for the raw Cocks primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,6 +71,36 @@ impl CocksPublicKey {
         }
         Some(self.encrypt_raw(&message_int))
     }
+
+    /// Encode the public key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.n])
+    }
+
+    /// Decode the public key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let n = fields.next()?;
+        if fields.next().is_some() || n <= BigUint::one() {
+            return None;
+        }
+        Some(Self { n })
+    }
+
+    /// Encode the public key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(COCKS_PUBLIC_LABEL, &self.to_binary())
+    }
+
+    /// Decode the public key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(COCKS_PUBLIC_LABEL, pem)?;
+        Self::from_binary(&blob)
+    }
 }
 
 impl fmt::Debug for CocksPrivateKey {
@@ -102,6 +136,37 @@ impl CocksPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
+    }
+
+    /// Encode the private key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.pi, &self.q])
+    }
+
+    /// Decode the private key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let pi = fields.next()?;
+        let q = fields.next()?;
+        if fields.next().is_some() || pi.is_zero() || q <= BigUint::one() {
+            return None;
+        }
+        Some(Self { pi, q })
+    }
+
+    /// Encode the private key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(COCKS_PRIVATE_LABEL, &self.to_binary())
+    }
+
+    /// Decode the private key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(COCKS_PRIVATE_LABEL, pem)?;
+        Self::from_binary(&blob)
     }
 }
 
@@ -150,7 +215,7 @@ impl Cocks {
 
 #[cfg(test)]
 mod tests {
-    use super::Cocks;
+    use super::{Cocks, CocksPrivateKey, CocksPublicKey};
     use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
 
@@ -226,5 +291,22 @@ mod tests {
         let p = BigUint::from_u64(17);
         let q = BigUint::from_u64(11);
         assert!(Cocks::from_primes(&p, &q).is_none());
+    }
+
+    #[test]
+    fn key_serialization_roundtrip() {
+        let p = BigUint::from_u64(11);
+        let q = BigUint::from_u64(17);
+        let (public, private) = Cocks::from_primes(&p, &q).expect("valid key");
+
+        let public_blob = public.to_binary();
+        let private_blob = private.to_binary();
+        assert_eq!(CocksPublicKey::from_binary(&public_blob), Some(public.clone()));
+        assert_eq!(CocksPrivateKey::from_binary(&private_blob), Some(private.clone()));
+
+        let public_pem = public.to_pem();
+        let private_pem = private.to_pem();
+        assert_eq!(CocksPublicKey::from_pem(&public_pem), Some(public));
+        assert_eq!(CocksPrivateKey::from_pem(&private_pem), Some(private));
     }
 }

@@ -340,6 +340,10 @@ standards-based usage layer:
 - reusable arithmetic toolkit: `BigUint`, `BigInt`, and `MontgomeryCtx`
 - usable wrappers today:
   - `RsaOaep<H>` and `RsaPss<H>`
+  - standard RSA key externalization via PKCS #8 / SPKI in DER or PEM
+  - crate-defined key externalization for `Cocks`, `ElGamal`, `Rabin`,
+    `Paillier`, and `SchmidtSamoa`: a DER `SEQUENCE` of `INTEGER`s, optionally
+    wrapped in a scheme-specific PEM label
   - byte-oriented `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and
     `SchmidtSamoa` encrypt/decrypt helpers
   - teaching-sized key generation for all of the implemented public-key schemes
@@ -353,6 +357,39 @@ use cryptography::{CtrDrbgAes256, Rsa};
 let seed = [0x55u8; 48];
 let mut drbg = CtrDrbgAes256::new(&seed);
 let (public, private) = Rsa::generate(&mut drbg, 512).expect("RSA key");
+```
+
+Persist the RSA key pair in modern standard containers:
+
+```rust
+let private_pem = private.to_pkcs8_pem();
+let public_pem = public.to_spki_pem();
+
+let private_again =
+    cryptography::RsaPrivateKey::from_pkcs8_pem(&private_pem).expect("PKCS #8");
+let public_again =
+    cryptography::RsaPublicKey::from_spki_pem(&public_pem).expect("SPKI");
+
+assert_eq!(private_again, private);
+assert_eq!(public_again, public);
+```
+
+Persist a non-RSA key pair in the crate-defined portable format:
+
+```rust
+use cryptography::{CtrDrbgAes256, Paillier};
+
+let mut drbg = CtrDrbgAes256::new(&[0x23; 48]);
+let (public, private) = Paillier::generate(&mut drbg, 512).expect("Paillier key");
+
+let public_pem = public.to_pem();
+let private_pem = private.to_pem();
+
+let public_again = cryptography::PaillierPublicKey::from_pem(&public_pem).expect("public");
+let private_again = cryptography::PaillierPrivateKey::from_pem(&private_pem).expect("private");
+
+assert_eq!(public_again, public);
+assert_eq!(private_again, private);
 ```
 
 Encrypt and decrypt with `RSAES-OAEP`:

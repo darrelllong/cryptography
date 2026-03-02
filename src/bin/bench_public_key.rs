@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use cryptography::{
-    CtrDrbgAes256, ElGamal, Paillier, Rsa, RsaOaep, RsaPss, Sha256,
+    Cocks, CtrDrbgAes256, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
 };
 use cryptography::public_key::bigint::BigUint;
 
@@ -14,6 +14,7 @@ const PSS_SALT: [u8; 32] = [0x22; 32];
 type ElGamalTimings = (Duration, Duration, Duration);
 type PaillierTimings = (Duration, Duration, Duration, Duration, Duration);
 type RsaTimings = (Duration, Duration, Duration, Duration, Duration);
+type SimplePkTimings = (Duration, Duration, Duration);
 
 fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
@@ -146,6 +147,64 @@ fn bench_paillier(rng: &mut CtrDrbgAes256, bits: usize) -> PaillierTimings {
     )
 }
 
+fn bench_cocks(rng: &mut CtrDrbgAes256, bits: usize) -> SimplePkTimings {
+    announce("Generating Cocks key");
+    let start = Instant::now();
+    let (public, private) = Cocks::generate(rng, bits).expect("Cocks key generation");
+    let keygen = start.elapsed();
+
+    announce("Measuring Cocks");
+    let start = Instant::now();
+    let ciphertext = public.encrypt(&MESSAGE).expect("Cocks encrypt");
+    let encrypt = start.elapsed();
+
+    let start = Instant::now();
+    let plaintext = private.decrypt(&ciphertext);
+    let decrypt = start.elapsed();
+    assert_eq!(plaintext, MESSAGE);
+
+    (keygen, encrypt, decrypt)
+}
+
+fn bench_rabin(rng: &mut CtrDrbgAes256, bits: usize) -> SimplePkTimings {
+    announce("Generating Rabin key");
+    let start = Instant::now();
+    let (public, private) = Rabin::generate(rng, bits).expect("Rabin key generation");
+    let keygen = start.elapsed();
+
+    announce("Measuring Rabin");
+    let start = Instant::now();
+    let ciphertext = public.encrypt(&MESSAGE).expect("Rabin encrypt");
+    let encrypt = start.elapsed();
+
+    let start = Instant::now();
+    let plaintext = private.decrypt(&ciphertext).expect("Rabin decrypt");
+    let decrypt = start.elapsed();
+    assert_eq!(plaintext, MESSAGE);
+
+    (keygen, encrypt, decrypt)
+}
+
+fn bench_schmidt_samoa(rng: &mut CtrDrbgAes256, bits: usize) -> SimplePkTimings {
+    announce("Generating Schmidt-Samoa key");
+    let start = Instant::now();
+    let (public, private) =
+        SchmidtSamoa::generate(rng, bits).expect("Schmidt-Samoa key generation");
+    let keygen = start.elapsed();
+
+    announce("Measuring Schmidt-Samoa");
+    let start = Instant::now();
+    let ciphertext = public.encrypt(&MESSAGE).expect("Schmidt-Samoa encrypt");
+    let encrypt = start.elapsed();
+
+    let start = Instant::now();
+    let plaintext = private.decrypt(&ciphertext);
+    let decrypt = start.elapsed();
+    assert_eq!(plaintext, MESSAGE);
+
+    (keygen, encrypt, decrypt)
+}
+
 fn main() {
     let (bits, skip_elgamal) = parse_args();
     if bits < 528 {
@@ -175,6 +234,9 @@ fn main() {
         paillier_rerandomize,
         paillier_add,
     ) = bench_paillier(&mut rng, bits);
+    let (cocks_keygen, cocks_encrypt, cocks_decrypt) = bench_cocks(&mut rng, bits);
+    let (rabin_keygen, rabin_encrypt, rabin_decrypt) = bench_rabin(&mut rng, bits);
+    let (schmidt_keygen, schmidt_encrypt, schmidt_decrypt) = bench_schmidt_samoa(&mut rng, bits);
 
     println!("RSA");
     print_row("keygen", rsa_keygen);
@@ -198,4 +260,22 @@ fn main() {
     print_row("decrypt", paillier_decrypt);
     print_row("rerandomize", paillier_rerandomize);
     print_row("add ciphertexts", paillier_add);
+    println!();
+
+    println!("Cocks");
+    print_row("keygen", cocks_keygen);
+    print_row("encrypt", cocks_encrypt);
+    print_row("decrypt", cocks_decrypt);
+    println!();
+
+    println!("Rabin");
+    print_row("keygen", rabin_keygen);
+    print_row("encrypt", rabin_encrypt);
+    print_row("decrypt", rabin_decrypt);
+    println!();
+
+    println!("Schmidt-Samoa");
+    print_row("keygen", schmidt_keygen);
+    print_row("encrypt", schmidt_encrypt);
+    print_row("decrypt", schmidt_decrypt);
 }

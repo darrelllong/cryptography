@@ -134,11 +134,11 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
 
     for &prime in &SMALL_TRIAL_PRIMES {
         let prime = u64::from(prime);
-        let small_prime = BigUint::from_u64(prime);
-        if candidate == &small_prime {
-            return true;
-        }
-        if candidate.rem_u64(prime) == 0 {
+        let remainder = candidate.rem_u64(prime);
+        if remainder == 0 {
+            if candidate.bits() <= 10 && candidate.rem_u64(1u64 << 10) == prime {
+                return true;
+            }
             return false;
         }
     }
@@ -182,8 +182,8 @@ pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option
         rng.fill_bytes(&mut bytes);
         bytes[0] &= top_mask;
         let candidate = BigUint::from_be_bytes(&bytes);
+        crate::ct::zeroize_slice(bytes.as_mut_slice());
         if candidate < *upper_exclusive {
-            crate::ct::zeroize_slice(bytes.as_mut_slice());
             return Some(candidate);
         }
     }
@@ -238,8 +238,8 @@ pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigU
         bytes[last] |= 1;
 
         let candidate = BigUint::from_be_bytes(&bytes);
+        crate::ct::zeroize_slice(bytes.as_mut_slice());
         if is_probable_prime(&candidate) {
-            crate::ct::zeroize_slice(bytes.as_mut_slice());
             return Some(candidate);
         }
     }
