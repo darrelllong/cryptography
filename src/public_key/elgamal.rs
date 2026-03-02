@@ -2,7 +2,9 @@
 //!
 //! This is the raw textbook construction from the companion Python code:
 //! explicit group parameters plus the bare multiplicative encrypt/decrypt
-//! transform. Random key generation and message encoding stay in later layers.
+//! transform. The usable wrapper below still keeps the scheme close to the
+//! teaching version, but its generated parameters use a prime-order subgroup
+//! rather than an extremely slow safe-prime search.
 
 use core::fmt;
 
@@ -199,54 +201,90 @@ impl ElGamal {
         ))
     }
 
-    /// Generate a teaching-sized `ElGamal` key pair over a safe-prime field.
+    /// Generate a teaching-sized `ElGamal` key pair over a prime-order subgroup.
     ///
-    /// This chooses a probable prime `q`, sets `p = 2q + 1`, accepts only
-    /// safe-prime candidates where `p` is also probably prime, then chooses a
-    /// generator of the full multiplicative group modulo `p`. The resulting
-    /// parameters are suitable for the raw textbook primitive and the minimal
-    /// byte-oriented wrapper above.
+    /// This chooses a probable-prime subgroup order `q`, searches for a prime
+    /// modulus `p = kq + 1`, then derives a generator of the order-`q`
+    /// subgroup by raising a random base to the cofactor `k`. That mirrors the
+    /// usual DSA/DH parameter-generation shape and avoids the extremely slow
+    /// safe-prime search that would insist on `k = 2`.
     #[must_use]
     pub fn generate<R: Csprng>(
         rng: &mut R,
         bits: usize,
     ) -> Option<(ElGamalPublicKey, ElGamalPrivateKey)> {
-        if bits < 4 {
+        if bits < 16 {
             return None;
         }
 
+        let subgroup_bits = (bits / 4).clamp(16, 256);
+        let cofactor_bits = bits.saturating_sub(subgroup_bits);
+        if cofactor_bits < 2 {
+            return None;
+        }
+        let one = BigUint::one();
         loop {
-            let q = random_probable_prime(rng, bits - 1)?;
-            let prime = q.add_ref(&q).add_ref(&BigUint::one());
-            if !is_probable_prime(&prime) {
-                continue;
-            }
+            let q = random_probable_prime(rng, subgroup_bits)?;
+            let mut attempts = 0usize;
+            while attempts < 256 {
+                let cofactor = random_even_with_bits(rng, cofactor_bits)?;
+                let prime = cofactor.mul_ref(&q).add_ref(&one);
+                if prime.bits() != bits || !is_probable_prime(&prime) {
+                    attempts += 1;
+                    continue;
+                }
 
-            let generator = find_safe_prime_generator(&prime, &q)?;
-            let upper = prime.sub_ref(&BigUint::one());
-            let secret = random_nonzero_below(rng, &upper)?;
-            if let Some(keypair) = Self::from_secret_exponent(&prime, &generator, &secret) {
-                return Some(keypair);
+                let generator = find_subgroup_generator(rng, &prime, &cofactor)?;
+                let secret = random_nonzero_below(rng, &q)?;
+                if let Some(keypair) = Self::from_secret_exponent(&prime, &generator, &secret) {
+                    return Some(keypair);
+                }
+                attempts += 1;
             }
         }
     }
 }
 
-fn find_safe_prime_generator(prime: &BigUint, q: &BigUint) -> Option<BigUint> {
-    let one = BigUint::one();
-    let two = BigUint::from_u64(2);
-    let ctx = MontgomeryCtx::new(prime)?;
-    let upper = prime.sub_ref(&one);
-    let mut candidate = BigUint::from_u64(2);
-
-    while candidate < upper {
-        if ctx.pow(&candidate, &two) != one && ctx.pow(&candidate, q) != one {
-            return Some(candidate);
-        }
-        candidate = candidate.add_ref(&one);
+fn random_even_with_bits<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
+    if bits < 2 {
+        return None;
     }
 
-    None
+    let mut bytes = vec![0u8; bits.div_ceil(8)];
+    let top_bit = (bits - 1) % 8;
+    let excess_bits = bytes.len() * 8 - bits;
+    let top_mask = 0xff_u8 >> excess_bits;
+    loop {
+        rng.fill_bytes(&mut bytes);
+        bytes[0] &= top_mask;
+        bytes[0] |= 1u8 << top_bit;
+        let last = bytes.len() - 1;
+        bytes[last] &= !1;
+        let candidate = BigUint::from_be_bytes(&bytes);
+        if !candidate.is_zero() {
+            crate::ct::zeroize_slice(bytes.as_mut_slice());
+            return Some(candidate);
+        }
+    }
+}
+
+fn find_subgroup_generator<R: Csprng>(
+    rng: &mut R,
+    prime: &BigUint,
+    cofactor: &BigUint,
+) -> Option<BigUint> {
+    let one = BigUint::one();
+    let upper = prime.sub_ref(&one);
+    loop {
+        let candidate = random_nonzero_below(rng, &upper)?;
+        if candidate <= one {
+            continue;
+        }
+        let generator = mod_pow(&candidate, cofactor, prime);
+        if generator != one {
+            return Some(generator);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -354,5 +392,11 @@ mod tests {
         let message = [0x12, 0x34];
         let ciphertext = public.encrypt(&message, &mut drbg).expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), message.to_vec());
+    }
+
+    #[test]
+    fn generate_rejects_too_few_bits() {
+        let mut drbg = CtrDrbgAes256::new(&[0x94; 48]);
+        assert!(ElGamal::generate(&mut drbg, 15).is_none());
     }
 }

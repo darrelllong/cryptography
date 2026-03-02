@@ -175,7 +175,10 @@ impl Rabin {
         rng: &mut R,
         bits: usize,
     ) -> Option<(RabinPublicKey, RabinPrivateKey)> {
-        if bits < 4 {
+        // With fewer than 8 total bits the split can collapse to the same tiny
+        // Blum prime on both sides, so a distinct-prime key may never be
+        // found.
+        if bits < 8 {
             return None;
         }
 
@@ -308,5 +311,11 @@ mod tests {
         let (public, private) = Rabin::generate(&mut drbg, 48).expect("Rabin key generation");
         let ciphertext = public.encrypt(&[0x00]).expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), Some(vec![0x00]));
+    }
+
+    #[test]
+    fn generate_rejects_too_few_bits() {
+        let mut drbg = CtrDrbgAes256::new(&[0x92; 48]);
+        assert!(Rabin::generate(&mut drbg, 7).is_none());
     }
 }

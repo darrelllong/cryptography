@@ -113,9 +113,6 @@ impl<H: Digest> RsaOaep<H> {
         let ciphertext_int = os2ip(ciphertext);
         let encoded_int = private.decrypt_raw(&ciphertext_int);
         let encoded = i2osp(&encoded_int, k)?;
-        if encoded[0] != 0 {
-            return None;
-        }
 
         let (masked_seed, masked_db) = encoded[1..].split_at(h_len);
         let seed_mask = mgf1::<H>(masked_db, h_len);
@@ -132,7 +129,8 @@ impl<H: Digest> RsaOaep<H> {
 
         let l_hash = H::digest(label);
         let mut saw_separator = 0u8;
-        let mut bad_padding = u8::from(!crate::ct::constant_time_eq(&db[..h_len], &l_hash));
+        let mut bad_padding = u8::from(encoded[0] != 0);
+        bad_padding |= u8::from(!crate::ct::constant_time_eq(&db[..h_len], &l_hash));
         let mut msg_idx = 0usize;
         for (idx, &byte) in db[h_len..].iter().enumerate() {
             let is_zero = u8::from(byte == 0);
@@ -237,10 +235,22 @@ impl<H: Digest> RsaPss<H> {
             masked_db[0] &= 0xff_u8 >> unused_bits;
         }
 
-        let Some(one_index) = masked_db.iter().position(|&b| b == 0x01) else {
-            return false;
-        };
-        if masked_db[..one_index].iter().any(|&b| b != 0) {
+        let mut saw_separator = 0u8;
+        let mut bad_padding = 0u8;
+        let mut one_index = 0usize;
+        for (idx, &byte) in masked_db.iter().enumerate() {
+            let is_zero = u8::from(byte == 0);
+            let is_one = u8::from(byte == 0x01);
+            let before_separator = saw_separator ^ 1;
+            bad_padding |= before_separator & (is_zero ^ 1) & (is_one ^ 1);
+
+            let take_separator = before_separator & is_one;
+            let mask = 0usize.wrapping_sub(usize::from(take_separator));
+            one_index = (one_index & !mask) | (idx & mask);
+            saw_separator |= take_separator;
+        }
+        bad_padding |= saw_separator ^ 1;
+        if bad_padding != 0 {
             return false;
         }
         let salt = &masked_db[one_index + 1..];

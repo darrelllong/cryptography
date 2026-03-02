@@ -141,7 +141,9 @@ impl SchmidtSamoa {
         rng: &mut R,
         bits: usize,
     ) -> Option<(SchmidtSamoaPublicKey, SchmidtSamoaPrivateKey)> {
-        if bits < 4 {
+        // The split is roughly `bits / 3` for `p`, so tiny bit sizes can
+        // collapse to the same minimal prime and never yield a valid pair.
+        if bits < 8 {
             return None;
         }
 
@@ -232,5 +234,11 @@ mod tests {
             SchmidtSamoa::generate(&mut drbg, 48).expect("Schmidt-Samoa key generation");
         let ciphertext = public.encrypt(&[0x2a]).expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), vec![0x2a]);
+    }
+
+    #[test]
+    fn generate_rejects_too_few_bits() {
+        let mut drbg = CtrDrbgAes256::new(&[0x93; 48]);
+        assert!(SchmidtSamoa::generate(&mut drbg, 7).is_none());
     }
 }

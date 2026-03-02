@@ -405,7 +405,9 @@ let mut drbg = CtrDrbgAes256::new(&[0x52u8; 48]);
 
 let left = public.encrypt(b"\x12", &mut drbg).expect("message fits");
 let right = public.encrypt(b"\x34", &mut drbg).expect("message fits");
-let combined = public.add_ciphertexts(&left, &right);
+let combined = public
+    .add_ciphertexts(&left, &right)
+    .expect("ciphertexts are in range");
 
 assert_eq!(private.decrypt(&combined), b"\x46");
 ```
@@ -420,6 +422,9 @@ There is also a simple latency tool for the public-key layer:
 ```text
 cargo run --release --bin bench_public_key -- 1024
 ```
+
+Add `--skip-elgamal` if you only want RSA and Paillier timings and do not want
+to wait for ElGamal parameter generation on larger inputs.
 
 Pass a larger bit length (for example `2048`) to probe the current bigint
 backend at practical sizes. This is the quickest way to decide whether the

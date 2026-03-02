@@ -83,10 +83,15 @@ impl PaillierPublicKey {
     }
 
     /// Re-randomize an existing ciphertext without changing the plaintext.
+    ///
+    /// Returns `None` if the input is not in the ciphertext range `[0, n^2)`.
     #[must_use]
     pub fn rerandomize<R: Csprng>(&self, ciphertext: &BigUint, rng: &mut R) -> Option<BigUint> {
         let nonce = random_coprime_below(rng, &self.n, &self.n)?;
         let n_squared = self.n.mul_ref(&self.n);
+        if ciphertext >= &n_squared {
+            return None;
+        }
         let factor = mod_pow(&nonce, &self.n, &n_squared);
         let product = if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
             ctx.mul(ciphertext, &factor)
@@ -97,13 +102,18 @@ impl PaillierPublicKey {
     }
 
     /// Combine two ciphertexts so that decryption adds the plaintexts modulo `n`.
+    ///
+    /// Returns `None` if either input is not in the ciphertext range `[0, n^2)`.
     #[must_use]
-    pub fn add_ciphertexts(&self, lhs: &BigUint, rhs: &BigUint) -> BigUint {
+    pub fn add_ciphertexts(&self, lhs: &BigUint, rhs: &BigUint) -> Option<BigUint> {
         let n_squared = self.n.mul_ref(&self.n);
+        if lhs >= &n_squared || rhs >= &n_squared {
+            return None;
+        }
         if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
-            ctx.mul(lhs, rhs)
+            Some(ctx.mul(lhs, rhs))
         } else {
-            BigUint::mod_mul(lhs, rhs, &n_squared)
+            Some(BigUint::mod_mul(lhs, rhs, &n_squared))
         }
     }
 }
@@ -217,7 +227,9 @@ impl Paillier {
         rng: &mut R,
         bits: usize,
     ) -> Option<(PaillierPublicKey, PaillierPrivateKey)> {
-        if bits < 4 {
+        // With fewer than 8 total bits the split can collapse to the same tiny
+        // prime on both sides, so a distinct-prime key may never be found.
+        if bits < 8 {
             return None;
         }
 
@@ -370,7 +382,9 @@ mod tests {
         let right = public
             .encrypt_with_nonce(&BigUint::from_u64(0x34), &BigUint::from_u64(3))
             .expect("valid nonce");
-        let combined = public.add_ciphertexts(&left, &right);
+        let combined = public
+            .add_ciphertexts(&left, &right)
+            .expect("ciphertexts are in range");
         assert_eq!(private.decrypt(&combined), vec![0x46]);
     }
 
@@ -380,5 +394,19 @@ mod tests {
         let (public, private) = Paillier::generate(&mut drbg, 32).expect("Paillier key generation");
         let ciphertext = public.encrypt(&[0x2a], &mut drbg).expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), vec![0x2a]);
+    }
+
+    #[test]
+    fn wrappers_reject_out_of_range_ciphertexts() {
+        let p = BigUint::from_u64(257);
+        let q = BigUint::from_u64(263);
+        let (public, _) = Paillier::from_primes(&p, &q).expect("valid Paillier key");
+        let invalid = public.modulus().mul_ref(public.modulus());
+        let mut drbg = CtrDrbgAes256::new(&[0x95; 48]);
+        assert!(public.rerandomize(&invalid, &mut drbg).is_none());
+        let valid = public
+            .encrypt_with_nonce(&BigUint::from_u64(7), &BigUint::from_u64(2))
+            .expect("valid nonce");
+        assert!(public.add_ciphertexts(&valid, &invalid).is_none());
     }
 }

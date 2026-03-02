@@ -121,7 +121,10 @@ impl Rsa {
     /// reference's default exponent search.
     ///
     /// The reference starts at `2^16 + 1` and increments the power until it
-    /// finds a value coprime to `lambda = lcm(p - 1, q - 1)`.
+    /// finds a value coprime to `lambda = lcm(p - 1, q - 1)`. This terminates
+    /// quickly in practice because `lambda` has only finitely many prime
+    /// factors, so some Fermat-like exponent in the sequence must be coprime
+    /// to it.
     #[must_use]
     pub fn from_primes(p: &BigUint, q: &BigUint) -> Option<(RsaPublicKey, RsaPrivateKey)> {
         if p == q || !is_probable_prime(p) || !is_probable_prime(q) {

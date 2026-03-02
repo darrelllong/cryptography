@@ -11,6 +11,10 @@ const OAEP_LABEL: &[u8] = b"cryptography-rsa-oaep";
 const OAEP_SEED: [u8; 32] = [0x11; 32];
 const PSS_SALT: [u8; 32] = [0x22; 32];
 
+type ElGamalTimings = (Duration, Duration, Duration);
+type PaillierTimings = (Duration, Duration, Duration, Duration, Duration);
+type RsaTimings = (Duration, Duration, Duration, Duration, Duration);
+
 fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
 }
@@ -24,19 +28,26 @@ fn announce(stage: &str) {
     io::stdout().flush().expect("flush benchmark progress");
 }
 
-fn main() {
-    let bits = std::env::args()
-        .nth(1)
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(2048);
-    let mut rng = CtrDrbgAes256::new(&[0x5a; 48]);
+fn parse_args() -> (usize, bool) {
+    let mut bits = 1024usize;
+    let mut skip_elgamal = false;
+    for arg in std::env::args().skip(1) {
+        if arg == "--skip-elgamal" {
+            skip_elgamal = true;
+        } else if let Ok(parsed) = arg.parse::<usize>() {
+            bits = parsed;
+        }
+    }
+    (bits, skip_elgamal)
+}
 
-    println!("Public-key latency (teaching backend, {bits}-bit keys)");
-    println!();
-
+fn bench_rsa(
+    rng: &mut CtrDrbgAes256,
+    bits: usize,
+) -> (cryptography::RsaPublicKey, cryptography::RsaPrivateKey, RsaTimings) {
     announce("Generating RSA key");
     let start = Instant::now();
-    let (rsa_public, rsa_private) = Rsa::generate(&mut rng, bits).expect("RSA key generation");
+    let (rsa_public, rsa_private) = Rsa::generate(rng, bits).expect("RSA key generation");
     let rsa_keygen = start.elapsed();
 
     announce("Measuring RSA OAEP/PSS");
@@ -60,17 +71,23 @@ fn main() {
     let rsa_verify_time = start.elapsed();
     assert!(rsa_verify);
 
+    (
+        rsa_public,
+        rsa_private,
+        (rsa_keygen, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify_time),
+    )
+}
+
+fn bench_elgamal(rng: &mut CtrDrbgAes256, bits: usize) -> ElGamalTimings {
     announce("Generating ElGamal key");
     let start = Instant::now();
     let (elgamal_public, elgamal_private) =
-        ElGamal::generate(&mut rng, bits).expect("ElGamal key generation");
+        ElGamal::generate(rng, bits).expect("ElGamal key generation");
     let elgamal_keygen = start.elapsed();
 
     announce("Measuring ElGamal");
     let start = Instant::now();
-    let elgamal_ciphertext = elgamal_public
-        .encrypt(&MESSAGE, &mut rng)
-        .expect("ElGamal encrypt");
+    let elgamal_ciphertext = elgamal_public.encrypt(&MESSAGE, rng).expect("ElGamal encrypt");
     let elgamal_encrypt = start.elapsed();
 
     let start = Instant::now();
@@ -78,16 +95,20 @@ fn main() {
     let elgamal_decrypt = start.elapsed();
     assert_eq!(elgamal_plaintext, MESSAGE);
 
+    (elgamal_keygen, elgamal_encrypt, elgamal_decrypt)
+}
+
+fn bench_paillier(rng: &mut CtrDrbgAes256, bits: usize) -> PaillierTimings {
     announce("Generating Paillier key");
     let start = Instant::now();
     let (paillier_public, paillier_private) =
-        Paillier::generate(&mut rng, bits).expect("Paillier key generation");
+        Paillier::generate(rng, bits).expect("Paillier key generation");
     let paillier_keygen = start.elapsed();
 
     announce("Measuring Paillier");
     let start = Instant::now();
     let paillier_ciphertext = paillier_public
-        .encrypt(&MESSAGE, &mut rng)
+        .encrypt(&MESSAGE, rng)
         .expect("Paillier encrypt");
     let paillier_encrypt = start.elapsed();
 
@@ -98,21 +119,62 @@ fn main() {
 
     let start = Instant::now();
     let rerandomized = paillier_public
-        .rerandomize(&paillier_ciphertext, &mut rng)
+        .rerandomize(&paillier_ciphertext, rng)
         .expect("Paillier rerandomize");
     let paillier_rerandomize = start.elapsed();
     assert_eq!(paillier_private.decrypt(&rerandomized), MESSAGE);
 
     let other_ciphertext = paillier_public
-        .encrypt(&[0x01], &mut rng)
+        .encrypt(&[0x01], rng)
         .expect("Paillier second encrypt");
     let start = Instant::now();
-    let combined = paillier_public.add_ciphertexts(&paillier_ciphertext, &other_ciphertext);
+    let combined = paillier_public
+        .add_ciphertexts(&paillier_ciphertext, &other_ciphertext)
+        .expect("Paillier ciphertexts are in range");
     let paillier_add = start.elapsed();
     let combined_plaintext = paillier_private.decrypt(&combined);
     let mut expected = BigUint::from_be_bytes(&MESSAGE);
     expected = expected.add_ref(&BigUint::from_u64(1));
     assert_eq!(combined_plaintext, expected.to_be_bytes());
+
+    (
+        paillier_keygen,
+        paillier_encrypt,
+        paillier_decrypt,
+        paillier_rerandomize,
+        paillier_add,
+    )
+}
+
+fn main() {
+    let (bits, skip_elgamal) = parse_args();
+    if bits < 528 {
+        eprintln!("RSAES-OAEP with SHA-256 requires at least a 528-bit modulus.");
+        std::process::exit(2);
+    }
+    let mut rng = CtrDrbgAes256::new(&[0x5a; 48]);
+
+    println!("Public-key latency (teaching backend, {bits}-bit keys)");
+    println!();
+
+    let (_, _, (rsa_keygen, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify_time)) =
+        bench_rsa(&mut rng, bits);
+
+    let mut elgamal_timings = None;
+    if skip_elgamal {
+        println!("Skipping ElGamal benchmark.");
+        println!();
+    } else {
+        elgamal_timings = Some(bench_elgamal(&mut rng, bits));
+    }
+
+    let (
+        paillier_keygen,
+        paillier_encrypt,
+        paillier_decrypt,
+        paillier_rerandomize,
+        paillier_add,
+    ) = bench_paillier(&mut rng, bits);
 
     println!("RSA");
     print_row("keygen", rsa_keygen);
@@ -122,11 +184,13 @@ fn main() {
     print_row("pss verify", rsa_verify_time);
     println!();
 
-    println!("ElGamal");
-    print_row("keygen", elgamal_keygen);
-    print_row("encrypt", elgamal_encrypt);
-    print_row("decrypt", elgamal_decrypt);
-    println!();
+    if let Some((elgamal_keygen, elgamal_encrypt, elgamal_decrypt)) = elgamal_timings {
+        println!("ElGamal");
+        print_row("keygen", elgamal_keygen);
+        print_row("encrypt", elgamal_encrypt);
+        print_row("decrypt", elgamal_decrypt);
+        println!();
+    }
 
     println!("Paillier");
     print_row("keygen", paillier_keygen);

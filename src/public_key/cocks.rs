@@ -108,7 +108,8 @@ impl CocksPrivateKey {
 impl Cocks {
     /// Derive a raw key pair from explicit primes `p` and `q`.
     ///
-    /// Returns `None` if the inputs are unordered, equal, composite, or if
+    /// Returns `None` if `p >= q`, the inputs are equal, either prime is
+    /// composite, or if
     /// `p` is not invertible modulo `q - 1`.
     #[must_use]
     pub fn from_primes(p: &BigUint, q: &BigUint) -> Option<(CocksPublicKey, CocksPrivateKey)> {
@@ -126,7 +127,9 @@ impl Cocks {
     /// Generate a teaching-sized Cocks key pair with `p < q`.
     #[must_use]
     pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(CocksPublicKey, CocksPrivateKey)> {
-        if bits < 4 {
+        // With fewer than 8 total bits the split can collapse to the same tiny
+        // prime on both sides, so a distinct-prime key may never be found.
+        if bits < 8 {
             return None;
         }
 
@@ -210,6 +213,12 @@ mod tests {
         let (public, private) = Cocks::generate(&mut drbg, 32).expect("Cocks key generation");
         let ciphertext = public.encrypt(&[0x2a]).expect("message fits public bound");
         assert_eq!(private.decrypt(&ciphertext), vec![0x2a]);
+    }
+
+    #[test]
+    fn generate_rejects_too_few_bits() {
+        let mut drbg = CtrDrbgAes256::new(&[0x91; 48]);
+        assert!(Cocks::generate(&mut drbg, 7).is_none());
     }
 
     #[test]

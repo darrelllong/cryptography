@@ -192,16 +192,16 @@ pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -
     }
 }
 
-/// Draw a random integer in `[1, upper_exclusive)` that is coprime to `modulus`.
+/// Draw a random integer in `[1, upper_exclusive)` that is coprime to `coprime_to`.
 #[must_use]
 pub fn random_coprime_below<R: Csprng>(
     rng: &mut R,
     upper_exclusive: &BigUint,
-    modulus: &BigUint,
+    coprime_to: &BigUint,
 ) -> Option<BigUint> {
     loop {
         let candidate = random_nonzero_below(rng, upper_exclusive)?;
-        if gcd(&candidate, modulus) == BigUint::one() {
+        if gcd(&candidate, coprime_to) == BigUint::one() {
             return Some(candidate);
         }
     }

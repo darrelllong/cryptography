@@ -193,31 +193,36 @@ The current latency probe is the small helper binary:
 cargo run --release --bin bench_public_key -- 1024
 ```
 
+Add `--skip-elgamal` if you want to omit the ElGamal parameter-generation path
+from a longer run.
+
 On this machine, the first 1024-bit run on the hand-rolled bigint backend
 lands at roughly:
 
 | Operation | Latency |
 |-----------|---------|
-| RSA-1024 keygen | 29.4 ms |
-| RSA-1024 OAEP encrypt | 0.066 ms |
-| RSA-1024 OAEP decrypt | 0.935 ms |
-| RSA-1024 PSS sign | 0.913 ms |
-| RSA-1024 PSS verify | 0.046 ms |
-| ElGamal-1024 keygen | 56.9 s |
-| ElGamal-1024 encrypt | 1.45 ms |
-| ElGamal-1024 decrypt | 0.79 ms |
-| Paillier-1024 keygen | 24.1 ms |
+| RSA-1024 keygen | 32.4 ms |
+| RSA-1024 OAEP encrypt | 0.065 ms |
+| RSA-1024 OAEP decrypt | 0.950 ms |
+| RSA-1024 PSS sign | 0.691 ms |
+| RSA-1024 PSS verify | 0.050 ms |
+| ElGamal-1024 keygen | 172 ms |
+| ElGamal-1024 encrypt | 1.41 ms |
+| ElGamal-1024 decrypt | 0.73 ms |
+| Paillier-1024 keygen | 15.2 ms |
 | Paillier-1024 encrypt | 6.70 ms |
-| Paillier-1024 decrypt | 2.38 ms |
-| Paillier-1024 rerandomize | 4.41 ms |
-| Paillier-1024 ciphertext add | 0.076 ms |
+| Paillier-1024 decrypt | 2.29 ms |
+| Paillier-1024 rerandomize | 4.25 ms |
+| Paillier-1024 ciphertext add | 0.078 ms |
 
 That split is informative: Montgomery fixed the steady-state modular arithmetic,
-so the raw encrypt/decrypt/sign work is already usable at teaching sizes, but
-safe-prime search and repeated probable-prime testing still make key generation
-the pressure point. A 2048-bit RSA run was slow enough in the first key
-generation stage that it was aborted after it had already made the point, so
-the current backend remains a reference implementation first and a practical
+so the raw encrypt/decrypt/sign work is already usable at teaching sizes. The
+first ElGamal version paid a severe safe-prime-search penalty; the current
+subgroup-based generator (`p = kq + 1` with an order-`q` generator) brings the
+1024-bit keygen path back into the same rough latency class as the other
+teaching-sized schemes. A 2048-bit RSA run was still slow enough in the first
+key-generation stage that it was aborted after it had already made the point,
+so the current backend remains a reference implementation first and a practical
 large-key engine second.
 
 ---
