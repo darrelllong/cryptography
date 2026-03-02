@@ -246,7 +246,7 @@ fn main() {
     }
     let mut rng = CtrDrbgAes256::new(&[0x5a; 48]);
 
-    println!("Public-key latency (teaching backend, {bits}-bit keys)");
+    println!("Public-key latency (in-tree bigint backend, {bits}-bit keys)");
     println!();
 
     let (_, _, (rsa_keygen, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify_time)) =

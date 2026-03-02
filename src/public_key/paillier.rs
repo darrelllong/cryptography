@@ -378,8 +378,8 @@ impl Paillier {
 
     /// Derive a Paillier key pair using the deterministic base `n + 1`.
     ///
-    /// The reference implementation samples `zeta` randomly, but `n + 1` is
-    /// the usual simple choice and keeps this constructor deterministic.
+    /// Sampling `zeta` randomly is valid, but `n + 1` is the usual simple
+    /// choice and keeps this constructor deterministic.
     #[must_use]
     pub fn from_primes(
         p: &BigUint,

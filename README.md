@@ -541,7 +541,7 @@ Production note:
 - The standards-backed RSA wrappers (`OAEP`, `PSS`, and standard key
   formats) are the intended path for modern use in this crate.
 - The historical schemes and the exposed raw primitives are included as
-  reference implementations. Treat them as specialized tools, not as the
+  specialized primitives. Treat them as specialized tools, not as the
   default choice for new deployments.
 
 Generate a balanced dataset of raw samples:

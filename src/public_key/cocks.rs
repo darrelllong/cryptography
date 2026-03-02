@@ -55,8 +55,8 @@ impl CocksPublicKey {
 
     /// Encrypt the raw integer message.
     ///
-    /// This follows the reference implementation directly: `c = m^n mod n`,
-    /// where the public exponent is the modulus `n` itself.
+    /// Cocks uses the unusual public map `c = m^n mod n`, where the public
+    /// exponent is the modulus `n` itself.
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         mod_pow(message, &self.n, &self.n)
