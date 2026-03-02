@@ -134,7 +134,7 @@ The practical RSA layer is the most complete in the crate:
 Core arithmetic:
 
 ```math
-\gamma = g^k \bmod p,\qquad \delta = m \cdot y^k \bmod p
+\gamma = g^k \bmod p,\qquad \delta = m \cdot y^k \bmod p,\qquad y = g^a \bmod p
 ```
 
 The key-generation path uses a prime-order subgroup construction instead of the
@@ -146,13 +146,53 @@ The public key stores the real ephemeral bound used for encryption, so the
 random ephemeral exponent is sampled from the right range instead of from the
 full `p - 1` interval.
 
+### Cocks
+
+Core arithmetic:
+
+```math
+c = m^n \bmod n,\qquad n = pq,\qquad \pi \equiv n^{-1} \pmod{q - 1}
+```
+
+with the private recovery map:
+
+```math
+m = c^\pi \bmod q
+```
+
+This is here because it is historically important: Clifford Cocks proposed it
+in 1973, five years before RSA. The scheme is unusual because the public
+exponent is the modulus itself. The crate keeps that arithmetic intact and adds
+the byte-level serialization layer on top instead of inventing a modernized
+padding story that the literature does not standardize.
+
 ### Rabin
 
-`Rabin` is implemented as a tagged-message variant, not as a bare “square and
-hope you pick the right root” demonstration. The tagging step is what makes the
-byte-oriented decrypt path deterministic.
+Core arithmetic:
+
+```math
+c = m^2 \bmod n,\qquad n = pq
+```
+
+Decryption computes square roots modulo `p` and `q`, then recombines them with
+the Chinese remainder theorem to recover the four square roots modulo `n`.
+Because plain Rabin is ambiguous, this crate uses a tagged-message variant: the
+tag is carried inside the encoded plaintext and is used to select the intended
+root deterministically at decrypt time.
 
 ### Paillier
+
+Core arithmetic:
+
+```math
+c = g^m r^n \bmod n^2
+```
+
+with decryption:
+
+```math
+m = L(c^\lambda \bmod n^2)\,\mu \bmod n,\qquad L(u) = \frac{u - 1}{n}
+```
 
 `Paillier` exposes both encryption/decryption and the natural homomorphic
 operations:
@@ -163,13 +203,29 @@ operations:
 That homomorphic surface is a real part of the scheme, not an extra trick, so
 it is intentionally part of the usable API.
 
-### Cocks and Schmidt-Samoa
+### Schmidt-Samoa
 
-These two are the least conventional public-key primitives in the crate. They
-remain implemented and usable, but they do not have the same ecosystem support,
-standardized wrapper story, or deployment relevance as RSA. Their wrappers are
-there so the algorithms are usable and testable, not to imply modern protocol
-adoption.
+Core arithmetic:
+
+```math
+c = m^n \bmod n,\qquad n = p^2 q,\qquad \gamma = pq
+```
+
+with the private exponent chosen so that:
+
+```math
+d \equiv n^{-1} \pmod{\mathrm{lcm}(p - 1, q - 1)}
+```
+
+and decryption:
+
+```math
+m = c^d \bmod \gamma
+```
+
+Like Cocks, Schmidt-Samoa uses the modulus itself as the public exponent. It
+is mathematically neat and implemented faithfully here, but it does not have
+the same standards ecosystem or deployment relevance as RSA.
 
 ## Byte-Oriented APIs
 
