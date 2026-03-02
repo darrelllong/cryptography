@@ -10,7 +10,9 @@ use crate::public_key::bigint::BigUint;
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
-use crate::public_key::primes::{is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime};
+use crate::public_key::primes::{
+    is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime,
+};
 use crate::Csprng;
 
 const SCHMIDT_SAMOA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PUBLIC KEY";
@@ -377,6 +379,9 @@ mod tests {
             Some(private.clone())
         );
         assert_eq!(SchmidtSamoaPublicKey::from_xml(&public_xml), Some(public));
-        assert_eq!(SchmidtSamoaPrivateKey::from_xml(&private_xml), Some(private));
+        assert_eq!(
+            SchmidtSamoaPrivateKey::from_xml(&private_xml),
+            Some(private)
+        );
     }
 }

@@ -199,7 +199,11 @@ impl RabinPrivateKey {
         let n = fields.next()?;
         let p = fields.next()?;
         let q = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() || p <= BigUint::one() || q <= BigUint::one() {
+        if fields.next().is_some()
+            || n <= BigUint::one()
+            || p <= BigUint::one()
+            || q <= BigUint::one()
+        {
             return None;
         }
         Some(Self { n, p, q })
@@ -436,15 +440,24 @@ mod tests {
 
         let public_blob = public.to_binary();
         let private_blob = private.to_binary();
-        assert_eq!(RabinPublicKey::from_binary(&public_blob), Some(public.clone()));
-        assert_eq!(RabinPrivateKey::from_binary(&private_blob), Some(private.clone()));
+        assert_eq!(
+            RabinPublicKey::from_binary(&public_blob),
+            Some(public.clone())
+        );
+        assert_eq!(
+            RabinPrivateKey::from_binary(&private_blob),
+            Some(private.clone())
+        );
 
         let public_pem = public.to_pem();
         let private_pem = private.to_pem();
         let public_xml = public.to_xml();
         let private_xml = private.to_xml();
         assert_eq!(RabinPublicKey::from_pem(&public_pem), Some(public.clone()));
-        assert_eq!(RabinPrivateKey::from_pem(&private_pem), Some(private.clone()));
+        assert_eq!(
+            RabinPrivateKey::from_pem(&private_pem),
+            Some(private.clone())
+        );
         assert_eq!(RabinPublicKey::from_xml(&public_xml), Some(public));
         assert_eq!(RabinPrivateKey::from_xml(&private_xml), Some(private));
     }

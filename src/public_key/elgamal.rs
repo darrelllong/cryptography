@@ -616,9 +616,12 @@ mod tests {
     fn generate_then_random_encrypt_roundtrip() {
         let mut key_rng = CtrDrbgAes256::new(&[0x53; 48]);
         let mut enc_rng = CtrDrbgAes256::new(&[0x54; 48]);
-        let (public, private) = ElGamal::generate(&mut key_rng, 32).expect("ElGamal key generation");
+        let (public, private) =
+            ElGamal::generate(&mut key_rng, 32).expect("ElGamal key generation");
         let message = [0x2a];
-        let ciphertext = public.encrypt(&message, &mut enc_rng).expect("message fits");
+        let ciphertext = public
+            .encrypt(&message, &mut enc_rng)
+            .expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), message.to_vec());
     }
 
@@ -631,16 +634,44 @@ mod tests {
 
         let public_blob = public.to_binary();
         let private_blob = private.to_binary();
-        assert_eq!(ElGamalPublicKey::from_binary(&public_blob), Some(public.clone()));
-        assert_eq!(ElGamalPrivateKey::from_binary(&private_blob), Some(private.clone()));
+        assert_eq!(
+            ElGamalPublicKey::from_binary(&public_blob),
+            Some(public.clone())
+        );
+        assert_eq!(
+            ElGamalPrivateKey::from_binary(&private_blob),
+            Some(private.clone())
+        );
 
         let public_pem = public.to_pem();
         let private_pem = private.to_pem();
         let public_xml = public.to_xml();
         let private_xml = private.to_xml();
-        assert_eq!(ElGamalPublicKey::from_pem(&public_pem), Some(public.clone()));
-        assert_eq!(ElGamalPrivateKey::from_pem(&private_pem), Some(private.clone()));
+        assert_eq!(
+            ElGamalPublicKey::from_pem(&public_pem),
+            Some(public.clone())
+        );
+        assert_eq!(
+            ElGamalPrivateKey::from_pem(&private_pem),
+            Some(private.clone())
+        );
         assert_eq!(ElGamalPublicKey::from_xml(&public_xml), Some(public));
         assert_eq!(ElGamalPrivateKey::from_xml(&private_xml), Some(private));
+    }
+
+    #[test]
+    fn generated_key_serialization_roundtrip() {
+        let mut key_rng = CtrDrbgAes256::new(&[0x63; 48]);
+        let mut enc_rng = CtrDrbgAes256::new(&[0x64; 48]);
+        let (public, private) =
+            ElGamal::generate(&mut key_rng, 32).expect("ElGamal key generation");
+        let message = [0x11];
+
+        let public = ElGamalPublicKey::from_binary(&public.to_binary()).expect("public binary");
+        let private = ElGamalPrivateKey::from_xml(&private.to_xml()).expect("private XML");
+        let ciphertext = public
+            .encrypt(&message, &mut enc_rng)
+            .expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), message.to_vec());
     }
 }

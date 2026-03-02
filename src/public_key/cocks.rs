@@ -228,7 +228,10 @@ impl Cocks {
 
     /// Generate a teaching-sized Cocks key pair with `p < q`.
     #[must_use]
-    pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(CocksPublicKey, CocksPrivateKey)> {
+    pub fn generate<R: Csprng>(
+        rng: &mut R,
+        bits: usize,
+    ) -> Option<(CocksPublicKey, CocksPrivateKey)> {
         // With fewer than 8 total bits the split can collapse to the same tiny
         // prime on both sides, so a distinct-prime key may never be found.
         if bits < 8 {
@@ -338,16 +341,37 @@ mod tests {
 
         let public_blob = public.to_binary();
         let private_blob = private.to_binary();
-        assert_eq!(CocksPublicKey::from_binary(&public_blob), Some(public.clone()));
-        assert_eq!(CocksPrivateKey::from_binary(&private_blob), Some(private.clone()));
+        assert_eq!(
+            CocksPublicKey::from_binary(&public_blob),
+            Some(public.clone())
+        );
+        assert_eq!(
+            CocksPrivateKey::from_binary(&private_blob),
+            Some(private.clone())
+        );
 
         let public_pem = public.to_pem();
         let private_pem = private.to_pem();
         let public_xml = public.to_xml();
         let private_xml = private.to_xml();
         assert_eq!(CocksPublicKey::from_pem(&public_pem), Some(public.clone()));
-        assert_eq!(CocksPrivateKey::from_pem(&private_pem), Some(private.clone()));
+        assert_eq!(
+            CocksPrivateKey::from_pem(&private_pem),
+            Some(private.clone())
+        );
         assert_eq!(CocksPublicKey::from_xml(&public_xml), Some(public));
         assert_eq!(CocksPrivateKey::from_xml(&private_xml), Some(private));
+    }
+
+    #[test]
+    fn generated_key_serialization_roundtrip() {
+        let mut drbg = CtrDrbgAes256::new(&[0xa1; 48]);
+        let (public, private) = Cocks::generate(&mut drbg, 32).expect("Cocks key generation");
+        let message = [0x07];
+
+        let public = CocksPublicKey::from_xml(&public.to_xml()).expect("public XML");
+        let private = CocksPrivateKey::from_binary(&private.to_binary()).expect("private binary");
+        let ciphertext = public.encrypt(&message).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), message.to_vec());
     }
 }

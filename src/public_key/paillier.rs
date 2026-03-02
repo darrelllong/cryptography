@@ -256,8 +256,7 @@ impl PaillierPrivateKey {
     /// Decode the private key from the crate's flat XML form.
     #[must_use]
     pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields =
-            xml_unwrap("PaillierPrivateKey", &["n", "lambda", "u"], xml)?.into_iter();
+        let mut fields = xml_unwrap("PaillierPrivateKey", &["n", "lambda", "u"], xml)?.into_iter();
         let n = fields.next()?;
         let lambda = fields.next()?;
         let u = fields.next()?;
@@ -472,7 +471,9 @@ mod tests {
         let q = BigUint::from_u64(263);
         let (public, private) = Paillier::from_primes(&p, &q).expect("valid Paillier key");
         let mut drbg = CtrDrbgAes256::new(&[0x52; 48]);
-        let ciphertext = public.encrypt(&[0x12, 0x34], &mut drbg).expect("message fits");
+        let ciphertext = public
+            .encrypt(&[0x12, 0x34], &mut drbg)
+            .expect("message fits");
         let rerandomized = public
             .rerandomize(&ciphertext, &mut drbg)
             .expect("rerandomization");
@@ -528,16 +529,44 @@ mod tests {
 
         let public_blob = public.to_binary();
         let private_blob = private.to_binary();
-        assert_eq!(PaillierPublicKey::from_binary(&public_blob), Some(public.clone()));
-        assert_eq!(PaillierPrivateKey::from_binary(&private_blob), Some(private.clone()));
+        assert_eq!(
+            PaillierPublicKey::from_binary(&public_blob),
+            Some(public.clone())
+        );
+        assert_eq!(
+            PaillierPrivateKey::from_binary(&private_blob),
+            Some(private.clone())
+        );
 
         let public_pem = public.to_pem();
         let private_pem = private.to_pem();
         let public_xml = public.to_xml();
         let private_xml = private.to_xml();
-        assert_eq!(PaillierPublicKey::from_pem(&public_pem), Some(public.clone()));
-        assert_eq!(PaillierPrivateKey::from_pem(&private_pem), Some(private.clone()));
+        assert_eq!(
+            PaillierPublicKey::from_pem(&public_pem),
+            Some(public.clone())
+        );
+        assert_eq!(
+            PaillierPrivateKey::from_pem(&private_pem),
+            Some(private.clone())
+        );
         assert_eq!(PaillierPublicKey::from_xml(&public_xml), Some(public));
         assert_eq!(PaillierPrivateKey::from_xml(&private_xml), Some(private));
+    }
+
+    #[test]
+    fn generated_key_serialization_roundtrip() {
+        let mut key_rng = CtrDrbgAes256::new(&[0xb5; 48]);
+        let mut enc_rng = CtrDrbgAes256::new(&[0xb6; 48]);
+        let (public, private) =
+            Paillier::generate(&mut key_rng, 32).expect("Paillier key generation");
+        let message = [0x03];
+
+        let public = PaillierPublicKey::from_binary(&public.to_binary()).expect("public binary");
+        let private = PaillierPrivateKey::from_xml(&private.to_xml()).expect("private XML");
+        let ciphertext = public
+            .encrypt(&message, &mut enc_rng)
+            .expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), message.to_vec());
     }
 }

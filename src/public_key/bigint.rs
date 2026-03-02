@@ -481,7 +481,9 @@ impl BigUint {
     ///
     /// The result is mathematically correct, but repeated division-based
     /// reduction makes it much slower than Montgomery multiplication for the
-    /// odd moduli that dominate public-key code.
+    /// odd moduli that dominate public-key code. The current scheme code only
+    /// reaches this path for even moduli, so it remains as the explicit
+    /// fallback and teaching reference for non-Montgomery cases.
     #[must_use]
     pub(crate) fn mod_mul_plain(lhs: &Self, rhs: &Self, modulus: &Self) -> Self {
         if lhs.is_zero() || rhs.is_zero() {
@@ -937,6 +939,14 @@ mod tests {
         let a = BigUint::from_u64(123_456_789);
         let b = BigUint::from_u64(987_654_321);
         assert_eq!(ctx.mul(&a, &b), BigUint::from_u64(259_106_859));
+    }
+
+    #[test]
+    fn mod_mul_even_modulus_uses_fallback_path() {
+        let a = BigUint::from_u64(37);
+        let b = BigUint::from_u64(19);
+        let modulus = BigUint::from_u64(100);
+        assert_eq!(BigUint::mod_mul(&a, &b, &modulus), BigUint::from_u64(3));
     }
 
     #[test]

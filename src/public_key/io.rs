@@ -29,6 +29,10 @@
 //! - `SchmidtSamoaPrivateKey`: `[d, gamma]`
 //!
 //! The PEM label selects the scheme and key role. The DER body is shared.
+//! Bare DER blobs are intentionally schema-shaped rather than self-describing:
+//! types with the same field count can therefore share identical binary
+//! encodings. The PEM labels and XML root tags are the type discriminants when
+//! callers need a tagged interchange format.
 
 use crate::public_key::bigint::BigUint;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
@@ -138,7 +142,7 @@ fn decode_der_len(input: &[u8]) -> Option<(usize, usize)> {
     let len_bytes = input.get(1..1 + count)?;
     let mut len = 0usize;
     for &byte in len_bytes {
-        len = len.checked_shl(8)? | usize::from(byte);
+        len = len.checked_shl(8)?.checked_add(usize::from(byte))?;
     }
     Some((len, 1 + count))
 }
@@ -358,10 +362,6 @@ fn decode_base64_char(ch: u8) -> Option<u8> {
 
 fn hex_encode_upper(value: &BigUint) -> String {
     let bytes = value.to_be_bytes();
-    if bytes.is_empty() {
-        return String::from("0");
-    }
-
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         out.push(char::from(UPPER_HEX[usize::from(byte >> 4)]));
@@ -374,6 +374,8 @@ fn hex_decode_biguint(input: &str) -> Option<BigUint> {
     if input.is_empty() {
         return None;
     }
+    // Accept the one-digit zero shorthand for hand-written XML, even though
+    // `hex_encode_upper` emits the canonical `00` form.
     if input == "0" {
         return Some(BigUint::zero());
     }
@@ -448,6 +450,12 @@ mod tests {
     #[test]
     fn xml_rejects_trailing_content() {
         let xml = "<TestKey><n>BB</n></TestKey>junk";
+        assert!(xml_unwrap("TestKey", &["n"], xml).is_none());
+    }
+
+    #[test]
+    fn xml_rejects_truncated_input() {
+        let xml = "<TestKey><n>BB</n>";
         assert!(xml_unwrap("TestKey", &["n"], xml).is_none());
     }
 }

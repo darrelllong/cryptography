@@ -59,7 +59,10 @@ impl RsaPublicKey {
     /// SPKI.
     #[must_use]
     pub fn to_xml(&self) -> String {
-        xml_wrap("RsaPublicKey", &[("e", self.exponent()), ("n", self.modulus())])
+        xml_wrap(
+            "RsaPublicKey",
+            &[("e", self.exponent()), ("n", self.modulus())],
+        )
     }
 
     /// Decode a PKCS #1 `RSAPublicKey` structure from DER.
@@ -127,7 +130,8 @@ impl RsaPublicKey {
         let mut fields = xml_unwrap("RsaPublicKey", &["e", "n"], xml)?.into_iter();
         let public_exponent = fields.next()?;
         let modulus = fields.next()?;
-        if fields.next().is_some() || public_exponent <= BigUint::one() || modulus <= BigUint::one() {
+        if fields.next().is_some() || public_exponent <= BigUint::one() || modulus <= BigUint::one()
+        {
             return None;
         }
         Some(Self::from_components(public_exponent, modulus))
@@ -313,8 +317,7 @@ impl RsaPrivateKey {
             return None;
         }
 
-        let (public, private) =
-            Rsa::from_primes_with_exponent(&prime1, &prime2, &public_exponent)?;
+        let (public, private) = Rsa::from_primes_with_exponent(&prime1, &prime2, &public_exponent)?;
         if public.modulus() != &modulus || private.exponent() != &private_exponent {
             return None;
         }
@@ -514,13 +517,32 @@ mod tests {
     }
 
     #[test]
+    fn generated_key_xml_roundtrip() {
+        let mut drbg = crate::CtrDrbgAes256::new(&[0xc1; 48]);
+        let (public, private) = Rsa::generate(&mut drbg, 64).expect("generated RSA key");
+
+        let public_der = public.to_spki_der();
+        let public_xml = public.to_xml();
+        let private_xml = private.to_xml();
+
+        assert_eq!(
+            RsaPublicKey::from_spki_der(&public_der),
+            Some(public.clone())
+        );
+        assert_eq!(RsaPublicKey::from_xml(&public_xml), Some(public));
+        assert_eq!(RsaPrivateKey::from_xml(&private_xml), Some(private));
+    }
+
+    #[test]
     fn openssl_accepts_spki_pem() {
         let p = BigUint::from_u64(61);
         let q = BigUint::from_u64(53);
         let (public, _) = Rsa::from_primes(&p, &q).expect("valid RSA key");
 
         let Some(expected) = crate::ct::run_openssl(
-            &["pkey", "-pubin", "-inform", "PEM", "-pubout", "-outform", "DER"],
+            &[
+                "pkey", "-pubin", "-inform", "PEM", "-pubout", "-outform", "DER",
+            ],
             public.to_spki_pem().as_bytes(),
         ) else {
             return;
@@ -535,9 +557,10 @@ mod tests {
         let q = BigUint::from_u64(53);
         let (_, private) = Rsa::from_primes(&p, &q).expect("valid RSA key");
 
-        let Some(expected) =
-            crate::ct::run_openssl(&["pkey", "-inform", "PEM", "-outform", "DER"], private.to_pkcs8_pem().as_bytes())
-        else {
+        let Some(expected) = crate::ct::run_openssl(
+            &["pkey", "-inform", "PEM", "-outform", "DER"],
+            private.to_pkcs8_pem().as_bytes(),
+        ) else {
             return;
         };
 

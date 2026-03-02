@@ -1,10 +1,10 @@
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+use cryptography::public_key::bigint::BigUint;
 use cryptography::{
     Cocks, CtrDrbgAes256, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
 };
-use cryptography::public_key::bigint::BigUint;
 
 const MESSAGE: [u8; 32] = [0x42; 32];
 const OAEP_LABEL: &[u8] = b"cryptography-rsa-oaep";
@@ -45,7 +45,11 @@ fn parse_args() -> (usize, bool) {
 fn bench_rsa(
     rng: &mut CtrDrbgAes256,
     bits: usize,
-) -> (cryptography::RsaPublicKey, cryptography::RsaPrivateKey, RsaTimings) {
+) -> (
+    cryptography::RsaPublicKey,
+    cryptography::RsaPrivateKey,
+    RsaTimings,
+) {
     announce("Generating RSA key");
     let start = Instant::now();
     let (rsa_public, rsa_private) = Rsa::generate(rng, bits).expect("RSA key generation");
@@ -75,7 +79,13 @@ fn bench_rsa(
     (
         rsa_public,
         rsa_private,
-        (rsa_keygen, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify_time),
+        (
+            rsa_keygen,
+            rsa_encrypt,
+            rsa_decrypt,
+            rsa_sign,
+            rsa_verify_time,
+        ),
     )
 }
 
@@ -88,7 +98,9 @@ fn bench_elgamal(rng: &mut CtrDrbgAes256, bits: usize) -> ElGamalTimings {
 
     announce("Measuring ElGamal");
     let start = Instant::now();
-    let elgamal_ciphertext = elgamal_public.encrypt(&MESSAGE, rng).expect("ElGamal encrypt");
+    let elgamal_ciphertext = elgamal_public
+        .encrypt(&MESSAGE, rng)
+        .expect("ElGamal encrypt");
     let elgamal_encrypt = start.elapsed();
 
     let start = Instant::now();
@@ -227,13 +239,8 @@ fn main() {
         elgamal_timings = Some(bench_elgamal(&mut rng, bits));
     }
 
-    let (
-        paillier_keygen,
-        paillier_encrypt,
-        paillier_decrypt,
-        paillier_rerandomize,
-        paillier_add,
-    ) = bench_paillier(&mut rng, bits);
+    let (paillier_keygen, paillier_encrypt, paillier_decrypt, paillier_rerandomize, paillier_add) =
+        bench_paillier(&mut rng, bits);
     let (cocks_keygen, cocks_encrypt, cocks_decrypt) = bench_cocks(&mut rng, bits);
     let (rabin_keygen, rabin_encrypt, rabin_decrypt) = bench_rabin(&mut rng, bits);
     let (schmidt_keygen, schmidt_encrypt, schmidt_decrypt) = bench_schmidt_samoa(&mut rng, bits);

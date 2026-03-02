@@ -23,6 +23,6 @@ pub mod paillier;
 pub mod primes;
 pub mod rabin;
 pub mod rsa;
-pub mod rsa_pkcs1;
 pub mod rsa_io;
+pub mod rsa_pkcs1;
 pub mod schmidt_samoa;
