@@ -188,6 +188,21 @@ pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -
     }
 }
 
+/// Draw a random integer in `[1, upper_exclusive)` that is coprime to `modulus`.
+#[must_use]
+pub fn random_coprime_below<R: Csprng>(
+    rng: &mut R,
+    upper_exclusive: &BigUint,
+    modulus: &BigUint,
+) -> Option<BigUint> {
+    loop {
+        let candidate = random_nonzero_below(rng, upper_exclusive)?;
+        if gcd(&candidate, modulus) == BigUint::one() {
+            return Some(candidate);
+        }
+    }
+}
+
 /// Draw a teaching-sized probable prime with the requested bit length.
 #[must_use]
 pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {

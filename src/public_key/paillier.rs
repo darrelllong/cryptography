@@ -8,7 +8,10 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::primes::{gcd, is_probable_prime, lcm, mod_inverse, mod_pow};
+use crate::public_key::primes::{
+    gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_coprime_below, random_probable_prime,
+};
+use crate::Csprng;
 
 /// Public key for the raw Paillier primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,12 +44,21 @@ impl PaillierPublicKey {
         &self.zeta
     }
 
+    /// Return the largest plaintext integer accepted by the raw scheme.
+    #[must_use]
+    pub fn max_plaintext_exclusive(&self) -> &BigUint {
+        &self.n
+    }
+
     /// Encrypt with an explicit nonce `r`.
     ///
     /// The Python reference chooses `r` randomly from `Z_n^*`; this raw layer
     /// takes it explicitly until a higher-level RNG/keygen API is added.
     #[must_use]
     pub fn encrypt_with_nonce(&self, message: &BigUint, nonce: &BigUint) -> Option<BigUint> {
+        if message >= &self.n {
+            return None;
+        }
         if nonce.is_zero() || nonce >= &self.n || gcd(nonce, &self.n) != BigUint::one() {
             return None;
         }
@@ -60,6 +72,39 @@ impl PaillierPublicKey {
             BigUint::mod_mul(&left, &right, &n_squared)
         };
         Some(product)
+    }
+
+    /// Encrypt a byte string with a fresh random nonce from `Z_n^*`.
+    #[must_use]
+    pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<BigUint> {
+        let message_int = BigUint::from_be_bytes(message);
+        let nonce = random_coprime_below(rng, &self.n, &self.n)?;
+        self.encrypt_with_nonce(&message_int, &nonce)
+    }
+
+    /// Re-randomize an existing ciphertext without changing the plaintext.
+    #[must_use]
+    pub fn rerandomize<R: Csprng>(&self, ciphertext: &BigUint, rng: &mut R) -> Option<BigUint> {
+        let nonce = random_coprime_below(rng, &self.n, &self.n)?;
+        let n_squared = self.n.mul_ref(&self.n);
+        let factor = mod_pow(&nonce, &self.n, &n_squared);
+        let product = if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
+            ctx.mul(ciphertext, &factor)
+        } else {
+            BigUint::mod_mul(ciphertext, &factor, &n_squared)
+        };
+        Some(product)
+    }
+
+    /// Combine two ciphertexts so that decryption adds the plaintexts modulo `n`.
+    #[must_use]
+    pub fn add_ciphertexts(&self, lhs: &BigUint, rhs: &BigUint) -> BigUint {
+        let n_squared = self.n.mul_ref(&self.n);
+        if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
+            ctx.mul(lhs, rhs)
+        } else {
+            BigUint::mod_mul(lhs, rhs, &n_squared)
+        }
     }
 }
 
@@ -93,6 +138,13 @@ impl PaillierPrivateKey {
         } else {
             BigUint::mod_mul(&lifted, &self.u, &self.n)
         }
+    }
+
+    /// Decrypt a ciphertext back into the big-endian byte string interpreted
+    /// as the plaintext integer.
+    #[must_use]
+    pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
+        self.decrypt_raw(ciphertext).to_be_bytes()
     }
 }
 
@@ -157,6 +209,28 @@ impl Paillier {
         let base = n.add_ref(&BigUint::one());
         Self::from_primes_with_base(p, q, &base)
     }
+
+    /// Generate a teaching-sized Paillier key pair using the standard `n + 1`
+    /// base.
+    #[must_use]
+    pub fn generate<R: Csprng>(
+        rng: &mut R,
+        bits: usize,
+    ) -> Option<(PaillierPublicKey, PaillierPrivateKey)> {
+        if bits < 4 {
+            return None;
+        }
+
+        let p_bits = bits / 2;
+        let q_bits = bits - p_bits;
+        loop {
+            let p = random_probable_prime(rng, p_bits)?;
+            let q = random_probable_prime(rng, q_bits)?;
+            if let Some(keypair) = Self::from_primes(&p, &q) {
+                return Some(keypair);
+            }
+        }
+    }
 }
 
 fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
@@ -173,6 +247,7 @@ fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
 mod tests {
     use super::Paillier;
     use crate::public_key::bigint::BigUint;
+    use crate::CtrDrbgAes256;
 
     #[test]
     fn derive_small_reference_key() {
@@ -267,5 +342,43 @@ mod tests {
         assert!(public
             .encrypt_with_nonce(&message, &BigUint::from_u64(15))
             .is_none());
+    }
+
+    #[test]
+    fn byte_wrapper_roundtrip_and_rerandomize() {
+        let p = BigUint::from_u64(257);
+        let q = BigUint::from_u64(263);
+        let (public, private) = Paillier::from_primes(&p, &q).expect("valid Paillier key");
+        let mut drbg = CtrDrbgAes256::new(&[0x52; 48]);
+        let ciphertext = public.encrypt(&[0x12, 0x34], &mut drbg).expect("message fits");
+        let rerandomized = public
+            .rerandomize(&ciphertext, &mut drbg)
+            .expect("rerandomization");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x12, 0x34]);
+        assert_eq!(private.decrypt(&rerandomized), vec![0x12, 0x34]);
+        assert_ne!(ciphertext, rerandomized);
+    }
+
+    #[test]
+    fn add_ciphertexts_wrapper_matches_plaintext_addition() {
+        let p = BigUint::from_u64(257);
+        let q = BigUint::from_u64(263);
+        let (public, private) = Paillier::from_primes(&p, &q).expect("valid Paillier key");
+        let left = public
+            .encrypt_with_nonce(&BigUint::from_u64(0x12), &BigUint::from_u64(2))
+            .expect("valid nonce");
+        let right = public
+            .encrypt_with_nonce(&BigUint::from_u64(0x34), &BigUint::from_u64(3))
+            .expect("valid nonce");
+        let combined = public.add_ciphertexts(&left, &right);
+        assert_eq!(private.decrypt(&combined), vec![0x46]);
+    }
+
+    #[test]
+    fn generate_teaching_keypair() {
+        let mut drbg = CtrDrbgAes256::new(&[0x53; 48]);
+        let (public, private) = Paillier::generate(&mut drbg, 32).expect("Paillier key generation");
+        let ciphertext = public.encrypt(&[0x2a], &mut drbg).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x2a]);
     }
 }
