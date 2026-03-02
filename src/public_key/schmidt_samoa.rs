@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_teaching_keypair() {
+    fn generate_keypair_roundtrip() {
         let mut drbg = CtrDrbgAes256::new(&[0x71; 48]);
         let (public, private) =
             SchmidtSamoa::generate(&mut drbg, 48).expect("Schmidt-Samoa key generation");

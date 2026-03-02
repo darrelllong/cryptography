@@ -581,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_teaching_keypair() {
+    fn generate_keypair_roundtrip() {
         let mut drbg = CtrDrbgAes256::new(&[0x33; 48]);
         let (public, private) = ElGamal::generate(&mut drbg, 32).expect("ElGamal key generation");
         let message = BigUint::from_u64(42);

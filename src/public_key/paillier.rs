@@ -585,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_teaching_keypair() {
+    fn generate_keypair_roundtrip() {
         let mut drbg = CtrDrbgAes256::new(&[0x53; 48]);
         let (public, private) = Paillier::generate(&mut drbg, 32).expect("Paillier key generation");
         let ciphertext = public.encrypt(&[0x2a], &mut drbg).expect("message fits");

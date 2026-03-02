@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_teaching_keypair() {
+    fn generate_keypair_roundtrip() {
         let mut drbg = CtrDrbgAes256::new(&[0x21; 48]);
         let (public, private) = Cocks::generate(&mut drbg, 32).expect("Cocks key generation");
         let ciphertext = public.encrypt(&[0x2a]).expect("message fits public bound");

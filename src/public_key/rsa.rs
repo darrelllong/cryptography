@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_teaching_keypair() {
+    fn generate_keypair_roundtrip() {
         let seed = [0x55u8; 48];
         let mut drbg = CtrDrbgAes256::new(&seed);
         let (public, private) = Rsa::generate(&mut drbg, 64).expect("generated RSA key");

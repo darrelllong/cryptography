@@ -209,7 +209,7 @@ N = \mathrm{clamp}(\lfloor L / 4 \rfloor, 16, 256)
 
 for a modulus size `L = bits(p)`. That is not the exact FIPS menu of `(L, N)`
 pairs (`(1024, 160)`, `(2048, 224)`, `(2048, 256)`, `(3072, 256)`), but it
-keeps the subgroup order conservative for the teaching and benchmarking sizes
+keeps the subgroup order conservative for the representative benchmark sizes
 used here while staying within the same finite-field `DSA` structure.
 
 ### Cocks

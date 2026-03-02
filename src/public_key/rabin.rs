@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_teaching_keypair() {
+    fn generate_keypair_roundtrip() {
         let mut drbg = CtrDrbgAes256::new(&[0x61; 48]);
         let (public, private) = Rabin::generate(&mut drbg, 48).expect("Rabin key generation");
         let ciphertext = public.encrypt(&[0x00]).expect("message fits");
