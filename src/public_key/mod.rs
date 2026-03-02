@@ -1,11 +1,11 @@
 //! Public-key building blocks.
 //!
 //! This module starts with the arithmetic foundation needed by the public-key
-//! schemes in the reference Python repository: a simple limb-based bigint
-//! representation, a reusable Montgomery toolkit, plus primality and
-//! modular-arithmetic helpers. The goal is fidelity to the hand-written
-//! algorithms in pure idiomatic Rust, not a replacement for industrial
-//! multiprecision libraries or a wrapper around external C code.
+//! schemes here: a simple limb-based bigint representation, a reusable
+//! Montgomery toolkit, plus primality and modular-arithmetic helpers. The goal
+//! is fidelity to the published arithmetic in pure idiomatic Rust, not a
+//! replacement for industrial multiprecision libraries or a wrapper around
+//! external C code.
 //!
 //! The public-key APIs are intentionally layered:
 //! - arithmetic maps such as `encrypt_raw` / `decrypt_raw`

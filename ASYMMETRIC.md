@@ -25,7 +25,7 @@ scheme here.
 The design goal is:
 
 - keep the arithmetic visible and auditable
-- make the scheme logic match the reference Python code
+- keep the scheme logic close to the published arithmetic
 - keep open the option of swapping the arithmetic backend later if larger-key
   performance demands it
 

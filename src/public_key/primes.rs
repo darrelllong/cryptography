@@ -1,9 +1,9 @@
 //! Primality and modular-arithmetic helpers for the public-key layer.
 //!
-//! These routines mirror the structure of the reference Python code:
-//! repeated-squaring modular exponentiation plus Miller-Rabin with a fixed
-//! witness set. The fixed bases keep the implementation deterministic and easy
-//! to test while we are still in the pure-Rust, dependency-free foundation.
+//! These routines use straightforward repeated-squaring modular exponentiation
+//! plus Miller-Rabin with a fixed witness set. The fixed bases keep the
+//! implementation deterministic and easy to test while we are still in the
+//! pure-Rust, dependency-free foundation.
 //!
 //! A smaller `u128`-bounded Miller-Rabin helper also exists in
 //! `crate::cprng::primes`; the duplication is intentional because the

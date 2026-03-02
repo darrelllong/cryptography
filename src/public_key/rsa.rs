@@ -1,9 +1,9 @@
 //! RSA public-key primitive (Rivest, Shamir, Adleman, 1978).
 //!
-//! This module exposes the core RSA trapdoor permutation from the companion
-//! Python code: key derivation from explicit primes plus modular exponentiation
-//! for encrypt/decrypt. Standards-based message formatting lives in
-//! `rsa_pkcs1`, and standard key containers live in `rsa_io`.
+//! This module exposes the core RSA trapdoor permutation directly: key
+//! derivation from explicit primes plus modular exponentiation for
+//! encrypt/decrypt. Standards-based message formatting lives in `rsa_pkcs1`,
+//! and standard key containers live in `rsa_io`.
 
 use core::fmt;
 

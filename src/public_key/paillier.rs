@@ -1,10 +1,10 @@
 //! Paillier public-key primitive (Pascal Paillier, 1999).
 //!
-//! This keeps the Paillier arithmetic core from the reference Python code: the
-//! `L(x) = (x - 1) / n` map, the Carmichael-function private exponent, and the
-//! multiplicative encryption formula over `n^2`. The wrapper layer already
-//! handles nonce generation, byte conversion, and ciphertext serialization, so
-//! the homomorphic API stays usable without hiding the scheme's structure.
+//! This keeps the Paillier arithmetic core explicit: the `L(x) = (x - 1) / n`
+//! map, the Carmichael-function private exponent, and the multiplicative
+//! encryption formula over `n^2`. The wrapper layer already handles nonce
+//! generation, byte conversion, and ciphertext serialization, so the
+//! homomorphic API stays usable without hiding the scheme's structure.
 
 use core::fmt;
 
