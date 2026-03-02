@@ -202,17 +202,17 @@ lands at roughly:
 | Operation | Latency |
 |-----------|---------|
 | RSA-1024 keygen | 27.2 ms |
-| RSA-1024 OAEP encrypt | 0.065 ms |
-| RSA-1024 OAEP decrypt | 1.01 ms |
-| RSA-1024 PSS sign | 1.00 ms |
-| RSA-1024 PSS verify | 0.057 ms |
-| ElGamal-1024 keygen | 134 ms |
-| ElGamal-1024 encrypt | 1.62 ms |
-| ElGamal-1024 decrypt | 0.83 ms |
-| Paillier-1024 keygen | 12.5 ms |
-| Paillier-1024 encrypt | 6.21 ms |
-| Paillier-1024 decrypt | 2.24 ms |
-| Paillier-1024 rerandomize | 4.12 ms |
+| RSA-1024 OAEP encrypt | 0.069 ms |
+| RSA-1024 OAEP decrypt | 1.04 ms |
+| RSA-1024 PSS sign | 0.97 ms |
+| RSA-1024 PSS verify | 0.047 ms |
+| ElGamal-1024 keygen | 102 ms |
+| ElGamal-1024 encrypt | 0.41 ms |
+| ElGamal-1024 decrypt | 0.75 ms |
+| Paillier-1024 keygen | 16.0 ms |
+| Paillier-1024 encrypt | 6.23 ms |
+| Paillier-1024 decrypt | 2.40 ms |
+| Paillier-1024 rerandomize | 4.18 ms |
 | Paillier-1024 ciphertext add | 0.078 ms |
 
 That split is informative: Montgomery fixed the steady-state modular arithmetic,
@@ -220,11 +220,12 @@ so the raw encrypt/decrypt/sign work is already usable at teaching sizes. The
 first ElGamal version paid a severe safe-prime-search penalty; the current
 subgroup-based generator (`p = kq + 1` with an order-`q` generator) plus a
 larger small-prime sieve in the bigint Miller-Rabin path brings the 1024-bit
-keygen path back into the same rough latency class as the other teaching-sized
-schemes. A 2048-bit RSA run was still slow enough in the first key-generation
-stage that it was aborted after it had already made the point, so the current
-backend remains a reference implementation first and a practical large-key
-engine second.
+ElGamal keygen path back into the same rough latency class as the other
+teaching-sized schemes, and storing that subgroup order in the public key cuts
+the encryption path down to the right exponent size as well. A 2048-bit RSA run
+was still slow enough in the first key-generation stage that it was aborted
+after it had already made the point, so the current backend remains a reference
+implementation first and a practical large-key engine second.
 
 ---
 

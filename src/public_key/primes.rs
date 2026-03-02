@@ -143,9 +143,6 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         }
     }
 
-    if !candidate.is_odd() {
-        return false;
-    }
     if bases.is_empty() {
         return false;
     }

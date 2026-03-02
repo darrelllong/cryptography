@@ -214,16 +214,14 @@ impl<H: Digest> RsaPss<H> {
         let Some(mut encoded) = i2osp(&encoded_int, em_len) else {
             return false;
         };
-        if encoded.last().copied() != Some(0xbc) {
-            return false;
-        }
+        let mut bad_padding = u8::from(encoded.last().copied() != Some(0xbc));
 
         let h_index = em_len - h_len - 1;
         let h = encoded[h_index..h_index + h_len].to_vec();
         let masked_db = &mut encoded[..h_index];
         let unused_bits = (8 * em_len) - em_bits;
-        if unused_bits != 0 && (masked_db[0] >> (8 - unused_bits)) != 0 {
-            return false;
+        if unused_bits != 0 {
+            bad_padding |= masked_db[0] >> (8 - unused_bits);
         }
 
         let db_mask = mgf1::<H>(&h, h_index);
@@ -235,7 +233,6 @@ impl<H: Digest> RsaPss<H> {
         }
 
         let mut saw_separator = 0u8;
-        let mut bad_padding = 0u8;
         let mut one_index = 0usize;
         for (idx, &byte) in masked_db.iter().enumerate() {
             let is_zero = u8::from(byte == 0);

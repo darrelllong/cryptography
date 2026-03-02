@@ -18,6 +18,7 @@ use crate::Csprng;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ElGamalPublicKey {
     p: BigUint,
+    q: BigUint,
     r: BigUint,
     b: BigUint,
 }
@@ -52,6 +53,17 @@ impl ElGamalPublicKey {
         &self.r
     }
 
+    /// Return the exclusive upper bound for the ephemeral exponent.
+    ///
+    /// For generated teaching keys this is the subgroup order `q`. For keys
+    /// built from explicit caller-supplied parameters, the code falls back to
+    /// `p - 1` because the subgroup order is not derivable from the inputs
+    /// alone.
+    #[must_use]
+    pub fn ephemeral_exclusive_bound(&self) -> &BigUint {
+        &self.q
+    }
+
     /// Return `b = r^a mod p`.
     #[must_use]
     pub fn public_component(&self) -> &BigUint {
@@ -75,8 +87,7 @@ impl ElGamalPublicKey {
             return None;
         }
 
-        let p_minus_one = self.p.sub_ref(&BigUint::one());
-        if ephemeral >= &p_minus_one {
+        if ephemeral >= &self.q {
             return None;
         }
 
@@ -93,16 +104,15 @@ impl ElGamalPublicKey {
     /// Encrypt a byte string with a fresh random ephemeral exponent.
     ///
     /// This is the minimal "usable" layer for textbook `ElGamal`: it samples
-    /// the ephemeral exponent from `[1, p - 2]`, interprets the message as one
-    /// big-endian integer, and applies the raw group operation. The encoded
+    /// the ephemeral exponent from `[1, q)` when the public key carries an
+    /// explicit subgroup order, and from `[1, p - 1)` otherwise. The encoded
     /// integer must be strictly smaller than `p`, so the practical message
     /// capacity is at most `floor((bits(p) - 1) / 8)` bytes. Callers that need
     /// hybrid encryption or padding should build that on top.
     #[must_use]
     pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<ElGamalCiphertext> {
         let message_int = BigUint::from_be_bytes(message);
-        let upper = self.p.sub_ref(&BigUint::one());
-        let ephemeral = random_nonzero_below(rng, &upper)?;
+        let ephemeral = random_nonzero_below(rng, &self.q)?;
         self.encrypt_with_ephemeral(&message_int, &ephemeral)
     }
 }
@@ -191,6 +201,7 @@ impl ElGamal {
         Some((
             ElGamalPublicKey {
                 p: prime.clone(),
+                q: p_minus_one.clone(),
                 r: generator.clone(),
                 b: public_component,
             },
@@ -213,7 +224,7 @@ impl ElGamal {
         rng: &mut R,
         bits: usize,
     ) -> Option<(ElGamalPublicKey, ElGamalPrivateKey)> {
-        if bits < 16 {
+        if bits < 18 {
             return None;
         }
 
@@ -236,10 +247,19 @@ impl ElGamal {
 
                 let generator = find_subgroup_generator(rng, &prime, &cofactor)?;
                 let secret = random_nonzero_below(rng, &q)?;
-                if let Some(keypair) = Self::from_secret_exponent(&prime, &generator, &secret) {
-                    return Some(keypair);
-                }
-                attempts += 1;
+                let public_component = mod_pow(&generator, &secret, &prime);
+                return Some((
+                    ElGamalPublicKey {
+                        p: prime.clone(),
+                        q,
+                        r: generator,
+                        b: public_component,
+                    },
+                    ElGamalPrivateKey {
+                        p: prime,
+                        a: secret,
+                    },
+                ));
             }
         }
     }
@@ -277,9 +297,6 @@ fn find_subgroup_generator<R: Csprng>(
     let upper = prime.sub_ref(&one);
     loop {
         let candidate = random_nonzero_below(rng, &upper)?;
-        if candidate <= one {
-            continue;
-        }
         let generator = mod_pow(&candidate, cofactor, prime);
         if generator != one {
             return Some(generator);
