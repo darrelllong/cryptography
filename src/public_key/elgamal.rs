@@ -62,10 +62,9 @@ impl ElGamalPublicKey {
 
     /// Return the exclusive upper bound for the ephemeral exponent.
     ///
-    /// For generated teaching keys this is the subgroup order `q`. For keys
-    /// built from explicit caller-supplied parameters, the code falls back to
-    /// `p - 1` because the subgroup order is not derivable from the inputs
-    /// alone.
+    /// For generated keys this is the subgroup order `q`. For keys built from
+    /// explicit caller-supplied parameters, the code falls back to `p - 1`
+    /// because the subgroup order is not derivable from the inputs alone.
     #[must_use]
     pub fn ephemeral_exclusive_bound(&self) -> &BigUint {
         &self.exponent_bound
@@ -79,8 +78,9 @@ impl ElGamalPublicKey {
 
     /// Encrypt with an explicit ephemeral exponent `k`.
     ///
-    /// The Python reference chooses `k` randomly; the raw primitive takes it
-    /// explicitly so key generation and randomness stay separate.
+    /// The reference implementation chooses `k` randomly; this lower-level
+    /// entry point takes it explicitly so callers can separate arithmetic from
+    /// randomness when they need deterministic control.
     #[must_use]
     pub fn encrypt_with_ephemeral(
         &self,
@@ -236,10 +236,10 @@ impl ElGamalPrivateKey {
 
     /// Return the exponent-cycle modulus used during decryption.
     ///
-    /// Generated teaching keys store the subgroup order here, so decryption
-    /// can reduce the exponent to `q - a`. Caller-supplied keys fall back to
-    /// `p - 1`, which is always valid by Fermat's little theorem even when the
-    /// subgroup order is unknown.
+    /// Generated keys store the subgroup order here, so decryption can reduce
+    /// the exponent to `q - a`. Caller-supplied keys fall back to `p - 1`,
+    /// which is always valid by Fermat's little theorem even when the subgroup
+    /// order is unknown.
     #[must_use]
     pub fn exponent_modulus(&self) -> &BigUint {
         &self.exponent_modulus
@@ -248,9 +248,9 @@ impl ElGamalPrivateKey {
     /// Decrypt the raw ciphertext.
     ///
     /// This uses Fermat's little theorem instead of an explicit modular
-    /// inverse: for generated teaching keys the exponent reduces to `q - a`
-    /// inside the order-`q` subgroup, while caller-supplied keys conservatively
-    /// fall back to `p - 1 - a`.
+    /// inverse: for generated keys the exponent reduces to `q - a` inside the
+    /// order-`q` subgroup, while caller-supplied keys conservatively fall back
+    /// to `p - 1 - a`.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &ElGamalCiphertext) -> BigUint {
         let exponent = self.exponent_modulus.sub_ref(&self.a);
@@ -431,7 +431,7 @@ impl ElGamal {
         ))
     }
 
-    /// Generate a teaching-sized `ElGamal` key pair over a prime-order subgroup.
+    /// Generate an `ElGamal` key pair over a prime-order subgroup.
     ///
     /// This chooses a probable-prime subgroup order `q`, searches for a prime
     /// modulus `p = kq + 1`, then derives a generator of the order-`q`
@@ -443,8 +443,8 @@ impl ElGamal {
         rng: &mut R,
         bits: usize,
     ) -> Option<(ElGamalPublicKey, ElGamalPrivateKey)> {
-        // With the current teaching split, the subgroup order is at least
-        // 16 bits. We therefore need at least 3 bits left for the even
+        // With the current split, the subgroup order is at least 16 bits. We
+        // therefore need at least 3 bits left for the even
         // cofactor `k` in `p = kq + 1`; otherwise `k` collapses to a fixed
         // tiny value and the requested bit length can never be reached.
         if bits < 19 {

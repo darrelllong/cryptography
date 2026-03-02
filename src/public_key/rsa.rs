@@ -179,13 +179,13 @@ impl Rsa {
         }
     }
 
-    /// Generate a teaching-sized RSA key pair from a CSPRNG and explicit
-    /// public exponent.
+    /// Generate an RSA key pair from a CSPRNG and explicit public exponent.
     ///
-    /// This keeps the raw primitive usable without forcing callers to provide
-    /// their own prime search. The generated primes are only screened with the
-    /// in-tree Miller-Rabin helper, so this is appropriate for demonstration
-    /// and testing rather than high-assurance production key generation.
+    /// This keeps the arithmetic primitive usable without forcing callers to
+    /// provide their own prime search. The generated primes are screened with
+    /// the in-tree Miller-Rabin helper rather than a dedicated external
+    /// multiprecision backend, so this remains the crate's built-in reference
+    /// key-generation path rather than a substitute for a hardened PKI stack.
     #[must_use]
     pub fn generate_with_exponent<R: Csprng>(
         rng: &mut R,
@@ -207,8 +207,8 @@ impl Rsa {
         }
     }
 
-    /// Generate a teaching-sized RSA key pair using the Python reference's
-    /// default exponent search.
+    /// Generate an RSA key pair using the Python reference's default exponent
+    /// search.
     #[must_use]
     pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(RsaPublicKey, RsaPrivateKey)> {
         if bits < 32 {

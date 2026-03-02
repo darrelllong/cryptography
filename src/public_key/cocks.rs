@@ -53,7 +53,7 @@ impl CocksPublicKey {
 
     /// Encrypt the raw integer message.
     ///
-    /// This follows the teaching implementation directly: `c = m^n mod n`,
+    /// This follows the reference implementation directly: `c = m^n mod n`,
     /// where the public exponent is the modulus `n` itself.
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
@@ -250,7 +250,7 @@ impl Cocks {
         Some((CocksPublicKey { n }, CocksPrivateKey { pi, q: q.clone() }))
     }
 
-    /// Generate a teaching-sized Cocks key pair with `p < q`.
+    /// Generate a Cocks key pair with `p < q`.
     #[must_use]
     pub fn generate<R: Csprng>(
         rng: &mut R,

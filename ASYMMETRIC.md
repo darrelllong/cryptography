@@ -29,6 +29,22 @@ The design goal is:
 - keep open the option of swapping the arithmetic backend later if larger-key
   performance demands it
 
+## Three-Level API
+
+Every implemented public-key scheme follows the same layering:
+
+1. Arithmetic maps such as `encrypt_raw` / `decrypt_raw`, which operate
+   directly on the integer domain.
+2. Typed wrappers such as `encrypt` / `decrypt`, which accept message bytes and
+   return the scheme-native ciphertext representation.
+3. Byte wrappers such as `encrypt_bytes` / `decrypt_bytes`, which serialize the
+   ciphertext so the scheme can be used as a byte-to-byte API.
+
+Level 3 is the normal entry point for callers who just want to encrypt or
+decrypt byte strings. Level 2 exists for schemes such as `Paillier` and
+`ElGamal`, where callers may want to work with the structured ciphertext form
+directly. Level 1 remains useful for arithmetic tests and direct cross-checks.
+
 ## Public-Key Surface
 
 Implemented schemes:
@@ -228,4 +244,3 @@ The existing chart is the public-key encrypt/decrypt radar:
 
 The primary public-key papers and standards are stored in `pubs/`. The
 top-level [README.md](README.md) remains the canonical BibTeX index.
-

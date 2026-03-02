@@ -262,7 +262,7 @@ impl SchmidtSamoa {
         ))
     }
 
-    /// Generate a teaching-sized Schmidt-Samoa key pair.
+    /// Generate a Schmidt-Samoa key pair.
     #[must_use]
     pub fn generate<R: Csprng>(
         rng: &mut R,

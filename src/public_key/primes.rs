@@ -1,6 +1,6 @@
 //! Primality and modular-arithmetic helpers for the public-key layer.
 //!
-//! These routines mirror the structure of the teaching-oriented Python code:
+//! These routines mirror the structure of the reference Python code:
 //! repeated-squaring modular exponentiation plus Miller-Rabin with a fixed
 //! witness set. The fixed bases keep the implementation deterministic and easy
 //! to test while we are still in the pure-Rust, dependency-free foundation.
@@ -217,7 +217,7 @@ pub fn random_coprime_below<R: Csprng>(
     }
 }
 
-/// Draw a teaching-sized probable prime with the requested bit length.
+/// Draw a probable prime with the requested bit length.
 #[must_use]
 pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
     if bits < 2 {

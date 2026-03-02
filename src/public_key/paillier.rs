@@ -333,11 +333,10 @@ impl Paillier {
         ))
     }
 
-    /// Derive a raw Paillier key pair using the deterministic base `n + 1`.
+    /// Derive a Paillier key pair using the deterministic base `n + 1`.
     ///
-    /// The Python reference samples `zeta` randomly, but `n + 1` is the usual
-    /// simple choice and lets the raw primitive be constructed without adding a
-    /// separate randomness layer yet.
+    /// The reference implementation samples `zeta` randomly, but `n + 1` is
+    /// the usual simple choice and keeps this constructor deterministic.
     #[must_use]
     pub fn from_primes(
         p: &BigUint,
@@ -348,8 +347,7 @@ impl Paillier {
         Self::from_primes_with_base(p, q, &base)
     }
 
-    /// Generate a teaching-sized Paillier key pair using the standard `n + 1`
-    /// base.
+    /// Generate a Paillier key pair using the standard `n + 1` base.
     #[must_use]
     pub fn generate<R: Csprng>(
         rng: &mut R,

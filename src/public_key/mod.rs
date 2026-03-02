@@ -1,13 +1,20 @@
 //! Public-key building blocks.
 //!
 //! This module starts with the arithmetic foundation needed by the public-key
-//! schemes in the companion Python repository: a simple limb-based bigint
+//! schemes in the reference Python repository: a simple limb-based bigint
 //! representation, a reusable Montgomery toolkit, plus primality and
 //! modular-arithmetic helpers. The goal is fidelity to the hand-written
 //! algorithms, not a replacement for industrial multiprecision libraries.
 //!
+//! The public-key APIs are intentionally layered:
+//! - arithmetic maps such as `encrypt_raw` / `decrypt_raw`
+//! - typed wrappers such as `encrypt` / `decrypt`, which return the
+//!   scheme-native ciphertext representation
+//! - byte wrappers such as `encrypt_bytes` / `decrypt_bytes`, which serialize
+//!   ciphertexts so callers can work directly with byte strings
+//!
 //! The arithmetic primitives remain directly accessible, and the wrapper layer
-//! now adds:
+//! adds:
 //! - `rsa_pkcs1` for OAEP encryption and PSS signatures
 //! - `rsa_io` for standard RSA key serialization (`PKCS #1`, `PKCS #8`,
 //!   `SPKI`) plus an optional flat XML export for symmetry with the other

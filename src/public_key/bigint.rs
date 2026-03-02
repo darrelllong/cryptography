@@ -3,7 +3,7 @@
 //! The representation uses little-endian `u64` limbs because the surrounding
 //! algorithms are naturally word-oriented. This is intentionally simple:
 //! schoolbook multiplication and bitwise long division are easy to audit and
-//! match the structure used in the teaching-oriented Python code.
+//! match the structure used in the reference Python code.
 
 use core::cmp::Ordering;
 
@@ -458,7 +458,7 @@ impl BigUint {
     /// Compute `(lhs * rhs) mod modulus`.
     ///
     /// Odd moduli use a fresh Montgomery context so the common public-key path
-    /// avoids the division-heavy teaching fallback. Even moduli keep the old
+    /// avoids the division-heavy fallback. Even moduli keep the old
     /// double-and-add reducer because Montgomery requires an odd modulus.
     ///
     /// # Panics
@@ -477,13 +477,13 @@ impl BigUint {
     }
 
     /// Compute `(lhs * rhs) mod modulus` using the simple double-and-add
-    /// teaching implementation.
+    /// fallback implementation.
     ///
     /// The result is mathematically correct, but repeated division-based
     /// reduction makes it much slower than Montgomery multiplication for the
     /// odd moduli that dominate public-key code. The current scheme code only
     /// reaches this path for even moduli, so it remains as the explicit
-    /// fallback and teaching reference for non-Montgomery cases.
+    /// fallback and readable reference for non-Montgomery cases.
     #[must_use]
     pub(crate) fn mod_mul_plain(lhs: &Self, rhs: &Self, modulus: &Self) -> Self {
         if lhs.is_zero() || rhs.is_zero() {

@@ -303,8 +303,7 @@ impl Rabin {
         ))
     }
 
-    /// Generate a teaching-sized Rabin key pair with primes congruent to `3`
-    /// modulo `4`.
+    /// Generate a Rabin key pair with primes congruent to `3` modulo `4`.
     #[must_use]
     pub fn generate<R: Csprng>(
         rng: &mut R,
