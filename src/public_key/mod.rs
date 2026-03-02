@@ -30,6 +30,7 @@
 
 pub mod bigint;
 pub mod cocks;
+pub mod dsa;
 pub mod elgamal;
 mod io;
 pub mod paillier;

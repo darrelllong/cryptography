@@ -88,6 +88,7 @@ pub use hash::{Digest, Xof};
 pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, Gmac, Ofb, Xts};
 pub use public_key::bigint::{BigInt, BigUint, MontgomeryCtx, Sign};
 pub use public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
+pub use public_key::dsa::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
 pub use public_key::elgamal::{ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey};
 pub use public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
 pub use public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};

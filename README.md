@@ -303,8 +303,8 @@ its own known-answer vectors and fast-vs-`Ct` equivalence tests where both
 paths exist.
 
 The public-key tests cover raw arithmetic vectors, wrapper round-trips, RSA
-OAEP/PSS behavior, key serialization, and OpenSSL interoperability checks where
-real standards exist.
+OAEP/PSS behavior, DSA signing and verification, key serialization, and
+OpenSSL interoperability checks where real standards exist.
 
 The generic mode layer is covered in-module too:
 
@@ -355,13 +355,14 @@ construction.
 
 The public-key module exposes three layers:
 
-- core arithmetic primitives: `Rsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
+- core arithmetic primitives: `Rsa`, `Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
 - shared arithmetic support: `BigUint`, `BigInt`, `MontgomeryCtx`
 - usable wrappers:
   - `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA encryption/signatures
   - standard RSA key externalization via PKCS #1 / PKCS #8 / SPKI in DER or PEM
-  - crate-defined DER/PEM/XML key externalization for the non-RSA schemes
+  - crate-defined DER/PEM/XML key externalization for the non-RSA schemes, including `Dsa`
   - byte-to-byte encrypt/decrypt helpers for all implemented encryption-capable schemes
+  - byte-to-byte sign/verify helpers for signature-capable schemes (`Dsa`, `RsaPss<H>`)
   - built-in key generation for all implemented public-key schemes
   - Paillier helper operations: ciphertext addition and rerandomization
 
@@ -458,6 +459,17 @@ use cryptography::{CtrDrbgAes256, RsaPss, Sha256};
 let mut drbg = CtrDrbgAes256::new(&[0x22; 48]);
 let signature = RsaPss::<Sha256>::sign_rng(&private, b"message", &mut drbg).expect("PSS");
 assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
+```
+
+Generate and use a `DSA` key pair:
+
+```rust
+use cryptography::{CtrDrbgAes256, Dsa};
+
+let mut drbg = CtrDrbgAes256::new(&[0x24; 48]);
+let (public, private) = Dsa::generate(&mut drbg, 256).expect("DSA key");
+let signature = private.sign_bytes(b"message digest", &mut drbg).expect("DSA sign");
+assert!(public.verify_bytes(b"message digest", &signature));
 ```
 
 Generate and use an `ElGamal` key pair:

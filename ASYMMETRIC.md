@@ -62,6 +62,7 @@ directly. Level 1 remains useful for arithmetic tests and direct cross-checks.
 Implemented schemes:
 
 - `Rsa`
+- `Dsa`
 - `Cocks`
 - `ElGamal`
 - `Rabin`
@@ -79,11 +80,15 @@ Every implemented scheme now has:
 - built-in key generation
 - key serialization
 - byte-oriented encrypt/decrypt helpers where encryption is defined
+- byte-oriented sign/verify helpers where signatures are defined
 
-Only `RSA` currently has a standards-based message-formatting layer. The other
-schemes expose explicit crate-defined message and serialization wrappers, which
-is the honest thing to do because there is no equally universal RFC/NIST
-padding story for those primitive forms.
+`RSA` has the richest standards surface because RFC 8017 defines both
+encryption and signature encodings. `DSA` itself is the standard signature
+construction, so it does not need an extra padding profile beyond the algorithm
+defined in the Digital Signature Standard. The other schemes expose explicit
+crate-defined message and serialization wrappers, which is the honest thing to
+do because there is no equally universal RFC/NIST padding story for those
+primitive forms.
 
 ## Serialization
 
@@ -106,7 +111,7 @@ debugging convenience; the canonical interoperable formats remain PKCS / X.509.
 
 ### Non-RSA Schemes
 
-`Cocks`, `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa` use crate-defined
+`Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa` use crate-defined
 formats:
 
 - binary: DER `SEQUENCE` of positive `INTEGER`s
@@ -159,6 +164,38 @@ random ephemeral exponent is sampled from the right range instead of from the
 full `p - 1` interval. Generated keys use the actual subgroup order `q` for
 that bound; explicitly constructed keys fall back to `p - 1` when the subgroup
 order is not derivable from the supplied parameters.
+
+### DSA
+
+Reference: `fips186-5`
+
+Core arithmetic:
+
+```math
+r = (g^k \bmod p) \bmod q,\qquad
+s = k^{-1}(z + xr) \bmod q
+```
+
+with verification:
+
+```math
+w = s^{-1} \bmod q,\qquad
+u_1 = zw \bmod q,\qquad
+u_2 = rw \bmod q
+```
+
+and acceptance when:
+
+```math
+\bigl(g^{u_1} y^{u_2} \bmod p\bigr) \bmod q = r
+```
+
+The implementation reuses the same prime-order subgroup generation shape as
+`ElGamal`: generated keys store `(p, q, g)` explicitly, and signatures sample
+their per-message nonce from `[1, q)`. The digest representative is reduced to
+the leftmost `N = \mathrm{bits}(q)` bits before signing and verification,
+matching the Digital Signature Standard's treatment of hash outputs that are
+wider than the subgroup order.
 
 ### Cocks
 
@@ -295,6 +332,7 @@ The public-key wrappers now distinguish clearly between:
 Examples:
 
 - `CocksPublicKey::encrypt_bytes` / `CocksPrivateKey::decrypt_bytes`
+- `DsaPrivateKey::sign_bytes` / `DsaPublicKey::verify_bytes`
 - `ElGamalPublicKey::encrypt_bytes` / `ElGamalPrivateKey::decrypt_bytes`
 - `PaillierPublicKey::encrypt_bytes` / `PaillierPrivateKey::decrypt_bytes`
 - `RabinPublicKey::encrypt_bytes` / `RabinPrivateKey::decrypt_bytes`
@@ -316,40 +354,46 @@ Representative current 1024-bit latencies on this host:
 
 | Operation | Latency |
 |-----------|--------:|
-| RSA-1024 keygen | `22.1 ms` |
+| RSA-1024 keygen | `25.0 ms` |
 | RSA-1024 OAEP encrypt | `0.071 ms` |
-| RSA-1024 OAEP decrypt | `1.08 ms` |
-| RSA-1024 PSS sign | `1.00 ms` |
-| RSA-1024 PSS verify | `0.048 ms` |
-| ElGamal-1024 keygen | `101 ms` |
-| ElGamal-1024 encrypt | `0.429 ms` |
-| ElGamal-1024 decrypt | `0.729 ms` |
-| Paillier-1024 keygen | `15.9 ms` |
-| Paillier-1024 encrypt | `6.57 ms` |
-| Paillier-1024 decrypt | `2.29 ms` |
-| Paillier-1024 rerandomize | `4.21 ms` |
-| Paillier-1024 ciphertext add | `0.082 ms` |
-| Cocks-1024 keygen | `15.4 ms` |
+| RSA-1024 OAEP decrypt | `0.964 ms` |
+| RSA-1024 PSS sign | `1.06 ms` |
+| RSA-1024 PSS verify | `0.055 ms` |
+| ElGamal-1024 keygen | `96.5 ms` |
+| ElGamal-1024 encrypt | `0.389 ms` |
+| ElGamal-1024 decrypt | `0.197 ms` |
+| DSA-1024 keygen | `41.2 ms` |
+| DSA-1024 sign | `0.331 ms` |
+| DSA-1024 verify | `0.489 ms` |
+| Paillier-1024 keygen | `13.7 ms` |
+| Paillier-1024 encrypt | `6.47 ms` |
+| Paillier-1024 decrypt | `2.26 ms` |
+| Paillier-1024 rerandomize | `3.94 ms` |
+| Paillier-1024 ciphertext add | `0.072 ms` |
+| Cocks-1024 keygen | `9.91 ms` |
 | Cocks-1024 encrypt | `0.782 ms` |
-| Cocks-1024 decrypt | `0.142 ms` |
-| Rabin-1024 keygen | `19.0 ms` |
+| Cocks-1024 decrypt | `0.147 ms` |
+| Rabin-1024 keygen | `7.80 ms` |
 | Rabin-1024 encrypt | `0.039 ms` |
-| Rabin-1024 decrypt | `1.44 ms` |
-| Schmidt-Samoa-1024 keygen | `5.21 ms` |
-| Schmidt-Samoa-1024 encrypt | `0.753 ms` |
+| Rabin-1024 decrypt | `1.14 ms` |
+| Schmidt-Samoa-1024 keygen | `6.05 ms` |
+| Schmidt-Samoa-1024 encrypt | `0.671 ms` |
 | Schmidt-Samoa-1024 decrypt | `0.228 ms` |
 
 The table above is measured in milliseconds per operation. The radar chart
 below uses the reciprocal view — operations per second on a log scale — so the
 faster operations sit farther from the center.
 
-The existing chart is the public-key encrypt/decrypt radar:
+The existing chart is the public-key encrypt/decrypt radar. Signature-only
+schemes such as `DSA` stay in the table instead of the chart because they do
+not have matching encrypt/decrypt operations to plot:
 
 ![Public-key encrypt/decrypt radar chart](assets/public-key-encdec-radar.svg)
 
 ## Practical Guidance
 
-- Use `RSA` when you need the standards-backed path today.
+- Use `RSA` when you need standards-backed encryption or signatures today.
+- Use `DSA` when you need a standards-backed signature-only finite-field scheme.
 - Use the other implemented schemes when you explicitly want those primitives
   and understand their wrapper model.
 - Use `CtrDrbgAes256` (or another strong `Csprng`) for all randomized public-key

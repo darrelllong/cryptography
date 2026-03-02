@@ -254,6 +254,89 @@ pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigU
     }
 }
 
+pub(crate) fn random_even_with_bits<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
+    if bits < 2 {
+        return None;
+    }
+
+    let mut bytes = vec![0u8; bits.div_ceil(8)];
+    let top_bit = (bits - 1) % 8;
+    let excess_bits = bytes.len() * 8 - bits;
+    let top_mask = 0xff_u8 >> excess_bits;
+    loop {
+        rng.fill_bytes(&mut bytes);
+        bytes[0] &= top_mask;
+        bytes[0] |= 1u8 << top_bit;
+        let last = bytes.len() - 1;
+        // The cofactor is kept even so `p - 1 = kq` has the usual DSA-style
+        // factorization with an explicit factor of two.
+        bytes[last] &= !1;
+        let candidate = BigUint::from_be_bytes(&bytes);
+        // The resulting cofactor is public, but clearing the temporary random
+        // buffer keeps the helper's hygiene consistent with the rest of the
+        // prime-generation code.
+        crate::ct::zeroize_slice(bytes.as_mut_slice());
+        if !candidate.is_zero() {
+            return Some(candidate);
+        }
+    }
+}
+
+pub(crate) fn find_subgroup_generator<R: Csprng>(
+    rng: &mut R,
+    prime: &BigUint,
+    cofactor: &BigUint,
+) -> Option<BigUint> {
+    let one = BigUint::one();
+    let upper = prime.sub_ref(&one);
+    loop {
+        let candidate = random_nonzero_below(rng, &upper)
+            .expect("prime > 2 leaves a non-zero subgroup-generator search range");
+        // Raising a random unit to the cofactor projects it into the order-`q`
+        // subgroup because `(candidate^cofactor)^q = candidate^(p - 1) = 1`.
+        // The only bad case is landing on the identity.
+        let generator = mod_pow(&candidate, cofactor, prime);
+        if generator != one {
+            return Some(generator);
+        }
+    }
+}
+
+pub(crate) fn generate_prime_order_group<R: Csprng>(
+    rng: &mut R,
+    bits: usize,
+) -> Option<(BigUint, BigUint, BigUint, BigUint)> {
+    // With the current split, the subgroup order is at least 16 bits. We
+    // therefore need at least 3 bits left for the even
+    // cofactor `k` in `p = kq + 1`; otherwise `k` collapses to a fixed
+    // tiny value and the requested bit length can never be reached.
+    if bits < 19 {
+        return None;
+    }
+
+    let subgroup_bits = (bits / 4).clamp(16, 256);
+    let cofactor_bits = bits.saturating_sub(subgroup_bits);
+    if cofactor_bits < 3 {
+        return None;
+    }
+    let one = BigUint::one();
+    loop {
+        let q = random_probable_prime(rng, subgroup_bits)?;
+        let mut attempts = 0usize;
+        while attempts < 256 {
+            let cofactor = random_even_with_bits(rng, cofactor_bits)?;
+            let prime = cofactor.mul_ref(&q).add_ref(&one);
+            if prime.bits() != bits || !is_probable_prime(&prime) {
+                attempts += 1;
+                continue;
+            }
+
+            let generator = find_subgroup_generator(rng, &prime, &cofactor)?;
+            return Some((prime, q, cofactor, generator));
+        }
+    }
+}
+
 /// Multiplicative inverse `a^{-1} mod n`, if it exists.
 #[must_use]
 pub fn mod_inverse(a: &BigUint, n: &BigUint) -> Option<BigUint> {

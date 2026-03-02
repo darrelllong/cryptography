@@ -1,0 +1,561 @@
+//! Digital Signature Algorithm (`DSA`, FIPS 186-5).
+//!
+//! `DSA` is the signature analogue of the prime-order subgroup construction
+//! already used for `ElGamal`: choose a prime modulus `p`, a prime subgroup
+//! order `q` dividing `p - 1`, and a generator `g` of the order-`q` subgroup.
+//! Signing and verification then operate entirely modulo `q`, while the group
+//! actions still happen modulo `p`.
+
+use core::fmt;
+
+use crate::public_key::bigint::{BigUint, MontgomeryCtx};
+use crate::public_key::io::{
+    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
+};
+use crate::public_key::primes::{
+    generate_prime_order_group, is_probable_prime, mod_inverse, mod_pow, random_nonzero_below,
+};
+use crate::Csprng;
+
+const DSA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY DSA PUBLIC KEY";
+const DSA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY DSA PRIVATE KEY";
+
+/// Public key for `DSA`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DsaPublicKey {
+    p: BigUint,
+    q: BigUint,
+    g: BigUint,
+    y: BigUint,
+}
+
+/// Private key for `DSA`.
+#[derive(Clone, Eq, PartialEq)]
+pub struct DsaPrivateKey {
+    p: BigUint,
+    q: BigUint,
+    g: BigUint,
+    x: BigUint,
+}
+
+/// Raw `DSA` signature pair `(r, s)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DsaSignature {
+    r: BigUint,
+    s: BigUint,
+}
+
+/// Namespace wrapper for the `DSA` construction.
+pub struct Dsa;
+
+impl DsaPublicKey {
+    /// Return the prime modulus.
+    #[must_use]
+    pub fn modulus(&self) -> &BigUint {
+        &self.p
+    }
+
+    /// Return the prime subgroup order.
+    #[must_use]
+    pub fn subgroup_order(&self) -> &BigUint {
+        &self.q
+    }
+
+    /// Return the subgroup generator.
+    #[must_use]
+    pub fn generator(&self) -> &BigUint {
+        &self.g
+    }
+
+    /// Return the public component `y = g^x mod p`.
+    #[must_use]
+    pub fn public_component(&self) -> &BigUint {
+        &self.y
+    }
+
+    /// Verify a signature over an explicit integer representative.
+    #[must_use]
+    pub fn verify_raw(&self, hash: &BigUint, signature: &DsaSignature) -> bool {
+        if signature.r.is_zero()
+            || signature.s.is_zero()
+            || signature.r >= self.q
+            || signature.s >= self.q
+        {
+            return false;
+        }
+
+        let Some(w) = mod_inverse(&signature.s, &self.q) else {
+            return false;
+        };
+        let z = hash.modulo(&self.q);
+        let u1 = BigUint::mod_mul(&z, &w, &self.q);
+        let u2 = BigUint::mod_mul(&signature.r, &w, &self.q);
+
+        let g_term = mod_pow(&self.g, &u1, &self.p);
+        let y_term = mod_pow(&self.y, &u2, &self.p);
+        let combined = if let Some(ctx) = MontgomeryCtx::new(&self.p) {
+            ctx.mul(&g_term, &y_term)
+        } else {
+            BigUint::mod_mul(&g_term, &y_term, &self.p)
+        };
+
+        combined.modulo(&self.q) == signature.r
+    }
+
+    /// Verify a signature over the provided digest bytes.
+    ///
+    /// The digest is reduced to the leftmost `N = bits(q)` bits, matching the
+    /// DSA representative construction from the Digital Signature Standard.
+    #[must_use]
+    pub fn verify(&self, digest: &[u8], signature: &DsaSignature) -> bool {
+        self.verify_raw(&digest_to_scalar(digest, &self.q), signature)
+    }
+
+    /// Verify a byte-encoded signature produced by [`DsaPrivateKey::sign_bytes`].
+    #[must_use]
+    pub fn verify_bytes(&self, digest: &[u8], signature: &[u8]) -> bool {
+        let Some(signature) = DsaSignature::from_binary(signature) else {
+            return false;
+        };
+        self.verify(digest, &signature)
+    }
+
+    /// Encode the public key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.p, &self.q, &self.g, &self.y])
+    }
+
+    /// Decode the public key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let p = fields.next()?;
+        let q = fields.next()?;
+        let g = fields.next()?;
+        let y = fields.next()?;
+        if fields.next().is_some() || !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p
+        {
+            return None;
+        }
+        Some(Self { p, q, g, y })
+    }
+
+    /// Encode the public key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(DSA_PUBLIC_LABEL, &self.to_binary())
+    }
+
+    /// Encode the public key as the crate's flat XML form.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap(
+            "DsaPublicKey",
+            &[
+                ("p", &self.p),
+                ("q", &self.q),
+                ("g", &self.g),
+                ("y", &self.y),
+            ],
+        )
+    }
+
+    /// Decode the public key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(DSA_PUBLIC_LABEL, pem)?;
+        Self::from_binary(&blob)
+    }
+
+    /// Decode the public key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields = xml_unwrap("DsaPublicKey", &["p", "q", "g", "y"], xml)?.into_iter();
+        let p = fields.next()?;
+        let q = fields.next()?;
+        let g = fields.next()?;
+        let y = fields.next()?;
+        if fields.next().is_some() || !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p
+        {
+            return None;
+        }
+        Some(Self { p, q, g, y })
+    }
+}
+
+impl DsaPrivateKey {
+    /// Return the prime modulus.
+    #[must_use]
+    pub fn modulus(&self) -> &BigUint {
+        &self.p
+    }
+
+    /// Return the prime subgroup order.
+    #[must_use]
+    pub fn subgroup_order(&self) -> &BigUint {
+        &self.q
+    }
+
+    /// Return the subgroup generator.
+    #[must_use]
+    pub fn generator(&self) -> &BigUint {
+        &self.g
+    }
+
+    /// Return the private exponent `x`.
+    #[must_use]
+    pub fn exponent(&self) -> &BigUint {
+        &self.x
+    }
+
+    /// Sign with an explicit nonce `k`.
+    ///
+    /// `DSA` uses a fresh `k` in `[1, q)` for every signature. This lower-level
+    /// entry point keeps the arithmetic explicit for deterministic tests.
+    #[must_use]
+    pub fn sign_with_k(&self, digest: &[u8], nonce: &BigUint) -> Option<DsaSignature> {
+        if nonce.is_zero() || nonce >= &self.q {
+            return None;
+        }
+
+        let z = digest_to_scalar(digest, &self.q);
+        let r = mod_pow(&self.g, nonce, &self.p).modulo(&self.q);
+        if r.is_zero() {
+            return None;
+        }
+
+        let nonce_inv = mod_inverse(nonce, &self.q)?;
+        let xr = BigUint::mod_mul(&self.x, &r, &self.q);
+        let sum = z.add_ref(&xr).modulo(&self.q);
+        let s = BigUint::mod_mul(&nonce_inv, &sum, &self.q);
+        if s.is_zero() {
+            return None;
+        }
+
+        Some(DsaSignature { r, s })
+    }
+
+    /// Sign a digest using a fresh random nonce.
+    #[must_use]
+    pub fn sign<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<DsaSignature> {
+        loop {
+            let nonce = random_nonzero_below(rng, &self.q)?;
+            if let Some(signature) = self.sign_with_k(digest, &nonce) {
+                return Some(signature);
+            }
+        }
+    }
+
+    /// Sign a digest and return the serialized signature bytes.
+    #[must_use]
+    pub fn sign_bytes<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<Vec<u8>> {
+        let signature = self.sign(digest, rng)?;
+        Some(signature.to_binary())
+    }
+
+    /// Encode the private key in the crate-defined binary format.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.p, &self.q, &self.g, &self.x])
+    }
+
+    /// Decode the private key from the crate-defined binary format.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let p = fields.next()?;
+        let q = fields.next()?;
+        let g = fields.next()?;
+        let x = fields.next()?;
+        if fields.next().is_some()
+            || !validate_domain(&p, &q, &g)
+            || x.is_zero()
+            || x >= q
+        {
+            return None;
+        }
+        Some(Self { p, q, g, x })
+    }
+
+    /// Encode the private key in PEM using the crate-defined label.
+    #[must_use]
+    pub fn to_pem(&self) -> String {
+        pem_wrap(DSA_PRIVATE_LABEL, &self.to_binary())
+    }
+
+    /// Encode the private key as the crate's flat XML form.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap(
+            "DsaPrivateKey",
+            &[
+                ("p", &self.p),
+                ("q", &self.q),
+                ("g", &self.g),
+                ("x", &self.x),
+            ],
+        )
+    }
+
+    /// Decode the private key from the crate-defined PEM label.
+    #[must_use]
+    pub fn from_pem(pem: &str) -> Option<Self> {
+        let blob = pem_unwrap(DSA_PRIVATE_LABEL, pem)?;
+        Self::from_binary(&blob)
+    }
+
+    /// Decode the private key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields = xml_unwrap("DsaPrivateKey", &["p", "q", "g", "x"], xml)?.into_iter();
+        let p = fields.next()?;
+        let q = fields.next()?;
+        let g = fields.next()?;
+        let x = fields.next()?;
+        if fields.next().is_some()
+            || !validate_domain(&p, &q, &g)
+            || x.is_zero()
+            || x >= q
+        {
+            return None;
+        }
+        Some(Self { p, q, g, x })
+    }
+}
+
+impl fmt::Debug for DsaPrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("DsaPrivateKey(<redacted>)")
+    }
+}
+
+impl DsaSignature {
+    /// Return the first signature component.
+    #[must_use]
+    pub fn r(&self) -> &BigUint {
+        &self.r
+    }
+
+    /// Return the second signature component.
+    #[must_use]
+    pub fn s(&self) -> &BigUint {
+        &self.s
+    }
+
+    /// Encode the signature as a DER `SEQUENCE` of `(r, s)`.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.r, &self.s])
+    }
+
+    /// Decode a crate-defined binary `DSA` signature.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let r = fields.next()?;
+        let s = fields.next()?;
+        if fields.next().is_some() || r.is_zero() || s.is_zero() {
+            return None;
+        }
+        Some(Self { r, s })
+    }
+}
+
+impl Dsa {
+    /// Derive a `DSA` key pair from explicit subgroup parameters and secret exponent.
+    #[must_use]
+    pub fn from_secret_exponent(
+        prime: &BigUint,
+        subgroup_order: &BigUint,
+        generator: &BigUint,
+        secret: &BigUint,
+    ) -> Option<(DsaPublicKey, DsaPrivateKey)> {
+        if !validate_domain(prime, subgroup_order, generator)
+            || secret.is_zero()
+            || secret >= subgroup_order
+        {
+            return None;
+        }
+
+        let public_component = mod_pow(generator, secret, prime);
+        Some((
+            DsaPublicKey {
+                p: prime.clone(),
+                q: subgroup_order.clone(),
+                g: generator.clone(),
+                y: public_component,
+            },
+            DsaPrivateKey {
+                p: prime.clone(),
+                q: subgroup_order.clone(),
+                g: generator.clone(),
+                x: secret.clone(),
+            },
+        ))
+    }
+
+    /// Generate a `DSA` key pair over a prime-order subgroup.
+    #[must_use]
+    pub fn generate<R: Csprng>(
+        rng: &mut R,
+        bits: usize,
+    ) -> Option<(DsaPublicKey, DsaPrivateKey)> {
+        let (prime, subgroup_order, _cofactor, generator) =
+            generate_prime_order_group(rng, bits)?;
+        let secret = random_nonzero_below(rng, &subgroup_order)?;
+        let public_component = mod_pow(&generator, &secret, &prime);
+        Some((
+            DsaPublicKey {
+                p: prime.clone(),
+                q: subgroup_order.clone(),
+                g: generator.clone(),
+                y: public_component,
+            },
+            DsaPrivateKey {
+                p: prime,
+                q: subgroup_order,
+                g: generator,
+                x: secret,
+            },
+        ))
+    }
+}
+
+fn validate_domain(prime: &BigUint, subgroup_order: &BigUint, generator: &BigUint) -> bool {
+    if !is_probable_prime(prime) || !is_probable_prime(subgroup_order) {
+        return false;
+    }
+    if subgroup_order >= prime {
+        return false;
+    }
+    let p_minus_one = prime.sub_ref(&BigUint::one());
+    if !p_minus_one.modulo(subgroup_order).is_zero() {
+        return false;
+    }
+    if generator <= &BigUint::one() || generator >= prime {
+        return false;
+    }
+    let one = BigUint::one();
+    mod_pow(generator, subgroup_order, prime) == one
+}
+
+fn digest_to_scalar(digest: &[u8], modulus: &BigUint) -> BigUint {
+    let mut value = BigUint::from_be_bytes(digest);
+    let target_bits = modulus.bits();
+    while value.bits() > target_bits {
+        value.shr1();
+    }
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
+    use crate::public_key::bigint::BigUint;
+    use crate::CtrDrbgAes256;
+
+    fn derive_small_reference_key() -> (DsaPublicKey, DsaPrivateKey) {
+        let p = BigUint::from_u64(23);
+        let q = BigUint::from_u64(11);
+        let g = BigUint::from_u64(4);
+        let x = BigUint::from_u64(3);
+        Dsa::from_secret_exponent(&p, &q, &g, &x).expect("valid DSA key")
+    }
+
+    #[test]
+    fn derive_small_reference_key_components() {
+        let (public, private) = derive_small_reference_key();
+        assert_eq!(public.modulus(), &BigUint::from_u64(23));
+        assert_eq!(public.subgroup_order(), &BigUint::from_u64(11));
+        assert_eq!(public.generator(), &BigUint::from_u64(4));
+        assert_eq!(public.public_component(), &BigUint::from_u64(18));
+        assert_eq!(private.exponent(), &BigUint::from_u64(3));
+    }
+
+    #[test]
+    fn exact_small_signature_matches_reference() {
+        let (public, private) = derive_small_reference_key();
+        let nonce = BigUint::from_u64(5);
+        let signature = private
+            .sign_with_k(&[0x09], &nonce)
+            .expect("valid DSA nonce");
+        assert_eq!(signature.r(), &BigUint::from_u64(1));
+        assert_eq!(signature.s(), &BigUint::from_u64(9));
+        assert!(public.verify(&[0x09], &signature));
+    }
+
+    #[test]
+    fn rejects_invalid_parameters() {
+        let p = BigUint::from_u64(23);
+        let q = BigUint::from_u64(5);
+        let g = BigUint::from_u64(4);
+        let x = BigUint::from_u64(3);
+        assert!(Dsa::from_secret_exponent(&p, &q, &g, &x).is_none());
+
+        let q = BigUint::from_u64(11);
+        let bad_g = BigUint::from_u64(5);
+        assert!(Dsa::from_secret_exponent(&p, &q, &bad_g, &x).is_none());
+        assert!(Dsa::from_secret_exponent(&p, &q, &g, &BigUint::zero()).is_none());
+    }
+
+    #[test]
+    fn sign_and_verify_roundtrip() {
+        let seed = [0x31u8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
+        let digest = b"dsa-signature-digest";
+        let signature = private.sign(digest, &mut drbg).expect("signature");
+        assert!(public.verify(digest, &signature));
+        assert!(!public.verify(b"wrong-digest", &signature));
+    }
+
+    #[test]
+    fn sign_bytes_roundtrip() {
+        let seed = [0x44u8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
+        let digest = b"dsa-bytes";
+        let signature = private.sign_bytes(digest, &mut drbg).expect("signature bytes");
+        assert!(public.verify_bytes(digest, &signature));
+    }
+
+    #[test]
+    fn serialization_roundtrip() {
+        let seed = [0x55u8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
+
+        let public_blob = public.to_binary();
+        let public_pem = public.to_pem();
+        let public_xml = public.to_xml();
+        let private_blob = private.to_binary();
+        let private_pem = private.to_pem();
+        let private_xml = private.to_xml();
+
+        let public_from_blob = DsaPublicKey::from_binary(&public_blob).expect("public binary");
+        let public_from_pem = DsaPublicKey::from_pem(&public_pem).expect("public pem");
+        let public_from_xml = DsaPublicKey::from_xml(&public_xml).expect("public xml");
+        let private_from_blob = DsaPrivateKey::from_binary(&private_blob).expect("private binary");
+        let private_from_pem = DsaPrivateKey::from_pem(&private_pem).expect("private pem");
+        let private_from_xml = DsaPrivateKey::from_xml(&private_xml).expect("private xml");
+
+        assert_eq!(public_from_blob, public);
+        assert_eq!(public_from_pem, public);
+        assert_eq!(public_from_xml, public);
+        assert_eq!(private_from_blob, private);
+        assert_eq!(private_from_pem, private);
+        assert_eq!(private_from_xml, private);
+    }
+
+    #[test]
+    fn signature_binary_roundtrip() {
+        let signature = DsaSignature {
+            r: BigUint::from_u64(1),
+            s: BigUint::from_u64(9),
+        };
+        let blob = signature.to_binary();
+        let parsed = DsaSignature::from_binary(&blob).expect("signature");
+        assert_eq!(parsed, signature);
+    }
+}

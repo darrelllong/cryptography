@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 
 use cryptography::public_key::bigint::BigUint;
 use cryptography::{
-    Cocks, CtrDrbgAes256, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
+    Cocks, CtrDrbgAes256, Dsa, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa,
+    Sha256,
 };
 
 const MESSAGE: [u8; 32] = [0x42; 32];
@@ -12,6 +13,7 @@ const OAEP_SEED: [u8; 32] = [0x11; 32];
 const PSS_SALT: [u8; 32] = [0x22; 32];
 
 type ElGamalTimings = (Duration, Duration, Duration);
+type DsaTimings = (Duration, Duration, Duration);
 type PaillierTimings = (Duration, Duration, Duration, Duration, Duration);
 type RsaTimings = (Duration, Duration, Duration, Duration, Duration);
 type SimplePkTimings = (Duration, Duration, Duration);
@@ -109,6 +111,25 @@ fn bench_elgamal(rng: &mut CtrDrbgAes256, bits: usize) -> ElGamalTimings {
     assert_eq!(elgamal_plaintext, MESSAGE);
 
     (elgamal_keygen, elgamal_encrypt, elgamal_decrypt)
+}
+
+fn bench_dsa(rng: &mut CtrDrbgAes256, bits: usize) -> DsaTimings {
+    announce("Generating DSA key");
+    let start = Instant::now();
+    let (public, private) = Dsa::generate(rng, bits).expect("DSA key generation");
+    let keygen = start.elapsed();
+
+    announce("Measuring DSA");
+    let start = Instant::now();
+    let signature = private.sign_bytes(&MESSAGE, rng).expect("DSA sign");
+    let sign = start.elapsed();
+
+    let start = Instant::now();
+    let verified = public.verify_bytes(&MESSAGE, &signature);
+    let verify = start.elapsed();
+    assert!(verified);
+
+    (keygen, sign, verify)
 }
 
 fn bench_paillier(rng: &mut CtrDrbgAes256, bits: usize) -> PaillierTimings {
@@ -239,6 +260,8 @@ fn main() {
         elgamal_timings = Some(bench_elgamal(&mut rng, bits));
     }
 
+    let (dsa_keygen, dsa_sign, dsa_verify) = bench_dsa(&mut rng, bits);
+
     let (paillier_keygen, paillier_encrypt, paillier_decrypt, paillier_rerandomize, paillier_add) =
         bench_paillier(&mut rng, bits);
     let (cocks_keygen, cocks_encrypt, cocks_decrypt) = bench_cocks(&mut rng, bits);
@@ -260,6 +283,12 @@ fn main() {
         print_row("decrypt", elgamal_decrypt);
         println!();
     }
+
+    println!("DSA");
+    print_row("keygen", dsa_keygen);
+    print_row("sign", dsa_sign);
+    print_row("verify", dsa_verify);
+    println!();
 
     println!("Paillier");
     print_row("keygen", paillier_keygen);
