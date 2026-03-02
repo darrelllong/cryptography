@@ -2,9 +2,16 @@
 //!
 //! RSA uses standards-based containers in `rsa_io`. The other public-key
 //! schemes do not have an equally universal interchange format for the exact
-//! primitive forms exposed here, so they use a deliberately simple
-//! crate-defined binary format: a DER `SEQUENCE` of positive `INTEGER`s,
-//! wrapped in a scheme-specific PEM label when text armor is needed.
+//! primitive forms exposed here, so they use two deliberately simple
+//! crate-defined formats:
+//! - a binary DER `SEQUENCE` of positive `INTEGER`s
+//! - a flat XML document whose root tag is the Rust type name and whose child
+//!   elements are fixed-schema big integers rendered as uppercase hexadecimal
+//!   with no `0x` prefix
+//!
+//! PEM text armor for the non-RSA schemes wraps the DER body, not the XML
+//! form. The XML form is a convenience export that mirrors the in-memory
+//! structs closely enough to audit side-by-side with the binary encoding.
 //!
 //! The payload is intentionally "RSA-like" in shape: just the key components
 //! encoded in a fixed field order, without pretending that these schemes have
@@ -24,6 +31,8 @@
 //! The PEM label selects the scheme and key role. The DER body is shared.
 
 use crate::public_key::bigint::BigUint;
+
+const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
 
 pub(crate) fn encode_biguints(fields: &[&BigUint]) -> Vec<u8> {
     let mut body = Vec::new();
@@ -173,6 +182,58 @@ pub(crate) fn pem_unwrap(label: &str, pem: &str) -> Option<Vec<u8>> {
     None
 }
 
+pub(crate) fn xml_wrap(root: &str, fields: &[(&str, &BigUint)]) -> String {
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(root);
+    out.push('>');
+
+    for (name, value) in fields {
+        out.push('<');
+        out.push_str(name);
+        out.push('>');
+        out.push_str(&hex_encode_upper(value));
+        out.push_str("</");
+        out.push_str(name);
+        out.push('>');
+    }
+
+    out.push_str("</");
+    out.push_str(root);
+    out.push('>');
+    out
+}
+
+pub(crate) fn xml_unwrap(root: &str, field_names: &[&str], xml: &str) -> Option<Vec<BigUint>> {
+    let bytes = xml.as_bytes();
+    let mut pos = 0usize;
+
+    skip_ws(bytes, &mut pos);
+    expect_open_tag(bytes, &mut pos, root)?;
+
+    let mut out = Vec::with_capacity(field_names.len());
+    for &field_name in field_names {
+        skip_ws(bytes, &mut pos);
+        expect_open_tag(bytes, &mut pos, field_name)?;
+        let start = pos;
+        while pos < bytes.len() && bytes[pos] != b'<' {
+            pos += 1;
+        }
+        let body = core::str::from_utf8(bytes.get(start..pos)?).ok()?;
+        out.push(hex_decode_biguint(body.trim())?);
+        expect_close_tag(bytes, &mut pos, field_name)?;
+    }
+
+    skip_ws(bytes, &mut pos);
+    expect_close_tag(bytes, &mut pos, root)?;
+    skip_ws(bytes, &mut pos);
+    if pos != bytes.len() {
+        return None;
+    }
+
+    Some(out)
+}
+
 fn base64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -266,9 +327,87 @@ fn decode_base64_char(ch: u8) -> Option<u8> {
     }
 }
 
+fn expect_open_tag(input: &[u8], pos: &mut usize, name: &str) -> Option<()> {
+    let mut tag = String::with_capacity(name.len() + 2);
+    tag.push('<');
+    tag.push_str(name);
+    tag.push('>');
+    let tag_bytes = tag.as_bytes();
+    if input.get(*pos..(*pos + tag_bytes.len()))? != tag_bytes {
+        return None;
+    }
+    *pos += tag_bytes.len();
+    Some(())
+}
+
+fn expect_close_tag(input: &[u8], pos: &mut usize, name: &str) -> Option<()> {
+    let mut tag = String::with_capacity(name.len() + 3);
+    tag.push_str("</");
+    tag.push_str(name);
+    tag.push('>');
+    let tag_bytes = tag.as_bytes();
+    if input.get(*pos..(*pos + tag_bytes.len()))? != tag_bytes {
+        return None;
+    }
+    *pos += tag_bytes.len();
+    Some(())
+}
+
+fn skip_ws(input: &[u8], pos: &mut usize) {
+    while *pos < input.len() && input[*pos].is_ascii_whitespace() {
+        *pos += 1;
+    }
+}
+
+fn hex_encode_upper(value: &BigUint) -> String {
+    let bytes = value.to_be_bytes();
+    if bytes.is_empty() {
+        return String::from("0");
+    }
+
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(UPPER_HEX[usize::from(byte >> 4)]));
+        out.push(char::from(UPPER_HEX[usize::from(byte & 0x0f)]));
+    }
+    out
+}
+
+fn hex_decode_biguint(input: &str) -> Option<BigUint> {
+    if input.is_empty() {
+        return None;
+    }
+    if input == "0" {
+        return Some(BigUint::zero());
+    }
+    if !input.len().is_multiple_of(2) {
+        return None;
+    }
+
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        let hi = decode_hex_char(bytes[idx])?;
+        let lo = decode_hex_char(bytes[idx + 1])?;
+        out.push((hi << 4) | lo);
+        idx += 2;
+    }
+    Some(BigUint::from_be_bytes(&out))
+}
+
+fn decode_hex_char(ch: u8) -> Option<u8> {
+    match ch {
+        b'0'..=b'9' => Some(ch - b'0'),
+        b'A'..=b'F' => Some(ch - b'A' + 10),
+        b'a'..=b'f' => Some(ch - b'a' + 10),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
+    use super::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap};
     use crate::public_key::bigint::BigUint;
 
     #[test]
@@ -286,5 +425,20 @@ mod tests {
         let pem = pem_wrap("CRYPTOGRAPHY TEST KEY", &blob);
         let parsed = pem_unwrap("CRYPTOGRAPHY TEST KEY", &pem).expect("pem");
         assert_eq!(parsed, blob);
+    }
+
+    #[test]
+    fn xml_roundtrip() {
+        let a = BigUint::from_u64(0x1234);
+        let b = BigUint::from_u64(0xabcd);
+        let xml = xml_wrap("TestKey", &[("first", &a), ("second", &b)]);
+        let parsed = xml_unwrap("TestKey", &["first", "second"], &xml).expect("xml");
+        assert_eq!(parsed, vec![a, b]);
+    }
+
+    #[test]
+    fn xml_rejects_wrong_root() {
+        let xml = "<Wrong><n>BB</n></Wrong>";
+        assert!(xml_unwrap("TestKey", &["n"], xml).is_none());
     }
 }

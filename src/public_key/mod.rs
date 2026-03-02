@@ -6,12 +6,14 @@
 //! modular-arithmetic helpers. The goal is fidelity to the hand-written
 //! algorithms, not a replacement for industrial multiprecision libraries.
 //!
-//! The raw schemes remain available directly, and RSA now also has
-//! standards-facing layers:
+//! The raw schemes remain available directly, and the wrapper layer now adds:
 //! - `rsa_pkcs1` for OAEP encryption and PSS signatures
-//! - `rsa_io` for PKCS #8 / SPKI key serialization
-//! - internal `io` helpers for the crate-defined binary / PEM key format used
-//!   by the non-RSA public-key schemes
+//! - `rsa_io` for standard RSA key serialization (`PKCS #1`, `PKCS #8`,
+//!   `SPKI`) plus an optional flat XML export for symmetry with the other
+//!   schemes
+//! - internal `io` helpers for the crate-defined non-RSA key formats: a DER
+//!   `SEQUENCE` of positive `INTEGER`s, custom PEM armor, and the shared flat
+//!   XML form
 
 pub mod bigint;
 pub mod cocks;

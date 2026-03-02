@@ -9,7 +9,9 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
+use crate::public_key::io::{
+    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
+};
 use crate::public_key::primes::{
     is_probable_prime, mod_pow, random_nonzero_below, random_probable_prime,
 };
@@ -157,11 +159,54 @@ impl ElGamalPublicKey {
         pem_wrap(ELGAMAL_PUBLIC_LABEL, &self.to_binary())
     }
 
+    /// Encode the public key as the crate's flat XML form.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap(
+            "ElGamalPublicKey",
+            &[
+                ("p", &self.p),
+                ("exponent-bound", &self.exponent_bound),
+                ("generator", &self.r),
+                ("public-component", &self.b),
+            ],
+        )
+    }
+
     /// Decode the public key from the crate-defined PEM label.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(ELGAMAL_PUBLIC_LABEL, pem)?;
         Self::from_binary(&blob)
+    }
+
+    /// Decode the public key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields = xml_unwrap(
+            "ElGamalPublicKey",
+            &["p", "exponent-bound", "generator", "public-component"],
+            xml,
+        )?
+        .into_iter();
+        let p = fields.next()?;
+        let exponent_bound = fields.next()?;
+        let r = fields.next()?;
+        let b = fields.next()?;
+        if fields.next().is_some()
+            || p <= BigUint::one()
+            || exponent_bound <= BigUint::one()
+            || r <= BigUint::one()
+            || b.is_zero()
+        {
+            return None;
+        }
+        Some(Self {
+            p,
+            exponent_bound,
+            r,
+            b,
+        })
     }
 }
 
@@ -247,11 +292,47 @@ impl ElGamalPrivateKey {
         pem_wrap(ELGAMAL_PRIVATE_LABEL, &self.to_binary())
     }
 
+    /// Encode the private key as the crate's flat XML form.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap(
+            "ElGamalPrivateKey",
+            &[
+                ("p", &self.p),
+                ("exponent-modulus", &self.exponent_modulus),
+                ("a", &self.a),
+            ],
+        )
+    }
+
     /// Decode the private key from the crate-defined PEM label.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(ELGAMAL_PRIVATE_LABEL, pem)?;
         Self::from_binary(&blob)
+    }
+
+    /// Decode the private key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields =
+            xml_unwrap("ElGamalPrivateKey", &["p", "exponent-modulus", "a"], xml)?.into_iter();
+        let p = fields.next()?;
+        let exponent_modulus = fields.next()?;
+        let a = fields.next()?;
+        if fields.next().is_some()
+            || p <= BigUint::one()
+            || exponent_modulus <= BigUint::one()
+            || a.is_zero()
+            || a >= exponent_modulus
+        {
+            return None;
+        }
+        Some(Self {
+            p,
+            exponent_modulus,
+            a,
+        })
     }
 }
 
@@ -555,7 +636,11 @@ mod tests {
 
         let public_pem = public.to_pem();
         let private_pem = private.to_pem();
-        assert_eq!(ElGamalPublicKey::from_pem(&public_pem), Some(public));
-        assert_eq!(ElGamalPrivateKey::from_pem(&private_pem), Some(private));
+        let public_xml = public.to_xml();
+        let private_xml = private.to_xml();
+        assert_eq!(ElGamalPublicKey::from_pem(&public_pem), Some(public.clone()));
+        assert_eq!(ElGamalPrivateKey::from_pem(&private_pem), Some(private.clone()));
+        assert_eq!(ElGamalPublicKey::from_xml(&public_xml), Some(public));
+        assert_eq!(ElGamalPrivateKey::from_xml(&private_xml), Some(private));
     }
 }

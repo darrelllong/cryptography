@@ -8,7 +8,9 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
+use crate::public_key::io::{
+    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
+};
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
 
@@ -95,11 +97,28 @@ impl CocksPublicKey {
         pem_wrap(COCKS_PUBLIC_LABEL, &self.to_binary())
     }
 
+    /// Encode the public key as the crate's flat XML form.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap("CocksPublicKey", &[("n", &self.n)])
+    }
+
     /// Decode the public key from the crate-defined PEM label.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(COCKS_PUBLIC_LABEL, pem)?;
         Self::from_binary(&blob)
+    }
+
+    /// Decode the public key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields = xml_unwrap("CocksPublicKey", &["n"], xml)?.into_iter();
+        let n = fields.next()?;
+        if fields.next().is_some() || n <= BigUint::one() {
+            return None;
+        }
+        Some(Self { n })
     }
 }
 
@@ -162,11 +181,29 @@ impl CocksPrivateKey {
         pem_wrap(COCKS_PRIVATE_LABEL, &self.to_binary())
     }
 
+    /// Encode the private key as the crate's flat XML form.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap("CocksPrivateKey", &[("pi", &self.pi), ("q", &self.q)])
+    }
+
     /// Decode the private key from the crate-defined PEM label.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(COCKS_PRIVATE_LABEL, pem)?;
         Self::from_binary(&blob)
+    }
+
+    /// Decode the private key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields = xml_unwrap("CocksPrivateKey", &["pi", "q"], xml)?.into_iter();
+        let pi = fields.next()?;
+        let q = fields.next()?;
+        if fields.next().is_some() || pi.is_zero() || q <= BigUint::one() {
+            return None;
+        }
+        Some(Self { pi, q })
     }
 }
 
@@ -306,7 +343,11 @@ mod tests {
 
         let public_pem = public.to_pem();
         let private_pem = private.to_pem();
-        assert_eq!(CocksPublicKey::from_pem(&public_pem), Some(public));
-        assert_eq!(CocksPrivateKey::from_pem(&private_pem), Some(private));
+        let public_xml = public.to_xml();
+        let private_xml = private.to_xml();
+        assert_eq!(CocksPublicKey::from_pem(&public_pem), Some(public.clone()));
+        assert_eq!(CocksPrivateKey::from_pem(&private_pem), Some(private.clone()));
+        assert_eq!(CocksPublicKey::from_xml(&public_xml), Some(public));
+        assert_eq!(CocksPrivateKey::from_xml(&private_xml), Some(private));
     }
 }

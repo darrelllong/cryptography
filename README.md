@@ -340,10 +340,12 @@ standards-based usage layer:
 - reusable arithmetic toolkit: `BigUint`, `BigInt`, and `MontgomeryCtx`
 - usable wrappers today:
   - `RsaOaep<H>` and `RsaPss<H>`
-  - standard RSA key externalization via PKCS #8 / SPKI in DER or PEM
+  - standard RSA key externalization via PKCS #1 / PKCS #8 / SPKI in DER or
+    PEM, plus an optional flat XML export/import for symmetry with the other
+    schemes
   - crate-defined key externalization for `Cocks`, `ElGamal`, `Rabin`,
     `Paillier`, and `SchmidtSamoa`: a DER `SEQUENCE` of `INTEGER`s, optionally
-    wrapped in a scheme-specific PEM label
+    wrapped in a scheme-specific PEM label, plus the same fixed-schema XML form
   - byte-oriented `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and
     `SchmidtSamoa` encrypt/decrypt helpers
   - teaching-sized key generation for all of the implemented public-key schemes
@@ -374,6 +376,20 @@ assert_eq!(private_again, private);
 assert_eq!(public_again, public);
 ```
 
+If you want a simple human-readable export for debugging, RSA also has the same
+flat XML convenience format as the non-RSA schemes:
+
+```rust
+let private_xml = private.to_xml();
+let public_xml = public.to_xml();
+
+let private_again = cryptography::RsaPrivateKey::from_xml(&private_xml).expect("xml");
+let public_again = cryptography::RsaPublicKey::from_xml(&public_xml).expect("xml");
+
+assert_eq!(private_again, private);
+assert_eq!(public_again, public);
+```
+
 Persist a non-RSA key pair in the crate-defined portable format:
 
 ```rust
@@ -387,6 +403,19 @@ let private_pem = private.to_pem();
 
 let public_again = cryptography::PaillierPublicKey::from_pem(&public_pem).expect("public");
 let private_again = cryptography::PaillierPrivateKey::from_pem(&private_pem).expect("private");
+
+assert_eq!(public_again, public);
+assert_eq!(private_again, private);
+```
+
+The same non-RSA keys can also be exported as flat XML:
+
+```rust
+let public_xml = public.to_xml();
+let private_xml = private.to_xml();
+
+let public_again = cryptography::PaillierPublicKey::from_xml(&public_xml).expect("public");
+let private_again = cryptography::PaillierPrivateKey::from_xml(&private_xml).expect("private");
 
 assert_eq!(public_again, public);
 assert_eq!(private_again, private);

@@ -151,8 +151,9 @@ trait shape, but they are not substitutes for modern DRBG deployments.
   `fips186-5`.
 - Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, and
   `SchmidtSamoa`, plus `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA
-  encryption and signatures, modern RSA key externalization via PKCS #8 / SPKI,
-  plus crate-defined key externalization, byte-oriented wrappers, and
+  encryption and signatures, modern RSA key externalization via the PKCS /
+  X.509 stack, optional flat XML key export/import for every implemented
+  scheme, plus crate-defined key externalization, byte-oriented wrappers, and
   teaching-sized key generation for the remaining schemes.
 - Scope: the raw arithmetic primitives are still exposed directly, but all of
   the currently implemented schemes now also have a usable front door:
@@ -175,13 +176,16 @@ That distinction matters for both message framing and key storage:
   - `PKCS #8` or raw PKCS #1 for private-key serialization
   - `SubjectPublicKeyInfo` (`SPKI`) for public-key serialization
   - `DER` or `PEM` as the outer container
+  - optional flat XML only as a convenience export, not as the primary
+    interoperable format
 - `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa` do not have an
   equally universal file-format story for the exact primitive forms exposed
   here, so any persistent key format for them should be explicitly crate-defined
   rather than mislabeled as "PKCS" or "SSH". The current crate therefore uses
   a simple crate-defined binary body that still mirrors the RSA structures: a
   DER `SEQUENCE` of positive `INTEGER`s, optionally wrapped in a scheme-
-  specific PEM armor label, while keeping RSA on the real PKCS / X.509 path.
+  specific PEM armor label, plus the same flat XML convenience form, while
+  keeping RSA on the real PKCS / X.509 path for its canonical serialization.
 
 The public-key layer is intentionally separated into:
 
@@ -192,9 +196,10 @@ The public-key layer is intentionally separated into:
 - one file per raw scheme
 - `rsa_pkcs1`: standards-based RSA wrappers (`OAEP` and `PSS`)
 - `rsa_io`: standards-based RSA key serialization (`PKCS #8`, PKCS #1, and
-  `SPKI` in `DER` / `PEM`)
-- internal `io`: crate-defined binary / PEM key framing for the non-RSA
-  public-key schemes (DER `SEQUENCE` of `INTEGER`s under custom PEM labels)
+  `SPKI` in `DER` / `PEM`), plus the optional flat XML form
+- internal `io`: crate-defined binary / XML helpers for the non-RSA public-key
+  schemes (DER `SEQUENCE` of `INTEGER`s, custom PEM labels, and flat fixed-
+  schema XML)
 
 That mirrors the earlier cipher layering: get the math right first, then add
 protocol-safe framing. The current code is therefore best read as a reference

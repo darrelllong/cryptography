@@ -10,7 +10,7 @@
 //! interop with older tooling.
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::io::{pem_unwrap, pem_wrap};
+use crate::public_key::io::{pem_unwrap, pem_wrap, xml_unwrap, xml_wrap};
 use crate::public_key::primes::mod_inverse;
 use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
 
@@ -50,6 +50,16 @@ impl RsaPublicKey {
     #[must_use]
     pub fn to_spki_pem(&self) -> String {
         pem_wrap("PUBLIC KEY", &self.to_spki_der())
+    }
+
+    /// Encode the public key as the crate's flat XML form.
+    ///
+    /// This is a convenience export that mirrors the in-memory Rust fields
+    /// directly. Standards-based interchange should still prefer PKCS #1 or
+    /// SPKI.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap("RsaPublicKey", &[("e", self.exponent()), ("n", self.modulus())])
     }
 
     /// Decode a PKCS #1 `RSAPublicKey` structure from DER.
@@ -110,6 +120,18 @@ impl RsaPublicKey {
         let der = pem_unwrap("PUBLIC KEY", pem)?;
         Self::from_spki_der(&der)
     }
+
+    /// Decode the public key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields = xml_unwrap("RsaPublicKey", &["e", "n"], xml)?.into_iter();
+        let public_exponent = fields.next()?;
+        let modulus = fields.next()?;
+        if fields.next().is_some() || public_exponent <= BigUint::one() || modulus <= BigUint::one() {
+            return None;
+        }
+        Some(Self::from_components(public_exponent, modulus))
+    }
 }
 
 impl RsaPrivateKey {
@@ -167,6 +189,24 @@ impl RsaPrivateKey {
     #[must_use]
     pub fn to_pkcs8_pem(&self) -> String {
         pem_wrap("PRIVATE KEY", &self.to_pkcs8_der())
+    }
+
+    /// Encode the private key as the crate's flat XML form.
+    ///
+    /// The XML form mirrors the stored key fields directly. PKCS #1 / PKCS #8
+    /// remain the preferred interoperable formats.
+    #[must_use]
+    pub fn to_xml(&self) -> String {
+        xml_wrap(
+            "RsaPrivateKey",
+            &[
+                ("e", self.public_exponent()),
+                ("d", self.exponent()),
+                ("n", self.modulus()),
+                ("p", self.prime1()),
+                ("q", self.prime2()),
+            ],
+        )
     }
 
     /// Decode a PKCS #1 `RSAPrivateKey` structure from DER.
@@ -258,6 +298,27 @@ impl RsaPrivateKey {
     pub fn from_pkcs8_pem(pem: &str) -> Option<Self> {
         let der = pem_unwrap("PRIVATE KEY", pem)?;
         Self::from_pkcs8_der(&der)
+    }
+
+    /// Decode the private key from the crate's flat XML form.
+    #[must_use]
+    pub fn from_xml(xml: &str) -> Option<Self> {
+        let mut fields = xml_unwrap("RsaPrivateKey", &["e", "d", "n", "p", "q"], xml)?.into_iter();
+        let public_exponent = fields.next()?;
+        let private_exponent = fields.next()?;
+        let modulus = fields.next()?;
+        let prime1 = fields.next()?;
+        let prime2 = fields.next()?;
+        if fields.next().is_some() {
+            return None;
+        }
+
+        let (public, private) =
+            Rsa::from_primes_with_exponent(&prime1, &prime2, &public_exponent)?;
+        if public.modulus() != &modulus || private.exponent() != &private_exponent {
+            return None;
+        }
+        Some(private)
     }
 }
 
@@ -438,6 +499,18 @@ mod tests {
         let pem = private.to_pkcs8_pem();
         let parsed = RsaPrivateKey::from_pkcs8_pem(&pem).expect("parse PKCS#8 PEM");
         assert_eq!(parsed, private);
+    }
+
+    #[test]
+    fn xml_roundtrip() {
+        let p = BigUint::from_u64(61);
+        let q = BigUint::from_u64(53);
+        let (public, private) = Rsa::from_primes(&p, &q).expect("valid RSA key");
+
+        let public_xml = public.to_xml();
+        let private_xml = private.to_xml();
+        assert_eq!(RsaPublicKey::from_xml(&public_xml), Some(public));
+        assert_eq!(RsaPrivateKey::from_xml(&private_xml), Some(private));
     }
 
     #[test]
