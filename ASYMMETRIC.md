@@ -180,6 +180,12 @@ Because plain Rabin is ambiguous, this crate uses a tagged-message variant: the
 tag is carried inside the encoded plaintext and is used to select the intended
 root deterministically at decrypt time.
 
+Rabin is historically important because it is one of the earliest public-key
+trapdoor constructions with a tight reduction story: in the plain setting,
+inverting the squaring map modulo `n = pq` is essentially equivalent to
+factoring `n`. That direct connection is part of why the scheme still matters
+pedagogically even though modern deployments usually prefer RSA.
+
 ### Paillier
 
 Core arithmetic:
@@ -202,6 +208,25 @@ operations:
 
 That homomorphic surface is a real part of the scheme, not an extra trick, so
 it is intentionally part of the usable API.
+
+That is also the reason to use `Paillier` at all: it is the cleanest additive
+homomorphic primitive in this crate. If `c_1` encrypts `m_1` and `c_2`
+encrypts `m_2`, then:
+
+```math
+c_1 c_2 \bmod n^2
+```
+
+decrypts to:
+
+```math
+m_1 + m_2 \pmod n
+```
+
+The wrapper keeps that property visible through
+`PaillierPublicKey::add_ciphertexts(...)`, and `rerandomize(...)` preserves the
+same plaintext while refreshing the random factor so identical messages do not
+stay linkable across ciphertext refreshes.
 
 ### Schmidt-Samoa
 
@@ -280,6 +305,10 @@ Representative current 1024-bit latencies on this host:
 | Schmidt-Samoa-1024 keygen | `5.21 ms` |
 | Schmidt-Samoa-1024 encrypt | `0.753 ms` |
 | Schmidt-Samoa-1024 decrypt | `0.228 ms` |
+
+The table above is measured in milliseconds per operation. The radar chart
+below uses the reciprocal view — operations per second on a log scale — so the
+faster operations sit farther from the center.
 
 The existing chart is the public-key encrypt/decrypt radar:
 

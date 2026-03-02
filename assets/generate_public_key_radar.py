@@ -23,7 +23,7 @@ TEXT_COLOR = "#342f29"
 SUBTEXT_COLOR = "#6b6257"
 
 WIDTH = 560
-HEIGHT = 590
+HEIGHT = 630
 CX = 280.0
 CY = 245.0
 RADIUS = 180.0
@@ -141,13 +141,13 @@ def generate_svg() -> str:
     lines.extend(
         [
             "",
-            '  <text class="label" x="20" y="538">Public-key Encrypt/Decrypt Throughput (1024-bit, log scale)</text>',
-            '  <text class="small" x="20" y="556">Radial scale is operations/second (higher is faster), spanning 100 to 30,000</text>',
+            '  <text class="label" x="20" y="548">Public-key Encrypt/Decrypt Throughput (1024-bit, log scale)</text>',
+            '  <text class="small" x="20" y="566">Radial scale is operations/second (higher is faster), spanning 100 to 30,000</text>',
             "",
-            '  <rect x="384" y="528" width="14" height="14" class="legend-enc" rx="2" />',
-            '  <text class="small" x="404" y="539">Encrypt</text>',
-            '  <rect x="384" y="550" width="14" height="14" class="legend-dec" rx="2" />',
-            '  <text class="small" x="404" y="561">Decrypt</text>',
+            '  <rect x="20" y="586" width="14" height="14" class="legend-enc" rx="2" />',
+            '  <text class="small" x="40" y="597">Encrypt</text>',
+            '  <rect x="108" y="586" width="14" height="14" class="legend-dec" rx="2" />',
+            '  <text class="small" x="128" y="597">Decrypt</text>',
             "</svg>",
         ]
     )

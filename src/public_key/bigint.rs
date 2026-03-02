@@ -460,6 +460,10 @@ impl BigUint {
     /// Odd moduli use a fresh Montgomery context so the common public-key path
     /// avoids the division-heavy fallback. Even moduli keep the old
     /// double-and-add reducer because Montgomery requires an odd modulus.
+    /// Rewriting one multiplicand as `y - 1` plus one extra add can change the
+    /// operand parity, but it does not change the modulus parity; the core
+    /// Montgomery requirement is `gcd(R, n) = 1`, so an even modulus still
+    /// needs a non-Montgomery path.
     ///
     /// # Panics
     ///
