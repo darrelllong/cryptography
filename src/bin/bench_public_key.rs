@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 
 use cryptography::public_key::bigint::BigUint;
 use cryptography::{
-    Cocks, CtrDrbgAes256, Dsa, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa,
-    Sha256,
+    Cocks, CtrDrbgAes256, Dsa, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
 };
 
 const MESSAGE: [u8; 32] = [0x42; 32];
@@ -31,17 +30,20 @@ fn announce(stage: &str) {
     io::stdout().flush().expect("flush benchmark progress");
 }
 
-fn parse_args() -> (usize, bool) {
+fn parse_args() -> (usize, bool, bool) {
     let mut bits = 1024usize;
     let mut skip_elgamal = false;
+    let mut skip_dsa = false;
     for arg in std::env::args().skip(1) {
         if arg == "--skip-elgamal" {
             skip_elgamal = true;
+        } else if arg == "--skip-dsa" {
+            skip_dsa = true;
         } else if let Ok(parsed) = arg.parse::<usize>() {
             bits = parsed;
         }
     }
-    (bits, skip_elgamal)
+    (bits, skip_elgamal, skip_dsa)
 }
 
 fn bench_rsa(
@@ -121,11 +123,15 @@ fn bench_dsa(rng: &mut CtrDrbgAes256, bits: usize) -> DsaTimings {
 
     announce("Measuring DSA");
     let start = Instant::now();
-    let signature = private.sign_bytes(&MESSAGE, rng).expect("DSA sign");
+    // Use the message-level API so the benchmark follows the same hashing path
+    // a normal caller would take.
+    let signature = private
+        .sign_message_bytes::<Sha256, _>(&MESSAGE, rng)
+        .expect("DSA sign");
     let sign = start.elapsed();
 
     let start = Instant::now();
-    let verified = public.verify_bytes(&MESSAGE, &signature);
+    let verified = public.verify_message_bytes::<Sha256>(&MESSAGE, &signature);
     let verify = start.elapsed();
     assert!(verified);
 
@@ -239,7 +245,7 @@ fn bench_schmidt_samoa(rng: &mut CtrDrbgAes256, bits: usize) -> SimplePkTimings 
 }
 
 fn main() {
-    let (bits, skip_elgamal) = parse_args();
+    let (bits, skip_elgamal, skip_dsa) = parse_args();
     if bits < 528 {
         eprintln!("RSAES-OAEP with SHA-256 requires at least a 528-bit modulus.");
         std::process::exit(2);
@@ -260,7 +266,13 @@ fn main() {
         elgamal_timings = Some(bench_elgamal(&mut rng, bits));
     }
 
-    let (dsa_keygen, dsa_sign, dsa_verify) = bench_dsa(&mut rng, bits);
+    let mut dsa_timings = None;
+    if skip_dsa {
+        println!("Skipping DSA benchmark.");
+        println!();
+    } else {
+        dsa_timings = Some(bench_dsa(&mut rng, bits));
+    }
 
     let (paillier_keygen, paillier_encrypt, paillier_decrypt, paillier_rerandomize, paillier_add) =
         bench_paillier(&mut rng, bits);
@@ -284,11 +296,13 @@ fn main() {
         println!();
     }
 
-    println!("DSA");
-    print_row("keygen", dsa_keygen);
-    print_row("sign", dsa_sign);
-    print_row("verify", dsa_verify);
-    println!();
+    if let Some((dsa_keygen, dsa_sign, dsa_verify)) = dsa_timings {
+        println!("DSA");
+        print_row("keygen", dsa_keygen);
+        print_row("sign", dsa_sign);
+        print_row("verify", dsa_verify);
+        println!();
+    }
 
     println!("Paillier");
     print_row("keygen", paillier_keygen);

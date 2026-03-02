@@ -591,9 +591,10 @@ impl BigUint {
         }
 
         // Second pass: Montgomery reduction. Choose `m` so the current low
-        // limb cancels modulo `2^64`, then add `m * modulus`. After `width`
-        // rounds, the low half is zero and the high half is the reduced
-        // Montgomery product.
+        // limb cancels modulo `2^64`, then add `m * modulus`. Each round
+        // zeros one more low limb; after `width` rounds the discarded low half
+        // accounts for the implicit division by `R = 2^(64w)`, so the high
+        // half is `lhs * rhs * R^-1 mod n`.
         for i in 0..width {
             let m = workspace[i].wrapping_mul(n0_inv);
             let mut carry = 0u128;
@@ -640,7 +641,7 @@ impl MontgomeryCtx {
 
         // With `w` limbs, Montgomery arithmetic uses `R = 2^(64w)`. `R^2 mod
         // n` is the standard conversion factor for entering the Montgomery
-        // domain.
+        // domain because `montgomery_mul(a, R^2) = a * R^2 * R^-1 = aR`.
         let mut r2 = BigUint::zero();
         r2.set_bit(modulus.limbs.len() * 128);
         let r2_mod = r2.modulo(modulus);

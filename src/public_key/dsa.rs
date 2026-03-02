@@ -8,6 +8,7 @@
 
 use core::fmt;
 
+use crate::hash::Digest;
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
@@ -23,18 +24,26 @@ const DSA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY DSA PRIVATE KEY";
 /// Public key for `DSA`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DsaPublicKey {
+    /// Prime modulus `p`.
     p: BigUint,
+    /// Prime subgroup order `q`.
     q: BigUint,
+    /// Generator `g` of the order-`q` subgroup.
     g: BigUint,
+    /// Public component `y = g^x mod p`.
     y: BigUint,
 }
 
 /// Private key for `DSA`.
 #[derive(Clone, Eq, PartialEq)]
 pub struct DsaPrivateKey {
+    /// Prime modulus `p`.
     p: BigUint,
+    /// Prime subgroup order `q`.
     q: BigUint,
+    /// Generator `g` of the order-`q` subgroup.
     g: BigUint,
+    /// Secret exponent `x`.
     x: BigUint,
 }
 
@@ -73,6 +82,20 @@ impl DsaPublicKey {
         &self.y
     }
 
+    /// Hash one message with `H`, then verify the resulting digest.
+    #[must_use]
+    pub fn verify_message<H: Digest>(&self, message: &[u8], signature: &DsaSignature) -> bool {
+        let digest = H::digest(message);
+        self.verify(&digest, signature)
+    }
+
+    /// Hash one message with `H`, then verify a serialized signature.
+    #[must_use]
+    pub fn verify_message_bytes<H: Digest>(&self, message: &[u8], signature: &[u8]) -> bool {
+        let digest = H::digest(message);
+        self.verify_bytes(&digest, signature)
+    }
+
     /// Verify a signature over an explicit integer representative.
     #[must_use]
     pub fn verify_raw(&self, hash: &BigUint, signature: &DsaSignature) -> bool {
@@ -87,6 +110,9 @@ impl DsaPublicKey {
         let Some(w) = mod_inverse(&signature.s, &self.q) else {
             return false;
         };
+        // FIPS 186-5 verification variables: `w = s^-1 mod q`,
+        // `z = leftmost-N-bits(H(M)) mod q`, then `u1 = z * w mod q` and
+        // `u2 = r * w mod q`.
         let z = hash.modulo(&self.q);
         let u1 = BigUint::mod_mul(&z, &w, &self.q);
         let u2 = BigUint::mod_mul(&signature.r, &w, &self.q);
@@ -209,10 +235,27 @@ impl DsaPrivateKey {
         &self.x
     }
 
+    /// Derive the matching public key from this private key.
+    #[must_use]
+    pub fn to_public_key(&self) -> DsaPublicKey {
+        let y = mod_pow(&self.g, &self.x, &self.p);
+        DsaPublicKey {
+            p: self.p.clone(),
+            q: self.q.clone(),
+            g: self.g.clone(),
+            y,
+        }
+    }
+
     /// Sign with an explicit nonce `k`.
     ///
     /// `DSA` uses a fresh `k` in `[1, q)` for every signature. This lower-level
     /// entry point keeps the arithmetic explicit for deterministic tests.
+    ///
+    /// Reusing the same `k` for two different messages with the same key
+    /// immediately reveals the private exponent. Outside of fixed vectors,
+    /// prefer [`Self::sign`] or [`Self::sign_message`], which sample a fresh
+    /// nonce internally.
     #[must_use]
     pub fn sign_with_k(&self, digest: &[u8], nonce: &BigUint) -> Option<DsaSignature> {
         if nonce.is_zero() || nonce >= &self.q {
@@ -240,6 +283,8 @@ impl DsaPrivateKey {
     #[must_use]
     pub fn sign<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<DsaSignature> {
         loop {
+            // Retry only in the negligible edge cases where `r = 0` or
+            // `s = 0`; the fresh nonce changes the arithmetic path.
             let nonce = random_nonzero_below(rng, &self.q)?;
             if let Some(signature) = self.sign_with_k(digest, &nonce) {
                 return Some(signature);
@@ -247,10 +292,32 @@ impl DsaPrivateKey {
         }
     }
 
+    /// Hash one message with `H`, then sign the resulting digest.
+    #[must_use]
+    pub fn sign_message<H: Digest, R: Csprng>(
+        &self,
+        message: &[u8],
+        rng: &mut R,
+    ) -> Option<DsaSignature> {
+        let digest = H::digest(message);
+        self.sign(&digest, rng)
+    }
+
     /// Sign a digest and return the serialized signature bytes.
     #[must_use]
     pub fn sign_bytes<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<Vec<u8>> {
         let signature = self.sign(digest, rng)?;
+        Some(signature.to_binary())
+    }
+
+    /// Hash one message with `H`, then sign and serialize the signature.
+    #[must_use]
+    pub fn sign_message_bytes<H: Digest, R: Csprng>(
+        &self,
+        message: &[u8],
+        rng: &mut R,
+    ) -> Option<Vec<u8>> {
+        let signature = self.sign_message::<H, R>(message, rng)?;
         Some(signature.to_binary())
     }
 
@@ -268,11 +335,7 @@ impl DsaPrivateKey {
         let q = fields.next()?;
         let g = fields.next()?;
         let x = fields.next()?;
-        if fields.next().is_some()
-            || !validate_domain(&p, &q, &g)
-            || x.is_zero()
-            || x >= q
-        {
+        if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
         Some(Self { p, q, g, x })
@@ -313,11 +376,7 @@ impl DsaPrivateKey {
         let q = fields.next()?;
         let g = fields.next()?;
         let x = fields.next()?;
-        if fields.next().is_some()
-            || !validate_domain(&p, &q, &g)
-            || x.is_zero()
-            || x >= q
-        {
+        if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
         Some(Self { p, q, g, x })
@@ -350,6 +409,10 @@ impl DsaSignature {
     }
 
     /// Decode a crate-defined binary `DSA` signature.
+    ///
+    /// Zero values are rejected immediately. The range checks against the
+    /// subgroup order `q` happen during verification because the signature
+    /// encoding does not carry `q`.
     #[must_use]
     pub fn from_binary(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
@@ -397,12 +460,8 @@ impl Dsa {
 
     /// Generate a `DSA` key pair over a prime-order subgroup.
     #[must_use]
-    pub fn generate<R: Csprng>(
-        rng: &mut R,
-        bits: usize,
-    ) -> Option<(DsaPublicKey, DsaPrivateKey)> {
-        let (prime, subgroup_order, _cofactor, generator) =
-            generate_prime_order_group(rng, bits)?;
+    pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(DsaPublicKey, DsaPrivateKey)> {
+        let (prime, subgroup_order, _cofactor, generator) = generate_prime_order_group(rng, bits)?;
         let secret = random_nonzero_below(rng, &subgroup_order)?;
         let public_component = mod_pow(&generator, &secret, &prime);
         Some((
@@ -422,6 +481,10 @@ impl Dsa {
     }
 }
 
+/// Validate the subgroup parameters used by `DSA`.
+///
+/// This checks that `p` and `q` are prime, that `q` divides `p - 1`, and that
+/// `g` lies in the order-`q` subgroup of `Z_p^*`.
 fn validate_domain(prime: &BigUint, subgroup_order: &BigUint, generator: &BigUint) -> bool {
     if !is_probable_prime(prime) || !is_probable_prime(subgroup_order) {
         return false;
@@ -440,11 +503,19 @@ fn validate_domain(prime: &BigUint, subgroup_order: &BigUint, generator: &BigUin
     mod_pow(generator, subgroup_order, prime) == one
 }
 
+/// FIPS 186-5 digest representative reduction.
+///
+/// The standard keeps the leftmost `N = bits(q)` bits of the hash. The shift
+/// amount is derived from the original digest width, not the width after
+/// leading-zero trimming.
 fn digest_to_scalar(digest: &[u8], modulus: &BigUint) -> BigUint {
     let mut value = BigUint::from_be_bytes(digest);
+    let hash_bits = digest.len() * 8;
     let target_bits = modulus.bits();
-    while value.bits() > target_bits {
-        value.shr1();
+    if hash_bits > target_bits {
+        for _ in 0..(hash_bits - target_bits) {
+            value.shr1();
+        }
     }
     value
 }
@@ -453,7 +524,7 @@ fn digest_to_scalar(digest: &[u8], modulus: &BigUint) -> BigUint {
 mod tests {
     use super::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
     use crate::public_key::bigint::BigUint;
-    use crate::CtrDrbgAes256;
+    use crate::{CtrDrbgAes256, Sha256, Sha384};
 
     fn derive_small_reference_key() -> (DsaPublicKey, DsaPrivateKey) {
         let p = BigUint::from_u64(23);
@@ -481,7 +552,10 @@ mod tests {
             .sign_with_k(&[0x09], &nonce)
             .expect("valid DSA nonce");
         assert_eq!(signature.r(), &BigUint::from_u64(1));
-        assert_eq!(signature.s(), &BigUint::from_u64(9));
+        // `q = 11` is 4 bits wide, so the 8-bit digest is reduced to its
+        // leftmost 4 bits before signing. `0x09` becomes `0x0`, which makes
+        // this tiny reference vector sensitive to the FIPS truncation rule.
+        assert_eq!(signature.s(), &BigUint::from_u64(5));
         assert!(public.verify(&[0x09], &signature));
     }
 
@@ -516,8 +590,88 @@ mod tests {
         let mut drbg = CtrDrbgAes256::new(&seed);
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
         let digest = b"dsa-bytes";
-        let signature = private.sign_bytes(digest, &mut drbg).expect("signature bytes");
+        let signature = private
+            .sign_bytes(digest, &mut drbg)
+            .expect("signature bytes");
         assert!(public.verify_bytes(digest, &signature));
+    }
+
+    #[test]
+    fn sign_message_roundtrip() {
+        let seed = [0x45u8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
+        let message = b"dsa full message";
+        let signature = private
+            .sign_message::<Sha256, _>(message, &mut drbg)
+            .expect("message signature");
+        assert!(public.verify_message::<Sha256>(message, &signature));
+    }
+
+    #[test]
+    fn tampered_signature_is_rejected() {
+        let seed = [0x46u8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
+        let digest = b"dsa-tamper";
+        let mut signature = private.sign(digest, &mut drbg).expect("signature");
+        signature.s = signature
+            .s
+            .add_ref(&BigUint::one())
+            .modulo(public.subgroup_order());
+        if signature.s.is_zero() {
+            signature.s = BigUint::one();
+        }
+        assert!(!public.verify(digest, &signature));
+    }
+
+    #[test]
+    fn cross_key_signature_is_rejected() {
+        let mut drbg_a = CtrDrbgAes256::new(&[0x47; 48]);
+        let mut drbg_b = CtrDrbgAes256::new(&[0x48; 48]);
+        let (public_a, private_a) = Dsa::generate(&mut drbg_a, 64).expect("first key");
+        let (public_b, _) = Dsa::generate(&mut drbg_b, 64).expect("second key");
+        let digest = b"dsa-cross";
+        let signature = private_a.sign(digest, &mut drbg_a).expect("signature");
+        assert!(public_a.verify(digest, &signature));
+        assert!(!public_b.verify(digest, &signature));
+    }
+
+    #[test]
+    fn sign_with_k_rejects_out_of_range_nonce() {
+        let (_public, private) = derive_small_reference_key();
+        assert!(private.sign_with_k(&[0x09], &BigUint::zero()).is_none());
+        assert!(private
+            .sign_with_k(&[0x09], private.subgroup_order())
+            .is_none());
+    }
+
+    #[test]
+    fn generate_rejects_too_few_bits() {
+        let mut drbg = CtrDrbgAes256::new(&[0x49; 48]);
+        for bits in 0..19 {
+            assert!(Dsa::generate(&mut drbg, bits).is_none());
+        }
+    }
+
+    #[test]
+    fn serialization_roundtrip_preserves_verification() {
+        let seed = [0x4Au8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
+        let digest = b"dsa-serialize";
+        let signature = private.sign(digest, &mut drbg).expect("signature");
+        let public_xml = public.to_xml();
+        let public_again = DsaPublicKey::from_xml(&public_xml).expect("public xml");
+        assert!(public_again.verify(digest, &signature));
+    }
+
+    #[test]
+    fn digest_to_scalar_truncates_by_digest_width() {
+        let q = BigUint::from_u64(257); // 9-bit subgroup order
+        let digest = [0x00u8, 0xff];
+        let value = super::digest_to_scalar(&digest, &q);
+        assert_eq!(value, BigUint::one());
     }
 
     #[test]
@@ -557,5 +711,16 @@ mod tests {
         let blob = signature.to_binary();
         let parsed = DsaSignature::from_binary(&blob).expect("signature");
         assert_eq!(parsed, signature);
+    }
+
+    #[test]
+    fn verify_message_matches_explicit_digest() {
+        let seed = [0x4Bu8; 48];
+        let mut drbg = CtrDrbgAes256::new(&seed);
+        let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
+        let message = b"dsa-digest";
+        let digest = Sha384::digest(message);
+        let signature = private.sign(&digest, &mut drbg).expect("signature");
+        assert!(public.verify_message::<Sha384>(message, &signature));
     }
 }

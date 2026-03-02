@@ -15,7 +15,9 @@ use crate::Csprng;
 /// Fixed Miller-Rabin witness set used by the bigint probable-prime test.
 ///
 /// These twelve small prime bases give a deterministic, repeatable witness
-/// schedule for the prime sizes this crate targets.
+/// schedule. They are the classic "small prime" Miller-Rabin bases through
+/// `37`: deterministic for all small values this crate uses in tests, and a
+/// conservative fixed set for the larger cryptographic candidates used here.
 const MR_BASES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
 
 /// Trial-division sieve primes checked before the Miller-Rabin stage.
@@ -225,7 +227,9 @@ pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -
 /// Draw a random integer in `[1, upper_exclusive)` that is coprime to `coprime_to`.
 ///
 /// This is the nonce sampler used by schemes such as Paillier that need a
-/// fresh random unit modulo `n`.
+/// fresh random unit modulo `n`: rejection-sample in `[1, upper_exclusive)`
+/// until the candidate lands in the multiplicative group with respect to
+/// `coprime_to`.
 #[must_use]
 pub fn random_coprime_below<R: Csprng>(
     rng: &mut R,

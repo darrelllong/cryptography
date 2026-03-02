@@ -464,12 +464,14 @@ assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
 Generate and use a `DSA` key pair:
 
 ```rust
-use cryptography::{CtrDrbgAes256, Dsa};
+use cryptography::{CtrDrbgAes256, Dsa, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x24; 48]);
 let (public, private) = Dsa::generate(&mut drbg, 256).expect("DSA key");
-let signature = private.sign_bytes(b"message digest", &mut drbg).expect("DSA sign");
-assert!(public.verify_bytes(b"message digest", &signature));
+let signature = private
+    .sign_message_bytes::<Sha256, _>(b"message", &mut drbg)
+    .expect("DSA sign");
+assert!(public.verify_message_bytes::<Sha256>(b"message", &signature));
 ```
 
 Generate and use an `ElGamal` key pair:
@@ -531,6 +533,9 @@ cargo run --release --bin bench_public_key -- 1024
 
 Add `--skip-elgamal` if you only want RSA and Paillier timings and do not want
 to wait for ElGamal parameter generation on larger inputs.
+
+Add `--skip-dsa` if you want to exclude the DSA keygen/sign/verify timings from
+the same run.
 
 Pass a larger bit length (for example `2048`) to probe the current bigint
 backend at practical sizes. This is the quickest way to decide whether the

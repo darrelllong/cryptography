@@ -169,7 +169,9 @@ order is not derivable from the supplied parameters.
 
 ### DSA
 
-Reference: `fips186-5`
+Reference: FIPS 186-5, Digital Signature Standard (see
+`pubs/fips186-5.pdf` and the matching BibTeX entry in
+the top-level references).
 
 Core arithmetic:
 
@@ -198,6 +200,17 @@ their per-message nonce from `[1, q)`. The digest representative is reduced to
 the leftmost `N = \mathrm{bits}(q)` bits before signing and verification,
 matching the Digital Signature Standard's treatment of hash outputs that are
 wider than the subgroup order.
+
+For generated keys, this crate uses
+
+```math
+N = \mathrm{clamp}(\lfloor L / 4 \rfloor, 16, 256)
+```
+
+for a modulus size `L = bits(p)`. That is not the exact FIPS menu of `(L, N)`
+pairs (`(1024, 160)`, `(2048, 224)`, `(2048, 256)`, `(3072, 256)`), but it
+keeps the subgroup order conservative for the teaching and benchmarking sizes
+used here while staying within the same finite-field `DSA` structure.
 
 ### Cocks
 
@@ -352,7 +365,7 @@ The public-key wrappers now distinguish clearly between:
 Examples:
 
 - `CocksPublicKey::encrypt_bytes` / `CocksPrivateKey::decrypt_bytes`
-- `DsaPrivateKey::sign_bytes` / `DsaPublicKey::verify_bytes`
+- `DsaPrivateKey::sign_message_bytes::<H>` / `DsaPublicKey::verify_message_bytes::<H>`
 - `ElGamalPublicKey::encrypt_bytes` / `ElGamalPrivateKey::decrypt_bytes`
 - `PaillierPublicKey::encrypt_bytes` / `PaillierPrivateKey::decrypt_bytes`
 - `RabinPublicKey::encrypt_bytes` / `RabinPrivateKey::decrypt_bytes`
@@ -369,6 +382,9 @@ Public-key timing is measured by:
 ```text
 cargo run --release --bin bench_public_key -- 1024
 ```
+
+Add `--skip-elgamal` or `--skip-dsa` to trim the slower key-generation paths
+when you only want the RSA / Paillier / deterministic-primitives timings.
 
 Representative current 1024-bit latencies on this host:
 

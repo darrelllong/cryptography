@@ -29,6 +29,8 @@ const PAILLIER_PRIVATE_LABEL: &str = "CRYPTOGRAPHY PAILLIER PRIVATE KEY";
 pub struct PaillierPublicKey {
     /// Public modulus `n = p * q`.
     n: BigUint,
+    /// Cached `n^2` used by the Paillier group operations.
+    n_squared: BigUint,
     /// Public encryption base, typically `n + 1`.
     zeta: BigUint,
 }
@@ -42,6 +44,8 @@ pub struct PaillierPublicKey {
 pub struct PaillierPrivateKey {
     /// Public modulus `n = p * q`.
     n: BigUint,
+    /// Cached `n^2` used during decryption.
+    n_squared: BigUint,
     /// Carmichael exponent `lambda = lcm(p - 1, q - 1)`.
     lambda: BigUint,
     /// Precomputed inverse of `L(zeta^lambda mod n^2)` modulo `n`.
@@ -85,20 +89,16 @@ impl PaillierPublicKey {
             return None;
         }
 
-        // `n^2` is a fixed public parameter. The implementation recomputes it
-        // here instead of storing it so the key structs keep only the minimal
-        // algebraic state; callers doing heavy batching can cache it
-        // externally if this multiply shows up in profiles.
-        let n_squared = self.n.mul_ref(&self.n);
-        let left = mod_pow(&self.zeta, message, &n_squared);
-        let right = mod_pow(nonce, &self.n, &n_squared);
-        // Valid Paillier keys always use odd `n`, so `n^2` stays on the
+        let left = mod_pow(&self.zeta, message, &self.n_squared);
+        let right = mod_pow(nonce, &self.n, &self.n_squared);
+        // `n^2` is cached in the key so the hot path does not redo the same
+        // public multiplication on every operation. Valid Paillier keys always use odd `n`, so `n^2` stays on the
         // Montgomery fast path. Keep the slow path as a defensive fallback for
         // malformed caller-supplied state.
-        let product = if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
+        let product = if let Some(ctx) = MontgomeryCtx::new(&self.n_squared) {
             ctx.mul(&left, &right)
         } else {
-            BigUint::mod_mul(&left, &right, &n_squared)
+            BigUint::mod_mul(&left, &right, &self.n_squared)
         };
         Some(product)
     }
@@ -127,15 +127,14 @@ impl PaillierPublicKey {
     #[must_use]
     pub fn rerandomize<R: Csprng>(&self, ciphertext: &BigUint, rng: &mut R) -> Option<BigUint> {
         let nonce = random_coprime_below(rng, &self.n, &self.n)?;
-        let n_squared = self.n.mul_ref(&self.n);
-        if ciphertext >= &n_squared {
+        if ciphertext >= &self.n_squared {
             return None;
         }
-        let factor = mod_pow(&nonce, &self.n, &n_squared);
-        let product = if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
+        let factor = mod_pow(&nonce, &self.n, &self.n_squared);
+        let product = if let Some(ctx) = MontgomeryCtx::new(&self.n_squared) {
             ctx.mul(ciphertext, &factor)
         } else {
-            BigUint::mod_mul(ciphertext, &factor, &n_squared)
+            BigUint::mod_mul(ciphertext, &factor, &self.n_squared)
         };
         Some(product)
     }
@@ -148,14 +147,13 @@ impl PaillierPublicKey {
     /// Returns `None` if either input is not in the ciphertext range `[0, n^2)`.
     #[must_use]
     pub fn add_ciphertexts(&self, lhs: &BigUint, rhs: &BigUint) -> Option<BigUint> {
-        let n_squared = self.n.mul_ref(&self.n);
-        if lhs >= &n_squared || rhs >= &n_squared {
+        if lhs >= &self.n_squared || rhs >= &self.n_squared {
             return None;
         }
-        if let Some(ctx) = MontgomeryCtx::new(&n_squared) {
+        if let Some(ctx) = MontgomeryCtx::new(&self.n_squared) {
             Some(ctx.mul(lhs, rhs))
         } else {
-            Some(BigUint::mod_mul(lhs, rhs, &n_squared))
+            Some(BigUint::mod_mul(lhs, rhs, &self.n_squared))
         }
     }
 
@@ -174,7 +172,8 @@ impl PaillierPublicKey {
         if fields.next().is_some() || n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
             return None;
         }
-        Some(Self { n, zeta })
+        let n_squared = n.mul_ref(&n);
+        Some(Self { n, n_squared, zeta })
     }
 
     /// Encode the public key in PEM using the crate-defined label.
@@ -205,7 +204,8 @@ impl PaillierPublicKey {
         if fields.next().is_some() || n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
             return None;
         }
-        Some(Self { n, zeta })
+        let n_squared = n.mul_ref(&n);
+        Some(Self { n, n_squared, zeta })
     }
 }
 
@@ -231,13 +231,12 @@ impl PaillierPrivateKey {
     /// Decrypt the raw ciphertext.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
-        let n_squared = self.n.mul_ref(&self.n);
-        let value = mod_pow(ciphertext, &self.lambda, &n_squared);
+        let value = mod_pow(ciphertext, &self.lambda, &self.n_squared);
         // Valid Paillier ciphertexts produce values of the form `1 + k*n`
         // here, so `L(value)` is defined and extracts the linear term that
         // still carries the plaintext. `u` was precomputed as
-        // `L(zeta^lambda mod n^2)^-1 mod n`, so multiplying by it cancels the
-        // fixed factor left by `zeta^lambda` and recovers `m`.
+        // `L(zeta^lambda mod n^2)^-1 mod n`, so multiplying by it inverts the
+        // fixed decryption multiplier left by `zeta^lambda` and recovers `m`.
         let lifted = paillier_l(&value, &self.n);
         if let Some(ctx) = MontgomeryCtx::new(&self.n) {
             ctx.mul(&lifted, &self.u)
@@ -285,7 +284,13 @@ impl PaillierPrivateKey {
         {
             return None;
         }
-        Some(Self { n, lambda, u })
+        let n_squared = n.mul_ref(&n);
+        Some(Self {
+            n,
+            n_squared,
+            lambda,
+            u,
+        })
     }
 
     /// Encode the private key in PEM using the crate-defined label.
@@ -325,7 +330,13 @@ impl PaillierPrivateKey {
         {
             return None;
         }
-        Some(Self { n, lambda, u })
+        let n_squared = n.mul_ref(&n);
+        Some(Self {
+            n,
+            n_squared,
+            lambda,
+            u,
+        })
     }
 }
 
@@ -371,8 +382,17 @@ impl Paillier {
         let u = mod_inverse(&lifted, &n)?;
 
         Some((
-            PaillierPublicKey { n: n.clone(), zeta },
-            PaillierPrivateKey { n, lambda, u },
+            PaillierPublicKey {
+                n: n.clone(),
+                n_squared: n_squared.clone(),
+                zeta,
+            },
+            PaillierPrivateKey {
+                n,
+                n_squared,
+                lambda,
+                u,
+            },
         ))
     }
 
@@ -418,7 +438,8 @@ fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
     // The Paillier `L` function is only defined on values of the form
     // `1 + k*n`; valid decryption inputs satisfy exactly that congruence
     // because the binomial expansion of `(n + 1)^m` modulo `n^2` leaves only
-    // the linear `m*n` term.
+    // the linear `m*n` term, so `zeta^m` and therefore `c^lambda` stay in the
+    // `1 + nZ` slice that `L` projects back down to `Z_n`.
     let shifted = value.sub_ref(&BigUint::one());
     let (quotient, remainder) = shifted.div_rem(modulus);
     debug_assert!(

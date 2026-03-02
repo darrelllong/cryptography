@@ -22,8 +22,9 @@ fn modulus_len_bytes(modulus: &BigUint) -> usize {
 }
 
 fn mgf1<H: Digest>(seed: &[u8], out_len: usize) -> Vec<u8> {
-    // RFC 8017 MGF1: hash `seed || counter` for a 32-bit big-endian counter
-    // and concatenate blocks until enough mask bytes have been produced.
+    // RFC 8017 Mask Generation Function 1 (MGF1): hash
+    // `seed || counter_be32` and concatenate blocks until enough mask bytes
+    // have been produced.
     let mut out = Vec::with_capacity(out_len);
     let mut counter = 0u32;
     while out.len() < out_len {
@@ -39,7 +40,8 @@ fn mgf1<H: Digest>(seed: &[u8], out_len: usize) -> Vec<u8> {
 }
 
 fn i2osp(value: &BigUint, len: usize) -> Option<Vec<u8>> {
-    // RFC 8017 I2OSP: fixed-width big-endian integer encoding.
+    // RFC 8017 Integer-to-Octet-String Primitive (I2OSP): fixed-width
+    // big-endian integer encoding.
     let bytes = value.to_be_bytes();
     if bytes.len() > len {
         return None;
@@ -50,7 +52,8 @@ fn i2osp(value: &BigUint, len: usize) -> Option<Vec<u8>> {
 }
 
 fn os2ip(bytes: &[u8]) -> BigUint {
-    // RFC 8017 OS2IP: big-endian octet string to non-negative integer.
+    // RFC 8017 Octet-String-to-Integer Primitive (OS2IP): big-endian octet
+    // string to non-negative integer.
     BigUint::from_be_bytes(bytes)
 }
 
@@ -293,7 +296,9 @@ impl<H: Digest> RsaPss<H> {
 
         // Full-scan PSS validation mirrors the OAEP approach: do not stop at
         // the first malformed byte, because verification should not leak where
-        // the separator structure failed or turn into a format oracle.
+        // the separator structure failed or turn into a format oracle. This
+        // is the same "no early parse oracle" discipline used to avoid the
+        // classic Manger-style OAEP failures on the decryption side.
         let mut saw_separator = 0u8;
         let mut one_index = 0usize;
         for (idx, &byte) in masked_db.iter().enumerate() {
