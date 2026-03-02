@@ -55,6 +55,9 @@ pub fn mod_pow(base: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigUint
     if modulus == &BigUint::one() {
         return BigUint::zero();
     }
+    if modulus.is_odd() {
+        return BigUint::mod_pow_odd(base, exponent, modulus);
+    }
 
     let mut result = BigUint::one();
     let mut power = base.modulo(modulus);

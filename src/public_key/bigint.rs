@@ -440,6 +440,34 @@ impl BigUint {
         out
     }
 
+    /// Compute `base^exponent mod modulus` using Montgomery multiplication.
+    ///
+    /// This path applies only to odd moduli, where Montgomery reduction
+    /// replaces the repeated division-heavy reduction used by `mod_mul`.
+    /// The arithmetic stays mathematically identical; only the reduction
+    /// engine changes.
+    #[must_use]
+    pub(crate) fn mod_pow_odd(base: &Self, exponent: &Self, modulus: &Self) -> Self {
+        debug_assert!(modulus.is_odd(), "Montgomery path requires an odd modulus");
+        if modulus == &Self::one() {
+            return Self::zero();
+        }
+
+        let n0_inv = montgomery_n0_inv(modulus.limbs[0]);
+        let one = Self::one();
+        let mut result = Self::montgomery_encode(&one, modulus);
+        let mut power = Self::montgomery_encode(&base.modulo(modulus), modulus);
+
+        for bit in 0..exponent.bits() {
+            if exponent.bit(bit) {
+                result = Self::montgomery_mul_odd(&result, &power, modulus, n0_inv);
+            }
+            power = Self::montgomery_mul_odd(&power, &power, modulus, n0_inv);
+        }
+
+        Self::montgomery_mul_odd(&result, &one, modulus, n0_inv)
+    }
+
     /// Return `(quotient, remainder)` for Euclidean division. Panics on zero divisor.
     ///
     /// # Panics
@@ -479,6 +507,79 @@ impl BigUint {
             self.limbs.pop();
         }
     }
+
+    fn limb_or_zero(&self, idx: usize) -> u64 {
+        self.limbs.get(idx).copied().unwrap_or(0)
+    }
+
+    fn montgomery_encode(value: &Self, modulus: &Self) -> Self {
+        if value.is_zero() {
+            return Self::zero();
+        }
+
+        let mut limbs = vec![0u64; modulus.limbs.len()];
+        limbs.extend_from_slice(&value.limbs);
+        let mut shifted = Self { limbs };
+        shifted.normalize();
+        shifted.modulo(modulus)
+    }
+
+    fn montgomery_mul_odd(lhs: &Self, rhs: &Self, modulus: &Self, n0_inv: u64) -> Self {
+        debug_assert!(modulus.is_odd(), "Montgomery path requires an odd modulus");
+        let width = modulus.limbs.len();
+        let mut workspace = vec![0u64; width * 2 + 2];
+
+        for i in 0..width {
+            let lhs_limb = lhs.limb_or_zero(i);
+            let mut carry = 0u128;
+            for j in 0..width {
+                let idx = i + j;
+                let acc = u128::from(workspace[idx])
+                    + u128::from(lhs_limb) * u128::from(rhs.limb_or_zero(j))
+                    + carry;
+                workspace[idx] = low_u64(acc);
+                carry = acc >> 64;
+            }
+
+            let mut idx = i + width;
+            while carry != 0 {
+                let acc = u128::from(workspace[idx]) + carry;
+                workspace[idx] = low_u64(acc);
+                carry = acc >> 64;
+                idx += 1;
+            }
+        }
+
+        for i in 0..width {
+            let m = workspace[i].wrapping_mul(n0_inv);
+            let mut carry = 0u128;
+            for j in 0..width {
+                let idx = i + j;
+                let acc = u128::from(workspace[idx])
+                    + u128::from(m) * u128::from(modulus.limb_or_zero(j))
+                    + carry;
+                workspace[idx] = low_u64(acc);
+                carry = acc >> 64;
+            }
+
+            let mut idx = i + width;
+            while carry != 0 {
+                let acc = u128::from(workspace[idx]) + carry;
+                workspace[idx] = low_u64(acc);
+                carry = acc >> 64;
+                idx += 1;
+            }
+        }
+
+        let mut out = Self {
+            limbs: workspace[width..=(width * 2)].to_vec(),
+        };
+        out.normalize();
+        if out >= *modulus {
+            out.sub_assign_ref(modulus);
+        }
+        out
+    }
 }
 
 impl Drop for BigUint {
@@ -490,6 +591,15 @@ impl Drop for BigUint {
 #[inline]
 fn low_u64(value: u128) -> u64 {
     u64::try_from(value & u128::from(u64::MAX)).expect("masked low 64 bits always fit into u64")
+}
+
+fn montgomery_n0_inv(n0: u64) -> u64 {
+    debug_assert!(n0 & 1 == 1, "Montgomery path requires an odd modulus");
+    let mut inv = 1u64;
+    for _ in 0..6 {
+        inv = inv.wrapping_mul(2u64.wrapping_sub(n0.wrapping_mul(inv)));
+    }
+    inv.wrapping_neg()
 }
 
 impl BigInt {
@@ -680,6 +790,17 @@ mod tests {
         let b = BigUint::from_u64(987_654_321);
         let m = BigUint::from_u64(1_000_000_007);
         assert_eq!(BigUint::mod_mul(&a, &b, &m), BigUint::from_u64(259_106_859));
+    }
+
+    #[test]
+    fn montgomery_mod_pow_matches_small_arithmetic() {
+        let base = BigUint::from_u64(123_456_789);
+        let exponent = BigUint::from_u64(65_537);
+        let modulus = BigUint::from_u64(1_000_000_007);
+        assert_eq!(
+            BigUint::mod_pow_odd(&base, &exponent, &modulus),
+            BigUint::from_u64(560_583_526)
+        );
     }
 
     #[test]
