@@ -214,6 +214,37 @@ impl BigUint {
         (self.limbs.len() - 1) * 64 + top_bits
     }
 
+    /// Integer square root: the largest `r` such that `r^2 <= self`.
+    #[must_use]
+    pub fn sqrt_floor(&self) -> Self {
+        if self.is_zero() {
+            return Self::zero();
+        }
+        if self.is_one() {
+            return Self::one();
+        }
+
+        let mut low = Self::one();
+        let mut high = Self::zero();
+        high.set_bit(self.bits().div_ceil(2));
+
+        while {
+            let next_low = low.add_ref(&Self::one());
+            next_low < high
+        } {
+            let mut middle = low.add_ref(&high);
+            middle.shr1();
+            let square = middle.mul_ref(&middle);
+            if square <= *self {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+
+        low
+    }
+
     /// Test bit `index`.
     #[must_use]
     pub fn bit(&self, index: usize) -> bool {
@@ -863,6 +894,20 @@ mod tests {
         assert_eq!(q, BigUint::from_u128(33_366_699_733_066_399));
         assert_eq!(r, BigUint::from_u64(26));
         assert_eq!(q.mul_ref(&divisor).add_ref(&r), dividend);
+    }
+
+    #[test]
+    fn sqrt_floor_small_values() {
+        assert_eq!(BigUint::from_u64(0).sqrt_floor(), BigUint::from_u64(0));
+        assert_eq!(BigUint::from_u64(1).sqrt_floor(), BigUint::from_u64(1));
+        assert_eq!(BigUint::from_u64(2).sqrt_floor(), BigUint::from_u64(1));
+        assert_eq!(BigUint::from_u64(15).sqrt_floor(), BigUint::from_u64(3));
+        assert_eq!(BigUint::from_u64(16).sqrt_floor(), BigUint::from_u64(4));
+        assert_eq!(BigUint::from_u64(17).sqrt_floor(), BigUint::from_u64(4));
+        assert_eq!(
+            BigUint::from_u128(17_184_849_881).sqrt_floor(),
+            BigUint::from_u64(131_090)
+        );
     }
 
     #[test]

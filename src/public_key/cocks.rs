@@ -8,7 +8,8 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow};
+use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
+use crate::Csprng;
 
 /// Public key for the raw Cocks primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,6 +34,16 @@ impl CocksPublicKey {
         &self.n
     }
 
+    /// Return a conservative public upper bound for byte-oriented plaintexts.
+    ///
+    /// When `p < q`, the private prime `q` is strictly larger than
+    /// `floor(sqrt(n))`, so any message in `[0, floor(sqrt(n)))` will also be
+    /// in the range recovered by the private map `c^pi mod q`.
+    #[must_use]
+    pub fn max_plaintext_exclusive(&self) -> BigUint {
+        self.n.sqrt_floor()
+    }
+
     /// Encrypt the raw integer message.
     ///
     /// This follows the teaching implementation directly: `c = m^n mod n`,
@@ -40,6 +51,21 @@ impl CocksPublicKey {
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         mod_pow(message, &self.n, &self.n)
+    }
+
+    /// Encrypt a byte string using the conservative public plaintext bound.
+    ///
+    /// The Cocks private map only recovers integers modulo the private prime
+    /// `q`. This wrapper therefore accepts only messages strictly below
+    /// `floor(sqrt(n))`, which is a public bound guaranteed to stay below `q`
+    /// because the key generator enforces `p < q`.
+    #[must_use]
+    pub fn encrypt(&self, message: &[u8]) -> Option<BigUint> {
+        let message_int = BigUint::from_be_bytes(message);
+        if message_int >= self.max_plaintext_exclusive() {
+            return None;
+        }
+        Some(self.encrypt_raw(&message_int))
     }
 }
 
@@ -70,16 +96,23 @@ impl CocksPrivateKey {
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         mod_pow(ciphertext, &self.pi, &self.q)
     }
+
+    /// Decrypt a ciphertext back into the big-endian byte string that was
+    /// interpreted as the plaintext integer.
+    #[must_use]
+    pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
+        self.decrypt_raw(ciphertext).to_be_bytes()
+    }
 }
 
 impl Cocks {
     /// Derive a raw key pair from explicit primes `p` and `q`.
     ///
-    /// Returns `None` if the inputs are equal, composite, or if `p` is not
-    /// invertible modulo `q - 1`.
+    /// Returns `None` if the inputs are unordered, equal, composite, or if
+    /// `p` is not invertible modulo `q - 1`.
     #[must_use]
     pub fn from_primes(p: &BigUint, q: &BigUint) -> Option<(CocksPublicKey, CocksPrivateKey)> {
-        if p == q || !is_probable_prime(p) || !is_probable_prime(q) {
+        if p >= q || !is_probable_prime(p) || !is_probable_prime(q) {
             return None;
         }
 
@@ -89,12 +122,34 @@ impl Cocks {
 
         Some((CocksPublicKey { n }, CocksPrivateKey { pi, q: q.clone() }))
     }
+
+    /// Generate a teaching-sized Cocks key pair with `p < q`.
+    #[must_use]
+    pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(CocksPublicKey, CocksPrivateKey)> {
+        if bits < 4 {
+            return None;
+        }
+
+        let p_bits = bits / 2;
+        let q_bits = bits - p_bits;
+        loop {
+            let mut p = random_probable_prime(rng, p_bits)?;
+            let mut q = random_probable_prime(rng, q_bits)?;
+            if q < p {
+                core::mem::swap(&mut p, &mut q);
+            }
+            if let Some(keypair) = Self::from_primes(&p, &q) {
+                return Some(keypair);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Cocks;
     use crate::public_key::bigint::BigUint;
+    use crate::CtrDrbgAes256;
 
     #[test]
     fn derive_small_reference_key() {
@@ -137,6 +192,30 @@ mod tests {
         let q = BigUint::from_u64(47);
         // Here q - 1 = 46 is divisible by p = 23, so p has no inverse modulo
         // q - 1 and the Cocks private exponent cannot be formed.
+        assert!(Cocks::from_primes(&p, &q).is_none());
+    }
+
+    #[test]
+    fn byte_wrapper_roundtrip() {
+        let prime_p = BigUint::from_u64(19);
+        let prime_q = BigUint::from_u64(23);
+        let (public, private) = Cocks::from_primes(&prime_p, &prime_q).expect("valid Cocks key");
+        let ciphertext = public.encrypt(&[0x0b]).expect("message fits public bound");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x0b]);
+    }
+
+    #[test]
+    fn generate_teaching_keypair() {
+        let mut drbg = CtrDrbgAes256::new(&[0x21; 48]);
+        let (public, private) = Cocks::generate(&mut drbg, 32).expect("Cocks key generation");
+        let ciphertext = public.encrypt(&[0x2a]).expect("message fits public bound");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x2a]);
+    }
+
+    #[test]
+    fn rejects_unordered_primes() {
+        let p = BigUint::from_u64(17);
+        let q = BigUint::from_u64(11);
         assert!(Cocks::from_primes(&p, &q).is_none());
     }
 }
