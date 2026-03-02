@@ -165,17 +165,16 @@ let tweak_key = [1u8; 16];
 Xts::new(Aes128::new(&data_key), Aes128::new(&tweak_key)).encrypt_sector(&tweak, &mut sector);
 ```
 
-The current mode layer implements:
+The mode layer implements:
 
 - SP 800-38A: ECB, CBC, CFB (full-block), OFB, CTR
 - SP 800-38B: CMAC
 - SP 800-38D: GCM, GMAC
 - SP 800-38E: XTS (for 128-bit block ciphers)
 
-RFC 8452's AES-GCM-SIV was reviewed while designing this layer. It is a
-nonce-misuse-resistant AEAD built around AES and `POLYVAL`, so it belongs in a
-later authenticated-encryption layer rather than in the basic mode adapters
-added here.
+RFC 8452's AES-GCM-SIV is a nonce-misuse-resistant AEAD built around AES and
+`POLYVAL`, so it belongs in a later authenticated-encryption layer rather than
+in the basic mode adapters added here.
 
 ### Stream-cipher example
 
@@ -522,7 +521,7 @@ assert_eq!(plaintext, b"\x2A");
 The same byte-oriented APIs work directly on file contents: read the file into
 a byte buffer, call `encrypt_bytes` / `decrypt_bytes`, and write the returned
 buffer back out. `RSA` is the only scheme with RFC/NIST message formatting
-today; the other public-key schemes use explicit crate-defined wrappers and
+the other public-key schemes use explicit crate-defined wrappers and
 serialization, which is documented in [ASYMMETRIC.md](ASYMMETRIC.md).
 
 There is also a simple latency tool for the public-key layer:
@@ -537,7 +536,7 @@ to wait for ElGamal parameter generation on larger inputs.
 Add `--skip-dsa` if you want to exclude the DSA keygen/sign/verify timings from
 the same run.
 
-Pass a larger bit length (for example `2048`) to probe the current bigint
+Pass a larger bit length (for example `2048`) to probe the in-tree bigint
 backend at practical sizes. This is the quickest way to decide whether the
 in-tree bigint backend is still acceptable or whether it is time to swap to
 `num-bigint`.
@@ -619,15 +618,15 @@ path for the same key and input.
 
 - No `unsafe`.
 - No hardware AES intrinsics in the main AES implementation; keeping the core
-  portable and safe matters on every processor family, not just the current
-  benchmark host.
+  portable and safe matters on every processor family, not just one benchmark
+  host.
 - No heap allocation inside block encrypt/decrypt paths.
 - Benchmark and test coverage are tracked in [ANALYSIS.md](ANALYSIS.md).
 - Reference PDFs used during implementation live in `pubs/`.
 
 ## Local PDFs
 
-The `pubs/` directory now carries one or more local PDFs for every cipher
+The `pubs/` directory carries one or more local PDFs for every cipher
 family and supporting primitive covered in this repository:
 
 - AES: `fips197.pdf`, `boyar-peralta-2011-a-depth-16-circuit-for-the-aes-s-box.pdf`

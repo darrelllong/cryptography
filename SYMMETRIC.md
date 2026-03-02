@@ -82,7 +82,7 @@ These provide integrity and authenticity, not signatures or non-repudiation.
 
 ## CSPRNGs
 
-The crate currently includes:
+Implemented generators:
 
 - `BlumBlumShub`
 - `BlumMicali`
@@ -148,7 +148,7 @@ The throughput story is tracked by:
 - `cipher_bench` for broad family coverage
 - `aes_bench` for focused AES comparisons
 
-Representative current figures on this host:
+Representative figures on this host:
 
 | Primitive | Throughput |
 |-----------|-----------:|
@@ -173,6 +173,5 @@ two families.
 
 ## References
 
-This repository keeps the primary standards and papers in `pubs/`. The
-top-level [README.md](README.md) remains the canonical BibTeX index.
-
+The primary standards and papers are stored in `pubs/`. The BibTeX index is in
+[README.md](README.md).

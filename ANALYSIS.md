@@ -1,7 +1,6 @@
 # ANALYSIS
 
-This repository now has two focused technical analyses instead of one mixed
-document:
+This top-level index points to two focused technical analyses:
 
 - [SYMMETRIC.md](SYMMETRIC.md) covers block ciphers, stream ciphers, modes,
   hashes, MACs, CSPRNGs, and the symmetric benchmark story.
@@ -9,8 +8,7 @@ document:
   primitives, standards-based and crate-defined wrappers, serialization, and
   public-key latency.
 
-This top-level file stays as the short overview so the repository has one place
-to answer three questions quickly:
+This top-level file is the short overview for three quick questions:
 
 1. what is implemented,
 2. how it is validated,
@@ -18,7 +16,7 @@ to answer three questions quickly:
 
 ## Shared Structure
 
-The crate is split into four major implementation areas:
+The crate has four major implementation areas:
 
 - `src/ciphers/`: symmetric block and stream ciphers
 - `src/modes/`: reusable block-cipher modes and AEAD-adjacent wrappers
@@ -45,7 +43,7 @@ that materially improves interoperability.
 
 ## Coverage
 
-Validation is split into three lanes:
+Validation has three main lanes:
 
 - correctness tests in `cargo test`
 - focused interoperability checks against OpenSSL where real standards exist
@@ -66,7 +64,7 @@ It is intentionally treated as a research sidecar, not as evidence that any
 implemented primitive is broken. The published runs so far remain effectively
 at chance on held-out data.
 
-For the current model families, commands, and result summaries, see:
+For model families, commands, and result summaries, see:
 
 - [README.md](README.md)
 - [ml/README.md](ml/README.md)

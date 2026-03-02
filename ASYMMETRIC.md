@@ -19,7 +19,7 @@ The public-key layer is built on:
 
 The in-tree bigint backend stores `u64` limbs in little-endian limb order and
 uses Montgomery multiplication for repeated modular arithmetic under odd
-moduli. That is the common case for every currently implemented public-key
+moduli. That is the common case for every implemented public-key
 scheme here.
 
 The design goal is:
@@ -74,7 +74,7 @@ Wrapper layers:
 - `RsaOaep<H>` for `RSAES-OAEP`
 - `RsaPss<H>` for `RSASSA-PSS`
 
-Every implemented scheme now has:
+Every implemented scheme has:
 
 - explicit key construction from mathematical parameters
 - built-in key generation
@@ -157,7 +157,7 @@ Core arithmetic:
 The key-generation path uses a prime-order subgroup construction instead of the
 older safe-prime search. A safe prime is a modulus of the form `p = 2q + 1`
 with `q` prime; it gives simple subgroup structure, but searching for those
-moduli is much slower than generating `p = kq + 1` directly. The current
+moduli is much slower than generating `p = kq + 1` directly. The
 implementation keeps the subgroup structure explicit while avoiding that
 pathological key-generation cost.
 
@@ -201,7 +201,7 @@ the leftmost `N = \mathrm{bits}(q)` bits before signing and verification,
 matching the Digital Signature Standard's treatment of hash outputs that are
 wider than the subgroup order.
 
-For generated keys, this crate uses
+For generated keys, the implementation uses
 
 ```math
 N = \mathrm{clamp}(\lfloor L / 4 \rfloor, 16, 256)
@@ -252,7 +252,7 @@ c = m^2 \bmod n,\qquad n = pq
 
 Decryption computes square roots modulo `p` and `q`, then recombines them with
 the Chinese remainder theorem to recover the four square roots modulo `n`.
-Because plain Rabin is ambiguous, this crate uses a tagged-message variant: the
+Because plain Rabin is ambiguous, the implementation uses a tagged-message variant: the
 tag is carried inside the encoded plaintext and is used to select the intended
 root deterministically at decrypt time.
 
@@ -386,7 +386,7 @@ cargo run --release --bin bench_public_key -- 1024
 Add `--skip-elgamal` or `--skip-dsa` to trim the slower key-generation paths
 when you only want the RSA / Paillier / deterministic-primitives timings.
 
-Representative current 1024-bit latencies on this host:
+Representative 1024-bit latencies on this host:
 
 | Operation | Latency |
 |-----------|--------:|
@@ -440,5 +440,5 @@ not have matching encrypt/decrypt operations to plot:
 
 ## References
 
-The primary public-key papers and standards are stored in `pubs/`. The
-top-level [README.md](README.md) remains the canonical BibTeX index.
+The primary public-key papers and standards are stored in `pubs/`. The BibTeX
+index is in [README.md](README.md).
