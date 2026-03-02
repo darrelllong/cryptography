@@ -1,8 +1,10 @@
 //! Schmidt-Samoa public-key primitive (Katja Schmidt-Samoa, 2005).
 //!
-//! This is the raw arithmetic map from the companion Python code: explicit
-//! prime inputs, public modulus `n = p^2 q`, and private decryption exponent
-//! modulo `gamma = p q`. Padding and randomized wrappers come later.
+//! This keeps the Schmidt-Samoa arithmetic map from the companion Python code:
+//! explicit prime inputs, public modulus `n = p^2 q`, and private decryption
+//! exponent modulo `gamma = p q`. On top of that arithmetic core, the byte
+//! helpers serialize ciphertexts as single-field DER `INTEGER` payloads so the
+//! scheme can be used directly on byte strings.
 
 use core::fmt;
 
@@ -18,20 +20,20 @@ use crate::Csprng;
 const SCHMIDT_SAMOA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PUBLIC KEY";
 const SCHMIDT_SAMOA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PRIVATE KEY";
 
-/// Public key for the raw Schmidt-Samoa primitive.
+/// Public key for the Schmidt-Samoa primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SchmidtSamoaPublicKey {
     n: BigUint,
 }
 
-/// Private key for the raw Schmidt-Samoa primitive.
+/// Private key for the Schmidt-Samoa primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct SchmidtSamoaPrivateKey {
     d: BigUint,
     gamma: BigUint,
 }
 
-/// Namespace wrapper for the raw Schmidt-Samoa construction.
+/// Namespace wrapper for the Schmidt-Samoa construction.
 pub struct SchmidtSamoa;
 
 impl SchmidtSamoaPublicKey {
@@ -69,6 +71,13 @@ impl SchmidtSamoaPublicKey {
             return None;
         }
         Some(self.encrypt_raw(&message_int))
+    }
+
+    /// Encrypt a byte string and return the serialized ciphertext bytes.
+    #[must_use]
+    pub fn encrypt_bytes(&self, message: &[u8]) -> Option<Vec<u8>> {
+        let ciphertext = self.encrypt(message)?;
+        Some(encode_biguints(&[&ciphertext]))
     }
 
     /// Encode the public key in the crate-defined binary format.
@@ -146,6 +155,17 @@ impl SchmidtSamoaPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
+    }
+
+    /// Decrypt a byte-encoded ciphertext produced by [`SchmidtSamoaPublicKey::encrypt_bytes`].
+    #[must_use]
+    pub fn decrypt_bytes(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
+        let mut fields = decode_biguints(ciphertext)?.into_iter();
+        let value = fields.next()?;
+        if fields.next().is_some() {
+            return None;
+        }
+        Some(self.decrypt(&value))
     }
 
     /// Encode the private key in the crate-defined binary format.
@@ -383,5 +403,14 @@ mod tests {
             SchmidtSamoaPrivateKey::from_xml(&private_xml),
             Some(private)
         );
+    }
+
+    #[test]
+    fn byte_ciphertext_roundtrip() {
+        let p = BigUint::from_u64(3);
+        let q = BigUint::from_u64(5);
+        let (public, private) = SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
+        let ciphertext = public.encrypt_bytes(&[0x05]).expect("message fits");
+        assert_eq!(private.decrypt_bytes(&ciphertext), Some(vec![0x05]));
     }
 }

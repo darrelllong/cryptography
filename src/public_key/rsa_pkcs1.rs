@@ -14,7 +14,7 @@ use core::marker::PhantomData;
 
 use crate::hash::Digest;
 use crate::public_key::bigint::BigUint;
-use crate::{RsaPrivateKey, RsaPublicKey};
+use crate::{Csprng, RsaPrivateKey, RsaPublicKey};
 
 fn modulus_len_bytes(modulus: &BigUint) -> usize {
     modulus.bits().div_ceil(8)
@@ -98,6 +98,23 @@ impl<H: Digest> RsaOaep<H> {
         let encoded_int = os2ip(&encoded);
         let ciphertext = public.encrypt_raw(&encoded_int);
         i2osp(&ciphertext, k)
+    }
+
+    /// Encrypt one message using `RSAES-OAEP` with a caller-supplied CSPRNG.
+    ///
+    /// The deterministic `encrypt(..., seed)` entry point remains useful for
+    /// KATs and differential testing; this helper is the ergonomic path for
+    /// normal use.
+    #[must_use]
+    pub fn encrypt_rng<R: Csprng>(
+        public: &RsaPublicKey,
+        label: &[u8],
+        message: &[u8],
+        rng: &mut R,
+    ) -> Option<Vec<u8>> {
+        let mut seed = vec![0u8; H::OUTPUT_LEN];
+        rng.fill_bytes(&mut seed);
+        Self::encrypt(public, label, message, &seed)
     }
 
     /// Decrypt one `RSAES-OAEP` ciphertext.
@@ -200,6 +217,22 @@ impl<H: Digest> RsaPss<H> {
         i2osp(&signature_int, k)
     }
 
+    /// Sign one message using `RSASSA-PSS` with a fresh random salt.
+    ///
+    /// The deterministic `sign(..., salt)` variant remains for fixed-vector
+    /// testing; this helper matches the RNG-taking style of the other
+    /// randomized public-key wrappers in the crate.
+    #[must_use]
+    pub fn sign_rng<R: Csprng>(
+        private: &RsaPrivateKey,
+        message: &[u8],
+        rng: &mut R,
+    ) -> Option<Vec<u8>> {
+        let mut salt = vec![0u8; H::OUTPUT_LEN];
+        rng.fill_bytes(&mut salt);
+        Self::sign(private, message, &salt)
+    }
+
     /// Verify one `RSASSA-PSS` signature.
     #[must_use]
     pub fn verify(public: &RsaPublicKey, message: &[u8], signature: &[u8]) -> bool {
@@ -271,7 +304,7 @@ mod tests {
     use super::{RsaOaep, RsaPss};
     use crate::public_key::bigint::BigUint;
     use crate::public_key::rsa::Rsa;
-    use crate::Sha1;
+    use crate::{CtrDrbgAes256, Sha1};
 
     fn large_reference_key() -> (crate::RsaPublicKey, crate::RsaPrivateKey) {
         let p = BigUint::from_be_bytes(&[
@@ -326,5 +359,24 @@ mod tests {
         let (public, private) = large_reference_key();
         assert!(RsaPss::<Sha1>::sign(&private, b"abc", &[0x44; 26]).is_none());
         assert!(!RsaPss::<Sha1>::verify(&public, b"abc", &[0u8; 3]));
+    }
+
+    #[test]
+    fn oaep_encrypt_rng_roundtrip() {
+        let (public, private) = large_reference_key();
+        let mut drbg = CtrDrbgAes256::new(&[0x21; 48]);
+        let ciphertext =
+            RsaOaep::<Sha1>::encrypt_rng(&public, b"label", b"hello", &mut drbg).expect("OAEP");
+        let plaintext =
+            RsaOaep::<Sha1>::decrypt(&private, b"label", &ciphertext).expect("valid OAEP");
+        assert_eq!(plaintext, b"hello");
+    }
+
+    #[test]
+    fn pss_sign_rng_and_verify() {
+        let (public, private) = large_reference_key();
+        let mut drbg = CtrDrbgAes256::new(&[0x22; 48]);
+        let signature = RsaPss::<Sha1>::sign_rng(&private, b"abc", &mut drbg).expect("PSS");
+        assert!(RsaPss::<Sha1>::verify(&public, b"abc", &signature));
     }
 }

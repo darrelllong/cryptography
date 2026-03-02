@@ -1,10 +1,10 @@
 //! `ElGamal` public-key primitive (Taher `ElGamal`, 1985).
 //!
-//! This is the raw textbook construction from the companion Python code:
-//! explicit group parameters plus the bare multiplicative encrypt/decrypt
-//! transform. The usable wrapper below still keeps the scheme close to the
-//! teaching version, but its generated parameters use a prime-order subgroup
-//! rather than an extremely slow safe-prime search.
+//! This keeps the published `ElGamal` arithmetic map from the companion Python
+//! code: explicit group parameters plus the multiplicative encrypt/decrypt
+//! transform. The wrapper layer adds subgroup-aware key generation and
+//! byte-oriented ciphertext serialization while keeping the group arithmetic
+//! itself visible and auditable.
 
 use core::fmt;
 
@@ -20,7 +20,7 @@ use crate::Csprng;
 const ELGAMAL_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ELGAMAL PUBLIC KEY";
 const ELGAMAL_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ELGAMAL PRIVATE KEY";
 
-/// Public key for the raw `ElGamal` primitive.
+/// Public key for the `ElGamal` primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ElGamalPublicKey {
     p: BigUint,
@@ -29,7 +29,7 @@ pub struct ElGamalPublicKey {
     b: BigUint,
 }
 
-/// Private key for the raw `ElGamal` primitive.
+/// Private key for the `ElGamal` primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct ElGamalPrivateKey {
     p: BigUint,
@@ -44,7 +44,7 @@ pub struct ElGamalCiphertext {
     delta: BigUint,
 }
 
-/// Namespace wrapper for the raw `ElGamal` construction.
+/// Namespace wrapper for the `ElGamal` construction.
 pub struct ElGamal;
 
 impl ElGamalPublicKey {
@@ -121,6 +121,17 @@ impl ElGamalPublicKey {
         let message_int = BigUint::from_be_bytes(message);
         let ephemeral = random_nonzero_below(rng, &self.exponent_bound)?;
         self.encrypt_with_ephemeral(&message_int, &ephemeral)
+    }
+
+    /// Encrypt a byte string and return a serialized ciphertext blob.
+    ///
+    /// The serialized form is a DER `SEQUENCE` containing the `(gamma, delta)`
+    /// pair in order, so the byte-level API stays self-contained without
+    /// hiding the two-component `ElGamal` structure.
+    #[must_use]
+    pub fn encrypt_bytes<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<Vec<u8>> {
+        let ciphertext = self.encrypt(message, rng)?;
+        Some(ciphertext.to_binary())
     }
 
     /// Encode the public key in the crate-defined binary format.
@@ -258,6 +269,13 @@ impl ElGamalPrivateKey {
         self.decrypt_raw(ciphertext).to_be_bytes()
     }
 
+    /// Decrypt a byte-encoded ciphertext produced by [`ElGamalPublicKey::encrypt_bytes`].
+    #[must_use]
+    pub fn decrypt_bytes(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
+        let ciphertext = ElGamalCiphertext::from_binary(ciphertext)?;
+        Some(self.decrypt(&ciphertext))
+    }
+
     /// Encode the private key in the crate-defined binary format.
     #[must_use]
     pub fn to_binary(&self) -> Vec<u8> {
@@ -353,6 +371,24 @@ impl ElGamalCiphertext {
     #[must_use]
     pub fn delta(&self) -> &BigUint {
         &self.delta
+    }
+
+    /// Encode the ciphertext as a DER `SEQUENCE` of `(gamma, delta)`.
+    #[must_use]
+    pub fn to_binary(&self) -> Vec<u8> {
+        encode_biguints(&[&self.gamma, &self.delta])
+    }
+
+    /// Decode the ciphertext from the crate's binary `ElGamal` ciphertext form.
+    #[must_use]
+    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+        let mut fields = decode_biguints(blob)?.into_iter();
+        let gamma = fields.next()?;
+        let delta = fields.next()?;
+        if fields.next().is_some() || gamma.is_zero() || delta.is_zero() {
+            return None;
+        }
+        Some(Self { gamma, delta })
     }
 }
 
@@ -673,5 +709,20 @@ mod tests {
             .encrypt(&message, &mut enc_rng)
             .expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), message.to_vec());
+    }
+
+    #[test]
+    fn byte_ciphertext_roundtrip() {
+        let p = BigUint::from_u64(65_537);
+        let r = BigUint::from_u64(3);
+        let a = BigUint::from_u64(7);
+        let (public, private) =
+            ElGamal::from_secret_exponent(&p, &r, &a).expect("valid ElGamal key");
+        let mut drbg = CtrDrbgAes256::new(&[0x45; 48]);
+        let message = [0x12, 0x34];
+        let ciphertext = public
+            .encrypt_bytes(&message, &mut drbg)
+            .expect("message fits");
+        assert_eq!(private.decrypt_bytes(&ciphertext), Some(message.to_vec()));
     }
 }

@@ -1,9 +1,10 @@
 //! Paillier public-key primitive (Pascal Paillier, 1999).
 //!
-//! This keeps the raw arithmetic core from the companion Python code: the
+//! This keeps the Paillier arithmetic core from the companion Python code: the
 //! `L(x) = (x - 1) / n` map, the Carmichael-function private exponent, and the
-//! multiplicative encryption formula over `n^2`. Random key generation and
-//! message encoding stay in later layers.
+//! multiplicative encryption formula over `n^2`. The wrapper layer already
+//! handles nonce generation, byte conversion, and ciphertext serialization, so
+//! the homomorphic API stays usable without hiding the scheme's structure.
 
 use core::fmt;
 
@@ -19,14 +20,14 @@ use crate::Csprng;
 const PAILLIER_PUBLIC_LABEL: &str = "CRYPTOGRAPHY PAILLIER PUBLIC KEY";
 const PAILLIER_PRIVATE_LABEL: &str = "CRYPTOGRAPHY PAILLIER PRIVATE KEY";
 
-/// Public key for the raw Paillier primitive.
+/// Public key for the Paillier primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaillierPublicKey {
     n: BigUint,
     zeta: BigUint,
 }
 
-/// Private key for the raw Paillier primitive.
+/// Private key for the Paillier primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct PaillierPrivateKey {
     n: BigUint,
@@ -34,7 +35,7 @@ pub struct PaillierPrivateKey {
     u: BigUint,
 }
 
-/// Namespace wrapper for the raw Paillier construction.
+/// Namespace wrapper for the Paillier construction.
 pub struct Paillier;
 
 impl PaillierPublicKey {
@@ -86,6 +87,13 @@ impl PaillierPublicKey {
         let message_int = BigUint::from_be_bytes(message);
         let nonce = random_coprime_below(rng, &self.n, &self.n)?;
         self.encrypt_with_nonce(&message_int, &nonce)
+    }
+
+    /// Encrypt a byte string and return the serialized ciphertext bytes.
+    #[must_use]
+    pub fn encrypt_bytes<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<Vec<u8>> {
+        let ciphertext = self.encrypt(message, rng)?;
+        Some(encode_biguints(&[&ciphertext]))
     }
 
     /// Re-randomize an existing ciphertext without changing the plaintext.
@@ -210,6 +218,17 @@ impl PaillierPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
+    }
+
+    /// Decrypt a byte-encoded ciphertext produced by [`PaillierPublicKey::encrypt_bytes`].
+    #[must_use]
+    pub fn decrypt_bytes(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
+        let mut fields = decode_biguints(ciphertext)?.into_iter();
+        let value = fields.next()?;
+        if fields.next().is_some() {
+            return None;
+        }
+        Some(self.decrypt(&value))
     }
 
     /// Encode the private key in the crate-defined binary format.
@@ -568,5 +587,15 @@ mod tests {
             .encrypt(&message, &mut enc_rng)
             .expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), message.to_vec());
+    }
+
+    #[test]
+    fn byte_ciphertext_roundtrip() {
+        let mut drbg = CtrDrbgAes256::new(&[0x57; 48]);
+        let p = BigUint::from_u64(257);
+        let q = BigUint::from_u64(263);
+        let (public, private) = Paillier::from_primes(&p, &q).expect("valid key");
+        let ciphertext = public.encrypt_bytes(&[0x2a], &mut drbg).expect("message fits");
+        assert_eq!(private.decrypt_bytes(&ciphertext), Some(vec![0x2a]));
     }
 }

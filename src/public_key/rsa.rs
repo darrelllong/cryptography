@@ -1,9 +1,9 @@
 //! RSA public-key primitive (Rivest, Shamir, Adleman, 1978).
 //!
-//! This module intentionally implements only the raw trapdoor permutation from
-//! the companion Python code: key derivation from explicit primes plus raw
-//! modular exponentiation for encrypt/decrypt. Padding, encoding, and hybrid
-//! KEM/PKE framing are separate layers.
+//! This module exposes the core RSA trapdoor permutation from the companion
+//! Python code: key derivation from explicit primes plus modular exponentiation
+//! for encrypt/decrypt. Standards-based message formatting lives in
+//! `rsa_pkcs1`, and standard key containers live in `rsa_io`.
 
 use core::fmt;
 
@@ -13,14 +13,14 @@ use crate::public_key::primes::{
 };
 use crate::Csprng;
 
-/// Public key for the raw RSA primitive.
+/// Public key for the core RSA primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RsaPublicKey {
     e: BigUint,
     n: BigUint,
 }
 
-/// Private key for the raw RSA primitive.
+/// Private key for the core RSA primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct RsaPrivateKey {
     e: BigUint,
@@ -30,7 +30,7 @@ pub struct RsaPrivateKey {
     q: BigUint,
 }
 
-/// Namespace wrapper for the raw RSA construction.
+/// Namespace wrapper for the core RSA construction.
 pub struct Rsa;
 
 impl RsaPublicKey {

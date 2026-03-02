@@ -30,8 +30,11 @@ Supporting primitives:
 - Historical CSPRNGs: `BlumBlumShub`, `BlumMicali`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
-See [ANALYSIS.md](ANALYSIS.md) for algorithm notes, coverage, and the current
-benchmark numbers for this host.
+Documentation is split by domain:
+
+- [ANALYSIS.md](ANALYSIS.md): top-level overview, coverage, and experiment notes
+- [SYMMETRIC.md](SYMMETRIC.md): symmetric ciphers, modes, hashes, and throughput
+- [ASYMMETRIC.md](ASYMMETRIC.md): public-key primitives, wrappers, serialization, and latency
 
 ## HOWTO
 
@@ -338,22 +341,16 @@ construction.
 
 ## Public-Key How To
 
-The public-key module keeps the raw arithmetic primitives separate from the
-standards-based usage layer:
+The public-key module exposes three layers:
 
-- raw math: `Rsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
-- reusable arithmetic toolkit: `BigUint`, `BigInt`, and `MontgomeryCtx`
-- usable wrappers today:
-  - `RsaOaep<H>` and `RsaPss<H>`
-  - standard RSA key externalization via PKCS #1 / PKCS #8 / SPKI in DER or
-    PEM, plus an optional flat XML export/import for symmetry with the other
-    schemes
-  - crate-defined key externalization for `Cocks`, `ElGamal`, `Rabin`,
-    `Paillier`, and `SchmidtSamoa`: a DER `SEQUENCE` of `INTEGER`s, optionally
-    wrapped in a scheme-specific PEM label, plus the same fixed-schema XML form
-  - byte-oriented `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and
-    `SchmidtSamoa` encrypt/decrypt helpers
-  - built-in key generation for all of the implemented public-key schemes
+- core arithmetic primitives: `Rsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
+- shared arithmetic support: `BigUint`, `BigInt`, `MontgomeryCtx`
+- usable wrappers:
+  - `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA encryption/signatures
+  - standard RSA key externalization via PKCS #1 / PKCS #8 / SPKI in DER or PEM
+  - crate-defined DER/PEM/XML key externalization for the non-RSA schemes
+  - byte-to-byte encrypt/decrypt helpers for all implemented encryption-capable schemes
+  - built-in key generation for all implemented public-key schemes
   - Paillier helper operations: ciphertext addition and rerandomization
 
 Generate an RSA key pair from a CSPRNG:
@@ -429,11 +426,11 @@ assert_eq!(private_again, private);
 Encrypt and decrypt with `RSAES-OAEP`:
 
 ```rust
-use cryptography::{RsaOaep, Sha1};
+use cryptography::{CtrDrbgAes256, RsaOaep, Sha1};
 
-let oaep_seed = [0x11u8; 20];
+let mut drbg = CtrDrbgAes256::new(&[0x11; 48]);
 let ciphertext =
-    RsaOaep::<Sha1>::encrypt(&public, b"", b"hello", &oaep_seed).expect("OAEP");
+    RsaOaep::<Sha1>::encrypt_rng(&public, b"", b"hello", &mut drbg).expect("OAEP");
 let plaintext = RsaOaep::<Sha1>::decrypt(&private, b"", &ciphertext).expect("OAEP");
 
 assert_eq!(plaintext, b"hello");
@@ -442,10 +439,10 @@ assert_eq!(plaintext, b"hello");
 Sign and verify with `RSASSA-PSS`:
 
 ```rust
-use cryptography::{RsaPss, Sha256};
+use cryptography::{CtrDrbgAes256, RsaPss, Sha256};
 
-let salt = [0x22u8; 16];
-let signature = RsaPss::<Sha256>::sign(&private, b"message", &salt).expect("PSS");
+let mut drbg = CtrDrbgAes256::new(&[0x22; 48]);
+let signature = RsaPss::<Sha256>::sign_rng(&private, b"message", &mut drbg).expect("PSS");
 assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
 ```
 
@@ -456,15 +453,15 @@ use cryptography::{CtrDrbgAes256, ElGamal};
 
 let mut drbg = CtrDrbgAes256::new(&[0x33u8; 48]);
 let (public, private) = ElGamal::generate(&mut drbg, 256).expect("ElGamal key");
-let ciphertext = public.encrypt(b"hi", &mut drbg).expect("message fits in F_p");
-let plaintext = private.decrypt(&ciphertext);
+let ciphertext = public.encrypt_bytes(b"hi", &mut drbg).expect("message fits in F_p");
+let plaintext = private.decrypt_bytes(&ciphertext).expect("valid ciphertext");
 
 assert_eq!(plaintext, b"hi");
 ```
 
-The other schemes follow the same "raw primitive plus thin byte wrapper"
-pattern. For example, `Paillier` now has RNG-backed encryption,
-re-randomization, and ciphertext addition:
+The other schemes follow the same pattern: the arithmetic primitive stays
+available, and the usable layer exposes byte-to-byte helpers. `Paillier` also
+keeps its homomorphic operations visible:
 
 ```rust
 use cryptography::{BigUint, CtrDrbgAes256, Paillier};
@@ -483,16 +480,22 @@ let combined = public
 assert_eq!(private.decrypt(&combined), b"\x46");
 ```
 
-The same byte-oriented APIs work for file contents: read the file into a byte
-buffer, pass that buffer to the scheme wrapper, and write the returned bytes
-back out. `RSA` is the only scheme with an RFC/NIST padding layer today; the
-other public-key schemes intentionally expose thin crate-defined wrappers around
-their textbook primitives.
+If you want the ciphertext as bytes instead of a scheme-native integer or
+pair, use the dedicated byte-to-byte helpers:
 
-The raw primitives still expose the bare modular maps for direct comparison
-with the companion Python code. The wrapper layer is where standards-compliant
-formatting lives, and the Montgomery toolkit is where the fast odd-modulus
-arithmetic now lives.
+```rust
+let ciphertext = public
+    .encrypt_bytes(b"\x2A", &mut drbg)
+    .expect("message fits");
+let plaintext = private.decrypt_bytes(&ciphertext).expect("valid ciphertext");
+assert_eq!(plaintext, b"\x2A");
+```
+
+The same byte-oriented APIs work directly on file contents: read the file into
+a byte buffer, call `encrypt_bytes` / `decrypt_bytes`, and write the returned
+buffer back out. `RSA` is the only scheme with RFC/NIST message formatting
+today; the other public-key schemes use explicit crate-defined wrappers and
+serialization, which is documented in [ASYMMETRIC.md](ASYMMETRIC.md).
 
 There is also a simple latency tool for the public-key layer:
 

@@ -17,13 +17,13 @@ const TAG: u32 = 0x7c6d_6a7f;
 const RABIN_PUBLIC_LABEL: &str = "CRYPTOGRAPHY RABIN PUBLIC KEY";
 const RABIN_PRIVATE_LABEL: &str = "CRYPTOGRAPHY RABIN PRIVATE KEY";
 
-/// Public key for the raw Rabin primitive.
+/// Public key for the Rabin primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RabinPublicKey {
     n: BigUint,
 }
 
-/// Private key for the raw Rabin primitive.
+/// Private key for the Rabin primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct RabinPrivateKey {
     n: BigUint,
@@ -31,7 +31,7 @@ pub struct RabinPrivateKey {
     q: BigUint,
 }
 
-/// Namespace wrapper for the raw Rabin construction.
+/// Namespace wrapper for the Rabin construction.
 pub struct Rabin;
 
 impl RabinPublicKey {
@@ -56,6 +56,16 @@ impl RabinPublicKey {
     pub fn encrypt(&self, message: &[u8]) -> Option<BigUint> {
         let message_int = BigUint::from_be_bytes(message);
         self.encrypt_raw(&message_int)
+    }
+
+    /// Encrypt a byte string and serialize the ciphertext as bytes.
+    ///
+    /// The serialized form is the crate's single-`INTEGER` DER payload for
+    /// non-RSA public-key ciphertexts.
+    #[must_use]
+    pub fn encrypt_bytes(&self, message: &[u8]) -> Option<Vec<u8>> {
+        let ciphertext = self.encrypt(message)?;
+        Some(encode_biguints(&[&ciphertext]))
     }
 
     /// Encode the public key in the crate-defined binary format.
@@ -184,6 +194,17 @@ impl RabinPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Option<Vec<u8>> {
         Some(self.decrypt_raw(ciphertext)?.to_be_bytes())
+    }
+
+    /// Decrypt a byte-encoded ciphertext produced by [`RabinPublicKey::encrypt_bytes`].
+    #[must_use]
+    pub fn decrypt_bytes(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
+        let mut fields = decode_biguints(ciphertext)?.into_iter();
+        let value = fields.next()?;
+        if fields.next().is_some() {
+            return None;
+        }
+        self.decrypt(&value)
     }
 
     /// Encode the private key in the crate-defined binary format.
@@ -460,5 +481,13 @@ mod tests {
         );
         assert_eq!(RabinPublicKey::from_xml(&public_xml), Some(public));
         assert_eq!(RabinPrivateKey::from_xml(&private_xml), Some(private));
+    }
+
+    #[test]
+    fn byte_ciphertext_roundtrip() {
+        let (p, q) = reference_primes();
+        let (public, private) = Rabin::from_primes(&p, &q).expect("valid Rabin key");
+        let ciphertext = public.encrypt_bytes(&[0x01]).expect("message fits");
+        assert_eq!(private.decrypt_bytes(&ciphertext), Some(vec![0x01]));
     }
 }

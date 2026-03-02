@@ -6,7 +6,8 @@
 //! modular-arithmetic helpers. The goal is fidelity to the hand-written
 //! algorithms, not a replacement for industrial multiprecision libraries.
 //!
-//! The raw schemes remain available directly, and the wrapper layer now adds:
+//! The arithmetic primitives remain directly accessible, and the wrapper layer
+//! now adds:
 //! - `rsa_pkcs1` for OAEP encryption and PSS signatures
 //! - `rsa_io` for standard RSA key serialization (`PKCS #1`, `PKCS #8`,
 //!   `SPKI`) plus an optional flat XML export for symmetry with the other

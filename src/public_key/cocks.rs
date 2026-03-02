@@ -1,9 +1,10 @@
 //! Cocks's early public-key scheme (CESG memo, 1973).
 //!
-//! This is the raw arithmetic primitive from the companion Python code: no
-//! padding, no encoding, and no higher-level message framing. Callers are
-//! responsible for mapping messages into the integer domain expected by the
-//! scheme.
+//! This module keeps the published Cocks arithmetic map exactly as written in
+//! the companion Python code and layers a minimal byte-oriented interface on
+//! top of it. The arithmetic primitive remains available directly, while the
+//! byte helpers serialize ciphertext integers as single-field DER `INTEGER`
+//! sequences so callers can move ciphertexts around as bytes.
 
 use core::fmt;
 
@@ -17,20 +18,20 @@ use crate::Csprng;
 const COCKS_PUBLIC_LABEL: &str = "CRYPTOGRAPHY COCKS PUBLIC KEY";
 const COCKS_PRIVATE_LABEL: &str = "CRYPTOGRAPHY COCKS PRIVATE KEY";
 
-/// Public key for the raw Cocks primitive.
+/// Public key for the Cocks primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CocksPublicKey {
     n: BigUint,
 }
 
-/// Private key for the raw Cocks primitive.
+/// Private key for the Cocks primitive.
 #[derive(Clone, Eq, PartialEq)]
 pub struct CocksPrivateKey {
     pi: BigUint,
     q: BigUint,
 }
 
-/// Namespace wrapper for the raw Cocks construction.
+/// Namespace wrapper for the Cocks construction.
 pub struct Cocks;
 
 impl CocksPublicKey {
@@ -72,6 +73,18 @@ impl CocksPublicKey {
             return None;
         }
         Some(self.encrypt_raw(&message_int))
+    }
+
+    /// Encrypt a byte string and return the ciphertext as a byte string.
+    ///
+    /// The encoded ciphertext is the crate's standard one-`INTEGER` DER
+    /// payload for non-RSA public-key values. That keeps the byte-oriented
+    /// helper unambiguous for this specific scheme without changing the
+    /// underlying arithmetic map.
+    #[must_use]
+    pub fn encrypt_bytes(&self, message: &[u8]) -> Option<Vec<u8>> {
+        let ciphertext = self.encrypt(message)?;
+        Some(encode_biguints(&[&ciphertext]))
     }
 
     /// Encode the public key in the crate-defined binary format.
@@ -155,6 +168,17 @@ impl CocksPrivateKey {
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
+    }
+
+    /// Decrypt a byte-encoded ciphertext produced by [`CocksPublicKey::encrypt_bytes`].
+    #[must_use]
+    pub fn decrypt_bytes(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
+        let mut fields = decode_biguints(ciphertext)?.into_iter();
+        let value = fields.next()?;
+        if fields.next().is_some() {
+            return None;
+        }
+        Some(self.decrypt(&value))
     }
 
     /// Encode the private key in the crate-defined binary format.
@@ -373,5 +397,14 @@ mod tests {
         let private = CocksPrivateKey::from_binary(&private.to_binary()).expect("private binary");
         let ciphertext = public.encrypt(&message).expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), message.to_vec());
+    }
+
+    #[test]
+    fn byte_ciphertext_roundtrip() {
+        let p = BigUint::from_u64(13);
+        let q = BigUint::from_u64(23);
+        let (public, private) = Cocks::from_primes(&p, &q).expect("valid Cocks key");
+        let ciphertext = public.encrypt_bytes(&[0x0b]).expect("message fits public bound");
+        assert_eq!(private.decrypt_bytes(&ciphertext), Some(vec![0x0b]));
     }
 }
