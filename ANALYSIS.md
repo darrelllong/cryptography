@@ -151,8 +151,8 @@ trait shape, but they are not substitutes for modern DRBG deployments.
   `fips186-5`.
 - Implemented now: raw `Cocks`, `Rsa`, `ElGamal`, `Rabin`, `Paillier`, and
   `SchmidtSamoa`, plus `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA
-  encryption and signatures, plus byte-oriented wrappers for the remaining
-  schemes.
+  encryption and signatures, plus byte-oriented wrappers and teaching-sized
+  key generation for the remaining schemes.
 - Scope: the raw arithmetic primitives are still exposed directly, but all of
   the currently implemented schemes now also have a usable front door:
   standards-based RSA wrappers, and thin byte-oriented wrappers for `Cocks`,
@@ -183,7 +183,9 @@ protocol-safe framing. The current code is therefore best read as a reference
 implementation of the core trapdoor operations, with RSA as the first scheme
 that has a standards-compliant wrapper layer and the other schemes now exposed
 through deliberately thin "usable" wrappers that still stay close to the
-companion Python algorithms.
+companion Python algorithms. Paillier's wrapper also exposes the natural
+homomorphic helper operations (ciphertext addition and rerandomization) rather
+than hiding them.
 
 ---
 
@@ -215,7 +217,7 @@ the separate Criterion benchmark crate under `benchmarks/`.
 | HMAC | `Hmac<H>` | RFC / FIPS vectors, streaming equivalence, and OpenSSL cross-checks (`cargo test hash::hmac::tests`) | not benchmarked |
 | Modes | `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`, `Gcm`, `Gmac`, `Xts` | SP 800-38A/B/D vectors, OpenSSL XTS cross-checks, generic non-AES path test (`cargo test modes::tests`) | not benchmarked |
 | CSPRNGs | `BlumBlumShub`, `BlumMicali`, `CtrDrbgAes256` | reference sequences, byte-packing checks, and SP 800-90A CAVP KAT (`cargo test cprng::`) | not benchmarked |
-| Public-key primitives | `BigUint`, `BigInt`, `MontgomeryCtx`, `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, Montgomery regression tests, wrapper round-trips for every implemented scheme, RSA OAEP/PSS tests, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
+| Public-key primitives | `BigUint`, `BigInt`, `MontgomeryCtx`, `Cocks`, `Rsa`, `RsaOaep<H>`, `RsaPss<H>`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa` | focused raw-arithmetic KATs, Montgomery regression tests, wrapper round-trips and teaching keygen tests for every implemented scheme, RSA OAEP/PSS tests, and RSA/Paillier homomorphism tests (`cargo test public_key::`) | not benchmarked |
 
 ---
 

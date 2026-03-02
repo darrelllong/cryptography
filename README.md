@@ -343,6 +343,7 @@ standards-based usage layer:
   - byte-oriented `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and
     `SchmidtSamoa` encrypt/decrypt helpers
   - teaching-sized key generation for all of the implemented public-key schemes
+  - Paillier helper operations: ciphertext addition and rerandomization
 
 Generate a teaching-sized RSA key pair from a CSPRNG:
 
