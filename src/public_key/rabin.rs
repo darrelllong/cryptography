@@ -7,7 +7,8 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow};
+use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
+use crate::Csprng;
 
 const TAG: u32 = 0x7c6d_6a7f;
 
@@ -42,6 +43,13 @@ impl RabinPublicKey {
     pub fn encrypt_raw(&self, message: &BigUint) -> Option<BigUint> {
         let payload = tagged_payload(message, &self.n)?;
         Some(mod_pow(&payload, &BigUint::from_u64(2), &self.n))
+    }
+
+    /// Encrypt a byte string using the tagged Rabin variant.
+    #[must_use]
+    pub fn encrypt(&self, message: &[u8]) -> Option<BigUint> {
+        let message_int = BigUint::from_be_bytes(message);
+        self.encrypt_raw(&message_int)
     }
 }
 
@@ -113,6 +121,13 @@ impl RabinPrivateKey {
 
         None
     }
+
+    /// Decrypt a ciphertext and recover the original big-endian byte string
+    /// if one of the four roots carries the embedded tag.
+    #[must_use]
+    pub fn decrypt(&self, ciphertext: &BigUint) -> Option<Vec<u8>> {
+        Some(self.decrypt_raw(ciphertext)?.to_be_bytes())
+    }
 }
 
 impl fmt::Debug for RabinPrivateKey {
@@ -143,6 +158,34 @@ impl Rabin {
                 q: q.clone(),
             },
         ))
+    }
+
+    /// Generate a teaching-sized Rabin key pair with primes congruent to `3`
+    /// modulo `4`.
+    #[must_use]
+    pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(RabinPublicKey, RabinPrivateKey)> {
+        if bits < 4 {
+            return None;
+        }
+
+        let p_bits = bits / 2;
+        let q_bits = bits - p_bits;
+        loop {
+            let p = random_rabin_prime(rng, p_bits)?;
+            let q = random_rabin_prime(rng, q_bits)?;
+            if let Some(keypair) = Self::from_primes(&p, &q) {
+                return Some(keypair);
+            }
+        }
+    }
+}
+
+fn random_rabin_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
+    loop {
+        let candidate = random_probable_prime(rng, bits)?;
+        if candidate.rem_u64(4) == 3 {
+            return Some(candidate);
+        }
     }
 }
 
@@ -182,6 +225,7 @@ fn sub_mod(lhs: &BigUint, rhs: &BigUint, modulus: &BigUint) -> BigUint {
 mod tests {
     use super::Rabin;
     use crate::public_key::bigint::BigUint;
+    use crate::CtrDrbgAes256;
 
     fn reference_primes() -> (BigUint, BigUint) {
         (BigUint::from_u64(131_071), BigUint::from_u64(131_111))
@@ -237,5 +281,21 @@ mod tests {
         let p = BigUint::from_u64(131_071);
         let composite = BigUint::from_u64(21);
         assert!(Rabin::from_primes(&p, &composite).is_none());
+    }
+
+    #[test]
+    fn byte_wrapper_roundtrip() {
+        let (p, q) = reference_primes();
+        let (public, private) = Rabin::from_primes(&p, &q).expect("valid Rabin key");
+        let ciphertext = public.encrypt(&[0x01]).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), Some(vec![0x01]));
+    }
+
+    #[test]
+    fn generate_teaching_keypair() {
+        let mut drbg = CtrDrbgAes256::new(&[0x61; 48]);
+        let (public, private) = Rabin::generate(&mut drbg, 48).expect("Rabin key generation");
+        let ciphertext = public.encrypt(&[0x00]).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), Some(vec![0x00]));
     }
 }
