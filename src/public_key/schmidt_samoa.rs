@@ -1,6 +1,6 @@
 //! Schmidt-Samoa public-key primitive (Katja Schmidt-Samoa, 2005).
 //!
-//! This keeps the Schmidt-Samoa arithmetic map from the companion Python code:
+//! This keeps the Schmidt-Samoa arithmetic map from the reference Python code:
 //! explicit prime inputs, public modulus `n = p^2 q`, and private decryption
 //! exponent modulo `gamma = p q`. On top of that arithmetic core, the byte
 //! helpers serialize ciphertexts as single-field DER `INTEGER` payloads so the

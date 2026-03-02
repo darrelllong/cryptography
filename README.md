@@ -3,6 +3,18 @@
 Pure, safe, portable Rust implementations of classical and modern ciphers
 written directly from the published specifications.
 
+Project-wide implementation rules:
+
+- pure idiomatic Rust
+- no architecture intrinsics
+- no C/FFI escape hatches
+- as few dependencies as practical
+
+That policy applies to the symmetric, hash, CSPRNG, and public-key layers
+alike. The goal is to keep the code readable, portable, and auditable in one
+language, and to add a dependency only when it clearly buys real
+interoperability or maintenance value.
+
 Implemented families:
 
 - DES and Triple-DES

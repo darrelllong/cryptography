@@ -25,9 +25,21 @@ scheme here.
 The design goal is:
 
 - keep the arithmetic visible and auditable
-- make the scheme logic match the companion Python code
+- make the scheme logic match the reference Python code
 - keep open the option of swapping the arithmetic backend later if larger-key
   performance demands it
+
+The broader implementation policy matches the rest of the crate:
+
+- pure idiomatic Rust
+- no architecture intrinsics
+- no C/FFI escape hatches
+- minimal dependencies unless they clearly improve interoperability or
+  maintainability
+
+That is why the bigint and Montgomery code live in-tree, while XML parsing uses
+`quick-xml` and RSA key persistence uses standard DER/PEM structures where that
+buys real compatibility.
 
 ## Three-Level API
 

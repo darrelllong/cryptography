@@ -31,6 +31,18 @@ The public API keeps the same layering:
 - reusable support layers (modes, hashes, DRBGs, Montgomery arithmetic)
 - higher-level wrappers where the standards are clear
 
+The implementation policy is intentionally uniform across the crate:
+
+- pure idiomatic Rust
+- no architecture intrinsics
+- no C/FFI escape hatches
+- minimal dependencies unless a standard format or external interop clearly
+  justifies one
+
+That is why the repository keeps its own cipher, hash, DRBG, and bigint code
+in-tree, while still using standard external formats such as DER/PEM where
+that materially improves interoperability.
+
 ## Coverage
 
 Validation is split into three lanes:
@@ -66,4 +78,3 @@ For the current model families, commands, and result summaries, see:
   or DRBGs.
 - Read [ASYMMETRIC.md](ASYMMETRIC.md) when working with key generation,
   serialization, encryption/signature wrappers, or the bigint backend.
-

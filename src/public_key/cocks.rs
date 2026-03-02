@@ -3,7 +3,7 @@
 //! This predates RSA by five years and is historically important as the first
 //! public-key encryption construction described in the open literature later on.
 //! The module keeps the published Cocks arithmetic map exactly as written in
-//! the companion Python code and layers a minimal byte-oriented interface on
+//! the reference Python code and layers a byte-oriented interface on
 //! top of it. The arithmetic primitive remains available directly, while the
 //! byte helpers serialize ciphertext integers as single-field DER `INTEGER`
 //! sequences so callers can move ciphertexts around as bytes.

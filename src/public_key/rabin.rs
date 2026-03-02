@@ -1,6 +1,6 @@
 //! Rabin public-key primitive (Michael O. Rabin, 1979).
 //!
-//! This mirrors the companion Python code rather than the pure square map:
+//! This mirrors the reference Python code rather than the pure square map:
 //! encryption prepends a fixed CRC tag and adds `n / 2` before squaring so the
 //! decryptor can distinguish the intended square root among the four CRT roots.
 

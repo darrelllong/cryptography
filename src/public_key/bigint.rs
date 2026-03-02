@@ -3,7 +3,8 @@
 //! The representation uses little-endian `u64` limbs because the surrounding
 //! algorithms are naturally word-oriented. This is intentionally simple:
 //! schoolbook multiplication and bitwise long division are easy to audit and
-//! match the structure used in the reference Python code.
+//! match the structure used in the reference Python code, while keeping the
+//! public-key layer fully in Rust with no external arithmetic backend.
 
 use core::cmp::Ordering;
 

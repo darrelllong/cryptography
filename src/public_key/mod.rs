@@ -4,7 +4,8 @@
 //! schemes in the reference Python repository: a simple limb-based bigint
 //! representation, a reusable Montgomery toolkit, plus primality and
 //! modular-arithmetic helpers. The goal is fidelity to the hand-written
-//! algorithms, not a replacement for industrial multiprecision libraries.
+//! algorithms in pure idiomatic Rust, not a replacement for industrial
+//! multiprecision libraries or a wrapper around external C code.
 //!
 //! The public-key APIs are intentionally layered:
 //! - arithmetic maps such as `encrypt_raw` / `decrypt_raw`
@@ -22,6 +23,10 @@
 //! - internal `io` helpers for the crate-defined non-RSA key formats: a DER
 //!   `SEQUENCE` of positive `INTEGER`s, custom PEM armor, and the shared flat
 //!   XML form
+//!
+//! This follows the crate-wide design rule: keep the implementation in Rust,
+//! avoid intrinsics and FFI, and add dependencies only where they materially
+//! improve interoperability or maintenance.
 
 pub mod bigint;
 pub mod cocks;

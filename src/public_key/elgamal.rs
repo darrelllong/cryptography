@@ -1,6 +1,6 @@
 //! `ElGamal` public-key primitive (Taher `ElGamal`, 1985).
 //!
-//! This keeps the published `ElGamal` arithmetic map from the companion Python
+//! This keeps the published `ElGamal` arithmetic map from the reference Python
 //! code: explicit group parameters plus the multiplicative encrypt/decrypt
 //! transform. The wrapper layer adds subgroup-aware key generation and
 //! byte-oriented ciphertext serialization while keeping the group arithmetic
