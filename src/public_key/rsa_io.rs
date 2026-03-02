@@ -335,6 +335,7 @@ fn der_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
 
 fn der_len(len: usize) -> Vec<u8> {
     if len < 128 {
+        // DER short-form length: the length octet is the value itself.
         return vec![u8::try_from(len).expect("short DER length fits in u8")];
     }
 
@@ -361,6 +362,8 @@ fn der_octet_string(content: &[u8]) -> Vec<u8> {
 
 fn der_bit_string(content: &[u8]) -> Vec<u8> {
     let mut body = Vec::with_capacity(1 + content.len());
+    // DER BIT STRING prefixes the payload with the number of unused bits in
+    // the final octet. Zero means the payload ends on a byte boundary.
     body.push(0);
     body.extend_from_slice(content);
     der_tlv(0x03, &body)
@@ -390,6 +393,8 @@ fn der_integer_bytes(bytes: &[u8]) -> Vec<u8> {
         vec![0]
     };
 
+    // DER INTEGER is signed two's-complement, so prepend a zero byte when the
+    // high bit would otherwise mark the value as negative.
     if body[0] & 0x80 != 0 {
         body.insert(0, 0);
     }
@@ -421,8 +426,11 @@ impl<'a> DerReader<'a> {
         let first = *self.data.get(self.pos)?;
         self.pos += 1;
         let len = if first & 0x80 == 0 {
+            // DER short-form length.
             usize::from(first)
         } else {
+            // DER long-form length: the low seven bits say how many following
+            // octets encode the content length in big-endian order.
             let count = usize::from(first & 0x7f);
             if count == 0 || count > core::mem::size_of::<usize>() {
                 return None;
@@ -446,11 +454,14 @@ impl<'a> DerReader<'a> {
         if content.is_empty() {
             return None;
         }
+        // Negative DER INTEGER encodings are not valid for RSA key material.
         if content[0] & 0x80 != 0 {
             return None;
         }
 
         let body = if content.len() > 1 && content[0] == 0 {
+            // Positive DER INTEGERs may carry a sign-extension zero byte when
+            // the true high bit is set; strip that back off for BigUint.
             &content[1..]
         } else {
             content

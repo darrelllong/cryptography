@@ -523,6 +523,10 @@ impl BigUint {
         let mut quotient = Self::zero();
         let mut remainder = Self::zero();
 
+        // Bit-by-bit long division. `remainder` holds the partially
+        // reconstructed dividend prefix; each step shifts it left, appends the
+        // next source bit, and subtracts the divisor if the prefix is already
+        // large enough.
         for bit in (0..self.bits()).rev() {
             remainder.shl1();
             if self.bit(bit) {
@@ -555,8 +559,11 @@ impl BigUint {
     fn montgomery_mul_odd(lhs: &Self, rhs: &Self, modulus: &Self, n0_inv: u64) -> Self {
         debug_assert!(modulus.is_odd(), "Montgomery path requires an odd modulus");
         let width = modulus.limbs.len();
+        // `2 * width` limbs hold the schoolbook product. The extra two limbs
+        // are carry headroom so neither pass can run off the end.
         let mut workspace = vec![0u64; width * 2 + 2];
 
+        // First pass: accumulate the ordinary product `lhs * rhs`.
         for i in 0..width {
             let lhs_limb = lhs.limb_or_zero(i);
             let mut carry = 0u128;
@@ -578,6 +585,10 @@ impl BigUint {
             }
         }
 
+        // Second pass: Montgomery reduction. Choose `m` so the current low
+        // limb cancels modulo `2^64`, then add `m * modulus`. After `width`
+        // rounds, the low half is zero and the high half is the reduced
+        // Montgomery product.
         for i in 0..width {
             let m = workspace[i].wrapping_mul(n0_inv);
             let mut carry = 0u128;
@@ -603,6 +614,8 @@ impl BigUint {
             limbs: workspace[width..=(width * 2)].to_vec(),
         };
         out.normalize();
+        // Montgomery reduction leaves a value in `[0, 2n)`, so at most one
+        // subtraction is needed to return to the canonical residue range.
         if out >= *modulus {
             out.sub_assign_ref(modulus);
         }
@@ -620,10 +633,15 @@ impl MontgomeryCtx {
 
         let n0_inv = montgomery_n0_inv(modulus.limbs[0]);
 
+        // With `w` limbs, Montgomery arithmetic uses `R = 2^(64w)`. `R^2 mod
+        // n` is the standard conversion factor for entering the Montgomery
+        // domain.
         let mut r2 = BigUint::zero();
         r2.set_bit(modulus.limbs.len() * 128);
         let r2_mod = r2.modulo(modulus);
 
+        // `R mod n` is the Montgomery encoding of 1, stored so exponentiation
+        // can start its accumulator in the correct domain.
         let mut r = BigUint::zero();
         r.set_bit(modulus.limbs.len() * 64);
         let one_mont = r.modulo(modulus);
@@ -649,6 +667,8 @@ impl MontgomeryCtx {
             return BigUint::zero();
         }
 
+        // `a * R^2 * R^-1 = aR`, which is the Montgomery representation of
+        // the ordinary residue `a`.
         BigUint::montgomery_mul_odd(
             &value.modulo(&self.modulus),
             &self.r2_mod,
@@ -660,6 +680,8 @@ impl MontgomeryCtx {
     /// Convert a Montgomery residue back to the ordinary representation.
     #[must_use]
     pub fn decode(&self, value: &BigUint) -> BigUint {
+        // Multiplying by the ordinary value 1 applies the final `R^-1` factor
+        // and lands back in the usual residue class.
         BigUint::montgomery_mul_odd(value, &BigUint::one(), &self.modulus, self.n0_inv)
     }
 
@@ -690,6 +712,9 @@ impl MontgomeryCtx {
         }
 
         let one = BigUint::one();
+        // Stay in Montgomery form for the whole square-and-multiply loop:
+        // start from encoded 1, keep all intermediate powers encoded, then
+        // decode once at the end.
         let mut result = self.one_mont.clone();
         let mut power = self.encode(&base.modulo(&self.modulus));
 
@@ -706,6 +731,9 @@ impl MontgomeryCtx {
 
 impl Drop for BigUint {
     fn drop(&mut self) {
+        // BigUint backs private exponents, prime factors, and nonces in the
+        // public-key layer. Clear the limb buffer on drop so those values do
+        // not linger in freed heap memory.
         crate::ct::zeroize_slice(self.limbs.as_mut_slice());
     }
 }
@@ -717,6 +745,9 @@ fn low_u64(value: u128) -> u64 {
 
 fn montgomery_n0_inv(n0: u64) -> u64 {
     debug_assert!(n0 & 1 == 1, "Montgomery path requires an odd modulus");
+    // Newton iteration in Z_(2^64): each step doubles the number of correct
+    // low bits in the inverse of `n0`. Six iterations are enough to converge
+    // to the full 64-bit inverse, and Montgomery reduction wants `-n0^-1`.
     let mut inv = 1u64;
     for _ in 0..6 {
         inv = inv.wrapping_mul(2u64.wrapping_sub(n0.wrapping_mul(inv)));

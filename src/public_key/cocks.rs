@@ -406,7 +406,9 @@ mod tests {
         let p = BigUint::from_u64(13);
         let q = BigUint::from_u64(23);
         let (public, private) = Cocks::from_primes(&p, &q).expect("valid Cocks key");
-        let ciphertext = public.encrypt_bytes(&[0x0b]).expect("message fits public bound");
+        let ciphertext = public
+            .encrypt_bytes(&[0x0b])
+            .expect("message fits public bound");
         assert_eq!(private.decrypt_bytes(&ciphertext), Some(vec![0x0b]));
     }
 }

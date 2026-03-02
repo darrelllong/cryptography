@@ -53,8 +53,10 @@ impl RsaPublicKey {
 
     /// Apply the raw public operation `m^e mod n`.
     ///
-    /// Like the Python reference, this is the naked permutation. Callers are
-    /// responsible for mapping structured messages into the integer domain.
+    /// This is textbook RSA's deterministic trapdoor permutation. It performs
+    /// no padding or randomness, so equal messages produce equal ciphertexts;
+    /// that lack of semantic security is exactly why OAEP exists on top of the
+    /// raw arithmetic.
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         mod_pow(message, &self.e, &self.n)
@@ -152,7 +154,9 @@ impl Rsa {
     /// Derive a raw RSA key pair from explicit primes using the Python
     /// reference's default exponent search.
     ///
-    /// The reference starts at `2^16 + 1` and increments the power until it
+    /// The search starts at `2^16 + 1 = 65_537`, the standard sparse public
+    /// exponent: it is prime, has only two set bits, and therefore keeps the
+    /// public operation cheap. The loop then increments the power until it
     /// finds a value coprime to `lambda = lcm(p - 1, q - 1)`. This terminates
     /// quickly in practice because `lambda` has only finitely many prime
     /// factors, so some Fermat-like exponent in the sequence must be coprime
@@ -192,6 +196,9 @@ impl Rsa {
         bits: usize,
         exponent: &BigUint,
     ) -> Option<(RsaPublicKey, RsaPrivateKey)> {
+        // Below 32 total bits, the split primes become so small that the key
+        // space is trivially enumerable and the "search until invertible"
+        // exponent logic stops being meaningful as a cryptographic API.
         if bits < 32 {
             return None;
         }
@@ -211,6 +218,8 @@ impl Rsa {
     /// search.
     #[must_use]
     pub fn generate<R: Csprng>(rng: &mut R, bits: usize) -> Option<(RsaPublicKey, RsaPrivateKey)> {
+        // Match the explicit-exponent generator's floor for the same reason:
+        // below 32 bits the result is too small to be a meaningful RSA key.
         if bits < 32 {
             return None;
         }

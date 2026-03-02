@@ -21,6 +21,8 @@ fn modulus_len_bytes(modulus: &BigUint) -> usize {
 }
 
 fn mgf1<H: Digest>(seed: &[u8], out_len: usize) -> Vec<u8> {
+    // RFC 8017 MGF1: hash `seed || counter` for a 32-bit big-endian counter
+    // and concatenate blocks until enough mask bytes have been produced.
     let mut out = Vec::with_capacity(out_len);
     let mut counter = 0u32;
     while out.len() < out_len {
@@ -36,6 +38,7 @@ fn mgf1<H: Digest>(seed: &[u8], out_len: usize) -> Vec<u8> {
 }
 
 fn i2osp(value: &BigUint, len: usize) -> Option<Vec<u8>> {
+    // RFC 8017 I2OSP: fixed-width big-endian integer encoding.
     let bytes = value.to_be_bytes();
     if bytes.len() > len {
         return None;
@@ -46,6 +49,7 @@ fn i2osp(value: &BigUint, len: usize) -> Option<Vec<u8>> {
 }
 
 fn os2ip(bytes: &[u8]) -> BigUint {
+    // RFC 8017 OS2IP: big-endian octet string to non-negative integer.
     BigUint::from_be_bytes(bytes)
 }
 
@@ -73,11 +77,15 @@ impl<H: Digest> RsaOaep<H> {
 
         let l_hash = H::digest(label);
         let mut db = Vec::with_capacity(k - h_len - 1);
+        // RFC 8017: DB = lHash || PS || 0x01 || M, with PS sized so the full
+        // encoded message fits into `k` octets.
         db.extend_from_slice(&l_hash);
         db.resize(k - h_len - message.len() - 2, 0);
         db.push(0x01);
         db.extend_from_slice(message);
 
+        // OAEP cross-masks the two halves so neither the seed nor the data
+        // block can be recovered independently.
         let db_mask = mgf1::<H>(seed, k - h_len - 1);
         let mut masked_db = db;
         for (byte, mask) in masked_db.iter_mut().zip(db_mask.iter()) {
@@ -91,6 +99,8 @@ impl<H: Digest> RsaOaep<H> {
         }
 
         let mut encoded = Vec::with_capacity(k);
+        // RFC 8017 requires a leading zero octet so the encoded message is
+        // interpreted as an integer strictly below the modulus-width bound.
         encoded.push(0x00);
         encoded.extend_from_slice(&masked_seed);
         encoded.extend_from_slice(&masked_db);
@@ -146,6 +156,8 @@ impl<H: Digest> RsaOaep<H> {
         }
 
         let l_hash = H::digest(label);
+        // Full-scan OAEP validation: keep the whole parse branchless so a
+        // malformed ciphertext does not become a timing oracle.
         let mut saw_separator = 0u8;
         let mut bad_padding = u8::from(encoded[0] != 0);
         bad_padding |= u8::from(!crate::ct::constant_time_eq(&db[..h_len], &l_hash));
@@ -181,6 +193,8 @@ impl<H: Digest> RsaPss<H> {
     #[must_use]
     pub fn sign(private: &RsaPrivateKey, message: &[u8], salt: &[u8]) -> Option<Vec<u8>> {
         let k = modulus_len_bytes(private.modulus());
+        // RFC 8017 uses `emBits = modBits - 1` so the encoded representative
+        // is guaranteed to stay below the modulus.
         let em_bits = private.modulus().bits().saturating_sub(1);
         let em_len = em_bits.div_ceil(8);
         let h_len = H::OUTPUT_LEN;
@@ -189,6 +203,8 @@ impl<H: Digest> RsaPss<H> {
         }
 
         let m_hash = H::digest(message);
+        // RFC 8017 §9.1.1 step 5 prefixes eight zero octets before hashing the
+        // message hash and salt into `H`.
         let mut m_prime = vec![0u8; 8];
         m_prime.extend_from_slice(&m_hash);
         m_prime.extend_from_slice(salt);
@@ -210,6 +226,8 @@ impl<H: Digest> RsaPss<H> {
 
         let mut encoded = db;
         encoded.extend_from_slice(&h);
+        // RFC 8017 §9.1.1 ends the encoded message with the fixed trailer
+        // field 0xbc.
         encoded.push(0xbc);
 
         let encoded_int = os2ip(&encoded);
@@ -271,6 +289,9 @@ impl<H: Digest> RsaPss<H> {
             masked_db[0] &= 0xff_u8 >> unused_bits;
         }
 
+        // Full-scan PSS validation mirrors the OAEP approach: do not stop at
+        // the first malformed byte, because verification should not leak where
+        // the separator structure failed.
         let mut saw_separator = 0u8;
         let mut one_index = 0usize;
         for (idx, &byte) in masked_db.iter().enumerate() {

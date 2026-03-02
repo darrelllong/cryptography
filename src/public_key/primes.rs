@@ -86,6 +86,8 @@ pub fn mod_pow(base: &BigUint, exponent: &BigUint, modulus: &BigUint) -> BigUint
 fn decompose_n_minus_one(n: &BigUint) -> (BigUint, usize) {
     let mut odd_factor = n.sub_ref(&BigUint::one());
     let mut two_adic_exponent = 0usize;
+    // Write `n - 1 = d * 2^s` with `d` odd. Miller-Rabin uses `d` as the
+    // first exponent and then squares through the `2^s` chain.
     while !odd_factor.is_odd() {
         odd_factor.shr1();
         two_adic_exponent += 1;
@@ -103,6 +105,8 @@ fn is_witness(
     let n_minus_one = ctx.modulus().sub_ref(&one);
     let mut value = ctx.pow(base, odd_factor);
 
+    // Miller-Rabin witness test: a non-trivial square root of 1 proves
+    // compositeness, and failing to end at 1 is the usual Fermat backstop.
     for _ in 0..two_adic_exponent {
         let next = ctx.square(&value);
         if next == one && value != one && value != n_minus_one {
@@ -134,6 +138,8 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         let prime = u64::from(prime);
         let remainder = candidate.rem_u64(prime);
         if remainder == 0 {
+            // A small prime divides itself; this preserves that case without
+            // allocating a temporary BigUint for each sieve entry.
             if candidate.bits() <= 10 && candidate.rem_u64(1u64 << 10) == prime {
                 return true;
             }
@@ -178,6 +184,9 @@ pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option
 
     loop {
         rng.fill_bytes(&mut bytes);
+        // Rejection sampling from the next power-of-two range. The buffer is
+        // big-endian, so masking byte 0 constrains only the most significant
+        // partial byte and keeps the candidate below `2^bits`.
         bytes[0] &= top_mask;
         let candidate = BigUint::from_be_bytes(&bytes);
         crate::ct::zeroize_slice(bytes.as_mut_slice());
@@ -231,6 +240,8 @@ pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigU
     loop {
         rng.fill_bytes(&mut bytes);
         bytes[0] &= top_mask;
+        // Force the requested bit length by setting the top significant bit,
+        // then force oddness because every even candidate above 2 is composite.
         bytes[0] |= 1u8 << top_bit;
         let last = bytes.len() - 1;
         bytes[last] |= 1;
@@ -255,6 +266,8 @@ pub fn mod_inverse(a: &BigUint, n: &BigUint) -> Option<BigUint> {
     let mut r = n.clone();
     let mut new_r = a.modulo(n);
 
+    // Extended Euclid. If the gcd ends at 1, the tracked coefficient `t`
+    // satisfies `t * a ≡ 1 (mod n)` and is therefore the modular inverse.
     while !new_r.is_zero() {
         let (quotient, remainder) = r.div_rem(&new_r);
         let next_t = t.sub_ref(&new_t.mul_biguint_ref(&quotient));

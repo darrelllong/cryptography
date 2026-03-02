@@ -78,9 +78,9 @@ impl ElGamalPublicKey {
 
     /// Encrypt with an explicit ephemeral exponent `k`.
     ///
-    /// The reference implementation chooses `k` randomly; this lower-level
-    /// entry point takes it explicitly so callers can separate arithmetic from
-    /// randomness when they need deterministic control.
+    /// Textbook `ElGamal` uses `k` as the per-message randomizer. This
+    /// lower-level entry point keeps it explicit so callers can separate the
+    /// arithmetic from the randomness when they need deterministic control.
     #[must_use]
     pub fn encrypt_with_ephemeral(
         &self,
@@ -247,10 +247,10 @@ impl ElGamalPrivateKey {
 
     /// Decrypt the raw ciphertext.
     ///
-    /// This uses Fermat's little theorem instead of an explicit modular
-    /// inverse: for generated keys the exponent reduces to `q - a` inside the
-    /// order-`q` subgroup, while caller-supplied keys conservatively fall back
-    /// to `p - 1 - a`.
+    /// This avoids an explicit modular inverse by multiplying `delta` by
+    /// `gamma^(q-a)` (or conservatively `gamma^(p-1-a)` when the subgroup
+    /// order is unknown). Inside the order-`q` subgroup,
+    /// `gamma^(q-a) * delta = g^(k(q-a)) * m * g^(ak) = m`.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &ElGamalCiphertext) -> BigUint {
         let exponent = self.exponent_modulus.sub_ref(&self.a);
@@ -411,6 +411,9 @@ impl ElGamal {
         }
 
         let p_minus_one = prime.sub_ref(&BigUint::one());
+        // `a = 0` makes `b = r^a = 1`, and `a = p - 1` does the same by
+        // Fermat. Both give a trivially useless public key, so the secret must
+        // live strictly inside the non-zero exponent range.
         if secret.is_zero() || secret >= &p_minus_one {
             return None;
         }
@@ -503,6 +506,8 @@ fn random_even_with_bits<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint>
         bytes[0] &= top_mask;
         bytes[0] |= 1u8 << top_bit;
         let last = bytes.len() - 1;
+        // Keep the cofactor even so `p - 1 = kq` has the usual DSA-style
+        // factorization with an explicit factor of two.
         bytes[last] &= !1;
         let candidate = BigUint::from_be_bytes(&bytes);
         // The resulting cofactor is public, but clearing the temporary random
@@ -525,6 +530,9 @@ fn find_subgroup_generator<R: Csprng>(
     loop {
         let candidate = random_nonzero_below(rng, &upper)
             .expect("prime > 2 leaves a non-zero subgroup-generator search range");
+        // Raising to the cofactor projects a random unit into the order-`q`
+        // subgroup because `(candidate^cofactor)^q = candidate^(p-1) = 1`.
+        // The only bad case is landing on the identity.
         let generator = mod_pow(&candidate, cofactor, prime);
         if generator != one {
             return Some(generator);

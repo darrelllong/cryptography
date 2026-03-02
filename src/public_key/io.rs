@@ -87,6 +87,8 @@ pub(crate) fn decode_biguints(input: &[u8]) -> Option<Vec<BigUint>> {
 
 fn der_integer_bytes(value: &BigUint) -> Vec<u8> {
     let mut bytes = value.to_be_bytes();
+    // DER INTEGER uses signed two's-complement, so a leading 1 bit would make
+    // the value look negative. Prepend a zero byte to keep it positive.
     if bytes.first().is_some_and(|byte| byte & 0x80 != 0) {
         bytes.insert(0, 0);
     }
@@ -97,11 +99,15 @@ fn decode_der_biguint(field: &[u8]) -> Option<BigUint> {
     if field.is_empty() {
         return None;
     }
+    // Negative DER INTEGER encodings are not valid for these key fields.
     if field[0] & 0x80 != 0 {
         return None;
     }
 
     let body = if field.len() > 1 && field[0] == 0 {
+        // DER requires the shortest positive encoding: a leading zero is
+        // allowed only when it prevents the next byte from being interpreted
+        // as a sign bit.
         if field[1] & 0x80 == 0 {
             return None;
         }
@@ -115,10 +121,13 @@ fn decode_der_biguint(field: &[u8]) -> Option<BigUint> {
 
 fn encode_der_len(len: usize, out: &mut Vec<u8>) {
     if len < 0x80 {
+        // Short-form DER length.
         out.push(u8::try_from(len).expect("short DER length fits in u8"));
         return;
     }
 
+    // Long-form DER length: high bit set, remaining bits = number of length
+    // octets that follow.
     let be = len.to_be_bytes();
     let first_nonzero = be
         .iter()
@@ -132,9 +141,12 @@ fn encode_der_len(len: usize, out: &mut Vec<u8>) {
 fn decode_der_len(input: &[u8]) -> Option<(usize, usize)> {
     let first = *input.first()?;
     if first & 0x80 == 0 {
+        // Short-form DER length.
         return Some((usize::from(first), 1));
     }
 
+    // Long-form DER length. The low 7 bits say how many big-endian length
+    // octets follow.
     let count = usize::from(first & 0x7f);
     if count == 0 {
         return None;

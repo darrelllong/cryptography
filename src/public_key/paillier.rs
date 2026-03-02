@@ -21,6 +21,10 @@ const PAILLIER_PUBLIC_LABEL: &str = "CRYPTOGRAPHY PAILLIER PUBLIC KEY";
 const PAILLIER_PRIVATE_LABEL: &str = "CRYPTOGRAPHY PAILLIER PRIVATE KEY";
 
 /// Public key for the Paillier primitive.
+///
+/// `zeta` is the public encryption base. This implementation uses `n + 1`,
+/// the standard simple choice that makes the decryption algebra especially
+/// direct.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaillierPublicKey {
     n: BigUint,
@@ -28,6 +32,10 @@ pub struct PaillierPublicKey {
 }
 
 /// Private key for the Paillier primitive.
+///
+/// `u` is the precomputed inverse of the decryption multiplier
+/// `L(zeta^lambda mod n^2)` modulo `n`, stored so decryption does not have to
+/// recompute it for every ciphertext.
 #[derive(Clone, Eq, PartialEq)]
 pub struct PaillierPrivateKey {
     n: BigUint,
@@ -59,8 +67,10 @@ impl PaillierPublicKey {
 
     /// Encrypt with an explicit nonce `r`.
     ///
-    /// The Python reference chooses `r` randomly from `Z_n^*`; this raw layer
-    /// takes it explicitly until a higher-level RNG/keygen API is added.
+    /// Paillier encryption is `c = zeta^m * r^n mod n^2`. The nonce `r` must
+    /// be drawn from `Z_n^*`; the higher-level `encrypt(...)` helper samples
+    /// it internally, while this entry point keeps it explicit for
+    /// deterministic tests and arithmetic cross-checks.
     #[must_use]
     pub fn encrypt_with_nonce(&self, message: &BigUint, nonce: &BigUint) -> Option<BigUint> {
         if message >= &self.n {
@@ -98,6 +108,9 @@ impl PaillierPublicKey {
 
     /// Re-randomize an existing ciphertext without changing the plaintext.
     ///
+    /// Multiplying by `r^n mod n^2` is an encryption of zero, so the
+    /// plaintext is preserved while the random factor is refreshed.
+    ///
     /// Returns `None` if the input is not in the ciphertext range `[0, n^2)`.
     #[must_use]
     pub fn rerandomize<R: Csprng>(&self, ciphertext: &BigUint, rng: &mut R) -> Option<BigUint> {
@@ -116,6 +129,9 @@ impl PaillierPublicKey {
     }
 
     /// Combine two ciphertexts so that decryption adds the plaintexts modulo `n`.
+    ///
+    /// This is the defining Paillier homomorphism:
+    /// `Enc(m1) * Enc(m2) = Enc(m1 + m2 mod n)`.
     ///
     /// Returns `None` if either input is not in the ciphertext range `[0, n^2)`.
     #[must_use]
@@ -205,6 +221,9 @@ impl PaillierPrivateKey {
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         let n_squared = self.n.mul_ref(&self.n);
         let value = mod_pow(ciphertext, &self.lambda, &n_squared);
+        // Valid Paillier ciphertexts produce values congruent to 1 mod n here,
+        // so `L(value)` is defined and extracts the linear term that still
+        // carries the plaintext.
         let lifted = paillier_l(&value, &self.n);
         if let Some(ctx) = MontgomeryCtx::new(&self.n) {
             ctx.mul(&lifted, &self.u)
@@ -372,6 +391,8 @@ impl Paillier {
 }
 
 fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
+    // The Paillier `L` function is only defined on values of the form
+    // `1 + k*n`; valid decryption inputs satisfy exactly that congruence.
     let shifted = value.sub_ref(&BigUint::one());
     let (quotient, remainder) = shifted.div_rem(modulus);
     debug_assert!(
@@ -593,7 +614,9 @@ mod tests {
         let p = BigUint::from_u64(257);
         let q = BigUint::from_u64(263);
         let (public, private) = Paillier::from_primes(&p, &q).expect("valid key");
-        let ciphertext = public.encrypt_bytes(&[0x2a], &mut drbg).expect("message fits");
+        let ciphertext = public
+            .encrypt_bytes(&[0x2a], &mut drbg)
+            .expect("message fits");
         assert_eq!(private.decrypt_bytes(&ciphertext), Some(vec![0x2a]));
     }
 }
