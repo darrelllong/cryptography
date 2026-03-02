@@ -338,8 +338,11 @@ standards-based usage layer:
 
 - raw math: `Rsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
 - reusable arithmetic toolkit: `BigUint`, `BigInt`, and `MontgomeryCtx`
-- usable wrappers today: `RsaOaep<H>`, `RsaPss<H>`, and the byte-oriented
-  `ElGamalPublicKey::encrypt(...)` / `ElGamalPrivateKey::decrypt(...)`
+- usable wrappers today:
+  - `RsaOaep<H>` and `RsaPss<H>`
+  - byte-oriented `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and
+    `SchmidtSamoa` encrypt/decrypt helpers
+  - teaching-sized key generation for all of the implemented public-key schemes
 
 Generate a teaching-sized RSA key pair from a CSPRNG:
 
@@ -385,6 +388,25 @@ let ciphertext = public.encrypt(b"hi", &mut drbg).expect("message fits in F_p");
 let plaintext = private.decrypt(&ciphertext);
 
 assert_eq!(plaintext, b"hi");
+```
+
+The other schemes follow the same "raw primitive plus thin byte wrapper"
+pattern. For example, `Paillier` now has RNG-backed encryption,
+re-randomization, and ciphertext addition:
+
+```rust
+use cryptography::{BigUint, CtrDrbgAes256, Paillier};
+
+let p = BigUint::from_u64(257);
+let q = BigUint::from_u64(263);
+let (public, private) = Paillier::from_primes(&p, &q).expect("Paillier key");
+let mut drbg = CtrDrbgAes256::new(&[0x52u8; 48]);
+
+let left = public.encrypt(b"\x12", &mut drbg).expect("message fits");
+let right = public.encrypt(b"\x34", &mut drbg).expect("message fits");
+let combined = public.add_ciphertexts(&left, &right);
+
+assert_eq!(private.decrypt(&combined), b"\x46");
 ```
 
 The raw primitives still expose the bare modular maps for teaching and direct
