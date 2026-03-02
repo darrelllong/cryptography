@@ -14,7 +14,6 @@ use core::marker::PhantomData;
 
 use crate::hash::Digest;
 use crate::public_key::bigint::BigUint;
-use crate::public_key::primes::mod_pow;
 use crate::{RsaPrivateKey, RsaPublicKey};
 
 fn modulus_len_bytes(modulus: &BigUint) -> usize {
@@ -192,10 +191,10 @@ impl<H: Digest> RsaPss<H> {
 
         let mut encoded = db;
         encoded.extend_from_slice(&h);
-        encoded.push(0xbc);
+       encoded.push(0xbc);
 
         let encoded_int = os2ip(&encoded);
-        let signature_int = mod_pow(&encoded_int, private.exponent(), private.modulus());
+        let signature_int = private.decrypt_raw(&encoded_int);
         i2osp(&signature_int, k)
     }
 

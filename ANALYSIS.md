@@ -201,29 +201,30 @@ lands at roughly:
 
 | Operation | Latency |
 |-----------|---------|
-| RSA-1024 keygen | 32.4 ms |
+| RSA-1024 keygen | 27.2 ms |
 | RSA-1024 OAEP encrypt | 0.065 ms |
-| RSA-1024 OAEP decrypt | 0.950 ms |
-| RSA-1024 PSS sign | 0.691 ms |
-| RSA-1024 PSS verify | 0.050 ms |
-| ElGamal-1024 keygen | 172 ms |
-| ElGamal-1024 encrypt | 1.41 ms |
-| ElGamal-1024 decrypt | 0.73 ms |
-| Paillier-1024 keygen | 15.2 ms |
-| Paillier-1024 encrypt | 6.70 ms |
-| Paillier-1024 decrypt | 2.29 ms |
-| Paillier-1024 rerandomize | 4.25 ms |
+| RSA-1024 OAEP decrypt | 1.01 ms |
+| RSA-1024 PSS sign | 1.00 ms |
+| RSA-1024 PSS verify | 0.057 ms |
+| ElGamal-1024 keygen | 134 ms |
+| ElGamal-1024 encrypt | 1.62 ms |
+| ElGamal-1024 decrypt | 0.83 ms |
+| Paillier-1024 keygen | 12.5 ms |
+| Paillier-1024 encrypt | 6.21 ms |
+| Paillier-1024 decrypt | 2.24 ms |
+| Paillier-1024 rerandomize | 4.12 ms |
 | Paillier-1024 ciphertext add | 0.078 ms |
 
 That split is informative: Montgomery fixed the steady-state modular arithmetic,
 so the raw encrypt/decrypt/sign work is already usable at teaching sizes. The
 first ElGamal version paid a severe safe-prime-search penalty; the current
-subgroup-based generator (`p = kq + 1` with an order-`q` generator) brings the
-1024-bit keygen path back into the same rough latency class as the other
-teaching-sized schemes. A 2048-bit RSA run was still slow enough in the first
-key-generation stage that it was aborted after it had already made the point,
-so the current backend remains a reference implementation first and a practical
-large-key engine second.
+subgroup-based generator (`p = kq + 1` with an order-`q` generator) plus a
+larger small-prime sieve in the bigint Miller-Rabin path brings the 1024-bit
+keygen path back into the same rough latency class as the other teaching-sized
+schemes. A 2048-bit RSA run was still slow enough in the first key-generation
+stage that it was aborted after it had already made the point, so the current
+backend remains a reference implementation first and a practical large-key
+engine second.
 
 ---
 
