@@ -10,13 +10,13 @@ from pathlib import Path
 OUTPUT = Path(__file__).with_name("ec-key-agreement-radar.svg")
 
 SERIES = [
-    ("ECDH (P-256)", "#0f766e", [518.7, 265.7, 111_111.1]),
-    ("Edwards DH", "#1d4ed8", [700.8, 364.2, 823.0]),
+    ("ECDH (P-256)", "#0f766e", [495.5, 484.5, 13_320_899.2]),
+    ("Edwards DH", "#1d4ed8", [504.0, 1_006.0, 17_391_304.3]),
 ]
 LABELS = ["Keygen", "Agree", "Serialize"]
-SCALE_LABELS = [100, 1_000, 10_000, 100_000]
+SCALE_LABELS = [100, 1_000, 10_000, 1_000_000, 100_000_000]
 MIN_VALUE = 100.0
-MAX_VALUE = 100_000.0
+MAX_VALUE = 100_000_000.0
 
 BG_COLOR = "#fbf8f1"
 GRID_COLOR = "#c9c2b7"
@@ -119,7 +119,7 @@ def generate_svg() -> str:
         [
             "",
             '  <text class="label" x="20" y="526">EC Key-agreement Throughput (log scale)</text>',
-            '  <text class="small" x="20" y="544">Radial scale is operations/second, spanning 100 to 100,000</text>',
+        '  <text class="small" x="20" y="544">Radial scale is operations/second, spanning 100 to 100,000,000</text>',
             "</svg>",
         ]
     )

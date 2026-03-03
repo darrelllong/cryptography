@@ -73,6 +73,9 @@ directly. Level 1 remains useful for arithmetic tests and direct cross-checks.
 - `EdwardsElGamal` — Edwards-curve ElGamal encryption
 - `Ecies` — Elliptic Curve Integrated Encryption Scheme (ephemeral ECDH + AES-256-GCM)
 
+The Edwards arithmetic is generic over `TwistedEdwardsCurve`, but the only
+built-in named Edwards domain currently shipped in-tree is `ed25519()`.
+
 ### Wrapper layers
 
 - `RsaOaep<H>` for `RSAES-OAEP`
@@ -436,6 +439,9 @@ canonical 32-byte value on the built-in Ed25519 curve instead of a bare
 x-coordinate. That matches the way the Edwards side of the crate already treats
 points as compressed byte strings.
 
+The implementation is generic over `TwistedEdwardsCurve`, but the in-tree named
+fixture and benchmark path today is the built-in `ed25519()` domain.
+
 ### EC-ElGamal
 
 Reference: the ElGamal paper for the discrete-logarithm construction and SEC 1
@@ -514,6 +520,10 @@ As with the short-Weierstrass variant, the module exposes:
 The main distinction is representation: the Edwards wrapper uses compressed
 Edwards point encodings throughout, which makes ciphertext serialization more
 compact and keeps it aligned with the `Ed25519` / `EdDsa` side of the crate.
+
+As with `EdwardsDh`, the machinery accepts any caller-supplied
+`TwistedEdwardsCurve`, but the in-tree deterministic fixtures and benchmarks
+currently target the built-in `ed25519()` domain.
 
 ### ECIES
 
@@ -647,6 +657,10 @@ So this is the standards-conformant Edwards path, while `EdDsa` remains the
 more explicit curve-generic signature layer for callers who want direct scalar
 control.
 
+The test coverage for this module now includes the full RFC 8032 section 7.1
+Ed25519 vector set, along with strict parsing and rejection checks for malformed
+public keys and signatures.
+
 ## Byte-Oriented APIs
 
 The public-key wrappers now distinguish clearly between:
@@ -672,78 +686,108 @@ throughout the non-RSA key formats.
 
 ## Public-Key Performance
 
-Public-key timing is measured by:
+Public-key timing is measured with [pilot-bench](https://github.com/ascar-io/pilot-bench)
+driving `pilot_pk` through:
 
 ```text
-cargo run --release --bin bench_public_key -- 1024
+bash bench_all_pk_full.sh
 ```
 
-Add `--skip-elgamal` or `--skip-dsa` to trim the slower key-generation paths
-when you only want the RSA / Paillier / deterministic-primitives timings.
+The legacy `bench_public_key` binary remains useful as a fixed-iteration
+fallback, but the publication-facing numbers below come from Pilot and report
+milliseconds per operation, 95% confidence-interval half-width, and rounds
+required to hit the stop rule.
 
-Representative 1024-bit latencies on this host:
+### Finite-field public key (1024-bit)
 
-| Operation | Latency |
-|-----------|--------:|
-| RSA-1024 keygen | `24.675 ms` |
-| RSA-1024 OAEP encrypt | `0.071 ms` |
-| RSA-1024 OAEP decrypt | `1.115 ms` |
-| RSA-1024 PSS sign | `1.011 ms` |
-| RSA-1024 PSS verify | `0.050 ms` |
-| ElGamal-1024 keygen | `95.549 ms` |
-| ElGamal-1024 encrypt | `0.390 ms` |
-| ElGamal-1024 decrypt | `0.195 ms` |
-| DSA-1024 keygen | `39.496 ms` |
-| DSA-1024 sign | `0.330 ms` |
-| DSA-1024 verify | `0.506 ms` |
-| Paillier-1024 keygen | `13.278 ms` |
-| Paillier-1024 encrypt | `5.976 ms` |
-| Paillier-1024 decrypt | `2.211 ms` |
-| Paillier-1024 rerandomize | `3.869 ms` |
-| Paillier-1024 ciphertext add | `0.073 ms` |
-| Cocks-1024 keygen | `9.678 ms` |
-| Cocks-1024 encrypt | `0.785 ms` |
-| Cocks-1024 decrypt | `0.144 ms` |
-| Rabin-1024 keygen | `7.594 ms` |
-| Rabin-1024 encrypt | `0.039 ms` |
-| Rabin-1024 decrypt | `1.125 ms` |
-| Schmidt-Samoa-1024 keygen | `5.829 ms` |
-| Schmidt-Samoa-1024 encrypt | `0.686 ms` |
-| Schmidt-Samoa-1024 decrypt | `0.238 ms` |
-| ECDH (P-256) keygen | `1.928 ms` |
-| ECDH (P-256) agree | `3.763 ms` |
-| ECDH (P-256) serialize | `0.009 ms` |
-| ECDSA (P-256) keygen | `1.879 ms` |
-| ECDSA (P-256) sign | `1.983 ms` |
-| ECDSA (P-256) verify | `3.592 ms` |
-| ECIES (P-256) keygen | `1.835 ms` |
-| ECIES (P-256) encrypt | `3.622 ms` |
-| ECIES (P-256) decrypt | `1.822 ms` |
-| EC ElGamal (P-256) keygen | `1.832 ms` |
-| EC ElGamal (P-256) encrypt | `3.766 ms` |
-| EC ElGamal (P-256) decrypt | `1.858 ms` |
-| Edwards DH (Ed25519) keygen | `1.427 ms` |
-| Edwards DH (Ed25519) agree | `2.746 ms` |
-| Edwards DH (Ed25519) serialize | `1.215 ms` |
-| Ed25519 keygen | `1.363 ms` |
-| Ed25519 sign | `1.361 ms` |
-| Ed25519 verify | `3.975 ms` |
-| Edwards ElGamal (Ed25519) keygen | `1.453 ms` |
-| Edwards ElGamal (Ed25519) encrypt | `2.976 ms` |
-| Edwards ElGamal (Ed25519) decrypt | `1.900 ms` |
+| Operation                        |   ms/op    |    ±CI     | Runs  |
+|----------------------------------|------------|------------|-------|
+| rsa_keygen_1024                  |      16.02 |   ±0.4013 |    43 |
+| rsa_encrypt_1024                 |    0.03228 | ±0.0002007 |    76 |
+| rsa_decrypt_1024                 |      0.681 |  ±0.02365 |    56 |
+| rsa_sign_1024                    |     0.6933 |  ±0.02252 |    90 |
+| rsa_verify_1024                  |     0.0324 | ±0.0005347 |    60 |
+| elgamal_keygen_1024              |      48.63 |   ±0.4083 |    30 |
+| elgamal_encrypt_1024             |     0.4124 | ±0.003134 |    60 |
+| elgamal_decrypt_1024             |     0.2212 | ±0.005175 |    33 |
+| dsa_keygen_1024                  |      54.07 |    ±1.199 |    30 |
+| dsa_sign_1024                    |       0.32 |  ±0.00196 |    53 |
+| dsa_verify_1024                  |     0.5129 | ±0.004096 |    99 |
+| paillier_keygen_1024             |      16.78 |  ±0.07887 |    96 |
+| paillier_encrypt_1024            |      6.383 |  ±0.03973 |    30 |
+| paillier_decrypt_1024            |      2.327 |   ±0.0179 |    34 |
+| paillier_rerandomize_1024        |      4.113 |  ±0.05597 |    47 |
+| paillier_add_1024                |    0.07652 | ±0.0005136 |    90 |
+| cocks_keygen_1024                |      13.63 |   ±0.3646 |    30 |
+| cocks_encrypt_1024               |     0.7711 | ±0.005889 |    60 |
+| cocks_decrypt_1024               |     0.1401 | ±0.008111 |    30 |
+| rabin_keygen_1024                |      20.79 |   ±0.0954 |    39 |
+| rabin_encrypt_1024               |    0.02683 | ±0.0002364 |    60 |
+| rabin_decrypt_1024               |      1.089 |  ±0.01946 |    48 |
+| schmidt_samoa_keygen_1024        |      6.333 |   ±0.1508 |    30 |
+| schmidt_samoa_encrypt_1024       |     0.7847 | ±0.009299 |    30 |
+| schmidt_samoa_decrypt_1024       |     0.2311 |  ±0.01224 |    30 |
 
-The table above is measured in milliseconds per operation. The radar chart
-below uses the reciprocal view — operations per second on a log scale — so the
-faster operations sit farther from the center.
+### RSA (2048-bit)
 
-The finite-field chart below plots encrypt/decrypt throughput for the
-integer-based public-key schemes. Signature-only schemes stay in the table
-because they do not have matching encrypt/decrypt operations to plot:
+| Operation                        |   ms/op    |    ±CI     | Runs  |
+|----------------------------------|------------|------------|-------|
+| rsa_keygen_2048                  |      160.8 |    ±6.852 |    30 |
+| rsa_encrypt_2048                 |      0.104 | ±0.003918 |    30 |
+| rsa_decrypt_2048                 |       4.97 |   ±0.1465 |   107 |
+| rsa_sign_2048                    |      5.139 |   ±0.3859 |    30 |
+| rsa_verify_2048                  |     0.1031 |   ±0.0016 |    60 |
+
+### ECDSA / ECDH (P-256)
+
+| Operation                        |   ms/op    |    ±CI     | Runs  |
+|----------------------------------|------------|------------|-------|
+| ecdsa_keygen                     |       2.04 |  ±0.07303 |    66 |
+| ecdsa_sign                       |      2.091 | ±0.009643 |    54 |
+| ecdsa_verify                     |      3.937 |  ±0.03526 |    30 |
+| ecdh_keygen                      |      2.018 |  ±0.05056 |    85 |
+| ecdh_agree                       |      2.064 |   ±0.1501 |    30 |
+| ecdh_serialize                   |  7.507e-05 | ±9.361e-06 |    56 |
+
+### ECIES / EC ElGamal (P-256)
+
+| Operation                        |   ms/op    |    ±CI     | Runs  |
+|----------------------------------|------------|------------|-------|
+| ecies_keygen                     |      2.034 |  ±0.06731 |    84 |
+| ecies_encrypt                    |      3.903 |  ±0.02181 |    93 |
+| ecies_decrypt                    |      1.962 |  ±0.01575 |    79 |
+| ec_elgamal_keygen                |      2.033 |  ±0.08416 |    60 |
+| ec_elgamal_encrypt               |      4.061 |  ±0.02283 |    94 |
+| ec_elgamal_decrypt               |      1.984 |  ±0.01803 |    30 |
+
+### Ed25519 / Edwards DH / Edwards ElGamal
+
+| Operation                        |   ms/op    |    ±CI     | Runs  |
+|----------------------------------|------------|------------|-------|
+| ed25519_keygen                   |      2.006 |  ±0.02327 |    30 |
+| ed25519_sign                     |      1.017 |  ±0.01166 |    33 |
+| ed25519_verify                   |      3.333 |  ±0.02346 |    30 |
+| edwards_dh_keygen                |      1.984 |   ±0.0103 |    57 |
+| edwards_dh_agree                 |      0.994 |  ±0.01259 |    30 |
+| edwards_dh_serialize             |   5.75e-05 | ±7.701e-06 |    30 |
+| edwards_elgamal_keygen           |      1.983 |  ±0.01137 |   174 |
+| edwards_elgamal_encrypt          |      2.084 |  ±0.01445 |    37 |
+| edwards_elgamal_decrypt          |      1.608 |  ±0.01821 |    30 |
+
+The tables above are measured in milliseconds per operation. The radar charts
+below use the reciprocal view, plotting operations per second on a log scale so
+the faster operations sit farther from the center.
+
+The finite-field chart plots 1024-bit encrypt/decrypt throughput for the
+integer-based public-key schemes. Signature-only and rerandomization/addition
+rows stay in the tables because they do not have matching encrypt/decrypt axes:
 
 ![Public-key encrypt/decrypt radar chart](assets/public-key-encdec-radar.svg)
 
 The elliptic-curve code benefits from lower-constant-factor group operations, so
-the EC families are easier to compare in separate charts.
+the EC families are easier to compare in separate charts. The key-agreement
+chart keeps serialization in the plot, which pushes that chart onto a much
+wider radial scale than the signature and encryption charts.
 
 ### EC Signature Throughput
 

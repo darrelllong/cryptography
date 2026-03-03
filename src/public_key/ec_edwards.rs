@@ -38,9 +38,11 @@
 //!
 //! ## Side-channel note
 //!
-//! The scalar multiplication loop branches on individual bits of the scalar
-//! and is **not constant-time**.  It is unsuitable for environments where
-//! timing or power measurements of the scalar are possible.
+//! Scalar multiplication uses variable-time fixed-window tables. The generic
+//! path and the specialized Ed25519 base-point path both select precomputed
+//! entries based on secret scalar windows, so this code is **not
+//! constant-time**. It is unsuitable for environments where timing or power
+//! measurements of the scalar are possible.
 //!
 //! ## Field square root
 //!
@@ -57,6 +59,7 @@
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::primes::{mod_inverse, random_nonzero_below};
 use crate::Csprng;
+use std::sync::OnceLock;
 
 // ─── Core types ─────────────────────────────────────────────────────────────
 
@@ -112,11 +115,23 @@ pub struct EdwardsPoint {
 ///
 /// Represents the affine point `(x, y)` as `(x·Z, y·Z, Z, x·y·Z)` for any
 /// non-zero `Z`.  The neutral element `(0, 1)` is `(0, Z, Z, 0)`.
+#[derive(Clone, Debug)]
 struct ExtendedPoint {
     x: BigUint,
     y: BigUint,
     z: BigUint,
     t: BigUint,
+}
+
+const SCALAR_WINDOW_BITS: usize = 4;
+const ED25519_BASE_WINDOW_BITS: usize = 8;
+const CACHED_PUBLIC_WINDOW_BITS: usize = 8;
+
+/// Cached precompute table for repeated variable-base scalar multiplication.
+#[derive(Clone, Debug)]
+pub(crate) struct EdwardsMulTable {
+    table: Vec<ExtendedPoint>,
+    window_bits: usize,
 }
 
 // ─── EdwardsPoint ───────────────────────────────────────────────────────────
@@ -308,23 +323,127 @@ fn point_add_extended(
 
 /// Point doubling via the unified addition formula with `P₁ = P₂`.
 ///
-/// The unified Edwards addition formula is *complete* and handles `P + P`
-/// without any special-case branching.  A dedicated "dbl-2008-hwcd" formula
-/// would save a few multiplications, but the unified formula is simpler to
-/// audit and correct for a toolkit.  This wrapper exists so callers can
-/// express intent (`double` vs `add`) without committing to a specific
-/// internal formula.
+/// Uses the dedicated "dbl-2008-hwcd" formula for extended twisted Edwards
+/// coordinates. For the built-in Ed25519 domain (`a = -1`) this saves field
+/// multiplications compared with reusing the unified addition formula.
 fn point_double_extended(curve: &TwistedEdwardsCurve, p1: &ExtendedPoint) -> ExtendedPoint {
-    point_add_extended(curve, p1, p1)
+    if p1.is_neutral() {
+        return ExtendedPoint::neutral();
+    }
+
+    let ctx = &curve.field;
+    let m = &curve.p;
+
+    let a = ctx.square(&p1.x);
+    let b = ctx.square(&p1.y);
+    let z2 = ctx.square(&p1.z);
+    let c = fadd(&z2, &z2, m);
+    let d = ctx.mul(&curve.a, &a);
+    let x_plus_y = fadd(&p1.x, &p1.y, m);
+    let e = {
+        let sum_sq = ctx.square(&x_plus_y);
+        fsub(&fsub(&sum_sq, &a, m), &b, m)
+    };
+    let g = fadd(&d, &b, m);
+    let f = fsub(&g, &c, m);
+    let h = fsub(&d, &b, m);
+
+    ExtendedPoint {
+        x: ctx.mul(&e, &f),
+        y: ctx.mul(&g, &h),
+        t: ctx.mul(&e, &h),
+        z: ctx.mul(&f, &g),
+    }
 }
 
-/// Scalar multiplication `k·P` via left-to-right binary double-and-add.
+/// Extract a `width`-bit little-endian window from `k`, starting at `bit_offset`.
+#[inline]
+fn scalar_window(k: &BigUint, bit_offset: usize, width: usize) -> usize {
+    let mut value = 0usize;
+    for bit in 0..width {
+        if k.bit(bit_offset + bit) {
+            value |= 1usize << bit;
+        }
+    }
+    value
+}
+
+fn precompute_window_table(
+    curve: &TwistedEdwardsCurve,
+    point: &ExtendedPoint,
+    window_bits: usize,
+) -> Vec<ExtendedPoint> {
+    let table_size = 1usize << window_bits;
+    let mut table = Vec::with_capacity(table_size);
+    table.push(ExtendedPoint::neutral());
+    table.push(point.clone());
+    for _ in 2..table_size {
+        let next = point_add_extended(curve, table.last().expect("table non-empty"), point);
+        table.push(next);
+    }
+    table
+}
+
+fn scalar_mul_with_table(
+    curve: &TwistedEdwardsCurve,
+    k: &BigUint,
+    table: &[ExtendedPoint],
+    window_bits: usize,
+) -> EdwardsPoint {
+    if k.is_zero() {
+        return EdwardsPoint::neutral();
+    }
+
+    let mut result = ExtendedPoint::neutral();
+    let windows = (k.bits() + window_bits - 1) / window_bits;
+    for window_index in (0..windows).rev() {
+        for _ in 0..window_bits {
+            result = point_double_extended(curve, &result);
+        }
+        let value = scalar_window(k, window_index * window_bits, window_bits);
+        result = point_add_extended(curve, &result, &table[value]);
+    }
+
+    result.to_affine(curve)
+}
+
+fn cached_ed25519() -> &'static TwistedEdwardsCurve {
+    static CURVE: OnceLock<TwistedEdwardsCurve> = OnceLock::new();
+    CURVE.get_or_init(ed25519)
+}
+
+fn is_ed25519_curve(curve: &TwistedEdwardsCurve) -> bool {
+    let reference = cached_ed25519();
+    curve.p == reference.p
+        && curve.a == reference.a
+        && curve.d == reference.d
+        && curve.n == reference.n
+        && curve.gx == reference.gx
+        && curve.gy == reference.gy
+}
+
+fn ed25519_base_table() -> &'static [ExtendedPoint] {
+    static TABLE: OnceLock<Vec<ExtendedPoint>> = OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let curve = cached_ed25519();
+            let base = ExtendedPoint::from_affine(&curve.base_point(), &curve.field);
+            precompute_window_table(curve, &base, ED25519_BASE_WINDOW_BITS)
+        })
+        .as_slice()
+}
+
+/// Scalar multiplication `k·P` via a fixed-window left-to-right method.
 ///
 /// The loop stays in extended coordinates throughout; a single conversion
 /// to affine is paid at the end.
 ///
-/// **Side-channel note**: the inner loop branches on individual bits of `k`.
-/// This is not constant-time.
+/// This reduces the number of additions compared with simple bit-by-bit
+/// double-and-add and avoids data-dependent branches in the main loop by
+/// always performing one table-backed add per window.
+///
+/// **Side-channel note**: table selection still depends on the scalar, so this
+/// remains a variable-time software implementation.
 fn scalar_mul_extended(
     curve: &TwistedEdwardsCurve,
     point: &EdwardsPoint,
@@ -334,17 +453,9 @@ fn scalar_mul_extended(
         return EdwardsPoint::neutral();
     }
 
-    let mut result = ExtendedPoint::neutral();
     let p_ext = ExtendedPoint::from_affine(point, &curve.field);
-
-    for i in (0..k.bits()).rev() {
-        result = point_add_extended(curve, &result, &result);
-        if k.bit(i) {
-            result = point_add_extended(curve, &result, &p_ext);
-        }
-    }
-
-    result.to_affine(curve)
+    let table = precompute_window_table(curve, &p_ext, SCALAR_WINDOW_BITS);
+    scalar_mul_with_table(curve, k, &table, SCALAR_WINDOW_BITS)
 }
 
 // ─── TwistedEdwardsCurve ────────────────────────────────────────────────────
@@ -368,7 +479,11 @@ impl TwistedEdwardsCurve {
         let coord_len = (p.bits() + 7) / 8;
         let d2 = {
             let v = d.add_ref(&d);
-            if &v >= &p { v.sub_ref(&p) } else { v }
+            if &v >= &p {
+                v.sub_ref(&p)
+            } else {
+                v
+            }
         };
         Some(Self {
             p,
@@ -444,7 +559,26 @@ impl TwistedEdwardsCurve {
     /// Returns the neutral element when `k = 0` or `P` is neutral.
     #[must_use]
     pub fn scalar_mul(&self, point: &EdwardsPoint, k: &BigUint) -> EdwardsPoint {
+        if !point.neutral && point.x == self.gx && point.y == self.gy {
+            return self.scalar_mul_base(k);
+        }
         scalar_mul_extended(self, point, k)
+    }
+
+    /// Scalar multiplication `k·G` with a dedicated fixed-base path.
+    ///
+    /// For the built-in Ed25519 domain this uses a cached 8-bit precompute
+    /// table for the standard base point, avoiding per-call table generation.
+    /// Other Edwards domains fall back to the generic scalar multiplier.
+    #[must_use]
+    pub fn scalar_mul_base(&self, k: &BigUint) -> EdwardsPoint {
+        if k.is_zero() {
+            return EdwardsPoint::neutral();
+        }
+        if is_ed25519_curve(self) {
+            return scalar_mul_with_table(self, k, ed25519_base_table(), ED25519_BASE_WINDOW_BITS);
+        }
+        scalar_mul_extended(self, &self.base_point(), k)
     }
 
     /// Compute the ECDH shared point `d·Q`.
@@ -466,8 +600,35 @@ impl TwistedEdwardsCurve {
     /// Generate a random key pair `(d, Q)` where `Q = d·G`.
     pub fn generate_keypair<R: Csprng>(&self, rng: &mut R) -> (BigUint, EdwardsPoint) {
         let d = self.random_scalar(rng);
-        let q = self.scalar_mul(&self.base_point(), &d);
+        let q = self.scalar_mul_base(&d);
         (d, q)
+    }
+
+    /// Build a cached table for repeated scalar multiplies by a fixed point.
+    #[must_use]
+    pub(crate) fn precompute_mul_table(&self, point: &EdwardsPoint) -> EdwardsMulTable {
+        let point_ext = ExtendedPoint::from_affine(point, &self.field);
+        EdwardsMulTable {
+            table: precompute_window_table(self, &point_ext, CACHED_PUBLIC_WINDOW_BITS),
+            window_bits: CACHED_PUBLIC_WINDOW_BITS,
+        }
+    }
+
+    /// Multiply by a point represented by a cached precompute table.
+    #[must_use]
+    pub(crate) fn scalar_mul_cached(&self, table: &EdwardsMulTable, k: &BigUint) -> EdwardsPoint {
+        scalar_mul_with_table(self, k, &table.table, table.window_bits)
+    }
+
+    /// Compare the structural Edwards parameters, ignoring cached Montgomery state.
+    #[must_use]
+    pub fn same_curve(&self, other: &Self) -> bool {
+        self.p == other.p
+            && self.a == other.a
+            && self.d == other.d
+            && self.n == other.n
+            && self.gx == other.gx
+            && self.gy == other.gy
     }
 
     /// Compute `k⁻¹ mod n`.  Returns `None` if `k = 0`.
@@ -520,7 +681,13 @@ impl TwistedEdwardsCurve {
         // Convert little-endian y to BigUint (big-endian internally).
         let y_be: Vec<u8> = y_le.into_iter().rev().collect();
         let y = BigUint::from_be_bytes(&y_be);
+        if y >= self.p {
+            return None;
+        }
         let x = self.field_recover_x(&y, x_odd)?;
+        if x.is_zero() && x_odd {
+            return None;
+        }
         let pt = if x.is_zero() && y == BigUint::one() {
             EdwardsPoint::neutral()
         } else {
@@ -589,7 +756,10 @@ impl TwistedEdwardsCurve {
 
         if p_mod8 == 3 || p_mod8 == 7 {
             // p ≡ 3 (mod 4): candidate = u^{(p+1)/4}.
-            let (exp, _) = self.p.add_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4));
+            let (exp, _) = self
+                .p
+                .add_ref(&BigUint::one())
+                .div_rem(&BigUint::from_u64(4));
             let candidate = ctx.pow(u, &exp);
             if ctx.square(&candidate) == *u {
                 Some(candidate)
@@ -600,7 +770,10 @@ impl TwistedEdwardsCurve {
             // p ≡ 5 (mod 8): RFC 8032 §5.1.3 algorithm.
             //
             // Step 1: candidate β = u^{(p+3)/8}
-            let (exp, _) = self.p.add_ref(&BigUint::from_u64(3)).div_rem(&BigUint::from_u64(8));
+            let (exp, _) = self
+                .p
+                .add_ref(&BigUint::from_u64(3))
+                .div_rem(&BigUint::from_u64(8));
             let beta = ctx.pow(u, &exp);
             let beta2 = ctx.square(&beta);
 
@@ -612,8 +785,10 @@ impl TwistedEdwardsCurve {
             let neg_u = fneg(u, &self.p);
             if beta2 == neg_u {
                 // Multiply by √(−1) = 2^{(p−1)/4} mod p.
-                let (sqrt_m1_exp, _) =
-                    self.p.sub_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4));
+                let (sqrt_m1_exp, _) = self
+                    .p
+                    .sub_ref(&BigUint::one())
+                    .div_rem(&BigUint::from_u64(4));
                 let sqrt_m1 = ctx.pow(&BigUint::from_u64(2), &sqrt_m1_exp);
                 return Some(ctx.mul(&beta, &sqrt_m1));
             }
@@ -630,6 +805,11 @@ impl TwistedEdwardsCurve {
 /// Pad `bytes` to `len` bytes by prepending zeros (big-endian padding).
 fn pad_to(bytes: Vec<u8>, len: usize) -> Vec<u8> {
     if bytes.len() >= len {
+        debug_assert_eq!(
+            bytes.len(),
+            len,
+            "field encodings must fit exactly in coord_len bytes"
+        );
         return bytes;
     }
     let mut out = vec![0u8; len - bytes.len()];
@@ -678,8 +858,7 @@ pub fn ed25519() -> TwistedEdwardsCurve {
     // Gy = 4/5 mod p; Gx is the positive (even) square root derived from Gy.
     let gx = from_hex("216936D3 CD6E53FE C0A4E231 FDD6DC5C 692CC760 9525A7B2 C9562D60 8F25D51A");
     let gy = from_hex("6666666666666666 66666666666666666666666666666666 6666666666666658");
-    TwistedEdwardsCurve::new(p, a, d, n, gx, gy)
-        .expect("Ed25519 parameters are well-formed")
+    TwistedEdwardsCurve::new(p, a, d, n, gx, gy).expect("Ed25519 parameters are well-formed")
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -687,6 +866,17 @@ pub fn ed25519() -> TwistedEdwardsCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        let bytes = hex.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len() / 2);
+        for chunk in bytes.chunks_exact(2) {
+            let hi = (chunk[0] as char).to_digit(16).expect("hex") as u8;
+            let lo = (chunk[1] as char).to_digit(16).expect("hex") as u8;
+            out.push((hi << 4) | lo);
+        }
+        out
+    }
 
     #[test]
     fn ed25519_base_point_on_curve() {
@@ -716,7 +906,23 @@ mod tests {
         let four_g_scalar = curve.scalar_mul(&g, &BigUint::from_u64(4));
         let two_g = curve.double(&g);
         let four_g_add = curve.add(&two_g, &two_g);
-        assert_eq!(four_g_scalar, four_g_add, "4G via scalar_mul must equal 2G+2G");
+        assert_eq!(
+            four_g_scalar, four_g_add,
+            "4G via scalar_mul must equal 2G+2G"
+        );
+    }
+
+    #[test]
+    fn ed25519_scalar_mul_base_matches_generic_base_path() {
+        let curve = ed25519();
+        let g = curve.base_point();
+        let scalar = BigUint::from_u64(77);
+        let via_base = curve.scalar_mul_base(&scalar);
+        let via_generic = scalar_mul_extended(&curve, &g, &scalar);
+        assert_eq!(
+            via_base, via_generic,
+            "fixed-base path must match generic path"
+        );
     }
 
     #[test]
@@ -726,7 +932,10 @@ mod tests {
         let g = curve.base_point();
         let n = curve.n.clone();
         let result = curve.scalar_mul(&g, &n);
-        assert!(result.is_neutral(), "n·G must be the neutral element for Ed25519");
+        assert!(
+            result.is_neutral(),
+            "n·G must be the neutral element for Ed25519"
+        );
     }
 
     #[test]
@@ -761,13 +970,77 @@ mod tests {
     }
 
     #[test]
+    fn ed25519_known_basepoint_multiples_match_fixture_encodings() {
+        let curve = ed25519();
+        let g = curve.base_point();
+        let fixtures = [
+            (
+                1_u64,
+                "5866666666666666666666666666666666666666666666666666666666666666",
+            ),
+            (
+                2_u64,
+                "c9a3f86aae465f0e56513864510f3997561fa2c9e85ea21dc2292309f3cd6022",
+            ),
+            (
+                3_u64,
+                "d4b4f5784868c3020403246717ec169ff79e26608ea126a1ab69ee77d1b16712",
+            ),
+            (
+                4_u64,
+                "2f1132ca61ab38dff00f2fea3228f24c6c71d58085b80e47e19515cb27e8d047",
+            ),
+            (
+                5_u64,
+                "edc876d6831fd2105d0b4389ca2e283166469289146e2ce06faefe98b22548df",
+            ),
+            (
+                7_u64,
+                "b862409fb5c4c4123df2abf7462b88f041ad36dd6864ce872fd5472be363c5b1",
+            ),
+            (
+                11_u64,
+                "1337036ac32d8f30d4589c3c1c595812ce0fff40e37c6f5a97ab213f318290ad",
+            ),
+            (
+                77_u64,
+                "aa6df914f7a0f04e7f852adf459873f17dba5b1671ea62e82cc10ed6aecc489c",
+            ),
+            (
+                82_u64,
+                "b03ed935d1de5bba7f51574b9fd88239083116ff867ee8562ae990c487579623",
+            ),
+        ];
+
+        for (scalar, encoding_hex) in fixtures {
+            let point = curve.scalar_mul(&g, &BigUint::from_u64(scalar));
+            let encoding = curve.encode_point(&point);
+            assert_eq!(
+                encoding,
+                decode_hex(encoding_hex),
+                "{scalar}G encoding mismatch"
+            );
+            let decoded = curve
+                .decode_point(&encoding)
+                .expect("decode known multiple");
+            assert_eq!(decoded, point, "{scalar}G decode mismatch");
+        }
+    }
+
+    #[test]
     fn ed25519_neutral_encodes_correctly() {
         let curve = ed25519();
         let neutral = EdwardsPoint::neutral();
         let enc = curve.encode_point(&neutral);
         // Neutral is (0, 1); encoding is LE(1) = 01 00 00 ... 00 (32 bytes).
-        assert_eq!(enc[0], 0x01, "first byte of neutral encoding must be 1 (LE)");
-        assert!(enc[1..].iter().all(|&b| b == 0), "remaining bytes of neutral must be 0");
+        assert_eq!(
+            enc[0], 0x01,
+            "first byte of neutral encoding must be 1 (LE)"
+        );
+        assert!(
+            enc[1..].iter().all(|&b| b == 0),
+            "remaining bytes of neutral must be 0"
+        );
     }
 
     #[test]
@@ -776,7 +1049,10 @@ mod tests {
         let neutral = EdwardsPoint::neutral();
         let enc = curve.encode_point(&neutral);
         let dec = curve.decode_point(&enc).expect("decode neutral");
-        assert!(dec.is_neutral(), "decode_point must preserve the neutral element");
+        assert!(
+            dec.is_neutral(),
+            "decode_point must preserve the neutral element"
+        );
     }
 
     #[test]
@@ -785,7 +1061,32 @@ mod tests {
         let g = curve.base_point();
         let mut enc = curve.encode_point(&g);
         enc.pop();
-        assert!(curve.decode_point(&enc).is_none(), "truncated encoding must be rejected");
+        assert!(
+            curve.decode_point(&enc).is_none(),
+            "truncated encoding must be rejected"
+        );
+    }
+
+    #[test]
+    fn ed25519_decode_rejects_neutral_with_sign_bit_set() {
+        let curve = ed25519();
+        let mut enc = curve.encode_point(&EdwardsPoint::neutral());
+        *enc.last_mut().expect("32-byte encoding") |= 0x80;
+        assert!(
+            curve.decode_point(&enc).is_none(),
+            "RFC 8032 forbids x = 0 with the sign bit set"
+        );
+    }
+
+    #[test]
+    fn ed25519_decode_rejects_non_canonical_y() {
+        let curve = ed25519();
+        let y_be = pad_to(curve.p.to_be_bytes(), curve.coord_len);
+        let enc: Vec<u8> = y_be.into_iter().rev().collect();
+        assert!(
+            curve.decode_point(&enc).is_none(),
+            "compressed encodings must reject y >= p"
+        );
     }
 
     #[test]
@@ -801,8 +1102,14 @@ mod tests {
         let shared_a = curve.diffie_hellman(&d_a, &q_b);
         let shared_b = curve.diffie_hellman(&d_b, &q_a);
         assert_eq!(shared_a, shared_b, "ECDH shared points must agree");
-        assert!(!shared_a.is_neutral(), "ECDH shared point must not be neutral");
-        assert!(curve.is_on_curve(&shared_a), "ECDH shared point must lie on Ed25519");
+        assert!(
+            !shared_a.is_neutral(),
+            "ECDH shared point must not be neutral"
+        );
+        assert!(
+            curve.is_on_curve(&shared_a),
+            "ECDH shared point must lie on Ed25519"
+        );
     }
 
     #[test]

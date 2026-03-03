@@ -23,7 +23,7 @@ use core::fmt;
 
 use crate::hash::Digest;
 use crate::public_key::bigint::BigUint;
-use crate::public_key::ec_edwards::{EdwardsPoint, TwistedEdwardsCurve};
+use crate::public_key::ec_edwards::{EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
@@ -39,6 +39,8 @@ pub struct EdDsaPublicKey {
     curve: TwistedEdwardsCurve,
     /// Public point `A = d·G`.
     a_point: EdwardsPoint,
+    /// Cached precompute table for repeated `k·A` verification work.
+    a_table: EdwardsMulTable,
 }
 
 /// Private key for the Edwards-curve signature layer.
@@ -69,7 +71,7 @@ pub struct EdDsa;
 
 impl PartialEq for EdDsaPublicKey {
     fn eq(&self, other: &Self) -> bool {
-        same_curve(&self.curve, &other.curve) && self.a_point == other.a_point
+        self.curve.same_curve(&other.curve) && self.a_point == other.a_point
     }
 }
 
@@ -77,7 +79,7 @@ impl Eq for EdDsaPublicKey {}
 
 impl PartialEq for EdDsaPrivateKey {
     fn eq(&self, other: &Self) -> bool {
-        same_curve(&self.curve, &other.curve) && self.d == other.d
+        self.curve.same_curve(&other.curve) && self.d == other.d
     }
 }
 
@@ -109,7 +111,12 @@ impl EdDsaPublicKey {
         if !validate_public_point(&curve, &a_point) {
             return None;
         }
-        Some(Self { curve, a_point })
+        let a_table = curve.precompute_mul_table(&a_point);
+        Some(Self {
+            curve,
+            a_point,
+            a_table,
+        })
     }
 
     /// Verify a signature over a raw message byte string.
@@ -125,17 +132,13 @@ impl EdDsaPublicKey {
             return false;
         }
 
-        let challenge = challenge_scalar::<H>(
-            &self.curve,
-            &signature.r_point,
-            &self.a_point,
-            message,
-        );
+        let challenge =
+            challenge_scalar::<H>(&self.curve, &signature.r_point, &self.a_point, message);
 
-        let lhs = self.curve.scalar_mul(&self.curve.base_point(), &signature.s);
+        let lhs = self.curve.scalar_mul_base(&signature.s);
         let rhs = self.curve.add(
             &signature.r_point,
-            &self.curve.scalar_mul(&self.a_point, &challenge),
+            &self.curve.scalar_mul_cached(&self.a_table, &challenge),
         );
         lhs == rhs
     }
@@ -186,7 +189,12 @@ impl EdDsaPublicKey {
         if !validate_public_point(&curve, &a_point) {
             return None;
         }
-        Some(Self { curve, a_point })
+        let a_table = curve.precompute_mul_table(&a_point);
+        Some(Self {
+            curve,
+            a_point,
+            a_table,
+        })
     }
 
     #[must_use]
@@ -241,7 +249,12 @@ impl EdDsaPublicKey {
         if !validate_public_point(&curve, &a_point) {
             return None;
         }
-        Some(Self { curve, a_point })
+        let a_table = curve.precompute_mul_table(&a_point);
+        Some(Self {
+            curve,
+            a_point,
+            a_table,
+        })
     }
 }
 
@@ -270,6 +283,7 @@ impl EdDsaPrivateKey {
         EdDsaPublicKey {
             curve: self.curve.clone(),
             a_point: self.a_point.clone(),
+            a_table: self.curve.precompute_mul_table(&self.a_point),
         }
     }
 
@@ -288,7 +302,7 @@ impl EdDsaPrivateKey {
             return None;
         }
 
-        let r_point = self.curve.scalar_mul(&self.curve.base_point(), nonce);
+        let r_point = self.curve.scalar_mul_base(nonce);
         if r_point.is_neutral() {
             return None;
         }
@@ -358,7 +372,7 @@ impl EdDsaPrivateKey {
         if d.is_zero() || d >= curve.n {
             return None;
         }
-        let a_point = curve.scalar_mul(&curve.base_point(), &d);
+        let a_point = curve.scalar_mul_base(&d);
         Some(Self { curve, d, a_point })
     }
 
@@ -411,7 +425,7 @@ impl EdDsaPrivateKey {
         if d.is_zero() || d >= curve.n {
             return None;
         }
-        let a_point = curve.scalar_mul(&curve.base_point(), &d);
+        let a_point = curve.scalar_mul_base(&d);
         Some(Self { curve, d, a_point })
     }
 }
@@ -444,15 +458,13 @@ impl EdDsaSignature {
     }
 
     /// Decode a signature from the crate-defined binary format.
-    ///
-    /// Range checks against the curve order happen during verification.
     #[must_use]
     pub fn from_binary(blob: &[u8], curve: &TwistedEdwardsCurve) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let rx = fields.next()?;
         let ry = fields.next()?;
         let s = fields.next()?;
-        if fields.next().is_some() || s.is_zero() {
+        if fields.next().is_some() || s.is_zero() || s >= curve.n {
             return None;
         }
         let r_point = EdwardsPoint::new(rx, ry);
@@ -474,12 +486,9 @@ impl EdDsa {
         let public = EdDsaPublicKey {
             curve: curve.clone(),
             a_point: a_point.clone(),
+            a_table: curve.precompute_mul_table(&a_point),
         };
-        let private = EdDsaPrivateKey {
-            curve,
-            d,
-            a_point,
-        };
+        let private = EdDsaPrivateKey { curve, d, a_point };
         (public, private)
     }
 
@@ -492,7 +501,7 @@ impl EdDsa {
         if secret.is_zero() || secret >= &curve.n {
             return None;
         }
-        let a_point = curve.scalar_mul(&curve.base_point(), secret);
+        let a_point = curve.scalar_mul_base(secret);
         if !validate_public_point(&curve, &a_point) {
             return None;
         }
@@ -500,6 +509,7 @@ impl EdDsa {
             EdDsaPublicKey {
                 curve: curve.clone(),
                 a_point: a_point.clone(),
+                a_table: curve.precompute_mul_table(&a_point),
             },
             EdDsaPrivateKey {
                 curve,
@@ -520,16 +530,6 @@ fn point_in_prime_subgroup(curve: &TwistedEdwardsCurve, point: &EdwardsPoint) ->
     curve.scalar_mul(point, &curve.n).is_neutral()
 }
 
-/// Compare the structural Edwards parameters, ignoring cached Montgomery state.
-fn same_curve(lhs: &TwistedEdwardsCurve, rhs: &TwistedEdwardsCurve) -> bool {
-    lhs.p == rhs.p
-        && lhs.a == rhs.a
-        && lhs.d == rhs.d
-        && lhs.n == rhs.n
-        && lhs.gx == rhs.gx
-        && lhs.gy == rhs.gy
-}
-
 /// Compute the EdDSA-style challenge scalar `e = H(encode(R) || encode(A) || M) mod n`.
 fn challenge_scalar<H: Digest>(
     curve: &TwistedEdwardsCurve,
@@ -548,6 +548,7 @@ mod tests {
     use super::{EdDsa, EdDsaPrivateKey, EdDsaPublicKey, EdDsaSignature};
     use crate::public_key::bigint::BigUint;
     use crate::public_key::ec_edwards::ed25519;
+    use crate::public_key::io::encode_biguints;
     use crate::{CtrDrbgAes256, Sha512};
 
     fn rng() -> CtrDrbgAes256 {
@@ -570,8 +571,7 @@ mod tests {
         let curve = ed25519();
         let secret = BigUint::from_u64(7);
         let nonce = BigUint::from_u64(11);
-        let (public, private) =
-            EdDsa::from_secret_scalar(curve, &secret).expect("explicit secret");
+        let (public, private) = EdDsa::from_secret_scalar(curve, &secret).expect("explicit secret");
         let sig = private
             .sign_with_nonce::<Sha512>(b"abc", &nonce)
             .expect("explicit nonce");
@@ -649,5 +649,13 @@ mod tests {
         let decoded = EdDsaSignature::from_binary(&blob, public.curve()).expect("decode sig");
         assert_eq!(decoded, sig);
         assert!(public.verify_message::<Sha512>(b"serialize", &decoded));
+    }
+
+    #[test]
+    fn signature_binary_rejects_out_of_range_s() {
+        let curve = ed25519();
+        let base = curve.base_point();
+        let blob = encode_biguints(&[&base.x, &base.y, &curve.n]);
+        assert!(EdDsaSignature::from_binary(&blob, &curve).is_none());
     }
 }

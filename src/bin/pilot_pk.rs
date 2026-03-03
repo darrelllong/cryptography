@@ -14,20 +14,28 @@
 ///   edwards_dh_keygen, edwards_dh_agree, edwards_dh_serialize
 ///   edwards_elgamal_keygen, edwards_elgamal_encrypt, edwards_elgamal_decrypt
 ///
-/// Integer-arithmetic (slow; N = 3–100):
-///   dsa_sign_1024, dsa_verify_1024
-///   elgamal_encrypt_1024, elgamal_decrypt_1024
-///   paillier_encrypt_1024, paillier_decrypt_1024
-///   rsa_keygen_1024, rsa_decrypt_1024, rsa_sign_1024, rsa_verify_1024
-///   rsa_keygen_2048, rsa_decrypt_2048, rsa_sign_2048, rsa_verify_2048
+/// Integer-arithmetic (slow; N = 3–5000):
+///   dsa_keygen_1024, dsa_sign_1024, dsa_verify_1024
+///   elgamal_keygen_1024, elgamal_encrypt_1024, elgamal_decrypt_1024
+///   paillier_keygen_1024, paillier_encrypt_1024, paillier_decrypt_1024
+///   paillier_rerandomize_1024, paillier_add_1024
+///   cocks_keygen_1024, cocks_encrypt_1024, cocks_decrypt_1024
+///   rabin_keygen_1024, rabin_encrypt_1024, rabin_decrypt_1024
+///   schmidt_samoa_keygen_1024, schmidt_samoa_encrypt_1024,
+///   schmidt_samoa_decrypt_1024
+///   rsa_keygen_1024, rsa_encrypt_1024, rsa_decrypt_1024, rsa_sign_1024,
+///   rsa_verify_1024
+///   rsa_keygen_2048, rsa_encrypt_2048, rsa_decrypt_2048, rsa_sign_2048,
+///   rsa_verify_2048
 use std::hint::black_box;
 use std::time::Instant;
 
+use cryptography::public_key::bigint::BigUint;
 use cryptography::public_key::ec::p256;
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
 use cryptography::{
-    CtrDrbgAes256, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal, ElGamal,
-    Paillier, Rsa, RsaOaep, RsaPss, Sha256,
+    Cocks, CtrDrbgAes256, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
+    ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
 };
 
 const MSG: [u8; 32] = [0x42; 32];
@@ -252,6 +260,14 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         // ── DSA (1024-bit) ────────────────────────────────────────────────────
+        "dsa_keygen_1024" => {
+            let n = 10;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(Dsa::generate(&mut rng, 1024).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
         "dsa_sign_1024" => {
             let (_, priv_key) = Dsa::generate(&mut rng, 1024).unwrap();
             let n = 100;
@@ -278,6 +294,14 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         // ── ElGamal (1024-bit) ────────────────────────────────────────────────
+        "elgamal_keygen_1024" => {
+            let n = 5;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(ElGamal::generate(&mut rng, 1024).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
         "elgamal_encrypt_1024" => {
             let (pub_key, _) = ElGamal::generate(&mut rng, 1024).unwrap();
             let n = 100;
@@ -298,6 +322,14 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         // ── Paillier (1024-bit) ───────────────────────────────────────────────
+        "paillier_keygen_1024" => {
+            let n = 20;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(Paillier::generate(&mut rng, 1024).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
         "paillier_encrypt_1024" => {
             let (pub_key, _) = Paillier::generate(&mut rng, 1024).unwrap();
             let n = 30;
@@ -317,12 +349,132 @@ fn main() {
             }
             ms_per_op(t0.elapsed(), n)
         }
+        "paillier_rerandomize_1024" => {
+            let (pub_key, _) = Paillier::generate(&mut rng, 1024).unwrap();
+            let ct = pub_key.encrypt(&MSG, &mut rng).unwrap();
+            let n = 50;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(pub_key.rerandomize(&ct, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "paillier_add_1024" => {
+            let (pub_key, priv_key) = Paillier::generate(&mut rng, 1024).unwrap();
+            let ct_a = pub_key.encrypt(&MSG, &mut rng).unwrap();
+            let ct_b = pub_key.encrypt(&[0x01], &mut rng).unwrap();
+            let n = 2000;
+            let mut combined = pub_key.add_ciphertexts(&ct_a, &ct_b).unwrap();
+            let t0 = Instant::now();
+            for _ in 0..n {
+                combined = black_box(pub_key.add_ciphertexts(&ct_a, &ct_b).unwrap());
+            }
+            let combined_plaintext = priv_key.decrypt(&combined);
+            let expected = BigUint::from_be_bytes(&MSG).add_ref(&BigUint::from_u64(1));
+            assert_eq!(combined_plaintext, expected.to_be_bytes());
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── Cocks (1024-bit) ──────────────────────────────────────────────────
+        "cocks_keygen_1024" => {
+            let n = 20;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(Cocks::generate(&mut rng, 1024).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "cocks_encrypt_1024" => {
+            let (pub_key, _) = Cocks::generate(&mut rng, 1024).unwrap();
+            let n = 300;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(pub_key.encrypt(&MSG).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "cocks_decrypt_1024" => {
+            let (pub_key, priv_key) = Cocks::generate(&mut rng, 1024).unwrap();
+            let ct = pub_key.encrypt(&MSG).unwrap();
+            let n = 1500;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(priv_key.decrypt(&ct));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── Rabin (1024-bit) ──────────────────────────────────────────────────
+        "rabin_keygen_1024" => {
+            let n = 20;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(Rabin::generate(&mut rng, 1024).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "rabin_encrypt_1024" => {
+            let (pub_key, _) = Rabin::generate(&mut rng, 1024).unwrap();
+            let n = 5000;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(pub_key.encrypt(&MSG).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "rabin_decrypt_1024" => {
+            let (pub_key, priv_key) = Rabin::generate(&mut rng, 1024).unwrap();
+            let ct = pub_key.encrypt(&MSG).unwrap();
+            let n = 200;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(priv_key.decrypt(&ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── Schmidt-Samoa (1024-bit) ──────────────────────────────────────────
+        "schmidt_samoa_keygen_1024" => {
+            let n = 20;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(SchmidtSamoa::generate(&mut rng, 1024).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "schmidt_samoa_encrypt_1024" => {
+            let (pub_key, _) = SchmidtSamoa::generate(&mut rng, 1024).unwrap();
+            let n = 300;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(pub_key.encrypt(&MSG).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "schmidt_samoa_decrypt_1024" => {
+            let (pub_key, priv_key) = SchmidtSamoa::generate(&mut rng, 1024).unwrap();
+            let ct = pub_key.encrypt(&MSG).unwrap();
+            let n = 1000;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(priv_key.decrypt(&ct));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
         // ── RSA (1024-bit) ────────────────────────────────────────────────────
         "rsa_keygen_1024" => {
             let n = 10;
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Rsa::generate(&mut rng, 1024).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "rsa_encrypt_1024" => {
+            let (pub_key, _) = Rsa::generate(&mut rng, 1024).unwrap();
+            let n = 1000;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(
+                    RsaOaep::<Sha256>::encrypt(&pub_key, OAEP_LABEL, &MSG, &OAEP_SEED).unwrap(),
+                );
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -361,6 +513,17 @@ fn main() {
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Rsa::generate(&mut rng, 2048).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "rsa_encrypt_2048" => {
+            let (pub_key, _) = Rsa::generate(&mut rng, 2048).unwrap();
+            let n = 500;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(
+                    RsaOaep::<Sha256>::encrypt(&pub_key, OAEP_LABEL, &MSG, &OAEP_SEED).unwrap(),
+                );
             }
             ms_per_op(t0.elapsed(), n)
         }

@@ -30,15 +30,15 @@
   <line class="axis" x1="280" y1="245" x2="124.1" y2="335.0" />
   <line class="axis" x1="280" y1="245" x2="124.1" y2="155.0" />
 
-  <polygon class="enc-fill" points="280.0,88.9 368.7,193.8 294.1,253.1 280.0,325.3 128.4,332.5 206.8,202.7" />
-  <polygon class="dec-fill" points="280.0,175.8 387.6,182.9 321.2,268.8 280.0,378.8 220.3,279.5 177.8,186.0" />
+  <polygon class="enc-fill" points="280.0,72.7 363.0,197.1 291.7,251.7 280.0,322.0 126.0,333.9 213.8,206.8" />
+  <polygon class="dec-fill" points="280.0,164.3 379.2,187.7 317.9,266.9 280.0,373.2 222.3,278.3 182.0,188.4" />
 
   <text class="small" x="314" y="216">100</text>
-  <text class="small" x="314" y="186">300</text>
-  <text class="small" x="314" y="156">1000</text>
-  <text class="small" x="314" y="126">3000</text>
-  <text class="small" x="314" y="96">10000</text>
-  <text class="small" x="314" y="66">30000</text>
+  <text class="small" x="314" y="186">400</text>
+  <text class="small" x="314" y="156">1600</text>
+  <text class="small" x="314" y="126">6400</text>
+  <text class="small" x="314" y="96">16000</text>
+  <text class="small" x="314" y="66">40000</text>
 
   <text class="label" x="280.0" y="41.0" text-anchor="middle">RSA</text>
   <text class="label" x="456.7" y="147.0" text-anchor="start">ElGamal</text>
@@ -48,7 +48,7 @@
   <text class="label" x="103.3" y="147.0" text-anchor="end">Schmidt-Samoa</text>
 
   <text class="label" x="20" y="548">Finite-field Public-key Encrypt/Decrypt Throughput (1024-bit, log scale)</text>
-  <text class="small" x="20" y="566">Radial scale is operations/second (higher is faster), spanning 100 to 30,000</text>
+  <text class="small" x="20" y="566">Radial scale is operations/second (higher is faster), spanning 100 to 40,000</text>
 
   <rect x="20" y="586" width="14" height="14" class="legend-enc" rx="2" />
   <text class="small" x="40" y="597">Encrypt</text>

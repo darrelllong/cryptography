@@ -15,7 +15,7 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::ec_edwards::{EdwardsPoint, TwistedEdwardsCurve};
+use crate::public_key::ec_edwards::{EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
@@ -30,6 +30,7 @@ const EDWARDS_ELGAMAL_CT_LABEL: &str = "CRYPTOGRAPHY EDWARDS-ELGAMAL CIPHERTEXT"
 pub struct EdwardsElGamalPublicKey {
     curve: TwistedEdwardsCurve,
     q: EdwardsPoint,
+    q_table: EdwardsMulTable,
 }
 
 /// Private key for Edwards ElGamal.
@@ -37,6 +38,7 @@ pub struct EdwardsElGamalPublicKey {
 pub struct EdwardsElGamalPrivateKey {
     curve: TwistedEdwardsCurve,
     d: BigUint,
+    q: EdwardsPoint,
 }
 
 /// Ciphertext pair `(C1, C2)`.
@@ -75,7 +77,8 @@ impl EdwardsElGamalPublicKey {
         if !validate_public_point(&curve, &q) {
             return None;
         }
-        Some(Self { curve, q })
+        let q_table = curve.precompute_mul_table(&q);
+        Some(Self { curve, q, q_table })
     }
 
     /// Encrypt a point with a freshly sampled nonce.
@@ -98,8 +101,8 @@ impl EdwardsElGamalPublicKey {
         message: &EdwardsPoint,
         nonce: &BigUint,
     ) -> EdwardsElGamalCiphertext {
-        let c1 = self.curve.scalar_mul(&self.curve.base_point(), nonce);
-        let shared = self.curve.scalar_mul(&self.q, nonce);
+        let c1 = self.curve.scalar_mul_base(nonce);
+        let shared = self.curve.scalar_mul_cached(&self.q_table, nonce);
         let c2 = self.curve.add(message, &shared);
         EdwardsElGamalCiphertext { c1, c2 }
     }
@@ -159,7 +162,8 @@ impl EdwardsElGamalPublicKey {
         if !validate_public_point(&curve, &q) {
             return None;
         }
-        Some(Self { curve, q })
+        let q_table = curve.precompute_mul_table(&q);
+        Some(Self { curve, q, q_table })
     }
 
     #[must_use]
@@ -214,7 +218,8 @@ impl EdwardsElGamalPublicKey {
         if !validate_public_point(&curve, &q) {
             return None;
         }
-        Some(Self { curve, q })
+        let q_table = curve.precompute_mul_table(&q);
+        Some(Self { curve, q, q_table })
     }
 }
 
@@ -234,10 +239,10 @@ impl EdwardsElGamalPrivateKey {
     /// Derive the matching public key.
     #[must_use]
     pub fn to_public_key(&self) -> EdwardsElGamalPublicKey {
-        let q = self.curve.scalar_mul(&self.curve.base_point(), &self.d);
         EdwardsElGamalPublicKey {
             curve: self.curve.clone(),
-            q,
+            q: self.q.clone(),
+            q_table: self.curve.precompute_mul_table(&self.q),
         }
     }
 
@@ -250,7 +255,11 @@ impl EdwardsElGamalPrivateKey {
 
     /// Recover a small non-negative integer from a ciphertext.
     #[must_use]
-    pub fn decrypt_int(&self, ciphertext: &EdwardsElGamalCiphertext, max_message: u64) -> Option<u64> {
+    pub fn decrypt_int(
+        &self,
+        ciphertext: &EdwardsElGamalCiphertext,
+        max_message: u64,
+    ) -> Option<u64> {
         let point = self.decrypt_point(ciphertext);
         bsgs_dlog(&self.curve, &point, max_message)
     }
@@ -287,7 +296,8 @@ impl EdwardsElGamalPrivateKey {
         if d.is_zero() || d >= curve.n {
             return None;
         }
-        Some(Self { curve, d })
+        let q = curve.scalar_mul_base(&d);
+        Some(Self { curve, d, q })
     }
 
     #[must_use]
@@ -339,7 +349,8 @@ impl EdwardsElGamalPrivateKey {
         if d.is_zero() || d >= curve.n {
             return None;
         }
-        Some(Self { curve, d })
+        let q = curve.scalar_mul_base(&d);
+        Some(Self { curve, d, q })
     }
 }
 
@@ -381,7 +392,7 @@ impl EdwardsElGamalCiphertext {
         }
         let c1 = EdwardsPoint::new(c1x, c1y);
         let c2 = EdwardsPoint::new(c2x, c2y);
-        if !curve.is_on_curve(&c1) || !curve.is_on_curve(&c2) {
+        if !validate_public_point(curve, &c1) || !validate_public_point(curve, &c2) {
             return None;
         }
         Some(Self { c1, c2 })
@@ -428,7 +439,7 @@ impl EdwardsElGamalCiphertext {
         }
         let c1 = EdwardsPoint::new(c1x, c1y);
         let c2 = EdwardsPoint::new(c2x, c2y);
-        if !curve.is_on_curve(&c1) || !curve.is_on_curve(&c2) {
+        if !validate_public_point(curve, &c1) || !validate_public_point(curve, &c2) {
             return None;
         }
         Some(Self { c1, c2 })
@@ -443,26 +454,29 @@ impl EdwardsElGamal {
         rng: &mut R,
     ) -> (EdwardsElGamalPublicKey, EdwardsElGamalPrivateKey) {
         let d = curve.random_scalar(rng);
-        let q = curve.scalar_mul(&curve.base_point(), &d);
+        let q = curve.scalar_mul_base(&d);
         (
             EdwardsElGamalPublicKey {
                 curve: curve.clone(),
-                q,
+                q: q.clone(),
+                q_table: curve.precompute_mul_table(&q),
             },
-            EdwardsElGamalPrivateKey { curve, d },
+            EdwardsElGamalPrivateKey { curve, d, q },
         )
     }
 }
 
 fn validate_public_point(curve: &TwistedEdwardsCurve, point: &EdwardsPoint) -> bool {
-    !point.is_neutral() && curve.is_on_curve(point) && curve.scalar_mul(point, &curve.n).is_neutral()
+    !point.is_neutral()
+        && curve.is_on_curve(point)
+        && curve.scalar_mul(point, &curve.n).is_neutral()
 }
 
 fn int_to_point(curve: &TwistedEdwardsCurve, value: u64) -> EdwardsPoint {
     if value == 0 {
         EdwardsPoint::neutral()
     } else {
-        curve.scalar_mul(&curve.base_point(), &BigUint::from_u64(value))
+        curve.scalar_mul_base(&BigUint::from_u64(value))
     }
 }
 
@@ -501,9 +515,24 @@ fn bsgs_dlog(curve: &TwistedEdwardsCurve, target: &EdwardsPoint, max_message: u6
 
 #[cfg(test)]
 mod tests {
-    use super::{EdwardsElGamal, EdwardsElGamalCiphertext, EdwardsElGamalPrivateKey, EdwardsElGamalPublicKey};
+    use super::{
+        encode_biguints, EdwardsElGamal, EdwardsElGamalCiphertext, EdwardsElGamalPrivateKey,
+        EdwardsElGamalPublicKey,
+    };
     use crate::public_key::ec_edwards::ed25519;
+    use crate::BigUint;
     use crate::CtrDrbgAes256;
+
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        let bytes = hex.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len() / 2);
+        for chunk in bytes.chunks_exact(2) {
+            let hi = (chunk[0] as char).to_digit(16).expect("hex") as u8;
+            let lo = (chunk[1] as char).to_digit(16).expect("hex") as u8;
+            out.push((hi << 4) | lo);
+        }
+        out
+    }
 
     fn rng(seed: u8) -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[seed; 48])
@@ -523,6 +552,38 @@ mod tests {
         let ct2 = public.encrypt_int(3, &mut rng(0x9a));
         let sum = public.add_ciphertexts(&ct1, &ct2);
         assert_eq!(private.decrypt_int(&sum, 16), Some(5));
+    }
+
+    #[test]
+    fn deterministic_fixture_matches_known_ed25519_components() {
+        let curve = ed25519();
+        let public_bytes =
+            decode_hex("b862409fb5c4c4123df2abf7462b88f041ad36dd6864ce872fd5472be363c5b1");
+        let message_bytes =
+            decode_hex("edc876d6831fd2105d0b4389ca2e283166469289146e2ce06faefe98b22548df");
+        let public =
+            EdwardsElGamalPublicKey::from_bytes(curve.clone(), &public_bytes).expect("public");
+        let private = EdwardsElGamalPrivateKey {
+            curve: curve.clone(),
+            d: BigUint::from_u64(7),
+            q: curve.scalar_mul_base(&BigUint::from_u64(7)),
+        };
+        let message = curve.decode_point(&message_bytes).expect("message");
+        let ciphertext = public.encrypt_point_with_nonce(&message, &BigUint::from_u64(11));
+
+        assert_eq!(
+            curve.encode_point(ciphertext.c1()),
+            decode_hex("1337036ac32d8f30d4589c3c1c595812ce0fff40e37c6f5a97ab213f318290ad")
+        );
+        assert_eq!(
+            curve.encode_point(ciphertext.c2()),
+            decode_hex("b03ed935d1de5bba7f51574b9fd88239083116ff867ee8562ae990c487579623")
+        );
+        assert_eq!(
+            curve.encode_point(&private.decrypt_point(&ciphertext)),
+            message_bytes
+        );
+        assert_eq!(private.decrypt_int(&ciphertext, 16), Some(5));
     }
 
     #[test]
@@ -578,8 +639,26 @@ mod tests {
     }
 
     #[test]
+    fn ciphertext_rejects_low_order_component() {
+        let curve = ed25519();
+        let base = curve.base_point();
+        let order_two = crate::public_key::ec_edwards::EdwardsPoint::new(
+            BigUint::zero(),
+            curve.p.sub_ref(&BigUint::one()),
+        );
+        let blob = encode_biguints(&[&order_two.x, &order_two.y, &base.x, &base.y]);
+        assert!(
+            EdwardsElGamalCiphertext::from_binary(&curve, &blob).is_none(),
+            "ciphertext import must reject low-order components"
+        );
+    }
+
+    #[test]
     fn debug_redacts_private_key() {
         let (_, private) = EdwardsElGamal::generate(ed25519(), &mut rng(0xaa));
-        assert_eq!(format!("{private:?}"), "EdwardsElGamalPrivateKey(<redacted>)");
+        assert_eq!(
+            format!("{private:?}"),
+            "EdwardsElGamalPrivateKey(<redacted>)"
+        );
     }
 }

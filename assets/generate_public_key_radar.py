@@ -28,7 +28,7 @@ CX = 280.0
 CY = 245.0
 RADIUS = 180.0
 MIN_VALUE = 100.0
-MAX_VALUE = 30_000.0
+MAX_VALUE = 40_000.0
 
 LABELS = [
     "RSA",
@@ -40,9 +40,9 @@ LABELS = [
 ]
 
 # Values are operations/second derived from the measured 1024-bit latencies.
-ENC_VALUES = [14_084.5, 2_564.1, 167.3, 1_273.9, 25_641.0, 1_457.7]
-DEC_VALUES = [896.9, 5_128.2, 452.3, 6_944.4, 888.9, 4_201.7]
-SCALE_LABELS = [100, 300, 1000, 3000, 10_000, 30_000]
+ENC_VALUES = [30_978.9, 2_424.8, 156.7, 1_296.8, 37_271.7, 1_274.4]
+DEC_VALUES = [1_468.4, 4_520.8, 429.7, 7_137.8, 918.3, 4_327.1]
+SCALE_LABELS = [100, 400, 1_600, 6_400, 16_000, 40_000]
 
 
 def polar(radius: float, angle: float) -> tuple[float, float]:
@@ -142,7 +142,7 @@ def generate_svg() -> str:
         [
             "",
             '  <text class="label" x="20" y="548">Finite-field Public-key Encrypt/Decrypt Throughput (1024-bit, log scale)</text>',
-            '  <text class="small" x="20" y="566">Radial scale is operations/second (higher is faster), spanning 100 to 30,000</text>',
+            '  <text class="small" x="20" y="566">Radial scale is operations/second (higher is faster), spanning 100 to 40,000</text>',
             "",
             '  <rect x="20" y="586" width="14" height="14" class="legend-enc" rx="2" />',
             '  <text class="small" x="40" y="597">Encrypt</text>',

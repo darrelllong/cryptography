@@ -184,6 +184,7 @@ Implemented stream-cipher families:
 - Salsa20
 - ChaCha20
 - XChaCha20
+- SNOW 3G
 - ZUC-128
 
 Design philosophy by family:
@@ -204,6 +205,12 @@ Design philosophy by family:
   ChaCha20. Its design philosophy is operational robustness: keep ChaCha20’s
   fast core, but fix nonce-management pain by stretching a 24-byte nonce into a
   subkey plus ordinary ChaCha20 state.
+- `SNOW 3G`: the 3GPP telecom stream-cipher core used underneath UEA2/UIA2.
+  Like ZUC, it is state-machine-centric rather than ARX-centric: a 16-word
+  LFSR feeds a three-register FSM and two byte-oriented S-box layers. The
+  crate keeps both the fast table-driven path and a separate `Ct` path because
+  the secret-indexed nonlinear steps are exactly where the software side-
+  channel tradeoff lives.
 - `ZUC-128`: the Chinese mobile-stream-cipher line (standardized through the
   3GPP / LTE world). It is very different from the ARX family: a word-structured
   LFSR plus a nonlinear filter and S-box layer, reflecting a telecom-stream-
@@ -213,59 +220,158 @@ Design philosophy by family:
 
 ## Symmetric Performance
 
-Performance is measured with:
+Measured with [pilot-bench](https://github.com/ascar-io/pilot-bench) driving
+`pilot_cipher`, a dedicated Rust binary that encrypts 1 MiB per round and
+prints MB/s to stdout.  Pilot repeats the round until a 20 % confidence
+interval is achieved, correcting for autocorrelation and startup transients.
+Columns: **Block** and **Key** in bits; **MB/s** mean; **±CI** half-width at
+95 %; **Runs** rounds required to reach CI.
 
-- `cipher_bench` for broad family coverage
-- `aes_bench` for focused AES comparisons
+### AES
 
-Representative figures on this host:
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| aes128               |   128 |   128 |    492.1 |   ±16.92 |    60 |
+| aes128ct             |   128 |   128 |    65.79 |  ±0.8375 |    30 |
+| aes192               |   128 |   192 |    415.5 |    ±10.9 |    30 |
+| aes192ct             |   128 |   192 |    53.14 |  ±0.7183 |   131 |
+| aes256               |   128 |   256 |    342.5 |   ±3.715 |   194 |
+| aes256ct             |   128 |   256 |    45.44 |  ±0.6266 |    30 |
 
-### Block-Cipher Throughput
+### Camellia
 
-| Primitive | Throughput |
-|-----------|-----------:|
-| AES-128 | `539.9 MiB/s` |
-| CAST-128 | `236.9 MiB/s` |
-| Camellia-128 | `128.6 MiB/s` |
-| SM4-128 | `118.3 MiB/s` |
-| DES | `78.6 MiB/s` |
-| SEED-128 | `70.8 MiB/s` |
-| Magma-256 | `60.6 MiB/s` |
-| Grasshopper-256 | `26.1 MiB/s` |
-| Twofish-128 | `13.5 MiB/s` |
-| PRESENT-80 | `12.7 MiB/s` |
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| camellia128          |   128 |   128 |    147.7 |    ±4.37 |    30 |
+| camellia128ct        |   128 |   128 |    6.356 |  ±0.1132 |    30 |
+| camellia192          |   128 |   192 |    106.5 |   ±2.198 |    58 |
+| camellia192ct        |   128 |   192 |    4.693 | ±0.02597 |   106 |
+| camellia256          |   128 |   256 |      106 |   ±1.785 |    60 |
+| camellia256ct        |   128 |   256 |    4.692 | ±0.04363 |    30 |
 
-### Stream-Cipher Throughput
+### CAST-128
 
-| Primitive | Throughput |
-|-----------|-----------:|
-| Rabbit | `1.58 GiB/s` |
-| Salsa20 | `833.0 MiB/s` |
-| ChaCha20 | `829.7 MiB/s` |
-| XChaCha20 | `825.6 MiB/s` |
-| ZUC-128 | `549.2 MiB/s` |
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| cast128              |    64 |   128 |    311.3 |   ±3.837 |   210 |
+| cast128ct            |    64 |   128 |     3.99 |   ±0.048 |    30 |
 
-The radar below compares representative fast-vs-`Ct` pairs. `SIMON` and
-`SPECK` are intentionally absent because their shipped round functions are
-already table-free bitwise/ARX designs, so there is no separate software `Ct`
-variant to compare.
+### DES / 3DES
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| des                  |    64 |    56 |    75.26 |   ±2.951 |    31 |
+| desct                |    64 |    56 |    7.912 | ±0.06045 |    30 |
+| 3des                 |    64 |   168 |    22.78 |  ±0.9068 |    30 |
+
+### Grasshopper (GOST R 34.12-2015)
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| grasshopper          |   128 |   256 |    25.05 |  ±0.1474 |    85 |
+| grasshopperct        |   128 |   256 |    4.061 | ±0.03098 |    45 |
+
+### Magma (GOST R 34.12-2015)
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| magma                |    64 |   256 |    60.13 |  ±0.5778 |    30 |
+| magmact              |    64 |   256 |    13.85 |  ±0.3147 |    30 |
+
+### PRESENT
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| present80            |    64 |    80 |    12.37 |  ±0.1675 |    30 |
+| present80ct          |    64 |    80 |    3.943 | ±0.02845 |    40 |
+| present128           |    64 |   128 |    12.24 | ±0.05114 |    83 |
+| present128ct         |    64 |   128 |    3.964 | ±0.03133 |    30 |
+
+### SEED
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| seed                 |   128 |   128 |    70.68 |  ±0.8154 |    60 |
+| seedct               |   128 |   128 |    4.534 | ±0.06126 |    30 |
+
+### Serpent
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| serpent128           |   128 |   128 |    10.63 |  ±0.2297 |    30 |
+| serpent128ct         |   128 |   128 |    6.909 | ±0.06488 |    83 |
+| serpent192           |   128 |   192 |    10.68 |  ±0.1903 |    31 |
+| serpent192ct         |   128 |   192 |    6.935 |  ±0.1152 |    30 |
+| serpent256           |   128 |   256 |    10.68 |  ±0.0652 |    33 |
+| serpent256ct         |   128 |   256 |    6.945 | ±0.07978 |    30 |
+
+### SM4
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| sm4                  |   128 |   128 |    183.8 |   ±3.126 |    30 |
+| sm4ct                |   128 |   128 |    6.674 | ±0.06411 |    30 |
+
+### Twofish
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| twofish128           |   128 |   128 |    13.22 |   ±0.076 |    62 |
+| twofish128ct         |   128 |   128 |    2.864 | ±0.02408 |    43 |
+| twofish192           |   128 |   192 |    13.06 |  ±0.1283 |    34 |
+| twofish192ct         |   128 |   192 |    2.457 | ±0.01706 |    30 |
+| twofish256           |   128 |   256 |    13.02 |  ±0.1058 |    60 |
+| twofish256ct         |   128 |   256 |    2.206 | ±0.00931 |    30 |
+
+### Simon
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| simon32_64           |    32 |    64 |    81.49 |  ±0.7099 |    36 |
+| simon48_72           |    48 |    72 |    104.5 |   ±1.241 |    72 |
+| simon48_96           |    48 |    96 |    104.9 |  ±0.8307 |    30 |
+| simon64_96           |    64 |    96 |    135.8 |   ±1.738 |    30 |
+| simon64_128          |    64 |   128 |    126.7 |   ±2.121 |   120 |
+| simon96_96           |    96 |    96 |    133.4 |    ±1.42 |    97 |
+| simon96_144          |    96 |   144 |    124.7 |   ±1.448 |   102 |
+| simon128_128         |   128 |   128 |    241.5 |   ±3.026 |    30 |
+| simon128_192         |   128 |   192 |      237 |   ±4.449 |    68 |
+| simon128_256         |   128 |   256 |    225.3 |   ±2.912 |    60 |
+
+### Speck
+
+| Cipher               | Block |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|------:|------:|---------:|---------:|------:|
+| speck32_64           |    32 |    64 |    203.9 |   ±1.974 |    65 |
+| speck48_72           |    48 |    72 |    294.8 |   ±5.961 |    30 |
+| speck48_96           |    48 |    96 |    251.5 |   ±8.818 |   276 |
+| speck64_96           |    64 |    96 |    307.7 |   ±8.606 |   151 |
+| speck64_128          |    64 |   128 |    293.7 |   ±5.145 |   225 |
+| speck96_96           |    96 |    96 |    375.9 |   ±8.246 |    30 |
+| speck96_144          |    96 |   144 |    360.9 |    ±6.58 |    30 |
+| speck128_128         |   128 |   128 |    917.5 |   ±32.95 |    30 |
+| speck128_192         |   128 |   192 |    866.9 |   ±52.26 |    30 |
+| speck128_256         |   128 |   256 |    863.2 |   ±10.59 |    30 |
+
+### Stream ciphers
+
+| Cipher               | Block  |   Key |   MB/s   |    ±CI   | Runs  |
+|----------------------|-------:|------:|---------:|---------:|------:|
+| chacha20             | stream |   256 |    760.2 |   ±39.38 |    30 |
+| xchacha20            | stream |   256 |    776.6 |   ±13.84 |    30 |
+| salsa20              | stream |   256 |    775.5 |   ±30.31 |    40 |
+| rabbit               | stream |   128 |     1419 |   ±62.83 |    30 |
+| snow3g               | stream |   128 |    492.8 |   ±11.58 |    47 |
+| snow3gct             | stream |   128 |    21.05 |  ±0.2957 |    30 |
+| zuc128               | stream |   128 |    520.2 |   ±10.32 |    39 |
+| zuc128ct             | stream |   128 |    27.05 |  ±0.2785 |    90 |
+
+The radar below compares representative fast-vs-`Ct` pairs across the
+table-driven ciphers. Simon and Speck are absent because their designs are
+already table-free bitwise/ARX, so there is no software `Ct` variant to
+compare.
 
 ![Fast vs Ct throughput radar chart](assets/fast-vs-ct-radar.svg)
-
-Focused AES measurements:
-
-| AES path | Throughput |
-|----------|-----------:|
-| AES-128 (single block) | `388.6 MiB/s` |
-| AES-192 (single block) | `378.0 MiB/s` |
-| AES-256 (single block) | `329.7 MiB/s` |
-| AES-256 (1 KiB) | `281.2 MiB/s` |
-| AESCt-128 (single block) | `43.4 MiB/s` |
-| AESCt-192 (single block) | `41.9 MiB/s` |
-| AESCt-256 (single block) | `34.7 MiB/s` |
-| AESCt-256 (1 KiB) | `41.5 MiB/s` |
-| libsodium XSalsa20-Poly1305 (16 B) | `59.0 MiB/s` |
-| libsodium XSalsa20-Poly1305 (1 KiB) | `544.4 MiB/s` |
 
 ## References
 
