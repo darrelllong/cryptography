@@ -42,7 +42,7 @@ Supporting primitives:
 - Historical CSPRNGs: `BlumBlumShub`, `BlumMicali`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
-Documentation is split by domain:
+Documentation:
 
 - [ANALYSIS.md](ANALYSIS.md): top-level overview, coverage, and experiment notes
 - [SYMMETRIC.md](SYMMETRIC.md): symmetric ciphers, modes, hashes, and throughput
@@ -78,7 +78,7 @@ The mode wrappers follow the block size or the standard profile:
 
 - `Cbc`, `Cfb`, `Ofb`, and block-cipher `Ctr` take an IV/counter block exactly
   one cipher block long
-- `Gcm` uses a 12-byte nonce in the standard fast path shown here
+- `Gcm` uses a 12-byte nonce in the 96-bit standard fast path
 - `Xts` takes a 16-byte tweak value and two independent 128-bit block-cipher
   keys (for example two separate `Aes128` instances)
 
@@ -174,7 +174,7 @@ The mode layer implements:
 
 RFC 8452's AES-GCM-SIV is a nonce-misuse-resistant AEAD built around AES and
 `POLYVAL`, so it belongs in a later authenticated-encryption layer rather than
-in the basic mode adapters added here.
+in the basic mode adapters.
 
 ### Stream-cipher example
 
@@ -520,9 +520,12 @@ assert_eq!(plaintext, b"\x2A");
 
 The same byte-oriented APIs work directly on file contents: read the file into
 a byte buffer, call `encrypt_bytes` / `decrypt_bytes`, and write the returned
-buffer back out. `RSA` is the only scheme with RFC/NIST message formatting
-the other public-key schemes use explicit crate-defined wrappers and
-serialization, which is documented in [ASYMMETRIC.md](ASYMMETRIC.md).
+buffer back out. `RSA` is the only encryption scheme here with RFC/NIST
+message formatting; the other public-key encryption schemes use explicit
+crate-defined wrappers and serialization, which is documented in
+[ASYMMETRIC.md](ASYMMETRIC.md). `DSA` and `ECDSA` already follow their
+published signature standards directly rather than adding a second padding
+layer on top.
 
 There is also a simple latency tool for the public-key layer:
 

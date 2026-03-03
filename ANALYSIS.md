@@ -1,18 +1,10 @@
 # ANALYSIS
 
-This top-level index points to two focused technical analyses:
-
 - [SYMMETRIC.md](SYMMETRIC.md) covers block ciphers, stream ciphers, modes,
   hashes, MACs, CSPRNGs, and the symmetric benchmark story.
 - [ASYMMETRIC.md](ASYMMETRIC.md) covers bigint arithmetic, public-key
   primitives, standards-based and crate-defined wrappers, serialization, and
   public-key latency.
-
-This top-level file is the short overview for three quick questions:
-
-1. what is implemented,
-2. how it is validated,
-3. where the deeper write-ups live.
 
 ## Shared Structure
 
@@ -23,7 +15,7 @@ The crate has four major implementation areas:
 - `src/hash/`: fixed-output hashes, XOFs, and HMAC support
 - `src/public_key/`: bigint arithmetic, number theory, and public-key schemes
 
-The public API keeps the same layering:
+The public API uses the same layering:
 
 - primitive arithmetic / cipher cores
 - reusable support layers (modes, hashes, DRBGs, Montgomery arithmetic)
@@ -37,7 +29,7 @@ The implementation policy is intentionally uniform across the crate:
 - minimal dependencies unless a standard format or external interop clearly
   justifies one
 
-That is why the repository keeps its own cipher, hash, DRBG, and bigint code
+That is why the crate keeps its own cipher, hash, DRBG, and bigint code
 in-tree, while still using standard external formats such as DER/PEM where
 that materially improves interoperability.
 

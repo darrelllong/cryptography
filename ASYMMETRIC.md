@@ -1,13 +1,5 @@
 # ASYMMETRIC
 
-This document covers the public-key half of the crate:
-
-- bigint and number-theory support
-- public-key primitives
-- standards-based and crate-defined wrappers
-- key serialization
-- public-key latency measurements
-
 ## Arithmetic Foundation
 
 The public-key layer is built on:
@@ -59,17 +51,27 @@ directly. Level 1 remains useful for arithmetic tests and direct cross-checks.
 
 ## Public-Key Surface
 
-Implemented schemes:
+### Finite-field schemes
 
-- `Rsa`
-- `Dsa`
-- `Cocks`
-- `ElGamal`
-- `Rabin`
-- `Paillier`
-- `SchmidtSamoa`
+- `Rsa` — encryption and signatures
+- `Dsa` — signatures (FIPS 186-5)
+- `Cocks` — encryption (historical; 1973)
+- `ElGamal` — encryption
+- `Rabin` — encryption
+- `Paillier` — additively homomorphic encryption
+- `SchmidtSamoa` — encryption
+- `Dh` — finite-field Diffie-Hellman key exchange
 
-Wrapper layers:
+### Elliptic-curve schemes
+
+- `Ecdh` — EC Diffie-Hellman key exchange (ANSI X9.63 / SEC 1)
+- `Ecdsa` — EC Digital Signature Algorithm (FIPS 186-5)
+- `EdDsa` — generic Edwards-curve Schnorr/EdDSA-style signatures
+- `Ed25519` — RFC 8032 Edwards-curve signatures
+- `EcElGamal` — EC-ElGamal encryption with additive homomorphism
+- `Ecies` — Elliptic Curve Integrated Encryption Scheme (ephemeral ECDH + AES-256-GCM)
+
+### Wrapper layers
 
 - `RsaOaep<H>` for `RSAES-OAEP`
 - `RsaPss<H>` for `RSASSA-PSS`
@@ -83,12 +85,11 @@ Every implemented scheme has:
 - byte-oriented sign/verify helpers where signatures are defined
 
 `RSA` has the richest standards surface because RFC 8017 defines both
-encryption and signature encodings. `DSA` itself is the standard signature
-construction, so it does not need an extra padding profile beyond the algorithm
-defined in the Digital Signature Standard. The other schemes expose explicit
-crate-defined message and serialization wrappers, which is the honest thing to
-do because there is no equally universal RFC/NIST padding story for those
-primitive forms.
+encryption and signature encodings. `DSA` and `ECDSA` are the standard
+signature constructions; they do not need extra padding profiles. The other
+schemes expose crate-defined message and serialization wrappers, which is the
+honest thing to do because there is no equally universal RFC/NIST padding story
+for those primitive forms.
 
 ## Serialization
 
@@ -111,8 +112,8 @@ debugging convenience; the canonical interoperable formats remain PKCS / X.509.
 
 ### Non-RSA Schemes
 
-`Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, and `SchmidtSamoa` use crate-defined
-formats:
+`Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`, `Dh`,
+`Ecdsa`, `EcElGamal`, `Ecies`, and `Ecdh` use crate-defined formats:
 
 - binary: DER `SEQUENCE` of positive `INTEGER`s
 - text:
@@ -122,6 +123,11 @@ formats:
 This deliberately copies the structural simplicity of the RSA key material
 without pretending that those schemes have standard OIDs or a real PKCS/X.509
 profile.
+
+The EC public key types (`EcdhPublicKey`, `EcdsaPublicKey`, `EciesPublicKey`,
+`EcElGamalPublicKey`) encode the curve domain parameters `(p, a, b, n, h, Gx,
+Gy)` alongside the public point `(Qx, Qy)`, so deserialization can reconstruct
+the `CurveParams` without a separate OID lookup or parameter database.
 
 ## Scheme Notes
 
@@ -226,7 +232,7 @@ with the private recovery map:
 m = c^\pi \bmod q
 ```
 
-This is here because it is historically important: Clifford Cocks proposed it
+Cocks is historically important: Clifford Cocks proposed it
 in 1973, five years before RSA. The scheme is unusual because the public
 exponent is the modulus itself. The crate keeps that arithmetic intact and adds
 the byte-level serialization layer on top instead of inventing a modernized
@@ -355,6 +361,211 @@ Like Cocks, Schmidt-Samoa uses the modulus itself as the public exponent. It
 is mathematically neat and implemented faithfully here, but it does not have
 the same standards ecosystem or deployment relevance as RSA.
 
+### Diffie-Hellman
+
+Core arithmetic:
+
+```math
+y = g^x \bmod p
+```
+
+with shared secret:
+
+```math
+s = y_{\mathrm{peer}}^x \bmod p
+```
+
+`DH` uses a prime-order subgroup construction identical to `DSA` and `ElGamal`: a
+Sophie-Germain-style group with explicit subgroup order `q`. The public key stores
+`(p, q, g, y)` so the receiver can validate that the peer's contribution actually
+lies in the correct subgroup before computing the shared secret. The validation
+check is:
+
+```math
+1 < y < p \qquad \text{and} \qquad y^q \equiv 1 \pmod{p}
+```
+
+`DhPrivateKey::agree` returns `None` when the peer key belongs to a different group
+or fails the subgroup check. The raw shared secret is returned as a `BigUint`; callers
+are expected to apply their own KDF before using it as keying material.
+
+### ECDH
+
+Shared secret:
+
+```math
+S = d \cdot Q_{\mathrm{peer}}, \qquad \text{secret} = S_x
+```
+
+`ECDH` follows SEC 1 v2.0: the shared secret is the x-coordinate of the point product,
+zero-padded to the curve's coordinate length. `EcdhPrivateKey::agree` returns `None`
+when the product is the point at infinity.
+
+`EcdhPublicKey` and `EcdhPrivateKey` carry the full `CurveParams` so both sides can
+use any of the named curves (`p256`, `p384`, `p521`, `secp256k1`, etc.) without a
+separate curve-identifier negotiation layer.
+
+### EC-ElGamal
+
+EC-ElGamal has three distinct plaintext layers stacked on the same key pair:
+
+**Point layer** — encrypt an arbitrary curve point `M`:
+
+```math
+(C_1, C_2) = (k \cdot G,\; M + k \cdot Q)
+```
+
+Decryption recovers `M` via:
+
+```math
+M = C_2 - d \cdot C_1
+```
+
+**Byte layer** — encrypt arbitrary bytes via Koblitz embedding: the message bytes are
+padded and placed into an x-coordinate candidate; `decode_point` is called with the
+`0x02` compressed prefix until a valid curve point is found. The last byte of the
+padded x-coordinate is an iteration counter `j ∈ [0, 255]`; the first byte of the
+decoded x-coordinate is stripped during recovery, leaving the original message bytes.
+This approach works on every named curve in this crate because all have `p ≡ 3 (mod 4)`,
+which means the compressed-point square root exists and the iteration succeeds quickly
+in practice.
+
+The message capacity per ciphertext is `coord_len − 1` bytes.
+
+**Integer layer** — additively homomorphic encryption of a small integer `m`:
+
+```math
+\text{encrypt\_int}(m) = \text{encrypt\_point}(m \cdot G)
+```
+
+Homomorphic addition of two ciphertexts:
+
+```math
+(C_1 + C_1',\; C_2 + C_2') \;\xrightarrow{\text{decrypt}}\; (m_1 + m_2) \cdot G
+```
+
+The integer `m` is recovered from `m · G` via baby-step giant-step (BSGS) with
+`O(\sqrt{\text{max\_m}})` precomputation.
+
+### ECIES
+
+`ECIES` is the standard way to encrypt arbitrary byte strings to a static EC public key.
+It combines ephemeral ECDH with a symmetric encryption step, so the per-message overhead
+is a single scalar multiplication by the sender and a single scalar multiplication by the
+receiver.
+
+**Encryption:**
+
+1. Generate an ephemeral key pair `(k, R)` where `R = k · G`.
+2. Compute the shared point `S = k · Q`.
+3. Derive symmetric key and nonce from `S_x`:
+
+```math
+\text{key}   = \mathrm{SHA\text{-}256}(\mathtt{0x01} \mathbin\| S_x)
+\qquad
+\text{nonce} = \mathrm{SHA\text{-}256}(\mathtt{0x02} \mathbin\| S_x)_{[0..12]}
+```
+
+4. Encrypt the message with AES-256-GCM, using `R_{\text{bytes}}` as the additional
+   authenticated data (AAD). The AAD binding prevents `R` from being silently swapped
+   without triggering a tag failure.
+
+**Wire format:**
+
+```text
+R_bytes  (1 + 2·coord_len bytes, SEC 1 uncompressed)
+ciphertext  (same length as plaintext)
+tag  (16 bytes, GCM authentication tag)
+```
+
+**Decryption:**
+
+1. Parse `R_bytes` from the front of the ciphertext.
+2. Compute `S = d · R`.
+3. Re-derive key and nonce from `S_x`.
+4. AES-256-GCM decrypt; return `None` if the tag fails.
+
+The GCM tag simultaneously authenticates the ciphertext and the ephemeral public key,
+so no separate MAC layer is needed.
+
+### ECDSA
+
+Core arithmetic (FIPS 186-5):
+
+```math
+r = (k \cdot G)_x \bmod n,\qquad
+s = k^{-1}(z + rd) \bmod n
+```
+
+with verification:
+
+```math
+w = s^{-1} \bmod n,\qquad
+u_1 = zw \bmod n,\qquad
+u_2 = rw \bmod n
+```
+
+and acceptance when:
+
+```math
+(u_1 \cdot G + u_2 \cdot Q)_x \bmod n = r
+```
+
+The per-message nonce `k` is generated from the crate's `Csprng`. The digest
+representative `z` is the leftmost `bits(n)` bits of the hash output, matching
+the FIPS 186-5 truncation rule for hash functions wider than the group order.
+
+The key types (`EcdsaPublicKey`, `EcdsaPrivateKey`) carry the full `CurveParams`
+and work with any named curve.
+
+### Ed25519
+
+`Ed25519` is the fixed-curve RFC 8032 signature construction built on the
+Edwards arithmetic in this crate. Unlike the generic `EdDsa` layer, it follows
+the standard seed-hash-and-clamp flow exactly:
+
+```math
+h = \mathrm{SHA\text{-}512}(\text{seed})
+```
+
+Clamp the lower 32 bytes of `h` to derive the secret scalar `a`, and use the
+upper 32 bytes as the deterministic nonce prefix. Signing then computes:
+
+```math
+r = H(\text{prefix} \parallel M) \bmod n
+```
+
+```math
+R = r \cdot B,\qquad
+k = H(\mathrm{enc}(R) \parallel \mathrm{enc}(A) \parallel M) \bmod n
+```
+
+```math
+S = r + ka \bmod n
+```
+
+The standard 64-byte signature is:
+
+```math
+\sigma = \mathrm{enc}(R) \parallel \mathrm{enc}_{\mathrm{LE}}(S)
+```
+
+Verification checks:
+
+```math
+S \cdot B = R + kA
+```
+
+The API exposes the real RFC shapes directly:
+
+- private key: 32-byte seed
+- public key: 32-byte compressed point
+- signature: 64-byte `R || S`
+
+So this is the standards-conformant Edwards path, while `EdDsa` remains the
+more explicit curve-generic signature layer for callers who want direct scalar
+control.
+
 ## Byte-Oriented APIs
 
 The public-key wrappers now distinguish clearly between:
@@ -366,6 +577,9 @@ Examples:
 
 - `CocksPublicKey::encrypt_bytes` / `CocksPrivateKey::decrypt_bytes`
 - `DsaPrivateKey::sign_message_bytes::<H>` / `DsaPublicKey::verify_message_bytes::<H>`
+- `EcElGamalPublicKey::encrypt` / `EcElGamalPrivateKey::decrypt` (Koblitz byte layer)
+- `EciesPublicKey::encrypt` / `EciesPrivateKey::decrypt` (arbitrary-length bytes)
+- `EcdsaPrivateKey::sign_message::<H>` / `EcdsaPublicKey::verify_message::<H>`
 - `ElGamalPublicKey::encrypt_bytes` / `ElGamalPrivateKey::decrypt_bytes`
 - `PaillierPublicKey::encrypt_bytes` / `PaillierPrivateKey::decrypt_bytes`
 - `RabinPublicKey::encrypt_bytes` / `RabinPrivateKey::decrypt_bytes`
@@ -390,37 +604,51 @@ Representative 1024-bit latencies on this host:
 
 | Operation | Latency |
 |-----------|--------:|
-| RSA-1024 keygen | `25.0 ms` |
-| RSA-1024 OAEP encrypt | `0.071 ms` |
-| RSA-1024 OAEP decrypt | `0.964 ms` |
-| RSA-1024 PSS sign | `1.06 ms` |
-| RSA-1024 PSS verify | `0.055 ms` |
-| ElGamal-1024 keygen | `96.5 ms` |
-| ElGamal-1024 encrypt | `0.389 ms` |
-| ElGamal-1024 decrypt | `0.197 ms` |
-| DSA-1024 keygen | `41.2 ms` |
-| DSA-1024 sign | `0.331 ms` |
-| DSA-1024 verify | `0.489 ms` |
-| Paillier-1024 keygen | `13.7 ms` |
-| Paillier-1024 encrypt | `6.47 ms` |
-| Paillier-1024 decrypt | `2.26 ms` |
-| Paillier-1024 rerandomize | `3.94 ms` |
-| Paillier-1024 ciphertext add | `0.072 ms` |
-| Cocks-1024 keygen | `9.91 ms` |
-| Cocks-1024 encrypt | `0.782 ms` |
-| Cocks-1024 decrypt | `0.147 ms` |
-| Rabin-1024 keygen | `7.80 ms` |
-| Rabin-1024 encrypt | `0.039 ms` |
-| Rabin-1024 decrypt | `1.14 ms` |
-| Schmidt-Samoa-1024 keygen | `6.05 ms` |
-| Schmidt-Samoa-1024 encrypt | `0.671 ms` |
-| Schmidt-Samoa-1024 decrypt | `0.228 ms` |
+| RSA-1024 keygen | `17.362 ms` |
+| RSA-1024 OAEP encrypt | `0.084 ms` |
+| RSA-1024 OAEP decrypt | `0.862 ms` |
+| RSA-1024 PSS sign | `1.198 ms` |
+| RSA-1024 PSS verify | `0.073 ms` |
+| ElGamal-1024 keygen | `104.043 ms` |
+| ElGamal-1024 encrypt | `0.437 ms` |
+| ElGamal-1024 decrypt | `0.224 ms` |
+| DSA-1024 keygen | `44.626 ms` |
+| DSA-1024 sign | `0.351 ms` |
+| DSA-1024 verify | `0.543 ms` |
+| ECDSA (P-256) keygen | `2.032 ms` |
+| ECDSA (P-256) sign | `1.933 ms` |
+| ECDSA (P-256) verify | `3.973 ms` |
+| Ed25519 keygen | `1.909 ms` |
+| Ed25519 sign | `1.438 ms` |
+| Ed25519 verify | `4.195 ms` |
+| Paillier-1024 keygen | `14.257 ms` |
+| Paillier-1024 encrypt | `6.964 ms` |
+| Paillier-1024 decrypt | `2.135 ms` |
+| Paillier-1024 rerandomize | `4.123 ms` |
+| Paillier-1024 ciphertext add | `0.082 ms` |
+| Cocks-1024 keygen | `10.519 ms` |
+| Cocks-1024 encrypt | `0.863 ms` |
+| Cocks-1024 decrypt | `0.157 ms` |
+| Rabin-1024 keygen | `7.982 ms` |
+| Rabin-1024 encrypt | `0.038 ms` |
+| Rabin-1024 decrypt | `1.147 ms` |
+| Schmidt-Samoa-1024 keygen | `6.434 ms` |
+| Schmidt-Samoa-1024 encrypt | `0.849 ms` |
+| Schmidt-Samoa-1024 decrypt | `0.307 ms` |
+| ECDH (P-256) keygen | `2.182 ms` |
+| ECDH (P-256) agree | `3.914 ms` |
+| ECIES (P-256) keygen | `1.937 ms` |
+| ECIES (P-256) encrypt | `4.185 ms` |
+| ECIES (P-256) decrypt | `1.836 ms` |
+| EC ElGamal (P-256) keygen | `1.800 ms` |
+| EC ElGamal (P-256) encrypt | `4.306 ms` |
+| EC ElGamal (P-256) decrypt | `2.019 ms` |
 
 The table above is measured in milliseconds per operation. The radar chart
 below uses the reciprocal view — operations per second on a log scale — so the
 faster operations sit farther from the center.
 
-The existing chart is the public-key encrypt/decrypt radar. Signature-only
+The chart below plots public-key encrypt/decrypt throughput. Signature-only
 schemes such as `DSA` stay in the table instead of the chart because they do
 not have matching encrypt/decrypt operations to plot:
 
@@ -428,8 +656,10 @@ not have matching encrypt/decrypt operations to plot:
 
 ## Practical Guidance
 
-- Use `RSA` when you need standards-backed encryption or signatures today.
-- Use `DSA` when you need a standards-backed signature-only finite-field scheme.
+- Use `RSA` when you need standards-backed encryption or signatures.
+- Use `DSA`, `ECDSA`, or `Ed25519` when you need a standards-backed digital signature.
+- Use `ECIES` when you need public-key encryption over an elliptic curve.
+- Use `ECDH` or `DH` when you need key agreement without a full encryption layer.
 - Use the other implemented schemes when you explicitly want those primitives
   and understand their wrapper model.
 - Use `CtrDrbgAes256` (or another strong `Csprng`) for all randomized public-key

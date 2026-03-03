@@ -50,7 +50,7 @@ Use the local PyTorch virtualenv:
 ml/.venv-torch/bin/python ml/train_distinguisher.py --generate
 ```
 
-The trainer currently exposes three model families:
+The trainer exposes three model families:
 
 - `cnn`: a residual 1D CNN baseline for short and medium-width samples
 - `transformer`: a patch Transformer that groups bytes into fixed-width patches
@@ -94,8 +94,7 @@ ml/.venv-torch/bin/python -m pip install -r ml/requirements.txt
 ```
 
 On Apple silicon, the trainer will use the MPS backend automatically when
-PyTorch can see the GPU. In this Codex sandbox, GPU visibility is blocked, so
-GPU-backed training from here requires running the process outside the sandbox.
+PyTorch can see the GPU.
 
 Artifacts are written to `ml/out/`:
 
