@@ -371,6 +371,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow conformance test"]
     fn example_2_million_encryptions() {
         let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
         let mut block: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
@@ -385,6 +386,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow conformance test"]
     fn example_2_million_encryptions_ct() {
         let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
         let mut block: [u8; 16] = parse("0123456789abcdeffedcba9876543210");

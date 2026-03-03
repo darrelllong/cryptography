@@ -31,6 +31,18 @@
 pub mod bigint;
 pub mod cocks;
 pub mod dsa;
+pub mod dh;
+pub mod ec;
+mod gf2m;
+pub mod ec_edwards;
+pub mod ec_elgamal;
+pub mod ecdh;
+pub mod ecdsa;
+pub mod edwards_dh;
+pub mod edwards_elgamal;
+pub mod eddsa;
+pub mod ed25519;
+pub mod ecies;
 pub mod elgamal;
 mod io;
 pub mod paillier;

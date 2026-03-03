@@ -65,10 +65,12 @@ directly. Level 1 remains useful for arithmetic tests and direct cross-checks.
 ### Elliptic-curve schemes
 
 - `Ecdh` — EC Diffie-Hellman key exchange (ANSI X9.63 / SEC 1)
+- `EdwardsDh` — Edwards-curve Diffie-Hellman key agreement
 - `Ecdsa` — EC Digital Signature Algorithm (FIPS 186-5)
 - `EdDsa` — generic Edwards-curve Schnorr/EdDSA-style signatures
 - `Ed25519` — RFC 8032 Edwards-curve signatures
 - `EcElGamal` — EC-ElGamal encryption with additive homomorphism
+- `EdwardsElGamal` — Edwards-curve ElGamal encryption
 - `Ecies` — Elliptic Curve Integrated Encryption Scheme (ephemeral ECDH + AES-256-GCM)
 
 ### Wrapper layers
@@ -113,7 +115,8 @@ debugging convenience; the canonical interoperable formats remain PKCS / X.509.
 ### Non-RSA Schemes
 
 `Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`, `Dh`,
-`Ecdsa`, `EcElGamal`, `Ecies`, and `Ecdh` use crate-defined formats:
+`Ecdsa`, `EcElGamal`, `Ecies`, `Ecdh`, `EdwardsDh`, `EdwardsElGamal`,
+`EdDsa`, and `Ed25519` use crate-defined formats:
 
 - binary: DER `SEQUENCE` of positive `INTEGER`s
 - text:
@@ -124,10 +127,13 @@ This deliberately copies the structural simplicity of the RSA key material
 without pretending that those schemes have standard OIDs or a real PKCS/X.509
 profile.
 
-The EC public key types (`EcdhPublicKey`, `EcdsaPublicKey`, `EciesPublicKey`,
-`EcElGamalPublicKey`) encode the curve domain parameters `(p, a, b, n, h, Gx,
-Gy)` alongside the public point `(Qx, Qy)`, so deserialization can reconstruct
-the `CurveParams` without a separate OID lookup or parameter database.
+The short-Weierstrass EC public key types (`EcdhPublicKey`, `EcdsaPublicKey`,
+`EciesPublicKey`, `EcElGamalPublicKey`) encode the curve domain parameters
+`(p, a, b, n, h, Gx, Gy)` alongside the public point `(Qx, Qy)`, so
+deserialization can reconstruct the `CurveParams` without a separate OID lookup
+or parameter database. The Edwards key types do the same job for
+`TwistedEdwardsCurve`, carrying the Edwards parameters together with the
+compressed public point.
 
 ## Scheme Notes
 
@@ -405,6 +411,20 @@ when the product is the point at infinity.
 use any of the named curves (`p256`, `p384`, `p521`, `secp256k1`, etc.) without a
 separate curve-identifier negotiation layer.
 
+### Edwards DH
+
+`EdwardsDh` provides the same core operation on a twisted Edwards curve:
+
+```math
+S = d \cdot Q_{\mathrm{peer}}
+```
+
+The difference is the wire representation. `EdwardsDhPrivateKey::agree`
+returns the compressed Edwards encoding of the shared point, so the output is a
+canonical 32-byte value on the built-in Ed25519 curve instead of a bare
+x-coordinate. That matches the way the Edwards side of the crate already treats
+points as compressed byte strings.
+
 ### EC-ElGamal
 
 EC-ElGamal has three distinct plaintext layers stacked on the same key pair:
@@ -446,6 +466,31 @@ Homomorphic addition of two ciphertexts:
 
 The integer `m` is recovered from `m · G` via baby-step giant-step (BSGS) with
 `O(\sqrt{\text{max\_m}})` precomputation.
+
+### Edwards ElGamal
+
+`EdwardsElGamal` mirrors the same ElGamal construction on a twisted Edwards
+group:
+
+```math
+(C_1, C_2) = (k \cdot B,\; M + k \cdot Q)
+```
+
+with decryption:
+
+```math
+M = C_2 - d \cdot C_1
+```
+
+As with the short-Weierstrass variant, the module exposes:
+
+- point encryption
+- integer encryption via `m \cdot B`
+- homomorphic ciphertext addition
+
+The main distinction is representation: the Edwards wrapper uses compressed
+Edwards point encodings throughout, which makes ciphertext serialization more
+compact and keeps it aligned with the `Ed25519` / `EdDsa` side of the crate.
 
 ### ECIES
 
@@ -604,55 +649,79 @@ Representative 1024-bit latencies on this host:
 
 | Operation | Latency |
 |-----------|--------:|
-| RSA-1024 keygen | `17.362 ms` |
-| RSA-1024 OAEP encrypt | `0.084 ms` |
-| RSA-1024 OAEP decrypt | `0.862 ms` |
-| RSA-1024 PSS sign | `1.198 ms` |
-| RSA-1024 PSS verify | `0.073 ms` |
-| ElGamal-1024 keygen | `104.043 ms` |
-| ElGamal-1024 encrypt | `0.437 ms` |
-| ElGamal-1024 decrypt | `0.224 ms` |
-| DSA-1024 keygen | `44.626 ms` |
-| DSA-1024 sign | `0.351 ms` |
-| DSA-1024 verify | `0.543 ms` |
-| ECDSA (P-256) keygen | `2.032 ms` |
-| ECDSA (P-256) sign | `1.933 ms` |
-| ECDSA (P-256) verify | `3.973 ms` |
-| Ed25519 keygen | `1.909 ms` |
-| Ed25519 sign | `1.438 ms` |
-| Ed25519 verify | `4.195 ms` |
-| Paillier-1024 keygen | `14.257 ms` |
-| Paillier-1024 encrypt | `6.964 ms` |
-| Paillier-1024 decrypt | `2.135 ms` |
-| Paillier-1024 rerandomize | `4.123 ms` |
-| Paillier-1024 ciphertext add | `0.082 ms` |
-| Cocks-1024 keygen | `10.519 ms` |
-| Cocks-1024 encrypt | `0.863 ms` |
-| Cocks-1024 decrypt | `0.157 ms` |
-| Rabin-1024 keygen | `7.982 ms` |
-| Rabin-1024 encrypt | `0.038 ms` |
-| Rabin-1024 decrypt | `1.147 ms` |
-| Schmidt-Samoa-1024 keygen | `6.434 ms` |
-| Schmidt-Samoa-1024 encrypt | `0.849 ms` |
-| Schmidt-Samoa-1024 decrypt | `0.307 ms` |
-| ECDH (P-256) keygen | `2.182 ms` |
-| ECDH (P-256) agree | `3.914 ms` |
-| ECIES (P-256) keygen | `1.937 ms` |
-| ECIES (P-256) encrypt | `4.185 ms` |
-| ECIES (P-256) decrypt | `1.836 ms` |
-| EC ElGamal (P-256) keygen | `1.800 ms` |
-| EC ElGamal (P-256) encrypt | `4.306 ms` |
-| EC ElGamal (P-256) decrypt | `2.019 ms` |
+| RSA-1024 keygen | `24.675 ms` |
+| RSA-1024 OAEP encrypt | `0.071 ms` |
+| RSA-1024 OAEP decrypt | `1.115 ms` |
+| RSA-1024 PSS sign | `1.011 ms` |
+| RSA-1024 PSS verify | `0.050 ms` |
+| ElGamal-1024 keygen | `95.549 ms` |
+| ElGamal-1024 encrypt | `0.390 ms` |
+| ElGamal-1024 decrypt | `0.195 ms` |
+| DSA-1024 keygen | `39.496 ms` |
+| DSA-1024 sign | `0.330 ms` |
+| DSA-1024 verify | `0.506 ms` |
+| Paillier-1024 keygen | `13.278 ms` |
+| Paillier-1024 encrypt | `5.976 ms` |
+| Paillier-1024 decrypt | `2.211 ms` |
+| Paillier-1024 rerandomize | `3.869 ms` |
+| Paillier-1024 ciphertext add | `0.073 ms` |
+| Cocks-1024 keygen | `9.678 ms` |
+| Cocks-1024 encrypt | `0.785 ms` |
+| Cocks-1024 decrypt | `0.144 ms` |
+| Rabin-1024 keygen | `7.594 ms` |
+| Rabin-1024 encrypt | `0.039 ms` |
+| Rabin-1024 decrypt | `1.125 ms` |
+| Schmidt-Samoa-1024 keygen | `5.829 ms` |
+| Schmidt-Samoa-1024 encrypt | `0.686 ms` |
+| Schmidt-Samoa-1024 decrypt | `0.238 ms` |
+| ECDH (P-256) keygen | `1.928 ms` |
+| ECDH (P-256) agree | `3.763 ms` |
+| ECDH (P-256) serialize | `0.009 ms` |
+| ECDSA (P-256) keygen | `1.879 ms` |
+| ECDSA (P-256) sign | `1.983 ms` |
+| ECDSA (P-256) verify | `3.592 ms` |
+| ECIES (P-256) keygen | `1.835 ms` |
+| ECIES (P-256) encrypt | `3.622 ms` |
+| ECIES (P-256) decrypt | `1.822 ms` |
+| EC ElGamal (P-256) keygen | `1.832 ms` |
+| EC ElGamal (P-256) encrypt | `3.766 ms` |
+| EC ElGamal (P-256) decrypt | `1.858 ms` |
+| Edwards DH (Ed25519) keygen | `1.427 ms` |
+| Edwards DH (Ed25519) agree | `2.746 ms` |
+| Edwards DH (Ed25519) serialize | `1.215 ms` |
+| Ed25519 keygen | `1.363 ms` |
+| Ed25519 sign | `1.361 ms` |
+| Ed25519 verify | `3.975 ms` |
+| Edwards ElGamal (Ed25519) keygen | `1.453 ms` |
+| Edwards ElGamal (Ed25519) encrypt | `2.976 ms` |
+| Edwards ElGamal (Ed25519) decrypt | `1.900 ms` |
 
 The table above is measured in milliseconds per operation. The radar chart
 below uses the reciprocal view — operations per second on a log scale — so the
 faster operations sit farther from the center.
 
-The chart below plots public-key encrypt/decrypt throughput. Signature-only
-schemes such as `DSA` stay in the table instead of the chart because they do
-not have matching encrypt/decrypt operations to plot:
+The finite-field chart below plots encrypt/decrypt throughput for the
+integer-based public-key schemes. Signature-only schemes stay in the table
+because they do not have matching encrypt/decrypt operations to plot:
 
 ![Public-key encrypt/decrypt radar chart](assets/public-key-encdec-radar.svg)
+
+The elliptic-curve code benefits from lower-constant-factor group operations, so
+the EC families are easier to compare in separate charts.
+
+### EC Signature Throughput
+
+These charts also use operations per second on a log scale.
+
+![EC signature radar chart](assets/ec-signature-radar.svg)
+
+### EC Key Agreement Throughput
+
+![EC key-agreement radar chart](assets/ec-key-agreement-radar.svg)
+
+### EC Encryption Throughput
+
+![EC encryption radar chart](assets/ec-encryption-radar.svg)
 
 ## Practical Guidance
 

@@ -228,8 +228,9 @@ impl BigUint {
         let mut low = Self::one();
         let mut high = Self::zero();
         // Choose `high` so the search starts with `low^2 <= self < high^2`.
-        // Setting bit `ceil(bits(self)/2)` makes `high` a strict upper bound
-        // on the square root.
+        // Setting bit `ceil(bits(self) / 2)` makes
+        // `high = 2^ceil(bits(self)/2)`, so `high^2 >= 2^bits(self) > self`.
+        // That gives the binary search a proved upper bound from the start.
         high.set_bit(self.bits().div_ceil(2));
 
         while {
@@ -431,6 +432,54 @@ impl BigUint {
         self.normalize();
     }
 
+    /// XOR another bigint into `self` in place (GF(2^m) field addition).
+    ///
+    /// Extends `self.limbs` with zeros if shorter than `other.limbs`, then
+    /// XORs each corresponding limb pair.  The result is normalized to strip
+    /// any leading zero limbs produced by XOR cancellation.
+    pub fn bitxor_assign(&mut self, other: &BigUint) {
+        if self.limbs.len() < other.limbs.len() {
+            self.limbs.resize(other.limbs.len(), 0);
+        }
+        for (s, &o) in self.limbs.iter_mut().zip(other.limbs.iter()) {
+            *s ^= o;
+        }
+        self.normalize();
+    }
+
+    /// Left-shift by `n` bits.
+    ///
+    /// Implemented as `n / 64` full-limb shifts (inserting zero limbs at the
+    /// low end) followed by up to 63 single-bit left shifts, which avoids
+    /// undefined behaviour from shifting a `u64` by 64 or more positions.
+    pub fn shl_bits(&mut self, n: usize) {
+        if self.is_zero() || n == 0 {
+            return;
+        }
+        let limb_shifts = n / 64;
+        let bit_shifts = n % 64;
+        // Full-limb shift: prepend zeros at the low (index 0) end.
+        if limb_shifts > 0 {
+            let mut new_limbs = vec![0u64; limb_shifts];
+            new_limbs.extend_from_slice(&self.limbs);
+            self.limbs = new_limbs;
+        }
+        // Remaining bit-level shift (0 < bit_shifts < 64, so 64 - bit_shifts is safe).
+        if bit_shifts > 0 {
+            let mut carry = 0u64;
+            for limb in &mut self.limbs {
+                let next_carry = *limb >> (64 - bit_shifts);
+                *limb = (*limb << bit_shifts) | carry;
+                carry = next_carry;
+            }
+            if carry != 0 {
+                self.limbs.push(carry);
+            }
+        }
+        // A left-shift on a normalized value cannot introduce a leading zero
+        // limb, so no normalize() pass is needed here.
+    }
+
     /// Compute `self mod modulus`.
     #[must_use]
     pub fn modulo(&self, modulus: &Self) -> Self {
@@ -451,8 +500,9 @@ impl BigUint {
         }
 
         let mut remainder = 0u128;
-        // Horner's method in base 2^64: carry the remainder of the already
-        // processed high limbs, then append the next limb.
+        // Horner's method in base `2^64`: carry the remainder of the already
+        // processed high limbs, then append the next limb as the next base
+        // digit before reducing again.
         for &limb in self.limbs.iter().rev() {
             let acc = (remainder << 64) | u128::from(limb);
             remainder = acc % u128::from(modulus);
@@ -594,7 +644,8 @@ impl BigUint {
         // limb cancels modulo `2^64`, then add `m * modulus`. Each round
         // zeros one more low limb; after `width` rounds the discarded low half
         // accounts for the implicit division by `R = 2^(64w)`, so the high
-        // half is `lhs * rhs * R^-1 mod n`.
+        // half is `lhs * rhs * R^-1 mod n`. That is why copying out
+        // `workspace[width..]` yields the Montgomery product.
         for i in 0..width {
             let m = workspace[i].wrapping_mul(n0_inv);
             let mut carry = 0u128;
@@ -641,7 +692,8 @@ impl MontgomeryCtx {
 
         // With `w` limbs, Montgomery arithmetic uses `R = 2^(64w)`. `R^2 mod
         // n` is the standard conversion factor for entering the Montgomery
-        // domain because `montgomery_mul(a, R^2) = a * R^2 * R^-1 = aR`.
+        // domain because `montgomery_mul(a, R^2) = a * R^2 * R^-1 = aR`, the
+        // Montgomery encoding of the ordinary residue `a`.
         let mut r2 = BigUint::zero();
         r2.set_bit(modulus.limbs.len() * 128);
         let r2_mod = r2.modulo(modulus);
@@ -720,7 +772,8 @@ impl MontgomeryCtx {
         let one = BigUint::one();
         // Stay in Montgomery form for the whole square-and-multiply loop:
         // start from encoded 1, keep all intermediate powers encoded, then
-        // decode once at the end.
+        // decode once at the end. This avoids paying the encode/decode cost
+        // on every multiply inside the exponentiation loop.
         let mut result = self.one_mont.clone();
         let mut power = self.encode(&base.modulo(&self.modulus));
 
@@ -732,7 +785,8 @@ impl MontgomeryCtx {
         }
 
         // `result` is still encoded (`aR mod n`). Multiplying by the ordinary
-        // integer 1 applies the final `R^-1` and decodes it.
+        // integer 1 applies the final `R^-1`: `(aR) * 1 * R^-1 = a`, so this
+        // one last Montgomery multiply is the decode step.
         BigUint::montgomery_mul_odd(&result, &one, &self.modulus, self.n0_inv)
     }
 }

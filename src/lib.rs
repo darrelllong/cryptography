@@ -88,7 +88,25 @@ pub use hash::{Digest, Xof};
 pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, Gmac, Ofb, Xts};
 pub use public_key::bigint::{BigInt, BigUint, MontgomeryCtx, Sign};
 pub use public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
+pub use public_key::dh::{Dh, DhParams, DhPrivateKey, DhPublicKey};
 pub use public_key::dsa::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
+pub use public_key::ec::{
+    AffinePoint, CurveParams,
+    b163, k163, b233, k233, b283, k283, b409, k409, b571, k571,
+    p192, p224, p256, p384, p521, secp256k1,
+};
+pub use public_key::ec_elgamal::{
+    EcElGamal, EcElGamalCiphertext, EcElGamalPrivateKey, EcElGamalPublicKey,
+};
+pub use public_key::ecdh::{Ecdh, EcdhPrivateKey, EcdhPublicKey};
+pub use public_key::ecdsa::{Ecdsa, EcdsaPrivateKey, EcdsaPublicKey, EcdsaSignature};
+pub use public_key::edwards_dh::{EdwardsDh, EdwardsDhPrivateKey, EdwardsDhPublicKey};
+pub use public_key::edwards_elgamal::{
+    EdwardsElGamal, EdwardsElGamalCiphertext, EdwardsElGamalPrivateKey, EdwardsElGamalPublicKey,
+};
+pub use public_key::eddsa::{EdDsa, EdDsaPrivateKey, EdDsaPublicKey, EdDsaSignature};
+pub use public_key::ed25519::{Ed25519, Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature};
+pub use public_key::ecies::{Ecies, EciesPrivateKey, EciesPublicKey};
 pub use public_key::elgamal::{ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey};
 pub use public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
 pub use public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};

@@ -2,11 +2,15 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use cryptography::public_key::bigint::BigUint;
+use cryptography::public_key::ec::p256;
+use cryptography::public_key::ec_edwards::ed25519 as edwards25519_curve;
 use cryptography::{
-    Cocks, CtrDrbgAes256, Dsa, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
+    Cocks, CtrDrbgAes256, Dsa, Ecdh, Ecdsa, EcElGamal, Ecies, Ed25519, EdwardsDh,
+    EdwardsElGamal, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
 };
 
 const MESSAGE: [u8; 32] = [0x42; 32];
+const EC_MESSAGE: [u8; 16] = [0x24; 16];
 const OAEP_LABEL: &[u8] = b"cryptography-rsa-oaep";
 const OAEP_SEED: [u8; 32] = [0x11; 32];
 const PSS_SALT: [u8; 32] = [0x22; 32];
@@ -16,6 +20,13 @@ type DsaTimings = (Duration, Duration, Duration);
 type PaillierTimings = (Duration, Duration, Duration, Duration, Duration);
 type RsaTimings = (Duration, Duration, Duration, Duration, Duration);
 type SimplePkTimings = (Duration, Duration, Duration);
+type EcdhTimings = (Duration, Duration, Duration);
+type EdwardsDhTimings = (Duration, Duration, Duration);
+type EcdsaTimings = (Duration, Duration, Duration);
+type Ed25519Timings = (Duration, Duration, Duration);
+type EciesTimings = (Duration, Duration, Duration);
+type EcElGamalTimings = (Duration, Duration, Duration);
+type EdwardsElGamalTimings = (Duration, Duration, Duration);
 
 fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
@@ -28,6 +39,68 @@ fn print_row(name: &str, duration: Duration) {
 fn announce(stage: &str) {
     println!("{stage}...");
     io::stdout().flush().expect("flush benchmark progress");
+}
+
+fn print_triplet(section: &str, labels: [&str; 3], timings: (Duration, Duration, Duration)) {
+    let (first, second, third) = timings;
+    println!("{section}");
+    print_row(labels[0], first);
+    print_row(labels[1], second);
+    print_row(labels[2], third);
+    println!();
+}
+
+fn print_quintet(section: &str, labels: [&str; 5], timings: PaillierTimings) {
+    let (first, second, third, fourth, fifth) = timings;
+    println!("{section}");
+    print_row(labels[0], first);
+    print_row(labels[1], second);
+    print_row(labels[2], third);
+    print_row(labels[3], fourth);
+    print_row(labels[4], fifth);
+    println!();
+}
+
+fn print_ec_sections(
+    p256_ecdh_timings: EcdhTimings,
+    p256_ecdsa_timings: EcdsaTimings,
+    edwards_dh_timings: EdwardsDhTimings,
+    ed25519_timings: Ed25519Timings,
+    p256_ecies_timings: EciesTimings,
+    p256_elgamal_timings: EcElGamalTimings,
+    edwards_elgamal_timings: EdwardsElGamalTimings,
+) {
+    print_triplet(
+        "ECDH (P-256)",
+        ["keygen", "agree", "serialize"],
+        p256_ecdh_timings,
+    );
+    print_triplet(
+        "ECDSA (P-256)",
+        ["keygen", "sign", "verify"],
+        p256_ecdsa_timings,
+    );
+    print_triplet(
+        "Edwards DH (Ed25519)",
+        ["keygen", "agree", "serialize"],
+        edwards_dh_timings,
+    );
+    print_triplet("Ed25519", ["keygen", "sign", "verify"], ed25519_timings);
+    print_triplet(
+        "ECIES (P-256)",
+        ["keygen", "encrypt", "decrypt"],
+        p256_ecies_timings,
+    );
+    print_triplet(
+        "EC ElGamal (P-256)",
+        ["keygen", "encrypt", "decrypt"],
+        p256_elgamal_timings,
+    );
+    print_triplet(
+        "Edwards ElGamal (Ed25519)",
+        ["keygen", "encrypt", "decrypt"],
+        edwards_elgamal_timings,
+    );
 }
 
 fn parse_args() -> (usize, bool, bool) {
@@ -244,6 +317,154 @@ fn bench_schmidt_samoa(rng: &mut CtrDrbgAes256, bits: usize) -> SimplePkTimings 
     (keygen, encrypt, decrypt)
 }
 
+fn bench_ecdh(rng: &mut CtrDrbgAes256) -> EcdhTimings {
+    announce("Generating ECDH key");
+    let start = Instant::now();
+    let (public_a, private_a) = Ecdh::generate(p256(), rng);
+    let keygen = start.elapsed();
+
+    announce("Measuring ECDH");
+    let (public_b, private_b) = Ecdh::generate(p256(), rng);
+    let start = Instant::now();
+    let shared_a = private_a.agree(&public_b).expect("ECDH agree A");
+    let shared_b = private_b.agree(&public_a).expect("ECDH agree B");
+    let agree = start.elapsed();
+    assert_eq!(shared_a, shared_b);
+    assert_eq!(shared_a.len(), 32);
+
+    let start = Instant::now();
+    let blob = public_a.to_binary();
+    let recovered = cryptography::EcdhPublicKey::from_binary(&blob).expect("ECDH public roundtrip");
+    let serialize = start.elapsed();
+    assert_eq!(recovered.to_bytes(), public_a.to_bytes());
+
+    (keygen, agree, serialize)
+}
+
+fn bench_ecdsa(rng: &mut CtrDrbgAes256) -> EcdsaTimings {
+    announce("Generating ECDSA key");
+    let start = Instant::now();
+    let (public, private) = Ecdsa::generate(p256(), rng);
+    let keygen = start.elapsed();
+
+    announce("Measuring ECDSA");
+    let start = Instant::now();
+    let signature = private
+        .sign_message_bytes::<Sha256, _>(&MESSAGE, rng)
+        .expect("ECDSA sign");
+    let sign = start.elapsed();
+
+    let start = Instant::now();
+    let verified = public.verify_message_bytes::<Sha256>(&MESSAGE, &signature);
+    let verify = start.elapsed();
+    assert!(verified);
+
+    (keygen, sign, verify)
+}
+
+fn bench_edwards_dh(rng: &mut CtrDrbgAes256) -> EdwardsDhTimings {
+    announce("Generating Edwards DH key");
+    let start = Instant::now();
+    let (public_a, private_a) = EdwardsDh::generate(edwards25519_curve(), rng);
+    let keygen = start.elapsed();
+
+    announce("Measuring Edwards DH");
+    let (public_b, private_b) = EdwardsDh::generate(edwards25519_curve(), rng);
+    let start = Instant::now();
+    let shared_a = private_a.agree(&public_b).expect("Edwards DH agree A");
+    let shared_b = private_b.agree(&public_a).expect("Edwards DH agree B");
+    let agree = start.elapsed();
+    assert_eq!(shared_a, shared_b);
+    assert_eq!(shared_a.len(), 32);
+
+    let start = Instant::now();
+    let blob = public_a.to_binary();
+    let recovered =
+        cryptography::EdwardsDhPublicKey::from_binary(&blob).expect("Edwards DH public roundtrip");
+    let serialize = start.elapsed();
+    assert_eq!(recovered.to_bytes(), public_a.to_bytes());
+
+    (keygen, agree, serialize)
+}
+
+fn bench_ecies(rng: &mut CtrDrbgAes256) -> EciesTimings {
+    announce("Generating ECIES key");
+    let start = Instant::now();
+    let (public, private) = Ecies::generate(p256(), rng);
+    let keygen = start.elapsed();
+
+    announce("Measuring ECIES");
+    let start = Instant::now();
+    let ciphertext = public.encrypt(&MESSAGE, rng);
+    let encrypt = start.elapsed();
+
+    let start = Instant::now();
+    let plaintext = private.decrypt(&ciphertext).expect("ECIES decrypt");
+    let decrypt = start.elapsed();
+    assert_eq!(plaintext, MESSAGE);
+
+    (keygen, encrypt, decrypt)
+}
+
+fn bench_edwards_elgamal(rng: &mut CtrDrbgAes256) -> EdwardsElGamalTimings {
+    announce("Generating Edwards ElGamal key");
+    let start = Instant::now();
+    let (public, private) = EdwardsElGamal::generate(edwards25519_curve(), rng);
+    let keygen = start.elapsed();
+
+    announce("Measuring Edwards ElGamal");
+    let start = Instant::now();
+    let ciphertext = public.encrypt_int(7, rng);
+    let encrypt = start.elapsed();
+
+    let start = Instant::now();
+    let message = private.decrypt_int(&ciphertext, 32).expect("Edwards ElGamal decrypt");
+    let decrypt = start.elapsed();
+    assert_eq!(message, 7);
+
+    (keygen, encrypt, decrypt)
+}
+
+fn bench_ed25519(rng: &mut CtrDrbgAes256) -> Ed25519Timings {
+    announce("Generating Ed25519 key");
+    let start = Instant::now();
+    let (public, private) = Ed25519::generate(rng);
+    let keygen = start.elapsed();
+
+    announce("Measuring Ed25519");
+    let start = Instant::now();
+    let signature = private.sign_message_bytes(&MESSAGE);
+    let sign = start.elapsed();
+
+    let start = Instant::now();
+    let verified = public.verify_message_bytes(&MESSAGE, &signature);
+    let verify = start.elapsed();
+    assert!(verified);
+
+    (keygen, sign, verify)
+}
+
+fn bench_ec_elgamal(rng: &mut CtrDrbgAes256) -> EcElGamalTimings {
+    announce("Generating EC ElGamal key");
+    let start = Instant::now();
+    let (public, private) = EcElGamal::generate(p256(), rng);
+    let keygen = start.elapsed();
+
+    announce("Measuring EC ElGamal");
+    let start = Instant::now();
+    let ciphertext = public
+        .encrypt(&EC_MESSAGE, rng)
+        .expect("EC ElGamal encrypt");
+    let encrypt = start.elapsed();
+
+    let start = Instant::now();
+    let plaintext = private.decrypt(&ciphertext);
+    let decrypt = start.elapsed();
+    assert_eq!(plaintext, EC_MESSAGE);
+
+    (keygen, encrypt, decrypt)
+}
+
 fn main() {
     let (bits, skip_elgamal, skip_dsa) = parse_args();
     if bits < 528 {
@@ -274,11 +495,19 @@ fn main() {
         dsa_timings = Some(bench_dsa(&mut rng, bits));
     }
 
-    let (paillier_keygen, paillier_encrypt, paillier_decrypt, paillier_rerandomize, paillier_add) =
-        bench_paillier(&mut rng, bits);
-    let (cocks_keygen, cocks_encrypt, cocks_decrypt) = bench_cocks(&mut rng, bits);
-    let (rabin_keygen, rabin_encrypt, rabin_decrypt) = bench_rabin(&mut rng, bits);
-    let (schmidt_keygen, schmidt_encrypt, schmidt_decrypt) = bench_schmidt_samoa(&mut rng, bits);
+    let paillier_timings = bench_paillier(&mut rng, bits);
+    let cocks_timings = bench_cocks(&mut rng, bits);
+    let rabin_timings = bench_rabin(&mut rng, bits);
+    let schmidt_timings = bench_schmidt_samoa(&mut rng, bits);
+    let (ecdh_keygen, ecdh_agree, ecdh_serialize) = bench_ecdh(&mut rng);
+    let (edwards_dh_keygen, edwards_dh_agree, edwards_dh_serialize) = bench_edwards_dh(&mut rng);
+    let (ecdsa_keygen, ecdsa_sign, ecdsa_verify) = bench_ecdsa(&mut rng);
+    let (ed25519_keygen, ed25519_sign, ed25519_verify) = bench_ed25519(&mut rng);
+    let (ecies_keygen, ecies_encrypt, ecies_decrypt) = bench_ecies(&mut rng);
+    let (p256_elgamal_keygen, p256_elgamal_encrypt, p256_elgamal_decrypt) =
+        bench_ec_elgamal(&mut rng);
+    let (edwards_elgamal_keygen, edwards_elgamal_encrypt, edwards_elgamal_decrypt) =
+        bench_edwards_elgamal(&mut rng);
 
     println!("RSA");
     print_row("keygen", rsa_keygen);
@@ -304,28 +533,29 @@ fn main() {
         println!();
     }
 
-    println!("Paillier");
-    print_row("keygen", paillier_keygen);
-    print_row("encrypt", paillier_encrypt);
-    print_row("decrypt", paillier_decrypt);
-    print_row("rerandomize", paillier_rerandomize);
-    print_row("add ciphertexts", paillier_add);
-    println!();
-
-    println!("Cocks");
-    print_row("keygen", cocks_keygen);
-    print_row("encrypt", cocks_encrypt);
-    print_row("decrypt", cocks_decrypt);
-    println!();
-
-    println!("Rabin");
-    print_row("keygen", rabin_keygen);
-    print_row("encrypt", rabin_encrypt);
-    print_row("decrypt", rabin_decrypt);
-    println!();
-
-    println!("Schmidt-Samoa");
-    print_row("keygen", schmidt_keygen);
-    print_row("encrypt", schmidt_encrypt);
-    print_row("decrypt", schmidt_decrypt);
+    print_quintet(
+        "Paillier",
+        ["keygen", "encrypt", "decrypt", "rerandomize", "add ciphertexts"],
+        paillier_timings,
+    );
+    print_triplet("Cocks", ["keygen", "encrypt", "decrypt"], cocks_timings);
+    print_triplet("Rabin", ["keygen", "encrypt", "decrypt"], rabin_timings);
+    print_triplet(
+        "Schmidt-Samoa",
+        ["keygen", "encrypt", "decrypt"],
+        schmidt_timings,
+    );
+    print_ec_sections(
+        (ecdh_keygen, ecdh_agree, ecdh_serialize),
+        (ecdsa_keygen, ecdsa_sign, ecdsa_verify),
+        (edwards_dh_keygen, edwards_dh_agree, edwards_dh_serialize),
+        (ed25519_keygen, ed25519_sign, ed25519_verify),
+        (ecies_keygen, ecies_encrypt, ecies_decrypt),
+        (p256_elgamal_keygen, p256_elgamal_encrypt, p256_elgamal_decrypt),
+        (
+            edwards_elgamal_keygen,
+            edwards_elgamal_encrypt,
+            edwards_elgamal_decrypt,
+        ),
+    );
 }

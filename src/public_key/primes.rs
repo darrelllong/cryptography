@@ -16,7 +16,7 @@ use crate::Csprng;
 ///
 /// These twelve small prime bases give a deterministic, repeatable witness
 /// schedule. They are the classic "small prime" Miller-Rabin bases through
-/// `37`: deterministic for all small values this crate uses in tests, and a
+/// `37`: deterministic for the small values used in the tests here, and a
 /// conservative fixed set for the larger cryptographic candidates used here.
 const MR_BASES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
 
@@ -171,6 +171,9 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
 
     for &base in bases {
         let witness = BigUint::from_u64(base);
+        // Bases `>= n - 1` add no information here: `n - 1` is the trivial
+        // `-1 mod n` case, and larger bases reduce to residues that a smaller
+        // representative would already cover.
         if witness >= n_minus_one {
             continue;
         }
@@ -199,7 +202,9 @@ pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option
         // Rejection sampling from the next power-of-two range. The buffer is
         // big-endian, so masking byte 0 constrains only the most significant
         // partial byte and keeps the candidate below `2^bits`; the loop then
-        // retries until the draw lands below `upper_exclusive`.
+        // retries until the draw lands below `upper_exclusive`. Because the
+        // candidate range is the next power of two, the expected retry count
+        // stays below 2.
         bytes[0] &= top_mask;
         let candidate = BigUint::from_be_bytes(&bytes);
         crate::ct::zeroize_slice(bytes.as_mut_slice());
@@ -287,7 +292,10 @@ pub(crate) fn random_even_with_bits<R: Csprng>(rng: &mut R, bits: usize) -> Opti
         bytes[0] |= 1u8 << top_bit;
         let last = bytes.len() - 1;
         // The cofactor is kept even so `p - 1 = kq` has the usual DSA-style
-        // factorization with an explicit factor of two.
+        // factorization with an explicit factor of two. In particular, an
+        // odd cofactor of 1 would collapse the subgroup construction into the
+        // full group, which is not the structure these finite-field schemes
+        // are trying to generate.
         bytes[last] &= !1;
         let candidate = BigUint::from_be_bytes(&bytes);
         // The resulting cofactor is public, but clearing the temporary random

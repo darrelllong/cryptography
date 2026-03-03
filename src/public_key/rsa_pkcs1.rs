@@ -297,8 +297,8 @@ impl<H: Digest> RsaPss<H> {
         // Full-scan PSS validation mirrors the OAEP approach: do not stop at
         // the first malformed byte, because verification should not leak where
         // the separator structure failed or turn into a format oracle. This
-        // is the same "no early parse oracle" discipline used to avoid the
-        // classic Manger-style OAEP failures on the decryption side.
+        // is the same "no early parse oracle" discipline used to avoid
+        // Manger-style OAEP padding oracles on the decryption side.
         let mut saw_separator = 0u8;
         let mut one_index = 0usize;
         for (idx, &byte) in masked_db.iter().enumerate() {

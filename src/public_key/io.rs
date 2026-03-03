@@ -90,7 +90,8 @@ pub(crate) fn decode_biguints(input: &[u8]) -> Option<Vec<BigUint>> {
 fn der_integer_bytes(value: &BigUint) -> Vec<u8> {
     let mut bytes = value.to_be_bytes();
     // DER INTEGER uses signed two's-complement, so a leading 1 bit would make
-    // the value look negative. Prepend a zero byte to keep it positive.
+    // the value look negative. Prepend a zero byte to mark the encoding as a
+    // positive integer.
     if bytes.first().is_some_and(|byte| byte & 0x80 != 0) {
         bytes.insert(0, 0);
     }

@@ -276,9 +276,11 @@ impl ElGamalPrivateKey {
     /// `gamma^(q-a)` (or conservatively `gamma^(p-1-a)` when the subgroup
     /// order is unknown). In the generated-key case, `gamma` lives in the
     /// order-`q` subgroup, so `g^q = 1` and
-    /// `gamma^(q-a) * delta = g^(k(q-a)) * m * g^(ak) = g^(kq) * m = m`.
-    /// In the fallback case, the exponent cycle is `p - 1`, so Fermat's
-    /// little theorem gives the same cancellation.
+    /// `gamma^(q-a) * delta = g^(k(q-a)) * m * g^(ak) = g^(kq) * m
+    /// = (g^q)^k * m = m`.
+    /// In the fallback case, the exponent cycle is `p - 1`, so the same
+    /// multiplication becomes `g^(k(p-1-a)) * m * g^(ak) = g^(k(p-1)) * m`,
+    /// and Fermat's little theorem gives the same cancellation.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &ElGamalCiphertext) -> BigUint {
         let exponent = self.exponent_modulus.sub_ref(&self.a);

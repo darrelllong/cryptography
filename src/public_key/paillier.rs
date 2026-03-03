@@ -92,9 +92,10 @@ impl PaillierPublicKey {
         let left = mod_pow(&self.zeta, message, &self.n_squared);
         let right = mod_pow(nonce, &self.n, &self.n_squared);
         // `n^2` is cached in the key so the hot path does not redo the same
-        // public multiplication on every operation. Valid Paillier keys always use odd `n`, so `n^2` stays on the
-        // Montgomery fast path. Keep the slow path as a defensive fallback for
-        // malformed caller-supplied state.
+        // public multiplication on every operation. Valid Paillier keys
+        // always use odd `n`, so `n^2` stays on the Montgomery fast path.
+        // Keep the slow path as a defensive fallback for malformed
+        // caller-supplied state.
         let product = if let Some(ctx) = MontgomeryCtx::new(&self.n_squared) {
             ctx.mul(&left, &right)
         } else {
@@ -235,8 +236,9 @@ impl PaillierPrivateKey {
         // Valid Paillier ciphertexts produce values of the form `1 + k*n`
         // here, so `L(value)` is defined and extracts the linear term that
         // still carries the plaintext. `u` was precomputed as
-        // `L(zeta^lambda mod n^2)^-1 mod n`, so multiplying by it inverts the
-        // fixed decryption multiplier left by `zeta^lambda` and recovers `m`.
+        // `L(zeta^lambda mod n^2)^-1 mod n`, so multiplying by it explicitly
+        // cancels the fixed `L(zeta^lambda)` factor left by the public base
+        // and recovers the plaintext representative `m`.
         let lifted = paillier_l(&value, &self.n);
         if let Some(ctx) = MontgomeryCtx::new(&self.n) {
             ctx.mul(&lifted, &self.u)
