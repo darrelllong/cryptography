@@ -6,3 +6,4 @@ Cargo.lock
 /ml/data/
 /ml/out/
 /ml/__pycache__/
+/pilot_result_*/
