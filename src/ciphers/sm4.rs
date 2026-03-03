@@ -36,6 +36,41 @@ const SBOX: [u8; 256] = [
     0x18, 0xf0, 0x7d, 0xec, 0x3a, 0xdc, 0x4d, 0x20, 0x79, 0xee, 0x5f, 0x3e, 0xd7, 0xcb, 0x39, 0x48,
 ];
 
+// ── T-tables for the fast-path round function ─────────────────────────────────
+//
+// T(x) = L(tau(x)).  L is linear over GF(2), so it distributes across the four
+// input bytes independently:
+//
+//   T(x) = T0[x>>24] ^ T1[(x>>16)&0xff] ^ T2[(x>>8)&0xff] ^ T3[x&0xff]
+//
+// where Ti[b] = L(SBOX[b] << (24 - 8*i)).  Four tables × 256 × 4 bytes = 4 KB.
+// The Ct path cannot use these because it must avoid secret-indexed lookups.
+
+const fn l_const(x: u32) -> u32 {
+    let r2 = (x << 2) | (x >> 30);
+    let r10 = (x << 10) | (x >> 22);
+    let r18 = (x << 18) | (x >> 14);
+    let r24 = (x << 24) | (x >> 8);
+    x ^ r2 ^ r10 ^ r18 ^ r24
+}
+
+const fn build_t_table(byte_pos: usize) -> [u32; 256] {
+    let mut tbl = [0u32; 256];
+    let mut b = 0usize;
+    while b < 256 {
+        let sval = SBOX[b] as u32;
+        let shifted = sval << (24 - 8 * byte_pos);
+        tbl[b] = l_const(shifted);
+        b += 1;
+    }
+    tbl
+}
+
+static T0: [u32; 256] = build_t_table(0);
+static T1: [u32; 256] = build_t_table(1);
+static T2: [u32; 256] = build_t_table(2);
+static T3: [u32; 256] = build_t_table(3);
+
 /// Build the packed ANF coefficients for the SM4 S-box.
 ///
 /// Each output bit becomes two `u128` masks covering the 256 monomials in
@@ -113,7 +148,10 @@ fn l_prime(x: u32) -> u32 {
 
 #[inline]
 fn t(x: u32) -> u32 {
-    l(tau(x))
+    T0[(x >> 24) as usize]
+        ^ T1[((x >> 16) & 0xff) as usize]
+        ^ T2[((x >> 8) & 0xff) as usize]
+        ^ T3[(x & 0xff) as usize]
 }
 
 #[inline]

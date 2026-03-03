@@ -32,6 +32,7 @@ Implemented families:
 - SM4 / SMS4 plus `Sm4Ct`
 - ChaCha20 and XChaCha20
 - Salsa20
+- Rabbit
 - ZUC-128 plus `Zuc128Ct`
 
 Supporting primitives:
@@ -69,7 +70,8 @@ The main variable-length exceptions are:
 
 Stream-cipher nonce/IV sizes are fixed by the constructor:
 
-- `Salsa20`: 8-byte nonce
+- `Salsa20`: 16- or 32-byte key, 8-byte nonce
+- `Rabbit`: 16-byte key, 8-byte IV
 - `ChaCha20`: 12-byte nonce, optional 32-bit block counter via `with_counter`
 - `XChaCha20`: 24-byte nonce, optional 32-bit block counter via `with_counter`
 - `Zuc128`: 16-byte key and 16-byte IV
@@ -652,6 +654,7 @@ family and supporting primitive covered in this repository:
 - SM4: `sm4-linear-cryptanalysis-2024.pdf` (the official GM/T host is not reachable from this sandbox, so the checked-in local PDF is a public SM4-family paper)
 - ChaCha20 / XChaCha20: `chacha-20080128.pdf`, `rfc8439-chacha20-poly1305.pdf`, `draft-irtf-cfrg-xchacha-03.pdf`
 - Salsa20: `salsafamily-20071225.pdf`
+- Rabbit: `rfc4503-rabbit.pdf`
 - ZUC-128: `ts-135222-zuc.pdf`
 
 ## References
@@ -1075,6 +1078,17 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year      = {2008},
   note      = {Author's specification PDF dated 2007-12-25},
   url       = {https://cr.yp.to/snuffle/salsafamily-20071225.pdf},
+}
+
+@techreport{rfc4503,
+  author      = {M. Boesgaard and M. Vesterager and T. Pedersen and J. Christiansen},
+  title       = {The {Rabbit} Cipher Algorithm},
+  type        = {{RFC}},
+  number      = {4503},
+  institution = {IETF},
+  year        = {2006},
+  month       = may,
+  url         = {https://www.rfc-editor.org/rfc/rfc4503},
 }
 
 @misc{chacha-2008,

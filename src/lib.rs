@@ -11,8 +11,8 @@ pub mod modes;
 pub mod public_key;
 
 pub use ciphers::{
-    aes, camellia, cast128, chacha20, des, grasshopper, magma, present, salsa20, seed, serpent,
-    simon, sm4, speck, twofish, zuc,
+    aes, camellia, cast128, chacha20, des, grasshopper, magma, present, rabbit, salsa20, seed,
+    serpent, simon, sm4, speck, twofish, zuc,
 };
 
 /// Common interface for block ciphers.
@@ -56,6 +56,7 @@ pub use ciphers::des::{key_schedule, Des, DesCt, KeySchedule, TDesMode, TripleDe
 pub use ciphers::grasshopper::{Grasshopper, GrasshopperCt};
 pub use ciphers::magma::{Magma, MagmaCt};
 pub use ciphers::present::{Present, Present128, Present128Ct, Present80, Present80Ct, PresentCt};
+pub use ciphers::rabbit::Rabbit;
 pub use ciphers::salsa20::Salsa20;
 pub use ciphers::seed::{Seed, SeedCt};
 pub use ciphers::serpent::{

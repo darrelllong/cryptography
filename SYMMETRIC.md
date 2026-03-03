@@ -110,59 +110,77 @@ Implemented block-cipher families:
 
 Design philosophy by family:
 
-- `DES / Triple-DES`: classic Feistel structure with tiny S-boxes and heavy
-  bit-permutation machinery. The implementation preserves the traditional fast
-  table-driven shape because the whole point of DES in software is how far that
-  old design can be pushed, while `DesCt` makes the constant-time tradeoff
-  explicit instead of pretending the two goals coincide.
-- `AES`: optimized software wants T-tables; side-channel discipline wants a
-  table-free nonlinear layer. The crate keeps both views visible: the fast path
-  for ordinary software benchmarking, and a separate Boyar-Peralta-style `Ct`
-  path so the constant-time cost is concrete.
-- `CAST-128 / CAST5`: a round-function-heavy Feistel cipher built around large
-  keyed S-boxes. It is historically interesting because it sits between DES-era
-  Feistel design and the later AES finalists, so the implementation keeps the
-  keyed-round shape obvious rather than hiding it behind abstractions.
-- `Camellia`: an AES-era design that deliberately blends an SP-network core
-  with Feistel-style `FL` / `FLINV` layers. The writeup and code keep that
-  hybrid structure visible because that split personality is the whole design.
-- `Serpent`: brute-force conservative design. Its philosophy is “simple boolean
+- `DES / Triple-DES`: the classic U.S. IBM / NIST line. It is a Feistel design
+  from the hardware-centric 1970s, so the tiny S-boxes and heavy bit
+  permutations reflect gate-count and wiring concerns more than modern software
+  taste. The implementation preserves the traditional fast table-driven shape
+  because the whole point of DES in software is how far that old design can be
+  pushed, while `DesCt` makes the constant-time tradeoff explicit instead of
+  pretending the two goals coincide.
+- `AES`: the U.S. federal standard selected by NIST, but designed in Belgium
+  as Rijndael. Its SP-network structure is a software/hardware compromise: fast
+  table-driven software on one hand, compact byte-oriented hardware on the
+  other. The crate keeps both views visible: the fast path for ordinary
+  software benchmarking, and a separate Boyar-Peralta-style `Ct` path so the
+  constant-time cost is concrete.
+- `CAST-128 / CAST5`: a Canadian design from Carlisle Adams and Stafford
+  Tavares. It is a round-function-heavy Feistel cipher built around large keyed
+  S-boxes, sitting between DES-era Feistel design and the later AES finalists.
+  The implementation keeps the keyed-round shape obvious rather than hiding it
+  behind abstractions.
+- `Camellia`: a Japanese design (NTT and Mitsubishi) from the AES era. It
+  deliberately blends an SP-network core with Feistel-style `FL` / `FLINV`
+  layers, reflecting a design culture that wanted AES-class performance without
+  abandoning older structural ideas. The writeup and code keep that hybrid
+  structure visible because that split personality is the whole design.
+- `Serpent`: a European AES finalist (Anderson, Biham, Knudsen) built as the
+  conservative answer to AES selection. Its philosophy is “simple boolean
   layers, many rounds, wide security margin,” so the implementation keeps the
   bitslice round structure explicit rather than chasing table speed tricks.
-- `Twofish`: key-dependent S-boxes plus an MDS layer and whitening. The code
-  keeps the `q` permutations, RS/MDS layers, and keyed `h()` transform visible
-  because Twofish’s design is about the interaction of those components, not
-  just the Feistel shell around them.
-- `SEED`: a national-standard Feistel cipher that leans on large 8-bit S-boxes
-  and a compact algebraic round mix. The implementation favors readability of
-  the round algebra and the key schedule over trying to disguise it as “just
-  another AES-like block cipher.”
-- `PRESENT`: ultra-lightweight substitution-permutation design. Its philosophy
-  is minimum hardware footprint, so the code keeps the 4-bit S-box / bit
-  permutation structure direct and simple.
-- `Magma`: 32-round Feistel design with 4-bit substitution and a single rotate.
-  It is intentionally small and regular, so the implementation keeps the nibble
-  structure obvious and treats the `Ct` path as a software side-channel
-  concession rather than a redesign.
-- `Grasshopper`: byte-oriented SP-network whose identity is its linear `L`
-  transform over `GF(2^8)`. The code emphasizes that linear layer because it is
-  the part that makes Grasshopper look and cost different from AES.
-- `SM4`: a pragmatic byte-oriented national standard whose round function is a
-  compact “S-box then linear diffusion” transform. The implementation keeps the
-  `T = L(tau(...))` structure front and center because that is the design’s
-  defining rhythm.
-- `SIMON`: minimalist bitwise Feistel design. Its philosophy is “only the
+- `Twofish`: the U.S. AES-finalist line from Schneier and collaborators. Its
+  design mixes key-dependent S-boxes, an MDS layer, and whitening, reflecting a
+  software-first philosophy that squeezes complexity into precomputation and
+  linear algebra instead of just adding rounds. The code keeps the `q`
+  permutations, RS/MDS layers, and keyed `h()` transform visible because
+  Twofish’s design is about the interaction of those components, not just the
+  Feistel shell around them.
+- `SEED`: the Korean national standard. It is a Feistel cipher that leans on
+  large 8-bit S-boxes and a compact algebraic round mix, closer in feel to the
+  1990s national-standard school than to the later ARX stream ciphers. The
+  implementation favors readability of the round algebra and the key schedule
+  over trying to disguise it as “just another AES-like block cipher.”
+- `PRESENT`: a lightweight European academic design aimed at tiny hardware. Its
+  philosophy is minimum area and simple logic, so the code keeps the 4-bit
+  S-box / bit permutation structure direct and simple.
+- `Magma`: the older Russian standard line (GOST 28147-89). It is a 32-round
+  Feistel design with 4-bit substitution and a single rotate, intentionally
+  small and regular in the style of older Soviet/Russian block-cipher design.
+  The implementation keeps the nibble structure obvious and treats the `Ct`
+  path as a software side-channel concession rather than a redesign.
+- `Grasshopper`: the newer Russian standard (Kuznyechik / GOST R 34.12-2015).
+  It is a byte-oriented SP-network whose identity is its linear `L` transform
+  over `GF(2^8)`. Compared to `Magma`, it reflects a much more modern
+  byte-oriented design style. The code emphasizes that linear layer because it
+  is the part that makes Grasshopper look and cost different from AES.
+- `SM4`: the Chinese national standard. Its round function is a compact
+  “S-box then linear diffusion” transform, a pragmatic software/hardware middle
+  ground that looks closer to the East Asian national-standard family than to
+  the Bernstein ARX line. The implementation keeps the `T = L(tau(...))`
+  structure front and center because that is the design’s defining rhythm.
+- `SIMON`: the U.S. NSA minimalist bitwise line. Its philosophy is “only the
   operations hardware and software both like”: rotates, AND, XOR. That is why
   there is no separate `Ct` split; the native round function is already close
   to the ideal constant-time software shape.
-- `SPECK`: ARX counterpart to `SIMON`. Its design philosophy is software-first
-  simplicity: add, rotate, XOR, and nothing else. The implementation therefore
-  focuses on exactness and endianness rather than alternate `Ct` variants.
+- `SPECK`: the U.S. NSA ARX counterpart to `SIMON`. Its design philosophy is
+  software-first simplicity: add, rotate, XOR, and nothing else. The
+  implementation therefore focuses on exactness and endianness rather than
+  alternate `Ct` variants.
 
 ### Stream Ciphers
 
 Implemented stream-cipher families:
 
+- Rabbit
 - Salsa20
 - ChaCha20
 - XChaCha20
@@ -170,22 +188,28 @@ Implemented stream-cipher families:
 
 Design philosophy by family:
 
-- `Salsa20`: Bernstein’s original “make a stream cipher out of a fast ARX
-  core” design. The quarter-round structure is intentionally simple and
-  pipeline-friendly, so the implementation keeps the core word-mixing visible.
-- `ChaCha20`: a refinement of Salsa20 that pushes for better diffusion per
+- `Rabbit`: an eSTREAM-era software stream cipher built around eight coupled
+  counters and a nonlinear integer `g`-function rather than a pure ARX quarter
+  round. Its design philosophy is software throughput with a more structured
+  internal state than the Bernstein line, and the implementation keeps that
+  counter/state split explicit because that is what makes Rabbit distinct.
+- `Salsa20`: the U.S. Bernstein line, built around a fast ARX core. The
+  quarter-round structure is intentionally simple and pipeline-friendly, so the
+  implementation keeps the core word-mixing visible.
+- `ChaCha20`: also Bernstein’s work, and explicitly a refinement of Salsa20
+  rather than a different design family. It pushes for better diffusion per
   round while keeping the same ARX spirit. The code keeps the quarter-round and
-  state layout explicit because ChaCha’s design is evolutionary, not a totally
-  different cipher.
+  state layout explicit because ChaCha’s design is evolutionary.
 - `XChaCha20`: not a new core cipher, but a longer-nonce construction around
   ChaCha20. Its design philosophy is operational robustness: keep ChaCha20’s
   fast core, but fix nonce-management pain by stretching a 24-byte nonce into a
   subkey plus ordinary ChaCha20 state.
-- `ZUC-128`: very different from the ARX family. It is built around a
-  word-structured LFSR plus a nonlinear filter and S-box layer, reflecting the
-  mobile-stream-cipher design tradition rather than the Bernstein ARX line. The
-  implementation leaves that contrast obvious, because the cost profile comes
-  from that architectural choice.
+- `ZUC-128`: the Chinese mobile-stream-cipher line (standardized through the
+  3GPP / LTE world). It is very different from the ARX family: a word-structured
+  LFSR plus a nonlinear filter and S-box layer, reflecting a telecom-stream-
+  cipher tradition rather than the Bernstein ARX line. The implementation leaves
+  that contrast obvious, because the cost profile comes from that architectural
+  choice.
 
 ## Symmetric Performance
 
@@ -196,12 +220,10 @@ Performance is measured with:
 
 Representative figures on this host:
 
+### Block-Cipher Throughput
+
 | Primitive | Throughput |
 |-----------|-----------:|
-| Salsa20 | `833.0 MiB/s` |
-| XChaCha20 | `825.6 MiB/s` |
-| ChaCha20 | `829.7 MiB/s` |
-| ZUC-128 | `549.2 MiB/s` |
 | AES-128 | `539.9 MiB/s` |
 | CAST-128 | `236.9 MiB/s` |
 | Camellia-128 | `128.6 MiB/s` |
@@ -212,6 +234,16 @@ Representative figures on this host:
 | Grasshopper-256 | `26.1 MiB/s` |
 | Twofish-128 | `13.5 MiB/s` |
 | PRESENT-80 | `12.7 MiB/s` |
+
+### Stream-Cipher Throughput
+
+| Primitive | Throughput |
+|-----------|-----------:|
+| Rabbit | `1.58 GiB/s` |
+| Salsa20 | `833.0 MiB/s` |
+| ChaCha20 | `829.7 MiB/s` |
+| XChaCha20 | `825.6 MiB/s` |
+| ZUC-128 | `549.2 MiB/s` |
 
 The radar below compares representative fast-vs-`Ct` pairs. `SIMON` and
 `SPECK` are intentionally absent because their shipped round functions are

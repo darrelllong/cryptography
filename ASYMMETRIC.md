@@ -397,6 +397,11 @@ are expected to apply their own KDF before using it as keying material.
 
 ### ECDH
 
+Reference: SEC 1 v2.0, SEC 2 v2.0, and NIST SP 800-56A Rev. 3 (see
+`pubs/sec1-v2-elliptic-curve-cryptography.pdf`,
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`, and
+`pubs/sp800-56a-r3.pdf`).
+
 Shared secret:
 
 ```math
@@ -413,6 +418,12 @@ separate curve-identifier negotiation layer.
 
 ### Edwards DH
 
+Reference: NIST SP 800-56A Rev. 3 for the DH model, with the Edwards-group
+arithmetic and compressed-point conventions used in this crate anchored by the
+same local curve references (`pubs/sec1-v2-elliptic-curve-cryptography.pdf`,
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`,
+`pubs/fips186-5.pdf`).
+
 `EdwardsDh` provides the same core operation on a twisted Edwards curve:
 
 ```math
@@ -426,6 +437,12 @@ x-coordinate. That matches the way the Edwards side of the crate already treats
 points as compressed byte strings.
 
 ### EC-ElGamal
+
+Reference: the ElGamal paper for the discrete-logarithm construction and SEC 1
+v2.0 / SEC 2 v2.0 for the elliptic-curve group and point encodings (see
+`pubs/elgamal-1985.pdf`,
+`pubs/sec1-v2-elliptic-curve-cryptography.pdf`, and
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`).
 
 EC-ElGamal has three distinct plaintext layers stacked on the same key pair:
 
@@ -469,6 +486,12 @@ The integer `m` is recovered from `m · G` via baby-step giant-step (BSGS) with
 
 ### Edwards ElGamal
 
+Reference: the ElGamal paper for the encryption law, with the Edwards-curve
+group and encoding choices in this crate tied to the same local curve
+references used for `Ed25519` and `EdwardsDh` (see `pubs/elgamal-1985.pdf`,
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`, and
+`pubs/fips186-5.pdf`).
+
 `EdwardsElGamal` mirrors the same ElGamal construction on a twisted Edwards
 group:
 
@@ -493,6 +516,10 @@ Edwards point encodings throughout, which makes ciphertext serialization more
 compact and keeps it aligned with the `Ed25519` / `EdDsa` side of the crate.
 
 ### ECIES
+
+Reference: SEC 1 v2.0 and NIST SP 800-56A Rev. 3 for the EC key-establishment
+model and point encodings (see `pubs/sec1-v2-elliptic-curve-cryptography.pdf`
+and `pubs/sp800-56a-r3.pdf`).
 
 `ECIES` is the standard way to encrypt arbitrary byte strings to a static EC public key.
 It combines ephemeral ECDH with a symmetric encryption step, so the per-message overhead
@@ -535,6 +562,11 @@ so no separate MAC layer is needed.
 
 ### ECDSA
 
+Reference: FIPS 186-5 and the local elliptic-curve standards in SEC 1 / SEC 2
+(see `pubs/fips186-5.pdf`,
+`pubs/sec1-v2-elliptic-curve-cryptography.pdf`, and
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`).
+
 Core arithmetic (FIPS 186-5):
 
 ```math
@@ -564,6 +596,10 @@ The key types (`EcdsaPublicKey`, `EcdsaPrivateKey`) carry the full `CurveParams`
 and work with any named curve.
 
 ### Ed25519
+
+Reference: FIPS 186-5 for EdDSA and the local elliptic-curve references for
+the underlying group and parameter conventions (see `pubs/fips186-5.pdf`,
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`).
 
 `Ed25519` is the fixed-curve RFC 8032 signature construction built on the
 Edwards arithmetic in this crate. Unlike the generic `EdDsa` layer, it follows

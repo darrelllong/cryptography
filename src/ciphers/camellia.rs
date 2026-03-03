@@ -43,6 +43,45 @@ const SIGMA: [u64; 6] = [
 
 const SBOX1_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SBOX1);
 
+const fn build_sbox2() -> [u8; 256] {
+    let mut out = [0u8; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        let v = SBOX1[i];
+        out[i] = (v << 1) | (v >> 7); // rotate_left(1)
+        i += 1;
+    }
+    out
+}
+
+const fn build_sbox3() -> [u8; 256] {
+    let mut out = [0u8; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        let v = SBOX1[i];
+        out[i] = (v << 7) | (v >> 1); // rotate_left(7)
+        i += 1;
+    }
+    out
+}
+
+const fn build_sbox4() -> [u8; 256] {
+    let mut out = [0u8; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        // sbox4(x) = sbox1(x.rotate_left(1)) = sbox1((x<<1)|(x>>7))
+        let x = i as u8;
+        let rotated = (x << 1) | (x >> 7);
+        out[i] = SBOX1[rotated as usize];
+        i += 1;
+    }
+    out
+}
+
+const SBOX2: [u8; 256] = build_sbox2();
+const SBOX3: [u8; 256] = build_sbox3();
+const SBOX4: [u8; 256] = build_sbox4();
+
 #[derive(Clone, Copy)]
 struct Subkeys18 {
     kw: [u64; 4],
@@ -69,17 +108,17 @@ fn sbox1_ct(x: u8) -> u8 {
 
 #[inline]
 fn sbox2(x: u8) -> u8 {
-    sbox1(x).rotate_left(1)
+    SBOX2[x as usize]
 }
 
 #[inline]
 fn sbox3(x: u8) -> u8 {
-    sbox1(x).rotate_left(7)
+    SBOX3[x as usize]
 }
 
 #[inline]
 fn sbox4(x: u8) -> u8 {
-    sbox1(x.rotate_left(1))
+    SBOX4[x as usize]
 }
 
 #[inline]

@@ -10,12 +10,15 @@
 //! HTML reports land in target/criterion/.
 
 use criterion::measurement::WallTime;
-use criterion::{BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{
+    BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main,
+};
+use std::time::Duration;
 use cryptography::{
     Aes128, Aes128Ct, Aes192, Aes192Ct, Aes256, Aes256Ct, BlockCipher, Camellia128,
     Camellia128Ct, Camellia192, Camellia192Ct, Camellia256, Camellia256Ct, Cast128, Cast128Ct,
     ChaCha20, Des, DesCt, Grasshopper, GrasshopperCt, Magma, MagmaCt, Present128, Present128Ct,
-    Present80, Present80Ct, Salsa20, Seed, SeedCt, Serpent128, Serpent128Ct, Serpent192,
+    Present80, Present80Ct, Rabbit, Salsa20, Seed, SeedCt, Serpent128, Serpent128Ct, Serpent192,
     Serpent192Ct, Serpent256, Serpent256Ct, Simon32_64, Simon48_72, Simon48_96, Simon64_96,
     Simon64_128, Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct,
     Speck32_64, Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144,
@@ -306,6 +309,24 @@ fn bench_salsa20(c: &mut Criterion) {
     g.finish();
 }
 
+// ── Rabbit ────────────────────────────────────────────────────────────────
+
+fn bench_rabbit(c: &mut Criterion) {
+    let mut g = c.benchmark_group("Rabbit");
+    g.throughput(Throughput::Bytes(MB as u64));
+    g.bench_function("Rabbit", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                Rabbit::new(&[0u8; 16], &[0u8; 8]).apply_keystream(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.finish();
+}
+
 // ── ZUC-128 ───────────────────────────────────────────────────────────────
 
 fn bench_zuc(c: &mut Criterion) {
@@ -335,7 +356,13 @@ fn bench_zuc(c: &mut Criterion) {
 }
 
 criterion_group!(
-    benches,
+    name = benches;
+    // 20 samples with a 1s warmup is ample for block cipher throughput.
+    // Variance is typically < 0.5 %, so 100 samples just wastes wall-clock time.
+    config = Criterion::default()
+        .sample_size(20)
+        .warm_up_time(Duration::from_secs(1));
+    targets =
     bench_simon,
     bench_speck,
     bench_aes,
@@ -351,6 +378,7 @@ criterion_group!(
     bench_seed,
     bench_chacha20,
     bench_salsa20,
+    bench_rabbit,
     bench_zuc
 );
 criterion_main!(benches);

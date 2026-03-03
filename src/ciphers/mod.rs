@@ -15,6 +15,7 @@ pub mod des;
 pub mod grasshopper;
 pub mod magma;
 pub mod present;
+pub mod rabbit;
 pub mod salsa20;
 pub mod seed;
 pub mod serpent;
