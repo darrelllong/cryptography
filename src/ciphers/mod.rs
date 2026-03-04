@@ -21,6 +21,7 @@ pub mod seed;
 pub mod serpent;
 pub mod simon;
 pub mod sm4;
+pub mod snow3g;
 pub mod speck;
 pub mod twofish;
 pub mod zuc;

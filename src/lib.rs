@@ -12,7 +12,7 @@ pub mod public_key;
 
 pub use ciphers::{
     aes, camellia, cast128, chacha20, des, grasshopper, magma, present, rabbit, salsa20, seed,
-    serpent, simon, sm4, speck, twofish, zuc,
+    serpent, simon, sm4, snow3g, speck, twofish, zuc,
 };
 
 /// Common interface for block ciphers.
@@ -68,6 +68,7 @@ pub use ciphers::simon::{
     Simon64_96, Simon96_144, Simon96_96,
 };
 pub use ciphers::sm4::{Sm4, Sm4Ct, Sms4, Sms4Ct};
+pub use ciphers::snow3g::{Snow3g, Snow3gCt};
 pub use ciphers::speck::{
     Speck128_128, Speck128_192, Speck128_256, Speck32_64, Speck48_72, Speck48_96, Speck64_128,
     Speck64_96, Speck96_144, Speck96_96,

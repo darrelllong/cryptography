@@ -33,6 +33,7 @@ Implemented families:
 - ChaCha20 and XChaCha20
 - Salsa20
 - Rabbit
+- SNOW 3G plus `Snow3gCt`
 - ZUC-128 plus `Zuc128Ct`
 
 Supporting primitives:
@@ -74,6 +75,7 @@ Stream-cipher nonce/IV sizes are fixed by the constructor:
 - `Rabbit`: 16-byte key, 8-byte IV
 - `ChaCha20`: 12-byte nonce, optional 32-bit block counter via `with_counter`
 - `XChaCha20`: 24-byte nonce, optional 32-bit block counter via `with_counter`
+- `Snow3g`: 16-byte key and 16-byte IV
 - `Zuc128`: 16-byte key and 16-byte IV
 
 The mode wrappers follow the block size or the standard profile:
@@ -180,23 +182,25 @@ in the basic mode adapters.
 
 ### Stream-cipher example
 
-ZUC produces keystream words and can fill a caller-supplied buffer, while
-Salsa20, ChaCha20, and XChaCha20 apply their keystream directly to plaintext
-or ciphertext:
+SNOW 3G and ZUC produce keystream words and can fill a caller-supplied
+buffer, while Salsa20, ChaCha20, and XChaCha20 apply their keystream directly
+to plaintext or ciphertext:
 
 ```rust
-use cryptography::{ChaCha20, Salsa20, XChaCha20, Zuc128};
+use cryptography::{ChaCha20, Salsa20, Snow3g, XChaCha20, Zuc128};
 
 let mut msg = *b"example message...";
 let mut salsa = Salsa20::new(&[0u8; 32], &[0u8; 8]); // 32-byte key, 8-byte nonce
 let mut chacha = ChaCha20::with_counter(&[1u8; 32], &[0u8; 12], 7); // 32-byte key, 12-byte nonce, u32 counter
 let mut xchacha = XChaCha20::with_counter(&[2u8; 32], &[0u8; 24], 7); // 32-byte key, 24-byte nonce, u32 counter
 let mut buf = [0u8; 64];
+let mut snow = Snow3g::new(&[3u8; 16], &[0u8; 16]); // 16-byte key, 16-byte IV
 let mut zuc = Zuc128::new(&[0u8; 16], &[0u8; 16]); // 16-byte key, 16-byte IV
 
 salsa.apply_keystream(&mut msg);
 chacha.apply_keystream(&mut msg);
 xchacha.apply_keystream(&mut msg);
+snow.fill(&mut buf);
 zuc.fill(&mut buf);
 ```
 
@@ -238,9 +242,9 @@ drbg.fill_bytes(&mut out);
 
 ### Fast vs `Ct` variants
 
-For AES, CAST-128, DES, Twofish, Magma, Grasshopper, SM4, and ZUC, the default
-type is the fast software implementation and the `Ct` type is the separate
-constant-time software path.
+For AES, CAST-128, DES, Twofish, Magma, Grasshopper, SM4, SNOW 3G, and ZUC,
+the default type is the fast software implementation and the `Ct` type is the
+separate constant-time software path.
 
 Use the fast path when:
 
@@ -295,6 +299,7 @@ cargo test sm4::tests
 cargo test speck::tests
 cargo test twofish::tests
 cargo test salsa20::tests
+cargo test snow3g::tests
 cargo test zuc::tests
 cargo test public_key::
 ```
@@ -655,6 +660,7 @@ family and supporting primitive covered in this repository:
 - ChaCha20 / XChaCha20: `chacha-20080128.pdf`, `rfc8439-chacha20-poly1305.pdf`, `draft-irtf-cfrg-xchacha-03.pdf`
 - Salsa20: `salsafamily-20071225.pdf`
 - Rabbit: `rfc4503-rabbit.pdf`
+- SNOW 3G: `ts-135216-snow3g.pdf`
 - ZUC-128: `ts-135222-zuc.pdf`
 
 ## References

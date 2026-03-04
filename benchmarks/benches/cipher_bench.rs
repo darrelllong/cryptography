@@ -21,9 +21,9 @@ use cryptography::{
     Present80, Present80Ct, Rabbit, Salsa20, Seed, SeedCt, Serpent128, Serpent128Ct, Serpent192,
     Serpent192Ct, Serpent256, Serpent256Ct, Simon32_64, Simon48_72, Simon48_96, Simon64_96,
     Simon64_128, Simon96_96, Simon96_144, Simon128_128, Simon128_192, Simon128_256, Sm4, Sm4Ct,
-    Speck32_64, Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96, Speck96_144,
-    Speck128_128, Speck128_192, Speck128_256, TripleDes, Twofish128, Twofish128Ct, Twofish192,
-    Twofish192Ct, Twofish256, Twofish256Ct, XChaCha20, Zuc128, Zuc128Ct,
+    Snow3g, Snow3gCt, Speck32_64, Speck48_72, Speck48_96, Speck64_96, Speck64_128, Speck96_96,
+    Speck96_144, Speck128_128, Speck128_192, Speck128_256, TripleDes, Twofish128, Twofish128Ct,
+    Twofish192, Twofish192Ct, Twofish256, Twofish256Ct, XChaCha20, Zuc128, Zuc128Ct,
 };
 use std::hint::black_box;
 
@@ -263,7 +263,7 @@ fn bench_seed(c: &mut Criterion) {
     g.finish();
 }
 
-// ── ZUC-128 ───────────────────────────────────────────────────────────────
+// ── ChaCha20 / XChaCha20 ─────────────────────────────────────────────────
 
 fn bench_chacha20(c: &mut Criterion) {
     let mut g = c.benchmark_group("ChaCha20");
@@ -327,6 +327,34 @@ fn bench_rabbit(c: &mut Criterion) {
     g.finish();
 }
 
+// ── SNOW 3G ───────────────────────────────────────────────────────────────
+
+fn bench_snow3g(c: &mut Criterion) {
+    let mut g = c.benchmark_group("SNOW 3G");
+    g.throughput(Throughput::Bytes(MB as u64));
+    g.bench_function("SNOW-3G", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                Snow3g::new(&[0u8; 16], &[0u8; 16]).fill(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.bench_function("SNOW-3G-ct", |b| {
+        b.iter_batched(
+            || vec![0u8; MB],
+            |mut buf| {
+                Snow3gCt::new(&[0u8; 16], &[0u8; 16]).fill(&mut buf);
+                black_box(buf)
+            },
+            BatchSize::LargeInput,
+        );
+    });
+    g.finish();
+}
+
 // ── ZUC-128 ───────────────────────────────────────────────────────────────
 
 fn bench_zuc(c: &mut Criterion) {
@@ -379,6 +407,7 @@ criterion_group!(
     bench_chacha20,
     bench_salsa20,
     bench_rabbit,
+    bench_snow3g,
     bench_zuc
 );
 criterion_main!(benches);
