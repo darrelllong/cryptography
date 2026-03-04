@@ -35,23 +35,42 @@ buys real compatibility.
 
 ## Three-Level API
 
-Every implemented public-key scheme follows the same layering:
+The public-key layer uses a common pattern, but it is not literally identical
+across every scheme:
 
-1. Arithmetic maps such as `encrypt_raw` / `decrypt_raw`, which operate
-   directly on the integer domain.
-2. Typed wrappers such as `encrypt` / `decrypt`, which accept message bytes and
-   return the scheme-native ciphertext representation.
-3. Byte wrappers such as `encrypt_bytes` / `decrypt_bytes`, which serialize the
-   ciphertext so the scheme can be used as a byte-to-byte API.
+1. Arithmetic maps such as `encrypt_raw`, `encrypt_with_nonce`,
+   `encrypt_point_with_k`, or `sign_with_k`, which keep the underlying math
+   explicit.
+2. Typed wrappers such as `encrypt`, `decrypt`, `sign_message`, and
+   `verify_message`, which work with the scheme's natural ciphertext or
+   signature type.
+3. Byte wrappers such as `encrypt_bytes`, `decrypt_bytes`,
+   `verify_message_bytes`, standard compact wire encodings, and crate-defined
+   key blobs.
 
-Level 3 is the normal entry point for callers who just want to encrypt or
-decrypt byte strings. Level 2 exists for schemes such as `Paillier` and
-`ElGamal`, where callers may want to work with the structured ciphertext form
-directly. Level 1 remains useful for arithmetic tests and direct cross-checks.
+Not every scheme exposes all three layers, and that is intentional:
+
+- key-agreement schemes return shared-secret material, not ciphertexts
+- signature schemes expose signing and verification rather than encryption
+- hybrid schemes such as `ECIES` are naturally byte-oriented at the top layer
+
+The consistency target for new APIs is:
+
+- use `*_with_nonce` for deterministic or caller-supplied randomness entry points
+- use `to_wire_bytes` / `from_wire_bytes` for compact standard encodings that
+  omit curve or algorithm parameters
+- use `to_key_blob` / `from_key_blob` for the crate-defined self-describing
+  binary formats
+- keep legacy `to_binary` / `from_binary` names as compatibility aliases where
+  they already exist
+
+Level 1 remains the right place for arithmetic tests and direct cross-checks.
+Level 2 is the normal typed interface. Level 3 is the byte-oriented convenience
+layer for schemes that naturally have one.
 
 ## Public-Key Surface
 
-### Finite-field schemes
+### Integer and finite-field schemes
 
 - `Rsa` — encryption and signatures
 - `Dsa` — signatures (FIPS 186-5)
@@ -62,16 +81,19 @@ directly. Level 1 remains useful for arithmetic tests and direct cross-checks.
 - `SchmidtSamoa` — encryption
 - `Dh` — finite-field Diffie-Hellman key exchange
 
-### Elliptic-curve schemes
+### Short-Weierstrass elliptic-curve schemes
 
 - `Ecdh` — EC Diffie-Hellman key exchange (ANSI X9.63 / SEC 1)
-- `EdwardsDh` — Edwards-curve Diffie-Hellman key agreement
 - `Ecdsa` — EC Digital Signature Algorithm (FIPS 186-5)
+- `EcElGamal` — EC-ElGamal encryption with additive homomorphism
+- `Ecies` — Elliptic Curve Integrated Encryption Scheme (ephemeral ECDH + AES-256-GCM)
+
+### Twisted Edwards schemes
+
+- `EdwardsDh` — Edwards-curve Diffie-Hellman key agreement
 - `EdDsa` — generic Edwards-curve Schnorr/EdDSA-style signatures
 - `Ed25519` — RFC 8032 Edwards-curve signatures
-- `EcElGamal` — EC-ElGamal encryption with additive homomorphism
 - `EdwardsElGamal` — Edwards-curve ElGamal encryption
-- `Ecies` — Elliptic Curve Integrated Encryption Scheme (ephemeral ECDH + AES-256-GCM)
 
 The Edwards arithmetic is generic over `TwistedEdwardsCurve`, but the only
 built-in named Edwards domain currently shipped in-tree is `ed25519()`.
@@ -140,7 +162,9 @@ compressed public point.
 
 ## Scheme Notes
 
-### RSA
+### Integer and finite-field schemes
+
+#### RSA
 
 Core arithmetic:
 
@@ -161,7 +185,7 @@ The practical RSA layer is the most complete in the crate:
 - standard key serialization
 - generated or imported keys
 
-### ElGamal
+#### ElGamal
 
 Core arithmetic:
 
@@ -182,7 +206,7 @@ full `p - 1` interval. Generated keys use the actual subgroup order `q` for
 that bound; explicitly constructed keys fall back to `p - 1` when the subgroup
 order is not derivable from the supplied parameters.
 
-### DSA
+#### DSA
 
 Reference: FIPS 186-5, Digital Signature Standard (see
 `pubs/fips186-5.pdf` and the matching BibTeX entry in
@@ -227,7 +251,7 @@ pairs (`(1024, 160)`, `(2048, 224)`, `(2048, 256)`, `(3072, 256)`), but it
 keeps the subgroup order conservative for the representative benchmark sizes
 used here while staying within the same finite-field `DSA` structure.
 
-### Cocks
+#### Cocks
 
 Core arithmetic:
 
@@ -257,7 +281,7 @@ and the key observation is the CRT reduction modulo `q`: when
 `c = m^{pq} \bmod n`, raising `c` to `\pi` modulo `q` reduces the exponent
 from `pq\pi` to `q`, so Fermat brings the result back to `m`.
 
-### Rabin
+#### Rabin
 
 Core arithmetic:
 
@@ -296,7 +320,7 @@ trapdoor into a deterministic decryptor. That direct connection is part of why
 the scheme still matters pedagogically even though modern deployments usually
 prefer RSA.
 
-### Paillier
+#### Paillier
 
 Core arithmetic:
 
@@ -338,7 +362,7 @@ The wrapper keeps that property visible through
 same plaintext while refreshing the random factor so identical messages do not
 stay linkable across ciphertext refreshes.
 
-### Schmidt-Samoa
+#### Schmidt-Samoa
 
 Reference: Katja Schmidt-Samoa (2005); see `pubs/schmidt-samoa.pdf` and the
 matching BibTeX entry in the repository references.
@@ -370,7 +394,7 @@ Like Cocks, Schmidt-Samoa uses the modulus itself as the public exponent. It
 is mathematically neat and implemented faithfully here, but it does not have
 the same standards ecosystem or deployment relevance as RSA.
 
-### Diffie-Hellman
+#### Diffie-Hellman
 
 Core arithmetic:
 
@@ -398,7 +422,9 @@ check is:
 or fails the subgroup check. The raw shared secret is returned as a `BigUint`; callers
 are expected to apply their own KDF before using it as keying material.
 
-### ECDH
+### Short-Weierstrass elliptic-curve schemes
+
+#### ECDH
 
 Reference: SEC 1 v2.0, SEC 2 v2.0, and NIST SP 800-56A Rev. 3 (see
 `pubs/sec1-v2-elliptic-curve-cryptography.pdf`,
@@ -419,30 +445,52 @@ when the product is the point at infinity.
 use any of the named curves (`p256`, `p384`, `p521`, `secp256k1`, etc.) without a
 separate curve-identifier negotiation layer.
 
-### Edwards DH
+#### ECIES
 
-Reference: NIST SP 800-56A Rev. 3 for the DH model, with the Edwards-group
-arithmetic and compressed-point conventions used in this crate anchored by the
-same local curve references (`pubs/sec1-v2-elliptic-curve-cryptography.pdf`,
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`,
-`pubs/fips186-5.pdf`).
+Reference: SEC 1 v2.0 and NIST SP 800-56A Rev. 3 for the EC key-establishment
+model and point encodings (see `pubs/sec1-v2-elliptic-curve-cryptography.pdf`
+and `pubs/sp800-56a-r3.pdf`).
 
-`EdwardsDh` provides the same core operation on a twisted Edwards curve:
+`ECIES` is the standard way to encrypt arbitrary byte strings to a static EC public key.
+It combines ephemeral ECDH with a symmetric encryption step, so the per-message overhead
+is a single scalar multiplication by the sender and a single scalar multiplication by the
+receiver.
+
+**Encryption:**
+
+1. Generate an ephemeral key pair `(k, R)` where `R = k · G`.
+2. Compute the shared point `S = k · Q`.
+3. Derive symmetric key and nonce from `S_x`:
 
 ```math
-S = d \cdot Q_{\mathrm{peer}}
+\text{key}   = \mathrm{SHA\text{-}256}(\mathtt{0x01} \mathbin\| S_x)
+\qquad
+\text{nonce} = \mathrm{SHA\text{-}256}(\mathtt{0x02} \mathbin\| S_x)_{[0..12]}
 ```
 
-The difference is the wire representation. `EdwardsDhPrivateKey::agree`
-returns the compressed Edwards encoding of the shared point, so the output is a
-canonical 32-byte value on the built-in Ed25519 curve instead of a bare
-x-coordinate. That matches the way the Edwards side of the crate already treats
-points as compressed byte strings.
+4. Encrypt the message with AES-256-GCM, using `R_{\text{bytes}}` as the additional
+   authenticated data (AAD). The AAD binding prevents `R` from being silently swapped
+   without triggering a tag failure.
 
-The implementation is generic over `TwistedEdwardsCurve`, but the in-tree named
-fixture and benchmark path today is the built-in `ed25519()` domain.
+**Wire format:**
 
-### EC-ElGamal
+```text
+R_bytes  (1 + 2·coord_len bytes, SEC 1 uncompressed)
+ciphertext  (same length as plaintext)
+tag  (16 bytes, GCM authentication tag)
+```
+
+**Decryption:**
+
+1. Parse `R_bytes` from the front of the ciphertext.
+2. Compute `S = d · R`.
+3. Re-derive key and nonce from `S_x`.
+4. AES-256-GCM decrypt; return `None` if the tag fails.
+
+The GCM tag simultaneously authenticates the ciphertext and the ephemeral public key,
+so no separate MAC layer is needed.
+
+#### EC-ElGamal
 
 Reference: the ElGamal paper for the discrete-logarithm construction and SEC 1
 v2.0 / SEC 2 v2.0 for the elliptic-curve group and point encodings (see
@@ -490,87 +538,7 @@ Homomorphic addition of two ciphertexts:
 The integer `m` is recovered from `m · G` via baby-step giant-step (BSGS) with
 `O(\sqrt{\text{max\_m}})` precomputation.
 
-### Edwards ElGamal
-
-Reference: the ElGamal paper for the encryption law, with the Edwards-curve
-group and encoding choices in this crate tied to the same local curve
-references used for `Ed25519` and `EdwardsDh` (see `pubs/elgamal-1985.pdf`,
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`, and
-`pubs/fips186-5.pdf`).
-
-`EdwardsElGamal` mirrors the same ElGamal construction on a twisted Edwards
-group:
-
-```math
-(C_1, C_2) = (k \cdot B,\; M + k \cdot Q)
-```
-
-with decryption:
-
-```math
-M = C_2 - d \cdot C_1
-```
-
-As with the short-Weierstrass variant, the module exposes:
-
-- point encryption
-- integer encryption via `m \cdot B`
-- homomorphic ciphertext addition
-
-The main distinction is representation: the Edwards wrapper uses compressed
-Edwards point encodings throughout, which makes ciphertext serialization more
-compact and keeps it aligned with the `Ed25519` / `EdDsa` side of the crate.
-
-As with `EdwardsDh`, the machinery accepts any caller-supplied
-`TwistedEdwardsCurve`, but the in-tree deterministic fixtures and benchmarks
-currently target the built-in `ed25519()` domain.
-
-### ECIES
-
-Reference: SEC 1 v2.0 and NIST SP 800-56A Rev. 3 for the EC key-establishment
-model and point encodings (see `pubs/sec1-v2-elliptic-curve-cryptography.pdf`
-and `pubs/sp800-56a-r3.pdf`).
-
-`ECIES` is the standard way to encrypt arbitrary byte strings to a static EC public key.
-It combines ephemeral ECDH with a symmetric encryption step, so the per-message overhead
-is a single scalar multiplication by the sender and a single scalar multiplication by the
-receiver.
-
-**Encryption:**
-
-1. Generate an ephemeral key pair `(k, R)` where `R = k · G`.
-2. Compute the shared point `S = k · Q`.
-3. Derive symmetric key and nonce from `S_x`:
-
-```math
-\text{key}   = \mathrm{SHA\text{-}256}(\mathtt{0x01} \mathbin\| S_x)
-\qquad
-\text{nonce} = \mathrm{SHA\text{-}256}(\mathtt{0x02} \mathbin\| S_x)_{[0..12]}
-```
-
-4. Encrypt the message with AES-256-GCM, using `R_{\text{bytes}}` as the additional
-   authenticated data (AAD). The AAD binding prevents `R` from being silently swapped
-   without triggering a tag failure.
-
-**Wire format:**
-
-```text
-R_bytes  (1 + 2·coord_len bytes, SEC 1 uncompressed)
-ciphertext  (same length as plaintext)
-tag  (16 bytes, GCM authentication tag)
-```
-
-**Decryption:**
-
-1. Parse `R_bytes` from the front of the ciphertext.
-2. Compute `S = d · R`.
-3. Re-derive key and nonce from `S_x`.
-4. AES-256-GCM decrypt; return `None` if the tag fails.
-
-The GCM tag simultaneously authenticates the ciphertext and the ephemeral public key,
-so no separate MAC layer is needed.
-
-### ECDSA
+#### ECDSA
 
 Reference: FIPS 186-5 and the local elliptic-curve standards in SEC 1 / SEC 2
 (see `pubs/fips186-5.pdf`,
@@ -605,7 +573,67 @@ the FIPS 186-5 truncation rule for hash functions wider than the group order.
 The key types (`EcdsaPublicKey`, `EcdsaPrivateKey`) carry the full `CurveParams`
 and work with any named curve.
 
-### Ed25519
+### Twisted Edwards schemes
+
+#### Edwards DH
+
+Reference: NIST SP 800-56A Rev. 3 for the DH model, with the Edwards-group
+arithmetic and compressed-point conventions used in this crate anchored by the
+same local curve references (`pubs/sec1-v2-elliptic-curve-cryptography.pdf`,
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`,
+`pubs/fips186-5.pdf`).
+
+`EdwardsDh` provides the same core operation on a twisted Edwards curve:
+
+```math
+S = d \cdot Q_{\mathrm{peer}}
+```
+
+The difference is the wire representation. `EdwardsDhPrivateKey::agree`
+returns the compressed Edwards encoding of the shared point, so the output is a
+canonical 32-byte value on the built-in Ed25519 curve instead of a bare
+x-coordinate. That matches the way the Edwards side of the crate already treats
+points as compressed byte strings.
+
+The implementation is generic over `TwistedEdwardsCurve`, but the in-tree named
+fixture and benchmark path today is the built-in `ed25519()` domain.
+
+#### Edwards ElGamal
+
+Reference: the ElGamal paper for the encryption law, with the Edwards-curve
+group and encoding choices in this crate tied to the same local curve
+references used for `Ed25519` and `EdwardsDh` (see `pubs/elgamal-1985.pdf`,
+`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`, and
+`pubs/fips186-5.pdf`).
+
+`EdwardsElGamal` mirrors the same ElGamal construction on a twisted Edwards
+group:
+
+```math
+(C_1, C_2) = (k \cdot B,\; M + k \cdot Q)
+```
+
+with decryption:
+
+```math
+M = C_2 - d \cdot C_1
+```
+
+As with the short-Weierstrass variant, the module exposes:
+
+- point encryption
+- integer encryption via `m \cdot B`
+- homomorphic ciphertext addition
+
+The main distinction is representation: the Edwards wrapper uses compressed
+Edwards point encodings throughout, which makes ciphertext serialization more
+compact and keeps it aligned with the `Ed25519` / `EdDsa` side of the crate.
+
+As with `EdwardsDh`, the machinery accepts any caller-supplied
+`TwistedEdwardsCurve`, but the in-tree deterministic fixtures and benchmarks
+currently target the built-in `ed25519()` domain.
+
+#### Ed25519
 
 Reference: FIPS 186-5 for EdDSA and the local elliptic-curve references for
 the underlying group and parameter conventions (see `pubs/fips186-5.pdf`,
@@ -698,7 +726,9 @@ fallback, but the publication-facing numbers below come from Pilot and report
 milliseconds per operation, 95% confidence-interval half-width, and rounds
 required to hit the stop rule.
 
-### Finite-field public key (1024-bit)
+### Integer and finite-field schemes
+
+#### RSA (1024-bit)
 
 | Operation                        |   ms/op    |    ±CI     | Runs  |
 |----------------------------------|------------|------------|-------|
@@ -707,12 +737,22 @@ required to hit the stop rule.
 | rsa_decrypt_1024                 |      0.681 |  ±0.02365 |    56 |
 | rsa_sign_1024                    |     0.6933 |  ±0.02252 |    90 |
 | rsa_verify_1024                  |     0.0324 | ±0.0005347 |    60 |
+
+#### Prime-order subgroup over `Z_p^*` (1024-bit)
+
+| Operation                        |   ms/op    |    ±CI     | Runs  |
+|----------------------------------|------------|------------|-------|
 | elgamal_keygen_1024              |      48.63 |   ±0.4083 |    30 |
 | elgamal_encrypt_1024             |     0.4124 | ±0.003134 |    60 |
 | elgamal_decrypt_1024             |     0.2212 | ±0.005175 |    33 |
 | dsa_keygen_1024                  |      54.07 |    ±1.199 |    30 |
 | dsa_sign_1024                    |       0.32 |  ±0.00196 |    53 |
 | dsa_verify_1024                  |     0.5129 | ±0.004096 |    99 |
+
+#### Composite-modulus schemes (1024-bit)
+
+| Operation                        |   ms/op    |    ±CI     | Runs  |
+|----------------------------------|------------|------------|-------|
 | paillier_keygen_1024             |      16.78 |  ±0.07887 |    96 |
 | paillier_encrypt_1024            |      6.383 |  ±0.03973 |    30 |
 | paillier_decrypt_1024            |      2.327 |   ±0.0179 |    34 |
@@ -728,7 +768,7 @@ required to hit the stop rule.
 | schmidt_samoa_encrypt_1024       |     0.7847 | ±0.009299 |    30 |
 | schmidt_samoa_decrypt_1024       |     0.2311 |  ±0.01224 |    30 |
 
-### RSA (2048-bit)
+#### RSA (2048-bit)
 
 | Operation                        |   ms/op    |    ±CI     | Runs  |
 |----------------------------------|------------|------------|-------|
@@ -738,7 +778,9 @@ required to hit the stop rule.
 | rsa_sign_2048                    |      5.139 |   ±0.3859 |    30 |
 | rsa_verify_2048                  |     0.1031 |   ±0.0016 |    60 |
 
-### ECDSA / ECDH (P-256)
+### Short-Weierstrass elliptic-curve schemes
+
+#### ECDSA / ECDH (P-256)
 
 | Operation                        |   ms/op    |    ±CI     | Runs  |
 |----------------------------------|------------|------------|-------|
@@ -749,7 +791,7 @@ required to hit the stop rule.
 | ecdh_agree                       |      2.064 |   ±0.1501 |    30 |
 | ecdh_serialize                   |  7.507e-05 | ±9.361e-06 |    56 |
 
-### ECIES / EC ElGamal (P-256)
+#### ECIES / EC ElGamal (P-256)
 
 | Operation                        |   ms/op    |    ±CI     | Runs  |
 |----------------------------------|------------|------------|-------|
@@ -760,7 +802,9 @@ required to hit the stop rule.
 | ec_elgamal_encrypt               |      4.061 |  ±0.02283 |    94 |
 | ec_elgamal_decrypt               |      1.984 |  ±0.01803 |    30 |
 
-### Ed25519 / Edwards DH / Edwards ElGamal
+### Twisted Edwards schemes
+
+#### Ed25519 / Edwards DH / Edwards ElGamal
 
 | Operation                        |   ms/op    |    ±CI     | Runs  |
 |----------------------------------|------------|------------|-------|
@@ -778,8 +822,8 @@ The tables above are measured in milliseconds per operation. The radar charts
 below use the reciprocal view, plotting operations per second on a log scale so
 the faster operations sit farther from the center.
 
-The finite-field chart plots 1024-bit encrypt/decrypt throughput for the
-integer-based public-key schemes. Signature-only and rerandomization/addition
+The integer-arithmetic chart plots 1024-bit encrypt/decrypt throughput for the
+mixed integer-based public-key schemes. Signature-only and rerandomization/addition
 rows stay in the tables because they do not have matching encrypt/decrypt axes:
 
 ![Public-key encrypt/decrypt radar chart](assets/public-key-encdec-radar.svg)
