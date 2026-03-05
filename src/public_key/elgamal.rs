@@ -125,6 +125,16 @@ impl ElGamalPublicKey {
         Some(ElGamalCiphertext { gamma, delta })
     }
 
+    /// Preferred explicit name for encryption with a caller-supplied nonce.
+    #[must_use]
+    pub fn encrypt_with_nonce(
+        &self,
+        message: &BigUint,
+        nonce: &BigUint,
+    ) -> Option<ElGamalCiphertext> {
+        self.encrypt_with_ephemeral(message, nonce)
+    }
+
     /// Encrypt a byte string with a fresh random ephemeral exponent.
     ///
     /// This is the minimal "usable" layer for textbook `ElGamal`: it samples
@@ -591,6 +601,23 @@ mod tests {
             .encrypt_with_ephemeral(&message, &BigUint::from_u64(3))
             .expect("valid ephemeral exponent");
         assert_eq!(private.decrypt_raw(&ciphertext), message);
+    }
+
+    #[test]
+    fn encrypt_with_nonce_matches_encrypt_with_ephemeral() {
+        let p = BigUint::from_u64(23);
+        let g = BigUint::from_u64(5);
+        let a = BigUint::from_u64(7);
+        let (public, _private) = ElGamal::from_secret_exponent(&p, &g, &a).expect("valid key");
+        let message = BigUint::from_u64(11);
+        let nonce = BigUint::from_u64(3);
+        let lhs = public
+            .encrypt_with_ephemeral(&message, &nonce)
+            .expect("legacy explicit nonce");
+        let rhs = public
+            .encrypt_with_nonce(&message, &nonce)
+            .expect("canonical explicit nonce");
+        assert_eq!(lhs, rhs);
     }
 
     #[test]

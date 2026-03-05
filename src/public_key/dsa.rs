@@ -45,6 +45,8 @@ pub struct DsaPrivateKey {
     g: BigUint,
     /// Secret exponent `x`.
     x: BigUint,
+    /// Cached public component `y = g^x mod p`.
+    y: BigUint,
 }
 
 /// Raw `DSA` signature pair `(r, s)`.
@@ -238,12 +240,11 @@ impl DsaPrivateKey {
     /// Derive the matching public key from this private key.
     #[must_use]
     pub fn to_public_key(&self) -> DsaPublicKey {
-        let y = mod_pow(&self.g, &self.x, &self.p);
         DsaPublicKey {
             p: self.p.clone(),
             q: self.q.clone(),
             g: self.g.clone(),
-            y,
+            y: self.y.clone(),
         }
     }
 
@@ -277,6 +278,12 @@ impl DsaPrivateKey {
         }
 
         Some(DsaSignature { r, s })
+    }
+
+    /// Preferred explicit name for signing a pre-hashed digest with a caller-supplied nonce.
+    #[must_use]
+    pub fn sign_digest_with_nonce(&self, digest: &[u8], nonce: &BigUint) -> Option<DsaSignature> {
+        self.sign_with_k(digest, nonce)
     }
 
     /// Sign a digest using a fresh random nonce.
@@ -338,7 +345,8 @@ impl DsaPrivateKey {
         if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
-        Some(Self { p, q, g, x })
+        let y = mod_pow(&g, &x, &p);
+        Some(Self { p, q, g, x, y })
     }
 
     /// Encode the private key in PEM using the crate-defined label.
@@ -379,7 +387,8 @@ impl DsaPrivateKey {
         if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
-        Some(Self { p, q, g, x })
+        let y = mod_pow(&g, &x, &p);
+        Some(Self { p, q, g, x, y })
     }
 }
 
@@ -447,13 +456,14 @@ impl Dsa {
                 p: prime.clone(),
                 q: subgroup_order.clone(),
                 g: generator.clone(),
-                y: public_component,
+                y: public_component.clone(),
             },
             DsaPrivateKey {
                 p: prime.clone(),
                 q: subgroup_order.clone(),
                 g: generator.clone(),
                 x: secret.clone(),
+                y: public_component.clone(),
             },
         ))
     }
@@ -469,13 +479,14 @@ impl Dsa {
                 p: prime.clone(),
                 q: subgroup_order.clone(),
                 g: generator.clone(),
-                y: public_component,
+                y: public_component.clone(),
             },
             DsaPrivateKey {
                 p: prime,
                 q: subgroup_order,
                 g: generator,
                 x: secret,
+                y: public_component.clone(),
             },
         ))
     }
@@ -644,6 +655,20 @@ mod tests {
         assert!(private
             .sign_with_k(&[0x09], private.subgroup_order())
             .is_none());
+    }
+
+    #[test]
+    fn sign_digest_with_nonce_matches_sign_with_k() {
+        let (_public, private) = derive_small_reference_key();
+        let digest = [0x09];
+        let nonce = BigUint::from_u64(7);
+        let lhs = private
+            .sign_with_k(&digest, &nonce)
+            .expect("legacy explicit nonce");
+        let rhs = private
+            .sign_digest_with_nonce(&digest, &nonce)
+            .expect("canonical explicit nonce");
+        assert_eq!(lhs, rhs);
     }
 
     #[test]

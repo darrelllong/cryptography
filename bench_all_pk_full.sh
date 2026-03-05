@@ -26,7 +26,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Operation                        |   ms/op    |    ±CI     | Runs  |"
+    echo "| Operation                        |   ms/op    | ±CI (95%)  | Runs  |"
     sep
 }
 

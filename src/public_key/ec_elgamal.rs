@@ -73,6 +73,8 @@ pub struct EcElGamalPrivateKey {
     curve: CurveParams,
     /// Secret scalar `d ∈ [1, n)`.
     d: BigUint,
+    /// Cached public point `Q = d·G`.
+    q: AffinePoint,
 }
 
 /// A pair of curve points `(C₁, C₂)` encoding one encrypted message.
@@ -94,6 +96,7 @@ pub struct EcElGamal;
 // ─── EcElGamalPublicKey ───────────────────────────────────────────────────────
 
 impl EcElGamalPublicKey {
+    /// The curve parameters for this key.
     #[must_use]
     pub fn curve(&self) -> &CurveParams {
         &self.curve
@@ -103,6 +106,19 @@ impl EcElGamalPublicKey {
     #[must_use]
     pub fn public_point(&self) -> &AffinePoint {
         &self.q
+    }
+
+    /// Encode the public point as a compact SEC 1 point string.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.curve.encode_point(&self.q)
+    }
+
+    /// Rebuild a public key from a compact SEC 1 point string plus explicit curve parameters.
+    #[must_use]
+    pub fn from_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
+        let q = curve.decode_point(bytes)?;
+        Some(Self { curve, q })
     }
 
     /// Encrypt a curve point `m` directly.
@@ -136,6 +152,16 @@ impl EcElGamalPublicKey {
         EcElGamalCiphertext { c1, c2 }
     }
 
+    /// Preferred explicit name for point encryption with a caller-supplied nonce.
+    #[must_use]
+    pub fn encrypt_point_with_nonce(
+        &self,
+        m: &AffinePoint,
+        nonce: &BigUint,
+    ) -> EcElGamalCiphertext {
+        self.encrypt_point_with_k(m, nonce)
+    }
+
     /// Encrypt a byte message using Koblitz point embedding.
     ///
     /// The message is embedded into a curve point by appending a one-byte
@@ -148,11 +174,7 @@ impl EcElGamalPublicKey {
     /// to P-224).  Failure after 256 index attempts is extremely unlikely
     /// (`< 2^{-256}` probability) for any real curve.
     #[must_use]
-    pub fn encrypt<R: Csprng>(
-        &self,
-        message: &[u8],
-        rng: &mut R,
-    ) -> Option<EcElGamalCiphertext> {
+    pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<EcElGamalCiphertext> {
         let m_point = koblitz_encode(&self.curve, message)?;
         Some(self.encrypt_point(&m_point, rng))
     }
@@ -382,10 +404,9 @@ impl EcElGamalPrivateKey {
     /// Derive the matching public key `Q = d·G`.
     #[must_use]
     pub fn to_public_key(&self) -> EcElGamalPublicKey {
-        let q = self.curve.scalar_mul(&self.curve.base_point(), &self.d);
         EcElGamalPublicKey {
             curve: self.curve.clone(),
-            q,
+            q: self.q.clone(),
         }
     }
 
@@ -488,9 +509,11 @@ impl EcElGamalPrivateKey {
         if private_scalar.is_zero() || private_scalar.cmp(&curve.n).is_ge() {
             return None;
         }
+        let q = curve.scalar_mul(&curve.base_point(), &private_scalar);
         Some(Self {
             curve,
             d: private_scalar,
+            q,
         })
     }
 
@@ -578,9 +601,11 @@ impl EcElGamalPrivateKey {
         if private_scalar.is_zero() || private_scalar.cmp(&curve.n).is_ge() {
             return None;
         }
+        let q = curve.scalar_mul(&curve.base_point(), &private_scalar);
         Some(Self {
             curve,
             d: private_scalar,
+            q,
         })
     }
 }
@@ -690,9 +715,9 @@ impl EcElGamal {
         (
             EcElGamalPublicKey {
                 curve: curve.clone(),
-                q,
+                q: q.clone(),
             },
-            EcElGamalPrivateKey { curve, d },
+            EcElGamalPrivateKey { curve, d, q },
         )
     }
 }
@@ -980,6 +1005,15 @@ mod tests {
     }
 
     #[test]
+    fn public_key_bytes_roundtrip() {
+        let mut rng = rng();
+        let (public, _) = EcElGamal::generate(p256(), &mut rng);
+        let bytes = public.to_bytes();
+        let recovered = EcElGamalPublicKey::from_bytes(p256(), &bytes).expect("from_bytes");
+        assert_eq!(recovered.q, public.q);
+    }
+
+    #[test]
     fn private_key_binary_roundtrip() {
         let mut rng = rng();
         let (_, private) = EcElGamal::generate(p256(), &mut rng);
@@ -996,6 +1030,17 @@ mod tests {
         let blob = ct.to_binary();
         let recovered = EcElGamalCiphertext::from_binary(&blob).expect("from_binary");
         assert_eq!(recovered, ct);
+    }
+
+    #[test]
+    fn encrypt_point_with_nonce_matches_encrypt_point_with_k() {
+        let mut rng = rng();
+        let (public, _) = EcElGamal::generate(p256(), &mut rng);
+        let point = p256().base_point();
+        let nonce = BigUint::from_u64(11);
+        let lhs = public.encrypt_point_with_k(&point, &nonce);
+        let rhs = public.encrypt_point_with_nonce(&point, &nonce);
+        assert_eq!(lhs, rhs);
     }
 
     #[test]

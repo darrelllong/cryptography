@@ -139,6 +139,11 @@ debugging convenience; the canonical interoperable formats remain PKCS / X.509.
 
 ### Non-RSA Schemes
 
+Most non-RSA key types use the crate-defined integer-sequence framing for
+`to_binary()` / `from_binary()`. `Ed25519` is the main exception: its binary
+form is the standard fixed-width raw encoding (32-byte compressed public key or
+32-byte seed), matching RFC 8032 rather than the crate's self-describing blob.
+
 `Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`, `Dh`,
 `Ecdsa`, `EcElGamal`, `Ecies`, `Ecdh`, `EdwardsDh`, `EdwardsElGamal`,
 `EdDsa`, and `Ed25519` use crate-defined formats:
@@ -166,6 +171,9 @@ compressed public point.
 
 #### RSA
 
+Reference: PKCS #1 v2.2 (RFC 8017) for OAEP, PSS, and the conventional key
+formats used by the interoperable RSA layer in this crate.
+
 Core arithmetic:
 
 ```math
@@ -178,6 +186,18 @@ with:
 n = pq,\qquad d \equiv e^{-1} \pmod{\lambda(n)}
 ```
 
+The default key-generation path deliberately chooses the standard sparse public
+exponent:
+
+```math
+e = 65{,}537
+```
+
+That keeps the public operation cheap while preserving the conventional RSA
+shape. The matching private exponent `d` is the full modular inverse modulo
+`\lambda(n)`, so the raw private operation is much heavier than the raw public
+operation.
+
 The practical RSA layer is the most complete in the crate:
 
 - standards-based OAEP encryption
@@ -185,7 +205,25 @@ The practical RSA layer is the most complete in the crate:
 - standard key serialization
 - generated or imported keys
 
+So RSA is the "real protocol" path in the integer family: the raw arithmetic is
+still present, but the intended surface is padded OAEP/PSS rather than textbook
+RSA on caller-supplied integers.
+
+The serialization story is also distinct from the other public-key families.
+RSA uses PKCS#1, PKCS#8, and SPKI-compatible encodings, so it interoperates
+with external tooling instead of relying on the crate-defined integer-sequence
+format used elsewhere.
+
+One practical caveat matters for the benchmark tables: the current private
+operation is still a direct `c^d mod n` exponentiation rather than a
+CRT-accelerated private path. So `decrypt` and `sign` are slower than a tuned
+production RSA implementation even though the public side already uses the
+standard sparse `e = 65,537`.
+
 #### ElGamal
+
+Reference: Taher ElGamal, "A Public Key Cryptosystem and a Signature Scheme
+Based on Discrete Logarithms" (1985); see `pubs/elgamal-1985.pdf`.
 
 Core arithmetic:
 
@@ -206,11 +244,25 @@ full `p - 1` interval. Generated keys use the actual subgroup order `q` for
 that bound; explicitly constructed keys fall back to `p - 1` when the subgroup
 order is not derivable from the supplied parameters.
 
+The API follows the same layered pattern as the EC and Edwards ElGamal wrappers:
+
+- an explicit-nonce entry point for deterministic fixtures
+- a randomized ciphertext layer over the raw group element
+- byte helpers that frame the bigint ciphertext pair into the crate-defined
+  binary format
+
+So the finite-field ElGamal path is still useful for reproducible KATs and
+in-repo byte-oriented tests even though its wire format is crate-specific.
+
+This is still multiplicative ElGamal, not one of the additive homomorphic
+variants. The native plaintext group law is multiplication modulo `p`; the byte
+helpers are only a serialization layer over that arithmetic.
+
 #### DSA
 
 Reference: FIPS 186-5, Digital Signature Standard (see
-`pubs/fips186-5.pdf` and the matching BibTeX entry in
-the top-level references).
+`pubs/fips186-5.pdf` and the matching BibTeX entry in the top-level
+references).
 
 Core arithmetic:
 
@@ -240,7 +292,7 @@ the leftmost `N = \mathrm{bits}(q)` bits before signing and verification,
 matching the Digital Signature Standard's treatment of hash outputs that are
 wider than the subgroup order.
 
-For generated keys, the implementation uses
+For generated keys, the implementation uses:
 
 ```math
 N = \mathrm{clamp}(\lfloor L / 4 \rfloor, 16, 256)
@@ -251,7 +303,26 @@ pairs (`(1024, 160)`, `(2048, 224)`, `(2048, 256)`, `(3072, 256)`), but it
 keeps the subgroup order conservative for the representative benchmark sizes
 used here while staying within the same finite-field `DSA` structure.
 
+The public API is intentionally parallel to `ECDSA`:
+
+- digest-level signing and verification for callers who already own the hash
+- message-level helpers parameterized by a `Digest`
+- an explicit-nonce signing entry point for deterministic tests and fixtures
+
+The important distinction from `EdDsa` and `Ed25519` is that `DSA` signs a
+digest representative `z`; it does not hash internally unless the caller uses
+the message-level wrapper.
+
+Like `ElGamal` and `Dh`, generated `DSA` keys carry the full subgroup domain
+parameters `(p, q, g)` in the key object and in the crate-defined key blob.
+That keeps key import self-contained instead of depending on an external
+parameter registry.
+
 #### Cocks
+
+Reference: the historical Clifford Cocks construction; the implementation here
+keeps the original arithmetic rather than wrapping it in a modern standards
+profile.
 
 Core arithmetic:
 
@@ -265,11 +336,11 @@ with the private recovery map:
 m = c^\pi \bmod q
 ```
 
-Cocks is historically important: Clifford Cocks proposed it
-in 1973, five years before RSA. The scheme is unusual because the public
-exponent is the modulus itself. The crate keeps that arithmetic intact and adds
-the byte-level serialization layer on top instead of inventing a modernized
-padding story that the literature does not standardize.
+Cocks is historically important: Clifford Cocks proposed it in 1973, five
+years before RSA. The scheme is unusual because the public exponent is the
+modulus itself. The crate keeps that arithmetic intact and adds the byte-level
+serialization layer on top instead of inventing a modernized padding story
+that the literature does not standardize.
 
 The private exponent is:
 
@@ -281,7 +352,20 @@ and the key observation is the CRT reduction modulo `q`: when
 `c = m^{pq} \bmod n`, raising `c` to `\pi` modulo `q` reduces the exponent
 from `pq\pi` to `q`, so Fermat brings the result back to `m`.
 
+From an API perspective, `Cocks` stays intentionally narrow:
+
+- raw arithmetic on the integer plaintext representative
+- byte helpers for the crate-defined framed encoding
+- no attempt at standards-style padding or interoperable key containers
+
+That restraint is deliberate. This is an educational historical primitive in
+the repo, not a recommendation for modern deployment.
+
 #### Rabin
+
+Reference: the classic Rabin trapdoor permutation; the implementation keeps the
+core squaring trapdoor visible and adds only the minimal disambiguation layer
+needed for practical decryption.
 
 Core arithmetic:
 
@@ -291,9 +375,9 @@ c = m^2 \bmod n,\qquad n = pq
 
 Decryption computes square roots modulo `p` and `q`, then recombines them with
 the Chinese remainder theorem to recover the four square roots modulo `n`.
-Because plain Rabin is ambiguous, the implementation uses a tagged-message variant: the
-tag is carried inside the encoded plaintext and is used to select the intended
-root deterministically at decrypt time.
+Because plain Rabin is ambiguous, the implementation uses a tagged-message
+variant: the tag is carried inside the encoded plaintext and is used to select
+the intended root deterministically at decrypt time.
 
 The implementation requires Blum primes:
 
@@ -316,11 +400,23 @@ trapdoor constructions with a tight reduction story: in the plain setting,
 inverting the squaring map modulo `n = pq` is essentially equivalent to
 factoring `n`. The fixed disambiguation tag used here is what lets the code
 identify the intended root among the four CRT roots and turn the raw squaring
-trapdoor into a deterministic decryptor. That direct connection is part of why
-the scheme still matters pedagogically even though modern deployments usually
-prefer RSA.
+trapdoor into a deterministic decryptor.
+
+The API follows that same philosophy:
+
+- raw encryption over the integer representative
+- byte wrappers that carry the tagged plaintext encoding
+- key generation that enforces the Blum-prime precondition directly
+
+So the practical wrapper is small, but it is enough to make the square-root
+ambiguity explicit and auditable rather than leaving that selection logic to
+callers.
 
 #### Paillier
+
+Reference: Pascal Paillier, "Public-Key Cryptosystems Based on Composite
+Degree Residuosity Classes" (1999); see
+`pubs/paillier-1999-composite-residuosity.pdf`.
 
 Core arithmetic:
 
@@ -343,9 +439,7 @@ operations:
 That homomorphic surface is a real part of the scheme, not an extra trick, so
 it is intentionally part of the usable API.
 
-That is also the reason to use `Paillier` at all: it is the cleanest additive
-homomorphic primitive in this crate. If `c_1` encrypts `m_1` and `c_2`
-encrypts `m_2`, then:
+If `c_1` encrypts `m_1` and `c_2` encrypts `m_2`, then:
 
 ```math
 c_1 c_2 \bmod n^2
@@ -361,6 +455,16 @@ The wrapper keeps that property visible through
 `PaillierPublicKey::add_ciphertexts(...)`, and `rerandomize(...)` preserves the
 same plaintext while refreshing the random factor so identical messages do not
 stay linkable across ciphertext refreshes.
+
+That is the intended way to read the API surface:
+
+- the raw ciphertext type is still just the integer modulo `n^2`
+- the byte helpers serialize that integer into a crate-defined framing
+- the homomorphic operations are first-class because they are part of the
+  reason to choose the scheme at all
+
+Among the integer schemes, this is the clearest "use it for its special
+algebra" path rather than for generic public-key encryption.
 
 #### Schmidt-Samoa
 
@@ -394,7 +498,20 @@ Like Cocks, Schmidt-Samoa uses the modulus itself as the public exponent. It
 is mathematically neat and implemented faithfully here, but it does not have
 the same standards ecosystem or deployment relevance as RSA.
 
+The wrapper therefore stays minimal:
+
+- raw arithmetic for the underlying construction
+- byte helpers for crate-local usability
+- no attempt to present it as a standards-grade interoperable scheme
+
+This keeps the scheme available for study and comparison without pretending it
+belongs in the same operational category as the RSA layer.
+
 #### Diffie-Hellman
+
+Reference: the classic finite-field Diffie-Hellman model, with subgroup
+validation handled in the same prime-order subgroup framework used for `DSA`
+and `ElGamal`.
 
 Core arithmetic:
 
@@ -408,19 +525,29 @@ with shared secret:
 s = y_{\mathrm{peer}}^x \bmod p
 ```
 
-`DH` uses a prime-order subgroup construction identical to `DSA` and `ElGamal`: a
-Sophie-Germain-style group with explicit subgroup order `q`. The public key stores
-`(p, q, g, y)` so the receiver can validate that the peer's contribution actually
-lies in the correct subgroup before computing the shared secret. The validation
-check is:
+`DH` uses a prime-order subgroup construction identical to `DSA` and
+`ElGamal`: a Sophie-Germain-style group with explicit subgroup order `q`. The
+public key stores `(p, q, g, y)` so the receiver can validate that the peer's
+contribution actually lies in the correct subgroup before computing the shared
+secret. The validation check is:
 
 ```math
 1 < y < p \qquad \text{and} \qquad y^q \equiv 1 \pmod{p}
 ```
 
-`DhPrivateKey::agree` returns `None` when the peer key belongs to a different group
-or fails the subgroup check. The raw shared secret is returned as a `BigUint`; callers
-are expected to apply their own KDF before using it as keying material.
+`DhPrivateKey::agree` returns `None` when the peer key belongs to a different
+group or fails the subgroup check. The raw shared secret is returned as a
+`BigUint`; callers are expected to apply their own KDF before using it as
+keying material.
+
+That return shape is intentionally lower-level than the EC variants. `DH`
+returns the shared group element itself, not a byte-oriented KDF input chosen
+by the library. The crate leaves that derivation step to the caller rather than
+quietly committing to a KDF policy here.
+
+Like `DSA`, the key blobs carry `(p, q, g)` explicitly. That makes `DhParams`
+and the generated keys self-contained and avoids any hidden dependency on an
+external parameter database.
 
 ### Short-Weierstrass elliptic-curve schemes
 
@@ -437,13 +564,30 @@ Shared secret:
 S = d \cdot Q_{\mathrm{peer}}, \qquad \text{secret} = S_x
 ```
 
-`ECDH` follows SEC 1 v2.0: the shared secret is the x-coordinate of the point product,
-zero-padded to the curve's coordinate length. `EcdhPrivateKey::agree` returns `None`
-when the product is the point at infinity.
+`ECDH` follows SEC 1 v2.0: the shared secret is the x-coordinate of the point
+product, zero-padded to the curve's coordinate length.
+`EcdhPrivateKey::agree` returns `None` when the product is the point at
+infinity.
 
-`EcdhPublicKey` and `EcdhPrivateKey` carry the full `CurveParams` so both sides can
-use any of the named curves (`p256`, `p384`, `p521`, `secp256k1`, etc.) without a
-separate curve-identifier negotiation layer.
+`EcdhPublicKey` and `EcdhPrivateKey` carry the full `CurveParams` so both sides
+can use any of the named curves (`p256`, `p384`, `p521`, `secp256k1`, etc.)
+without a separate curve-identifier negotiation layer.
+
+On the representation side, the short-Weierstrass public key types now expose
+both of the forms the Edwards writeup already calls out:
+
+- compact SEC 1 point encodings via `to_bytes` / `from_bytes`
+- the crate-defined self-describing key blob that carries the full curve
+  parameters
+
+That split is deliberate. The compact form is what a peer would normally place
+on the wire when the curve is already known; the self-describing blob is what
+the repo uses when it wants a standalone serialized key without an external OID
+or curve registry.
+
+As with `DH`, `EcdhPrivateKey::agree` returns raw shared-secret material, not a
+KDF output. The returned bytes are the padded x-coordinate and should be fed
+through a KDF before use as a symmetric key.
 
 #### ECIES
 
@@ -451,10 +595,10 @@ Reference: SEC 1 v2.0 and NIST SP 800-56A Rev. 3 for the EC key-establishment
 model and point encodings (see `pubs/sec1-v2-elliptic-curve-cryptography.pdf`
 and `pubs/sp800-56a-r3.pdf`).
 
-`ECIES` is the standard way to encrypt arbitrary byte strings to a static EC public key.
-It combines ephemeral ECDH with a symmetric encryption step, so the per-message overhead
-is a single scalar multiplication by the sender and a single scalar multiplication by the
-receiver.
+`ECIES` is the standard way to encrypt arbitrary byte strings to a static EC
+public key. It combines ephemeral ECDH with a symmetric encryption step, so the
+per-message overhead is a single scalar multiplication by the sender and a
+single scalar multiplication by the receiver.
 
 **Encryption:**
 
@@ -468,9 +612,9 @@ receiver.
 \text{nonce} = \mathrm{SHA\text{-}256}(\mathtt{0x02} \mathbin\| S_x)_{[0..12]}
 ```
 
-4. Encrypt the message with AES-256-GCM, using `R_{\text{bytes}}` as the additional
-   authenticated data (AAD). The AAD binding prevents `R` from being silently swapped
-   without triggering a tag failure.
+4. Encrypt the message with AES-256-GCM, using `R_{\text{bytes}}` as the
+   additional authenticated data (AAD). The AAD binding prevents `R` from being
+   silently swapped without triggering a tag failure.
 
 **Wire format:**
 
@@ -487,8 +631,18 @@ tag  (16 bytes, GCM authentication tag)
 3. Re-derive key and nonce from `S_x`.
 4. AES-256-GCM decrypt; return `None` if the tag fails.
 
-The GCM tag simultaneously authenticates the ciphertext and the ephemeral public key,
-so no separate MAC layer is needed.
+The GCM tag simultaneously authenticates the ciphertext and the ephemeral
+public key, so no separate MAC layer is needed.
+
+This makes `ECIES` the practical "encrypt arbitrary bytes to an EC key" path
+in the short-Weierstrass family. Unlike `EC-ElGamal`, it does not try to expose
+the group law of the plaintext space; it uses the EC operation only for key
+establishment, then hands the real data path to AES-256-GCM.
+
+The key objects follow the same representation pattern as `ECDH` and `ECDSA`:
+they can be serialized either as compact SEC 1 points when the curve is known
+out-of-band or as the crate-defined self-describing blob when the curve
+parameters need to travel with the key.
 
 #### EC-ElGamal
 
@@ -498,7 +652,7 @@ v2.0 / SEC 2 v2.0 for the elliptic-curve group and point encodings (see
 `pubs/sec1-v2-elliptic-curve-cryptography.pdf`, and
 `pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`).
 
-EC-ElGamal has three distinct plaintext layers stacked on the same key pair:
+EC-ElGamal has three distinct plaintext layers stacked on the same key pair.
 
 **Point layer** — encrypt an arbitrary curve point `M`:
 
@@ -512,16 +666,17 @@ Decryption recovers `M` via:
 M = C_2 - d \cdot C_1
 ```
 
-**Byte layer** — encrypt arbitrary bytes via Koblitz embedding: the message bytes are
-padded and placed into an x-coordinate candidate; `decode_point` is called with the
-`0x02` compressed prefix until a valid curve point is found. The last byte of the
-padded x-coordinate is an iteration counter `j ∈ [0, 255]`; the first byte of the
-decoded x-coordinate is stripped during recovery, leaving the original message bytes.
-This approach works on every named curve in this crate because all have `p ≡ 3 (mod 4)`,
-which means the compressed-point square root exists and the iteration succeeds quickly
-in practice.
+**Byte layer** — encrypt arbitrary bytes via Koblitz embedding: the message
+bytes are padded and placed into an x-coordinate candidate; `decode_point` is
+called with the `0x02` compressed prefix until a valid curve point is found.
+The last byte of the padded x-coordinate is an iteration counter
+`j ∈ [0, 255]`; the first byte of the decoded x-coordinate is stripped during
+recovery, leaving the original message bytes. This approach works on every
+named curve in this crate because all have `p ≡ 3 (mod 4)`, which means the
+compressed-point square root exists and the iteration succeeds quickly in
+practice.
 
-The message capacity per ciphertext is `coord_len − 1` bytes.
+The message capacity per ciphertext is `coord_len - 1` bytes.
 
 **Integer layer** — additively homomorphic encryption of a small integer `m`:
 
@@ -535,8 +690,24 @@ Homomorphic addition of two ciphertexts:
 (C_1 + C_1',\; C_2 + C_2') \;\xrightarrow{\text{decrypt}}\; (m_1 + m_2) \cdot G
 ```
 
-The integer `m` is recovered from `m · G` via baby-step giant-step (BSGS) with
-`O(\sqrt{\text{max\_m}})` precomputation.
+The integer `m` is recovered from `m \cdot G` via baby-step giant-step (BSGS)
+with `O(\sqrt{\text{max\_m}})` precomputation.
+
+So `EC-ElGamal` is intentionally the arithmetic-rich counterpart to `ECIES`:
+
+- point encryption for direct group-element work
+- byte encryption for bounded arbitrary payloads via Koblitz embedding
+- additive homomorphism on the integer layer
+
+The practical constraint is capacity. Because the byte layer embeds the payload
+into an x-coordinate candidate, each ciphertext can carry only `coord_len - 1`
+bytes. That is why `ECIES` exists alongside it: `ECIES` is the general-purpose
+byte-encryption path, while `EC-ElGamal` is the path that preserves the group
+structure when that algebra matters.
+
+As with the other short-Weierstrass public key types, the public key can be
+serialized either as a compact SEC 1 point or as the crate-defined blob that
+embeds the full curve parameters.
 
 #### ECDSA
 
@@ -572,6 +743,24 @@ the FIPS 186-5 truncation rule for hash functions wider than the group order.
 
 The key types (`EcdsaPublicKey`, `EcdsaPrivateKey`) carry the full `CurveParams`
 and work with any named curve.
+
+The API mirrors the `DSA` surface closely:
+
+- digest-level signing and verification
+- message-level helpers parameterized by a `Digest`
+- an explicit-nonce signing path for deterministic tests and vectors
+
+So the short-Weierstrass and finite-field signature families line up on the
+same caller model even though their underlying groups differ.
+
+Like the other short-Weierstrass key types, `EcdsaPublicKey` supports both
+compact SEC 1 point encodings and the self-describing crate-defined key blob.
+That matches the Edwards writeup's clearer separation between "wire point" and
+"standalone serialized key" forms.
+
+The important practical caveat is the same one called out for the Edwards side:
+the arithmetic is generic and variable-time. The implementation is correct and
+well tested, but it is not a hardened constant-time signing engine.
 
 ### Twisted Edwards schemes
 
@@ -725,6 +914,11 @@ The legacy `bench_public_key` binary remains useful as a fixed-iteration
 fallback, but the publication-facing numbers below come from Pilot and report
 milliseconds per operation, 95% confidence-interval half-width, and rounds
 required to hit the stop rule.
+
+For RSA specifically, the timing gap between `encrypt`/`verify` and
+`decrypt`/`sign` is expected in this codebase: the default keys use
+`e = 65,537`, and the current raw private operation is a direct `c^d mod n`
+exponentiation rather than a CRT-accelerated private path.
 
 ### Integer and finite-field schemes
 

@@ -5,8 +5,8 @@ use cryptography::public_key::bigint::BigUint;
 use cryptography::public_key::ec::p256;
 use cryptography::public_key::ec_edwards::ed25519 as edwards25519_curve;
 use cryptography::{
-    Cocks, CtrDrbgAes256, Dsa, Ecdh, Ecdsa, EcElGamal, Ecies, Ed25519, EdwardsDh,
-    EdwardsElGamal, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
+    Cocks, CtrDrbgAes256, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
+    ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
 };
 
 const MESSAGE: [u8; 32] = [0x42; 32];
@@ -418,7 +418,9 @@ fn bench_edwards_elgamal(rng: &mut CtrDrbgAes256) -> EdwardsElGamalTimings {
     let encrypt = start.elapsed();
 
     let start = Instant::now();
-    let message = private.decrypt_int(&ciphertext, 32).expect("Edwards ElGamal decrypt");
+    let message = private
+        .decrypt_int(&ciphertext, 32)
+        .expect("Edwards ElGamal decrypt");
     let decrypt = start.elapsed();
     assert_eq!(message, 7);
 
@@ -535,7 +537,13 @@ fn main() {
 
     print_quintet(
         "Paillier",
-        ["keygen", "encrypt", "decrypt", "rerandomize", "add ciphertexts"],
+        [
+            "keygen",
+            "encrypt",
+            "decrypt",
+            "rerandomize",
+            "add ciphertexts",
+        ],
         paillier_timings,
     );
     print_triplet("Cocks", ["keygen", "encrypt", "decrypt"], cocks_timings);
@@ -551,7 +559,11 @@ fn main() {
         (edwards_dh_keygen, edwards_dh_agree, edwards_dh_serialize),
         (ed25519_keygen, ed25519_sign, ed25519_verify),
         (ecies_keygen, ecies_encrypt, ecies_decrypt),
-        (p256_elgamal_keygen, p256_elgamal_encrypt, p256_elgamal_decrypt),
+        (
+            p256_elgamal_keygen,
+            p256_elgamal_encrypt,
+            p256_elgamal_decrypt,
+        ),
         (
             edwards_elgamal_keygen,
             edwards_elgamal_encrypt,

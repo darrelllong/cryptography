@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the publication-facing EC / Edwards public-key operations through
 # pilot-bench and emit a Markdown table.
-# Columns: operation, ms/op mean, ±CI, runs-to-CI
+# Columns: operation, ms/op mean, ±CI (95%), runs-to-CI
 # Heavy integer-arithmetic families stay on the legacy bench_public_key path.
 set -euo pipefail
 
@@ -27,7 +27,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Operation                        |   ms/op    |    ±CI     | Runs  |"
+    echo "| Operation                        |   ms/op    | ±CI (95%)  | Runs  |"
     sep
 }
 

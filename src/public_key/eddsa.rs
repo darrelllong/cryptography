@@ -312,6 +312,16 @@ impl EdDsaPrivateKey {
         Some(EdDsaSignature { r_point, s })
     }
 
+    /// Preferred explicit name for signing a raw message with a caller-supplied nonce.
+    #[must_use]
+    pub fn sign_message_with_nonce<H: Digest>(
+        &self,
+        message: &[u8],
+        nonce: &BigUint,
+    ) -> Option<EdDsaSignature> {
+        self.sign_with_nonce::<H>(message, nonce)
+    }
+
     /// Sign using a fresh random nonce.
     #[must_use]
     pub fn sign_message<H: Digest, R: Csprng>(
@@ -576,6 +586,22 @@ mod tests {
             .sign_with_nonce::<Sha512>(b"abc", &nonce)
             .expect("explicit nonce");
         assert!(public.verify_message::<Sha512>(b"abc", &sig));
+    }
+
+    #[test]
+    fn sign_message_with_nonce_matches_sign_with_nonce() {
+        let curve = ed25519();
+        let secret = BigUint::from_u64(7);
+        let nonce = BigUint::from_u64(11);
+        let (_public, private) =
+            EdDsa::from_secret_scalar(curve, &secret).expect("explicit secret");
+        let lhs = private
+            .sign_with_nonce::<Sha512>(b"abc", &nonce)
+            .expect("legacy");
+        let rhs = private
+            .sign_message_with_nonce::<Sha512>(b"abc", &nonce)
+            .expect("canonical");
+        assert_eq!(lhs, rhs);
     }
 
     #[test]

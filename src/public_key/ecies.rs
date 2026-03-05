@@ -72,6 +72,8 @@ pub struct EciesPrivateKey {
     curve: CurveParams,
     /// Secret scalar `d ∈ [1, n)`.
     d: BigUint,
+    /// Cached public point `Q = d·G`.
+    q: AffinePoint,
 }
 
 pub struct Ecies;
@@ -79,6 +81,7 @@ pub struct Ecies;
 // ─── EciesPublicKey ───────────────────────────────────────────────────────────
 
 impl EciesPublicKey {
+    /// The curve parameters for this key.
     #[must_use]
     pub fn curve(&self) -> &CurveParams {
         &self.curve
@@ -88,6 +91,19 @@ impl EciesPublicKey {
     #[must_use]
     pub fn public_point(&self) -> &AffinePoint {
         &self.q
+    }
+
+    /// Encode the public point as a compact SEC 1 point string.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.curve.encode_point(&self.q)
+    }
+
+    /// Rebuild a public key from a compact SEC 1 point string plus explicit curve parameters.
+    #[must_use]
+    pub fn from_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
+        let q = curve.decode_point(bytes)?;
+        Some(Self { curve, q })
     }
 
     /// Encrypt `message` for the holder of the matching private key.
@@ -308,10 +324,9 @@ impl EciesPrivateKey {
     /// Derive the matching public key `Q = d·G`.
     #[must_use]
     pub fn to_public_key(&self) -> EciesPublicKey {
-        let q = self.curve.scalar_mul(&self.curve.base_point(), &self.d);
         EciesPublicKey {
             curve: self.curve.clone(),
-            q,
+            q: self.q.clone(),
         }
     }
 
@@ -419,9 +434,11 @@ impl EciesPrivateKey {
         if private_scalar.is_zero() || private_scalar.cmp(&curve.n).is_ge() {
             return None;
         }
+        let q = curve.scalar_mul(&curve.base_point(), &private_scalar);
         Some(Self {
             curve,
             d: private_scalar,
+            q,
         })
     }
 
@@ -509,9 +526,11 @@ impl EciesPrivateKey {
         if private_scalar.is_zero() || private_scalar.cmp(&curve.n).is_ge() {
             return None;
         }
+        let q = curve.scalar_mul(&curve.base_point(), &private_scalar);
         Some(Self {
             curve,
             d: private_scalar,
+            q,
         })
     }
 }
@@ -527,14 +546,17 @@ impl fmt::Debug for EciesPrivateKey {
 impl Ecies {
     /// Generate a random ECIES key pair on `curve`.
     #[must_use]
-    pub fn generate<R: Csprng>(curve: CurveParams, rng: &mut R) -> (EciesPublicKey, EciesPrivateKey) {
+    pub fn generate<R: Csprng>(
+        curve: CurveParams,
+        rng: &mut R,
+    ) -> (EciesPublicKey, EciesPrivateKey) {
         let (d, q) = curve.generate_keypair(rng);
         (
             EciesPublicKey {
                 curve: curve.clone(),
-                q,
+                q: q.clone(),
             },
-            EciesPrivateKey { curve, d },
+            EciesPrivateKey { curve, d, q },
         )
     }
 }
@@ -731,6 +753,15 @@ mod tests {
         let (public, _) = Ecies::generate(p256(), &mut rng);
         let blob = public.to_binary();
         let recovered = EciesPublicKey::from_binary(&blob).expect("from_binary");
+        assert_eq!(recovered.q, public.q);
+    }
+
+    #[test]
+    fn public_key_bytes_roundtrip() {
+        let mut rng = rng();
+        let (public, _) = Ecies::generate(p256(), &mut rng);
+        let bytes = public.to_bytes();
+        let recovered = EciesPublicKey::from_bytes(p256(), &bytes).expect("from_bytes");
         assert_eq!(recovered.q, public.q);
     }
 

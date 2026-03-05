@@ -65,6 +65,8 @@ pub struct EcdhPrivateKey {
     curve: CurveParams,
     /// Secret scalar `d ∈ [1, n)`.
     d: BigUint,
+    /// Cached public point `Q = d·G`.
+    q: AffinePoint,
 }
 
 pub struct Ecdh;
@@ -72,6 +74,7 @@ pub struct Ecdh;
 // ─── EcdhPublicKey ────────────────────────────────────────────────────────────
 
 impl EcdhPublicKey {
+    /// The curve parameters for this key.
     #[must_use]
     pub fn curve(&self) -> &CurveParams {
         &self.curve
@@ -284,10 +287,9 @@ impl EcdhPrivateKey {
     /// Derive the matching public key `Q = d·G`.
     #[must_use]
     pub fn to_public_key(&self) -> EcdhPublicKey {
-        let q = self.curve.scalar_mul(&self.curve.base_point(), &self.d);
         EcdhPublicKey {
             curve: self.curve.clone(),
-            q,
+            q: self.q.clone(),
         }
     }
 
@@ -382,9 +384,11 @@ impl EcdhPrivateKey {
         if private_scalar.is_zero() || private_scalar.cmp(&curve.n).is_ge() {
             return None;
         }
+        let q = curve.scalar_mul(&curve.base_point(), &private_scalar);
         Some(Self {
             curve,
             d: private_scalar,
+            q,
         })
     }
 
@@ -472,9 +476,11 @@ impl EcdhPrivateKey {
         if private_scalar.is_zero() || private_scalar.cmp(&curve.n).is_ge() {
             return None;
         }
+        let q = curve.scalar_mul(&curve.base_point(), &private_scalar);
         Some(Self {
             curve,
             d: private_scalar,
+            q,
         })
     }
 }
@@ -495,9 +501,9 @@ impl Ecdh {
         (
             EcdhPublicKey {
                 curve: curve.clone(),
-                q,
+                q: q.clone(),
             },
-            EcdhPrivateKey { curve, d },
+            EcdhPrivateKey { curve, d, q },
         )
     }
 }

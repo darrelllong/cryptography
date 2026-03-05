@@ -444,7 +444,11 @@ fn point_add_jacobian(
     let hz1 = ctx.mul(&h, &p1.z);
     let z3 = ctx.mul(&hz1, &p2.z);
 
-    JacobianPoint { x: x3, y: y3, z: z3 }
+    JacobianPoint {
+        x: x3,
+        y: y3,
+        z: z3,
+    }
 }
 
 /// Scalar multiplication `k·P` via left-to-right binary double-and-add.
@@ -764,9 +768,7 @@ impl CurveParams {
             return point.clone();
         }
         match &self.field {
-            FieldCtx::Prime(_) => {
-                AffinePoint::new(point.x.clone(), field_neg(&point.y, &self.p))
-            }
+            FieldCtx::Prime(_) => AffinePoint::new(point.x.clone(), field_neg(&point.y, &self.p)),
             FieldCtx::Binary { .. } => {
                 // −P = (xP, xP ⊕ yP)
                 let neg_y = gf2m_add(&point.x, &point.y);
@@ -817,7 +819,11 @@ impl CurveParams {
     /// public point `Q = d_B·G`; the shared secret is the x-coordinate of
     /// `d·Q = d·d_B·G`.
     #[must_use]
-    pub fn diffie_hellman(&self, private_scalar: &BigUint, public_point: &AffinePoint) -> AffinePoint {
+    pub fn diffie_hellman(
+        &self,
+        private_scalar: &BigUint,
+        public_point: &AffinePoint,
+    ) -> AffinePoint {
         self.scalar_mul(public_point, private_scalar)
     }
 
@@ -1464,18 +1470,10 @@ pub fn b283() -> CurveParams {
         poly.set_bit(bit);
     }
     let a = BigUint::one();
-    let b = from_hex(
-        "027B680AC8B8596DA5A4AF8A19A0303FCA97FD7645309FA2A581485AF6263E313B79A2F5",
-    );
-    let n = from_hex(
-        "03FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEF90399660FC938A90165B042A7CEFADB307",
-    );
-    let gx = from_hex(
-        "05F939258DB7DD90E1934F8C70B0DFEC2EED25B8557EAC9C80E2E198F8CDBECD86B12053",
-    );
-    let gy = from_hex(
-        "03676854FE24141CB98FE6D4B20D02B4516FF702350EDDB0826779C813F0DF45BE8112F4",
-    );
+    let b = from_hex("027B680AC8B8596DA5A4AF8A19A0303FCA97FD7645309FA2A581485AF6263E313B79A2F5");
+    let n = from_hex("03FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEF90399660FC938A90165B042A7CEFADB307");
+    let gx = from_hex("05F939258DB7DD90E1934F8C70B0DFEC2EED25B8557EAC9C80E2E198F8CDBECD86B12053");
+    let gy = from_hex("03676854FE24141CB98FE6D4B20D02B4516FF702350EDDB0826779C813F0DF45BE8112F4");
     CurveParams::new_binary(poly, 283, a, b, n, 2, (gx, gy))
         .expect("B-283 parameters are well-formed")
 }
@@ -1496,15 +1494,9 @@ pub fn k283() -> CurveParams {
     }
     let a = BigUint::zero();
     let b = BigUint::one();
-    let n = from_hex(
-        "01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE9AE2ED07577265DFF7F94451E061E163C61",
-    );
-    let gx = from_hex(
-        "0503213F78CA44883F1A3B8162F188E553CD265F23C1567A16876913B0C2AC2458492836",
-    );
-    let gy = from_hex(
-        "01CCDA380F1C9E318D90F95D07E5426FE87E45C0E8184698E45962364E34116177DD2259",
-    );
+    let n = from_hex("01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE9AE2ED07577265DFF7F94451E061E163C61");
+    let gx = from_hex("0503213F78CA44883F1A3B8162F188E553CD265F23C1567A16876913B0C2AC2458492836");
+    let gy = from_hex("01CCDA380F1C9E318D90F95D07E5426FE87E45C0E8184698E45962364E34116177DD2259");
     CurveParams::new_binary(poly, 283, a, b, n, 4, (gx, gy))
         .expect("K-283 parameters are well-formed")
 }
@@ -1641,7 +1633,10 @@ mod tests {
     fn p256_base_point_on_curve() {
         let curve = p256();
         let g = curve.base_point();
-        assert!(curve.is_on_curve(&g), "P-256 base point G must satisfy y² = x³ + ax + b");
+        assert!(
+            curve.is_on_curve(&g),
+            "P-256 base point G must satisfy y² = x³ + ax + b"
+        );
     }
 
     #[test]
@@ -1651,7 +1646,10 @@ mod tests {
         let g = curve.base_point();
         let via_double = curve.double(&g);
         let via_add = curve.add(&g, &g);
-        assert_eq!(via_double, via_add, "2G via double must equal G+G via add for P-256");
+        assert_eq!(
+            via_double, via_add,
+            "2G via double must equal G+G via add for P-256"
+        );
         assert!(curve.is_on_curve(&via_double), "2G must lie on P-256");
     }
 
@@ -1663,7 +1661,10 @@ mod tests {
         let four_g_scalar = curve.scalar_mul(&g, &BigUint::from_u64(4));
         let two_g = curve.double(&g);
         let four_g_add = curve.add(&two_g, &two_g);
-        assert_eq!(four_g_scalar, four_g_add, "4G via scalar_mul must equal 2G+2G");
+        assert_eq!(
+            four_g_scalar, four_g_add,
+            "4G via scalar_mul must equal 2G+2G"
+        );
     }
 
     #[test]
@@ -1673,7 +1674,10 @@ mod tests {
         let g = curve.base_point();
         let n = curve.n.clone();
         let result = curve.scalar_mul(&g, &n);
-        assert!(result.is_infinity(), "n·G must be the point at infinity for P-256");
+        assert!(
+            result.is_infinity(),
+            "n·G must be the point at infinity for P-256"
+        );
     }
 
     #[test]
@@ -1691,8 +1695,13 @@ mod tests {
         let curve = p256();
         let g = curve.base_point();
         let encoded = curve.encode_point(&g);
-        let decoded = curve.decode_point(&encoded).expect("decode must succeed for a valid point");
-        assert_eq!(decoded, g, "uncompressed encode/decode must be the identity");
+        let decoded = curve
+            .decode_point(&encoded)
+            .expect("decode must succeed for a valid point");
+        assert_eq!(
+            decoded, g,
+            "uncompressed encode/decode must be the identity"
+        );
     }
 
     #[test]
@@ -1700,7 +1709,9 @@ mod tests {
         let curve = p256();
         let g = curve.base_point();
         let encoded = curve.encode_point_compressed(&g);
-        let decoded = curve.decode_point(&encoded).expect("compressed decode must succeed");
+        let decoded = curve
+            .decode_point(&encoded)
+            .expect("compressed decode must succeed");
         assert_eq!(decoded, g, "compressed encode/decode must be the identity");
     }
 
@@ -1720,7 +1731,10 @@ mod tests {
         let g = curve.base_point();
         let mut enc = curve.encode_point(&g);
         enc.pop(); // truncate by one byte
-        assert!(curve.decode_point(&enc).is_none(), "truncated encoding must be rejected");
+        assert!(
+            curve.decode_point(&enc).is_none(),
+            "truncated encoding must be rejected"
+        );
     }
 
     #[test]
@@ -1731,7 +1745,10 @@ mod tests {
         let mut enc = curve.encode_point(&g);
         let last = enc.last_mut().unwrap();
         *last ^= 0xff; // flip the low byte of y
-        assert!(curve.decode_point(&enc).is_none(), "off-curve point must be rejected");
+        assert!(
+            curve.decode_point(&enc).is_none(),
+            "off-curve point must be rejected"
+        );
     }
 
     // ── P-384 ──────────────────────────────────────────────────────────────
@@ -1805,8 +1822,14 @@ mod tests {
         let shared_a = curve.diffie_hellman(&d_a, &q_b);
         let shared_b = curve.diffie_hellman(&d_b, &q_a);
         assert_eq!(shared_a, shared_b, "ECDH shared points must agree");
-        assert!(!shared_a.is_infinity(), "ECDH shared point must not be infinity");
-        assert!(curve.is_on_curve(&shared_a), "ECDH shared point must lie on the curve");
+        assert!(
+            !shared_a.is_infinity(),
+            "ECDH shared point must not be infinity"
+        );
+        assert!(
+            curve.is_on_curve(&shared_a),
+            "ECDH shared point must lie on the curve"
+        );
     }
 
     // ── scalar_invert ──────────────────────────────────────────────────────
@@ -1911,7 +1934,9 @@ mod tests {
         // k * k⁻¹ ≡ 1 (mod n)
         let curve = p256();
         let k = BigUint::from_u64(0x1234_5678_9abc_def0);
-        let k_inv = curve.scalar_invert(&k).expect("k is non-zero and coprime with n");
+        let k_inv = curve
+            .scalar_invert(&k)
+            .expect("k is non-zero and coprime with n");
         // Verify: k * k_inv mod n == 1
         let product = BigUint::mod_mul(&k, &k_inv, &curve.n);
         assert_eq!(product, BigUint::one(), "k * k⁻¹ must equal 1 mod n");
@@ -2088,5 +2113,4 @@ mod tests {
         assert_eq!(shared_a, shared_b, "K-283 ECDH shared points must agree");
         assert!(!shared_a.is_infinity());
     }
-
 }

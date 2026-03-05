@@ -226,7 +226,11 @@ mod tests {
         let a = BigUint::from_u64(0x1234_5678_9ABC_DEF0);
         let a_inv = gf2m_inv(&a, &poly, 163).expect("a is non-zero, must be invertible");
         let product = gf2m_mul(&a, &a_inv, &poly, 163);
-        assert_eq!(product, BigUint::one(), "a * a^{{-1}} must be 1 in GF(2^163)");
+        assert_eq!(
+            product,
+            BigUint::one(),
+            "a * a^{{-1}} must be 1 in GF(2^163)"
+        );
     }
 
     #[test]

@@ -83,6 +83,8 @@ pub struct DhPrivateKey {
     g: BigUint,
     /// Private exponent `x ∈ [1, q)`.
     x: BigUint,
+    /// Cached public component `y = g^x mod p`.
+    y: BigUint,
 }
 
 pub struct Dh;
@@ -123,7 +125,10 @@ impl DhParams {
 
     #[must_use]
     pub fn to_xml(&self) -> String {
-        xml_wrap("DhParams", &[("p", &self.p), ("q", &self.q), ("g", &self.g)])
+        xml_wrap(
+            "DhParams",
+            &[("p", &self.p), ("q", &self.q), ("g", &self.g)],
+        )
     }
 
     /// Returns `None` if the XML is malformed or the decoded parameters fail
@@ -212,7 +217,12 @@ impl DhPublicKey {
     pub fn to_xml(&self) -> String {
         xml_wrap(
             "DhPublicKey",
-            &[("p", &self.p), ("q", &self.q), ("g", &self.g), ("y", &self.y)],
+            &[
+                ("p", &self.p),
+                ("q", &self.q),
+                ("g", &self.g),
+                ("y", &self.y),
+            ],
         )
     }
 
@@ -259,12 +269,11 @@ impl DhPrivateKey {
     /// Derive the matching public key.
     #[must_use]
     pub fn to_public_key(&self) -> DhPublicKey {
-        let y = mod_pow(&self.g, &self.x, &self.p);
         DhPublicKey {
             p: self.p.clone(),
             q: self.q.clone(),
             g: self.g.clone(),
-            y,
+            y: self.y.clone(),
         }
     }
 
@@ -279,7 +288,7 @@ impl DhPrivateKey {
 
     /// Compute the shared secret with a peer's public key.
     ///
-    /// Returns `s = y_peer^x mod p` as a big-endian byte vector, or `None` if
+    /// Returns `s = y_peer^x mod p`, or `None` if
     /// the peer key uses different domain parameters or fails subgroup validation.
     ///
     /// **Subgroup validation**: checks that `1 < y_peer < p` and that
@@ -321,7 +330,8 @@ impl DhPrivateKey {
         if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
-        Some(Self { p, q, g, x })
+        let y = mod_pow(&g, &x, &p);
+        Some(Self { p, q, g, x, y })
     }
 
     #[must_use]
@@ -339,7 +349,12 @@ impl DhPrivateKey {
     pub fn to_xml(&self) -> String {
         xml_wrap(
             "DhPrivateKey",
-            &[("p", &self.p), ("q", &self.q), ("g", &self.g), ("x", &self.x)],
+            &[
+                ("p", &self.p),
+                ("q", &self.q),
+                ("g", &self.g),
+                ("x", &self.x),
+            ],
         )
     }
 
@@ -354,7 +369,8 @@ impl DhPrivateKey {
         if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
-        Some(Self { p, q, g, x })
+        let y = mod_pow(&g, &x, &p);
+        Some(Self { p, q, g, x, y })
     }
 }
 
@@ -388,13 +404,14 @@ impl Dh {
                 p: params.p.clone(),
                 q: params.q.clone(),
                 g: params.g.clone(),
-                y,
+                y: y.clone(),
             },
             DhPrivateKey {
                 p: params.p.clone(),
                 q: params.q.clone(),
                 g: params.g.clone(),
                 x,
+                y,
             },
         )
     }

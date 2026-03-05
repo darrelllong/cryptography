@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run every cipher through pilot-bench and emit a Markdown table.
-# Columns: cipher, block bits, key bits, MB/s mean, ±CI, runs-to-CI
+# Columns: cipher, block bits, key bits, MB/s mean, ±CI (95%), runs-to-CI
 set -euo pipefail
 
 BENCH=~/pilot-bench/build/cli/bench
@@ -25,7 +25,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Cipher               | Block |   Key |   MB/s   |  ±CI     | Runs  |"
+    echo "| Cipher               | Block |   Key |   MB/s   | ±CI (95%) | Runs  |"
     sep
 }
 
@@ -119,7 +119,7 @@ measure speck128_256 128 256
 echo ""
 echo "### Stream ciphers"
 echo ""
-echo "| Cipher               | Block |   Key |   MB/s   |  ±CI     | Runs  |"
+echo "| Cipher               | Block |   Key |   MB/s   | ±CI (95%) | Runs  |"
 sep
 measure chacha20  stream 256
 measure xchacha20 stream 256

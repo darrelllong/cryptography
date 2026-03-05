@@ -15,7 +15,7 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::ec_edwards::{EdwardsPoint, TwistedEdwardsCurve};
+use crate::public_key::ec_edwards::{EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
@@ -29,6 +29,7 @@ const EDWARDS_DH_PRIVATE_LABEL: &str = "CRYPTOGRAPHY EDWARDS-DH PRIVATE KEY";
 pub struct EdwardsDhPublicKey {
     curve: TwistedEdwardsCurve,
     q: EdwardsPoint,
+    q_table: EdwardsMulTable,
 }
 
 /// Private key for Edwards-curve Diffie-Hellman.
@@ -36,6 +37,7 @@ pub struct EdwardsDhPublicKey {
 pub struct EdwardsDhPrivateKey {
     curve: TwistedEdwardsCurve,
     d: BigUint,
+    q: EdwardsPoint,
 }
 
 /// Namespace wrapper for Edwards-curve Diffie-Hellman.
@@ -67,7 +69,8 @@ impl EdwardsDhPublicKey {
         if !validate_public_point(&curve, &q) {
             return None;
         }
-        Some(Self { curve, q })
+        let q_table = curve.precompute_mul_table(&q);
+        Some(Self { curve, q, q_table })
     }
 
     /// Encode in the crate-defined binary format: `[p, a, d, n, Gx, Gy, Qx, Qy]`.
@@ -105,7 +108,8 @@ impl EdwardsDhPublicKey {
         if !validate_public_point(&curve, &q) {
             return None;
         }
-        Some(Self { curve, q })
+        let q_table = curve.precompute_mul_table(&q);
+        Some(Self { curve, q, q_table })
     }
 
     #[must_use]
@@ -160,7 +164,8 @@ impl EdwardsDhPublicKey {
         if !validate_public_point(&curve, &q) {
             return None;
         }
-        Some(Self { curve, q })
+        let q_table = curve.precompute_mul_table(&q);
+        Some(Self { curve, q, q_table })
     }
 }
 
@@ -180,10 +185,10 @@ impl EdwardsDhPrivateKey {
     /// Derive the matching public key.
     #[must_use]
     pub fn to_public_key(&self) -> EdwardsDhPublicKey {
-        let q = self.curve.scalar_mul(&self.curve.base_point(), &self.d);
         EdwardsDhPublicKey {
             curve: self.curve.clone(),
-            q,
+            q: self.q.clone(),
+            q_table: self.curve.precompute_mul_table(&self.q),
         }
     }
 
@@ -194,10 +199,10 @@ impl EdwardsDhPrivateKey {
     /// material.
     #[must_use]
     pub fn agree(&self, peer: &EdwardsDhPublicKey) -> Option<Vec<u8>> {
-        if !same_curve(&self.curve, &peer.curve) {
+        if !self.curve.same_curve(&peer.curve) {
             return None;
         }
-        let shared = self.curve.diffie_hellman(&self.d, &peer.q);
+        let shared = self.curve.scalar_mul_cached(&peer.q_table, &self.d);
         if shared.is_neutral() {
             return None;
         }
@@ -236,7 +241,8 @@ impl EdwardsDhPrivateKey {
         if d.is_zero() || d >= curve.n {
             return None;
         }
-        Some(Self { curve, d })
+        let q = curve.scalar_mul_base(&d);
+        Some(Self { curve, d, q })
     }
 
     #[must_use]
@@ -288,7 +294,8 @@ impl EdwardsDhPrivateKey {
         if d.is_zero() || d >= curve.n {
             return None;
         }
-        Some(Self { curve, d })
+        let q = curve.scalar_mul_base(&d);
+        Some(Self { curve, d, q })
     }
 }
 
@@ -306,35 +313,41 @@ impl EdwardsDh {
         rng: &mut R,
     ) -> (EdwardsDhPublicKey, EdwardsDhPrivateKey) {
         let d = curve.random_scalar(rng);
-        let q = curve.scalar_mul(&curve.base_point(), &d);
+        let q = curve.scalar_mul_base(&d);
         (
             EdwardsDhPublicKey {
                 curve: curve.clone(),
-                q,
+                q: q.clone(),
+                q_table: curve.precompute_mul_table(&q),
             },
-            EdwardsDhPrivateKey { curve, d },
+            EdwardsDhPrivateKey { curve, d, q },
         )
     }
 }
 
 fn validate_public_point(curve: &TwistedEdwardsCurve, point: &EdwardsPoint) -> bool {
-    !point.is_neutral() && curve.is_on_curve(point) && curve.scalar_mul(point, &curve.n).is_neutral()
-}
-
-fn same_curve(lhs: &TwistedEdwardsCurve, rhs: &TwistedEdwardsCurve) -> bool {
-    lhs.p == rhs.p
-        && lhs.a == rhs.a
-        && lhs.d == rhs.d
-        && lhs.n == rhs.n
-        && lhs.gx == rhs.gx
-        && lhs.gy == rhs.gy
+    !point.is_neutral()
+        && curve.is_on_curve(point)
+        && curve.scalar_mul(point, &curve.n).is_neutral()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{EdwardsDh, EdwardsDhPrivateKey, EdwardsDhPublicKey};
     use crate::public_key::ec_edwards::ed25519;
+    use crate::BigUint;
     use crate::CtrDrbgAes256;
+
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        let bytes = hex.as_bytes();
+        let mut out = Vec::with_capacity(bytes.len() / 2);
+        for chunk in bytes.chunks_exact(2) {
+            let hi = (chunk[0] as char).to_digit(16).expect("hex") as u8;
+            let lo = (chunk[1] as char).to_digit(16).expect("hex") as u8;
+            out.push((hi << 4) | lo);
+        }
+        out
+    }
 
     fn rng(seed: u8) -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[seed; 48])
@@ -347,6 +360,24 @@ mod tests {
         let shared_a = priv_a.agree(&pub_b).expect("shared a");
         let shared_b = priv_b.agree(&pub_a).expect("shared b");
         assert_eq!(shared_a, shared_b);
+    }
+
+    #[test]
+    fn agreement_fixture_matches_known_ed25519_encoding() {
+        let curve = ed25519();
+        let private = EdwardsDhPrivateKey {
+            curve: curve.clone(),
+            d: BigUint::from_u64(7),
+            q: curve.scalar_mul_base(&BigUint::from_u64(7)),
+        };
+        let peer_bytes =
+            decode_hex("1337036ac32d8f30d4589c3c1c595812ce0fff40e37c6f5a97ab213f318290ad");
+        let peer = EdwardsDhPublicKey::from_bytes(curve, &peer_bytes).expect("peer");
+        let shared = private.agree(&peer).expect("shared");
+        assert_eq!(
+            shared,
+            decode_hex("aa6df914f7a0f04e7f852adf459873f17dba5b1671ea62e82cc10ed6aecc489c")
+        );
     }
 
     #[test]
