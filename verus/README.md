@@ -11,11 +11,11 @@ It is intentionally isolated from normal `cargo` builds.
 `src/cprng/primes.rs`:
 
 - Euclidean `gcd` loop: proved to match a recursive mathematical specification.
-- Decomposition step: proved that `n - 1 = d * 2^s` with odd `d`.
-- Bounded `mul_mod` loop: proved to compute
-  `((a mod m) * (b mod m)) mod m` under `m < 2^127`.
-- Bounded `mod_pow` loop: proved repeated-squaring correctness against a
-  squaring-style recursive modular exponentiation spec.
+- Decomposition step: proved odd/positive `d` output from the halving loop.
+- Bounded `mul_mod` loop: proved against a step-accurate recursive `u128`
+  spec that mirrors the overflow-safe branch updates.
+- Bounded `mod_pow` loop: proved against a repeated-squaring recursive `u128`
+  spec built on the proved `mul_mod` spec.
 - Primality precheck stage: proved behavior for domain guards and all fixed
   small-prime accept/reject branches used before Miller-Rabin rounds.
 - Miller-Rabin witness pipeline:

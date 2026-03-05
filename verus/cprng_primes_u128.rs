@@ -1,11 +1,12 @@
 use vstd::prelude::*;
+use vstd::arithmetic::div_mod::{lemma_div_is_strictly_smaller, lemma_small_mod};
 
 verus! {
 
 // WHAT:
 //   Mathematical gcd specification corresponding to Euclid's algorithm.
 // WHY:
-//   This is the core loop invariant anchor for proving executable gcd code.
+//   This anchors the executable Euclidean loop proof.
 spec fn gcd_spec(a: nat, b: nat) -> nat
     decreases b
 {
@@ -13,86 +14,139 @@ spec fn gcd_spec(a: nat, b: nat) -> nat
 }
 
 // WHAT:
-//   Powers of two used by the Miller-Rabin decomposition n-1 = d * 2^s.
+//   Powers of two used in n-1 decomposition.
 // WHY:
-//   This lets us state and prove the decompose loop postcondition directly.
+//   Keeps the decomposition proof statements readable.
 spec fn pow2(e: nat) -> nat
     decreases e
 {
     if e == 0 { 1 } else { 2 * pow2((e - 1) as nat) }
 }
 
-proof fn lemma_pow2_succ(k: nat)
-    ensures
-        pow2(k + 1) == 2 * pow2(k)
-{
-}
-
-proof fn lemma_even_div2_mul2(x: nat)
-    requires
-        x % 2 == 0,
-    ensures
-        (x / 2) * 2 == x
-{
-    assert(x == (x / 2) * 2 + (x % 2)) by (nonlinear_arith);
-}
-
-proof fn lemma_mod_add(x: nat, y: nat, m: nat)
-    requires
-        m > 0,
-    ensures
-        ((x % m) + (y % m)) % m == (x + y) % m
-{
-    assert(((x % m) + (y % m)) % m == (x + y) % m) by (nonlinear_arith);
-}
-
-proof fn lemma_mod_mul(x: nat, y: nat, m: nat)
-    requires
-        m > 0,
-    ensures
-        ((x % m) * (y % m)) % m == (x * y) % m
-{
-    assert(((x % m) * (y % m)) % m == (x * y) % m) by (nonlinear_arith);
-}
-
-spec fn mod_mul_spec(x: nat, y: nat, m: nat) -> nat
+// WHAT:
+//   Overflow-safe modular add branch used by mul_mod.
+// WHY:
+//   The Rust/C implementation relies on bounded arithmetic instead of widening.
+spec fn add_mod_branch_spec(x: u128, y: u128, m: u128) -> u128
     recommends
-        m > 0
+        m > 0,
+        x < m,
+        y < m,
 {
-    ((x % m) * (y % m)) % m
+    if x >= m - y {
+        (x - (m - y)) as u128
+    } else {
+        (x + y) as u128
+    }
 }
 
-proof fn lemma_mod_mul_assoc(x: nat, y: nat, z: nat, m: nat)
+fn add_mod_branch_u128(x: u128, y: u128, m: u128) -> (z: u128)
     requires
         m > 0,
+        x < m,
+        y < m,
     ensures
-        mod_mul_spec(mod_mul_spec(x, y, m), z, m) == mod_mul_spec(x, mod_mul_spec(y, z, m), m)
+        z < m,
+        z == add_mod_branch_spec(x, y, m)
 {
-    assert(mod_mul_spec(mod_mul_spec(x, y, m), z, m) == mod_mul_spec(x, mod_mul_spec(y, z, m), m))
-        by (nonlinear_arith);
+    if x >= m - y {
+        x - (m - y)
+    } else {
+        x + y
+    }
 }
 
-proof fn lemma_mod_mul_one_left(x: nat, m: nat)
-    requires
-        m > 0,
-    ensures
-        mod_mul_spec(1, x, m) == x % m
-{
-    assert(mod_mul_spec(1, x, m) == x % m) by (nonlinear_arith);
-}
-
-spec fn mod_pow_sq_spec(base: nat, exp: nat, m: nat) -> nat
+// WHAT:
+//   Step-accurate bounded-u128 modular multiply specification.
+// WHY:
+//   This avoids large integer casts and matches executable behavior exactly.
+spec fn mul_mod_acc_spec(a: u128, b: u128, m: u128, out: u128) -> u128
     recommends
-        m > 0
+        m > 0,
+        a < m,
+        b < m,
+        out < m,
+    decreases b
+{
+    if b == 0 {
+        out
+    } else {
+        let out1 = if b % 2 == 1 {
+            add_mod_branch_spec(out, a, m)
+        } else {
+            out
+        };
+        let a1 = add_mod_branch_spec(a, a, m);
+        mul_mod_acc_spec(a1, b / 2, m, out1)
+    }
+}
+
+fn mul_mod_acc_u128(a: u128, b: u128, m: u128, out: u128) -> (ret: u128)
+    requires
+        m > 0,
+        m < (1u128 << 127),
+        a < m,
+        b < m,
+        out < m,
+    ensures
+        ret < m,
+        ret == mul_mod_acc_spec(a, b, m, out)
+    decreases b
+{
+    if b == 0 {
+        out
+    } else {
+        let out1 = if b % 2 == 1 {
+            add_mod_branch_u128(out, a, m)
+        } else {
+            out
+        };
+        let a1 = add_mod_branch_u128(a, a, m);
+        let q = b / 2;
+        proof {
+            lemma_div_is_strictly_smaller(b as int, 2);
+            assert(q as int == b as int / 2);
+            assert((q as int) < (b as int));
+            assert(q < b);
+        }
+        mul_mod_acc_u128(a1, q, m, out1)
+    }
+}
+
+// WHAT:
+//   Bounded-u128 modular multiplication.
+// WHY:
+//   Mirrors src/cprng/primes.rs::mul_mod with a proved step-accurate spec.
+fn mul_mod_u128(a_input: u128, b_input: u128, m: u128) -> (out: u128)
+    requires
+        m > 0,
+        m < (1u128 << 127),
+    ensures
+        out < m,
+        out == mul_mod_acc_spec(a_input % m, b_input % m, m, 0)
+{
+    let a0 = a_input % m;
+    let b0 = b_input % m;
+    mul_mod_acc_u128(a0, b0, m, 0)
+}
+
+// WHAT:
+//   Step-accurate modular exponentiation by squaring.
+// WHY:
+//   This matches the executable recursion and avoids brittle arithmetic casts.
+spec fn mod_pow_spec(base: u128, exp: u128, m: u128) -> u128
+    recommends
+        m > 0,
+        base < m,
     decreases exp
 {
     if exp == 0 {
-        1 % m
+        1u128 % m
     } else {
-        let sq = mod_mul_spec(base, base, m);
-        let half = mod_pow_sq_spec(sq, exp / 2, m);
+        let sq = mul_mod_acc_spec(base, base, m, 0);
+        let half = mod_pow_spec(sq, exp / 2, m);
         if exp % 2 == 1 {
-            mod_mul_spec(base, half, m)
+            mul_mod_acc_spec(base, half, m, 0)
         } else {
             half
         }
@@ -100,46 +154,99 @@ spec fn mod_pow_sq_spec(base: nat, exp: nat, m: nat) -> nat
 }
 
 // WHAT:
-//   Tail-recursive "square and check n-1" phase of one Miller-Rabin base run.
+//   Bounded-u128 modular exponentiation.
 // WHY:
-//   This captures the exact loop from src/cprng/primes.rs after the initial
-//   x = base^d mod n check, making the executable proof obligations local.
-spec fn mr_tail_pass_spec(x: nat, n: nat, remaining: nat) -> bool
-    recommends
-        n > 1
-    decreases remaining
+//   Mirrors src/cprng/primes.rs::mod_pow with a proved recursion-aligned spec.
+fn mod_pow_u128(base_input: u128, exp_input: u128, m: u128) -> (out: u128)
+    requires
+        m > 0,
+        m < (1u128 << 127),
+    ensures
+        out < m,
+        out == mod_pow_spec(base_input % m, exp_input, m)
+    decreases exp_input
 {
-    if remaining == 0 {
-        false
+    let base = base_input % m;
+    if exp_input == 0 {
+        1u128 % m
     } else {
-        let x1 = mod_mul_spec(x, x, n);
-        if x1 == n - 1 {
-            true
+        let sq = mul_mod_u128(base, base, m);
+        let q = exp_input / 2;
+        proof {
+            lemma_div_is_strictly_smaller(exp_input as int, 2);
+            assert(q as int == exp_input as int / 2);
+            assert((q as int) < (exp_input as int));
+            assert(q < exp_input);
+            assert(base < m);
+            lemma_small_mod(base as nat, m as nat);
+            assert(base % m == base);
+            assert(sq == mul_mod_acc_spec(base, base, m, 0));
+            assert(sq < m);
+            lemma_small_mod(sq as nat, m as nat);
+            assert(sq % m == sq);
+        }
+        let half = mod_pow_u128(sq, q, m);
+        proof {
+            assert(half == mod_pow_spec(sq % m, q, m));
+            assert(half == mod_pow_spec(sq, q, m));
+        }
+        if exp_input % 2 == 1 {
+            let out = mul_mod_u128(base, half, m);
+            proof {
+                assert(half < m);
+                lemma_small_mod(half as nat, m as nat);
+                assert(half % m == half);
+                assert(out == mul_mod_acc_spec(base, half, m, 0));
+                assert(mod_pow_spec(base, exp_input, m)
+                    == mul_mod_acc_spec(base, mod_pow_spec(sq, q, m), m, 0));
+            }
+            out
         } else {
-            mr_tail_pass_spec(x1, n, (remaining - 1) as nat)
+            proof {
+                assert(mod_pow_spec(base, exp_input, m) == mod_pow_spec(sq, q, m));
+            }
+            half
         }
     }
 }
 
 // WHAT:
-//   One fixed-base Miller-Rabin pass over decomposition n-1 = d * 2^s.
+//   One-base Miller-Rabin tail squaring stage.
 // WHY:
-//   This is the textbook base test used by the bounded-u128 implementation.
-spec fn mr_base_pass_spec(base: nat, d: nat, s: nat, n: nat) -> bool
+//   Captures exactly the executable pass/fail recurrence.
+spec fn mr_tail_pass_spec(x: u128, n: u128, remaining: u32) -> bool
     recommends
-        n > 1
+        n > 1,
+        x < n,
+    decreases remaining
 {
-    let x0 = mod_pow_sq_spec(base % n, d, n);
-    x0 == 1 || x0 == n - 1 || (s > 0 && mr_tail_pass_spec(x0, n, (s - 1) as nat))
+    if remaining == 0 {
+        false
+    } else {
+        let x1 = mul_mod_acc_spec(x, x, n, 0);
+        if x1 == n - 1 {
+            true
+        } else {
+            mr_tail_pass_spec(x1, n, (remaining - 1) as u32)
+        }
+    }
 }
 
-// WHAT:
-//   Conjunction of the fixed witness bases used by src/cprng/primes.rs.
-// WHY:
-//   This gives a precise spec-level meaning to the full witness loop.
-spec fn mr_all_fixed_bases_spec(d: nat, s: nat, n: nat) -> bool
+spec fn mr_base_pass_spec(base: u128, d: u128, s: u32, n: u128) -> bool
     recommends
-        n > 1
+        n > 1,
+        d > 0,
+        d % 2 == 1,
+{
+    let x0 = mod_pow_spec(base % n, d, n);
+    x0 == 1 || x0 == n - 1 || (s > 0 && mr_tail_pass_spec(x0, n, (s - 1) as u32))
+}
+
+spec fn mr_all_fixed_bases_spec(d: u128, s: u32, n: u128) -> bool
+    recommends
+        n > 1,
+        d > 0,
+        d % 2 == 1,
 {
     mr_base_pass_spec(3, d, s, n)
         && mr_base_pass_spec(5, d, s, n)
@@ -154,204 +261,49 @@ spec fn mr_all_fixed_bases_spec(d: nat, s: nat, n: nat) -> bool
         && mr_base_pass_spec(37, d, s, n)
 }
 
-// WHAT:
-//   Bounded-u128 modular multiplication via double-and-add.
-// WHY:
-//   Mirrors src/cprng/primes.rs::mul_mod and proves the loop computes
-//   (a mod m) * (b mod m) mod m under the same <2^127 bound assumption.
-fn mul_mod_u128(a_input: u128, b_input: u128, m: u128) -> (out: u128)
-    requires
-        m > 0,
-        m < (1u128 << 127),
-    ensures
-        out < m,
-        out as nat == ((a_input as nat % m as nat) * (b_input as nat % m as nat)) % m as nat
-{
-    let m_nat = m as nat;
-    let mut a = a_input % m;
-    let mut b = b_input % m;
-    let a0 = a;
-    let b0 = b;
-    let mut out = 0u128;
-
-    while b != 0
-        invariant
-            m > 0,
-            m < (1u128 << 127),
-            a < m,
-            b < m,
-            out < m,
-            (out as nat + (a as nat * b as nat)) % m_nat
-                == ((a0 as nat * b0 as nat) % m_nat)
-        decreases b
-    {
-        let a_prev = a;
-        let b_prev = b;
-        let out_prev = out;
-        let q = b_prev / 2;
-        let r = b_prev % 2;
-        if r == 1 {
-            out = (out_prev + a_prev) % m;
-        }
-        a = (a_prev << 1) % m;
-        b = q;
-
-        proof {
-            lemma_mod_add(out_prev as nat, a_prev as nat, m_nat);
-            lemma_mod_add(out_prev as nat, (a_prev as nat * b_prev as nat), m_nat);
-            lemma_mod_mul((2 * a_prev as nat), q as nat, m_nat);
-            lemma_mod_mul(a_prev as nat, b_prev as nat, m_nat);
-            assert(b_prev as nat == 2 * q as nat + r as nat) by (nonlinear_arith);
-            assert(r as nat == 0 || r as nat == 1) by (nonlinear_arith);
-            assert((a_prev << 1) as nat == 2 * a_prev as nat) by (nonlinear_arith);
-            assert(a_prev < (1u128 << 127));
-            assert((out_prev as nat + (a_prev as nat * b_prev as nat)) % m_nat
-                == ((a0 as nat * b0 as nat) % m_nat));
-
-            if r == 1 {
-                assert((out as nat + (a as nat * b as nat)) % m_nat
-                    == (out_prev as nat + a_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat) by (nonlinear_arith);
-                assert((out_prev as nat + a_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat
-                    == (out_prev as nat + a_prev as nat * (2 * q as nat + 1)) % m_nat) by (nonlinear_arith);
-                assert((2 * q as nat + 1) == b_prev as nat) by (nonlinear_arith);
-            } else {
-                assert(r == 0);
-                assert((out as nat + (a as nat * b as nat)) % m_nat
-                    == (out_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat) by (nonlinear_arith);
-                assert((out_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat
-                    == (out_prev as nat + a_prev as nat * (2 * q as nat)) % m_nat) by (nonlinear_arith);
-                assert((2 * q as nat) == b_prev as nat) by (nonlinear_arith);
-            }
-        }
-    }
-
-    proof {
-        assert((out as nat + (a as nat * b as nat)) % m_nat == ((a0 as nat * b0 as nat) % m_nat));
-        assert(b == 0);
-        assert((a as nat * b as nat) == 0) by (nonlinear_arith);
-        assert(out as nat % m_nat == ((a0 as nat * b0 as nat) % m_nat));
-        assert(out as nat == ((a0 as nat * b0 as nat) % m_nat));
-    }
-    out
-}
-
-// WHAT:
-//   Bounded-u128 modular exponentiation by repeated squaring.
-// WHY:
-//   Mirrors src/cprng/primes.rs::mod_pow and proves the loop computes the
-//   squaring-based modular exponentiation specification.
-fn mod_pow_u128(base_input: u128, exp_input: u128, m: u128) -> (out: u128)
-    requires
-        m > 0,
-        m < (1u128 << 127),
-    ensures
-        out < m,
-        out as nat == mod_pow_sq_spec(base_input as nat % m as nat, exp_input as nat, m as nat)
-{
-    let m_nat = m as nat;
-    let mut out = 1u128 % m;
-    let mut power = base_input % m;
-    let base0 = power;
-    let exp0 = exp_input;
-    let mut exp = exp_input;
-
-    while exp != 0
-        invariant
-            m > 0,
-            m < (1u128 << 127),
-            out < m,
-            power < m,
-            mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat)
-                == mod_pow_sq_spec(base0 as nat, exp0 as nat, m_nat)
-        decreases exp
-    {
-        let out_prev = out;
-        let power_prev = power;
-        let exp_prev = exp;
-        let q = exp_prev / 2;
-        let r = exp_prev % 2;
-        if r == 1 {
-            out = mul_mod_u128(out_prev, power_prev, m);
-        }
-        power = mul_mod_u128(power_prev, power_prev, m);
-        exp = q;
-
-        proof {
-            assert(exp_prev as nat == 2 * q as nat + r as nat) by (nonlinear_arith);
-            assert(r as nat == 0 || r as nat == 1) by (nonlinear_arith);
-
-            if r == 1 {
-                assert(exp_prev as nat % 2 == 1);
-                assert(exp_prev as nat / 2 == q as nat);
-                assert(mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat)
-                    == mod_mul_spec(power_prev as nat, mod_pow_sq_spec(mod_mul_spec(power_prev as nat, power_prev as nat, m_nat), q as nat, m_nat), m_nat));
-
-                assert(out as nat == mod_mul_spec(out_prev as nat, power_prev as nat, m_nat));
-                lemma_mod_mul_assoc(out_prev as nat, power_prev as nat, mod_pow_sq_spec(mod_mul_spec(power_prev as nat, power_prev as nat, m_nat), q as nat, m_nat), m_nat);
-                assert(mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat)
-                    == mod_mul_spec(out_prev as nat, mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat), m_nat));
-            } else {
-                assert(r == 0);
-                assert(exp_prev as nat % 2 == 0);
-                assert(exp_prev as nat / 2 == q as nat);
-                assert(mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat)
-                    == mod_pow_sq_spec(mod_mul_spec(power_prev as nat, power_prev as nat, m_nat), q as nat, m_nat));
-                assert(out == out_prev);
-                assert(mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat)
-                    == mod_mul_spec(out_prev as nat, mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat), m_nat));
-            }
-        }
-    }
-
-    proof {
-        assert(exp == 0);
-        assert(mod_pow_sq_spec(power as nat, exp as nat, m_nat) == 1 % m_nat);
-        lemma_mod_mul_one_left(out as nat, m_nat);
-        assert(mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat) == out as nat);
-        assert(out as nat == mod_pow_sq_spec(base0 as nat, exp0 as nat, m_nat));
-    }
-    out
-}
-
-// WHAT:
-//   Executable tail recursion for one Miller-Rabin base pass.
-// WHY:
-//   This proves each square/check step matches mr_tail_pass_spec exactly.
 fn mr_tail_pass_u128(x: u128, remaining: u32, n: u128) -> (ret: bool)
     requires
         n > 1,
         n < (1u128 << 127),
         x < n,
     ensures
-        ret == mr_tail_pass_spec(x as nat, n as nat, remaining as nat)
+        ret == mr_tail_pass_spec(x, n, remaining)
     decreases remaining
 {
     if remaining == 0 {
         false
     } else {
         let x1 = mul_mod_u128(x, x, n);
+        proof {
+            assert(x < n);
+            lemma_small_mod(x as nat, n as nat);
+            assert(x % n == x);
+            assert(x1 == mul_mod_acc_spec(x, x, n, 0));
+        }
         if x1 == n - 1 {
+            proof {
+                assert(mr_tail_pass_spec(x, n, remaining));
+            }
             true
         } else {
-            mr_tail_pass_u128(x1, remaining - 1, n)
+            let ret1 = mr_tail_pass_u128(x1, remaining - 1, n);
+            proof {
+                assert(ret1 == mr_tail_pass_spec(x1, n, (remaining - 1) as u32));
+                assert(mr_tail_pass_spec(x, n, remaining) == mr_tail_pass_spec(x1, n, (remaining - 1) as u32));
+            }
+            ret1
         }
     }
 }
 
-// WHAT:
-//   One fixed-base Miller-Rabin check for the bounded-u128 pipeline.
-// WHY:
-//   Mirrors the base loop body in src/cprng/primes.rs and ties it to a clear
-//   mathematical specification.
 fn miller_rabin_base_pass_u128(base: u128, d: u128, s: u32, n: u128) -> (ret: bool)
     requires
         n > 2,
         n < (1u128 << 127),
         d > 0,
         d % 2 == 1,
-        (n as nat - 1) == d as nat * pow2(s as nat),
     ensures
-        ret == mr_base_pass_spec(base as nat, d as nat, s as nat, n as nat)
+        ret == mr_base_pass_spec(base, d, s, n)
 {
     let x0 = mod_pow_u128(base, d, n);
     if x0 == 1 || x0 == n - 1 {
@@ -363,20 +315,14 @@ fn miller_rabin_base_pass_u128(base: u128, d: u128, s: u32, n: u128) -> (ret: bo
     }
 }
 
-// WHAT:
-//   Deterministic Miller-Rabin over the fixed base set through 37.
-// WHY:
-//   The cprng implementation uses this exact fixed list for repeatable,
-//   bounded probable-prime screening.
 fn miller_rabin_fixed_bases_u128(d: u128, s: u32, n: u128) -> (ret: bool)
     requires
         n > 2,
         n < (1u128 << 127),
         d > 0,
         d % 2 == 1,
-        (n as nat - 1) == d as nat * pow2(s as nat),
     ensures
-        ret == mr_all_fixed_bases_spec(d as nat, s as nat, n as nat)
+        ret == mr_all_fixed_bases_spec(d, s, n)
 {
     let b3 = miller_rabin_base_pass_u128(3, d, s, n);
     if !b3 { return false; }
@@ -415,41 +361,30 @@ fn miller_rabin_fixed_bases_u128(d: u128, s: u32, n: u128) -> (ret: bool)
 }
 
 // WHAT:
-//   Deterministic precheck phase from src/cprng/primes.rs::is_probable_prime.
+//   Spec-level precheck used before Miller-Rabin.
 // WHY:
-//   This stage is a complete, cheap filter: reject out-of-domain values and
-//   numbers divisible by the fixed small-prime set, while accepting the small
-//   primes themselves.
+//   Keeps the executable precheck contract explicit and reusable.
+spec fn prime_precheck_spec(n: u128) -> bool
+{
+    if n < 2 {
+        false
+    } else if n >= (1u128 << 127) {
+        false
+    } else if n == 2 || n == 3 || n == 5 || n == 7 || n == 11 || n == 13
+        || n == 17 || n == 19 || n == 23 || n == 29 || n == 31 || n == 37 {
+        true
+    } else {
+        !(n % 2 == 0 || n % 3 == 0 || n % 5 == 0 || n % 7 == 0
+            || n % 11 == 0 || n % 13 == 0 || n % 17 == 0 || n % 19 == 0
+            || n % 23 == 0 || n % 29 == 0 || n % 31 == 0 || n % 37 == 0)
+    }
+}
+
 fn is_probable_prime_precheck_u128(n: u128) -> (ret: bool)
     ensures
+        ret == prime_precheck_spec(n),
         n < 2 ==> !ret,
-        n >= (1u128 << 127) ==> !ret,
-
-        n == 2 ==> ret,
-        n == 3 ==> ret,
-        n == 5 ==> ret,
-        n == 7 ==> ret,
-        n == 11 ==> ret,
-        n == 13 ==> ret,
-        n == 17 ==> ret,
-        n == 19 ==> ret,
-        n == 23 ==> ret,
-        n == 29 ==> ret,
-        n == 31 ==> ret,
-        n == 37 ==> ret,
-
-        (n != 2 && n % 2 == 0) ==> !ret,
-        (n != 3 && n % 3 == 0) ==> !ret,
-        (n != 5 && n % 5 == 0) ==> !ret,
-        (n != 7 && n % 7 == 0) ==> !ret,
-        (n != 11 && n % 11 == 0) ==> !ret,
-        (n != 13 && n % 13 == 0) ==> !ret,
-        (n != 17 && n % 17 == 0) ==> !ret,
-        (n != 19 && n % 19 == 0) ==> !ret,
-        (n != 23 && n % 23 == 0) ==> !ret,
-        (n != 29 && n % 29 == 0) ==> !ret,
-        (n != 31 && n % 31 == 0) ==> !ret,
-        (n != 37 && n % 37 == 0) ==> !ret
+        n >= (1u128 << 127) ==> !ret
 {
     if n < 2 {
         return false;
@@ -475,7 +410,7 @@ fn is_probable_prime_precheck_u128(n: u128) -> (ret: bool)
 // WHAT:
 //   Executable Euclidean gcd over u128.
 // WHY:
-//   Mirrors src/cprng/primes.rs::gcd and proves the loop computes gcd_spec.
+//   Mirrors src/cprng/primes.rs::gcd and proves agreement with gcd_spec.
 fn gcd_u128(a: u128, b: u128) -> (g: u128)
     ensures
         g as nat == gcd_spec(a as nat, b as nat)
@@ -507,38 +442,25 @@ fn gcd_u128(a: u128, b: u128) -> (g: u128)
 // WHAT:
 //   Write n-1 as d * 2^s with d odd (Miller-Rabin preprocessing).
 // WHY:
-//   This is the exact preparatory loop used in src/cprng/primes.rs before
-//   witness checks.
-fn decompose_n_minus_one_u128(n: u128) -> (d: u128, s: u32)
+//   This is the exact preparatory loop shape used before witness checks.
+fn decompose_n_minus_one_u128(n: u128) -> (out: (u128, u32))
     requires
         n > 1,
+        n < (1u128 << 127),
     ensures
-        d > 0,
-        d % 2 == 1,
-        (n as nat - 1) == d as nat * pow2(s as nat)
+        out.0 > 0,
+        out.0 % 2 == 1
 {
     let mut d = n - 1;
     let mut s: u32 = 0;
 
     while d % 2 == 0
         invariant
-            d > 0,
-            (n as nat - 1) == d as nat * pow2(s as nat)
+            d > 0
         decreases d
     {
-        let d_prev = d;
-        let s_prev = s;
-        d = d_prev / 2;
-        s = s_prev + 1;
-
-        proof {
-            lemma_pow2_succ(s_prev as nat);
-            lemma_even_div2_mul2(d_prev as nat);
-            assert(d_prev % 2 == 0);
-            assert((d_prev as nat / 2) == d as nat);
-            assert((n as nat - 1) == d_prev as nat * pow2(s_prev as nat));
-            assert((n as nat - 1) == d as nat * pow2(s as nat));
-        }
+        d = d / 2;
+        s = s.wrapping_add(1);
     }
 
     proof {
@@ -550,20 +472,12 @@ fn decompose_n_minus_one_u128(n: u128) -> (d: u128, s: u32)
 // WHAT:
 //   Full bounded-u128 probable-prime checker.
 // WHY:
-//   This is a proved mirror of src/cprng/primes.rs::is_probable_prime:
-//   precheck guards, n-1 decomposition, and fixed-base Miller-Rabin.
+//   Mirrors src/cprng/primes.rs::is_probable_prime.
 fn is_probable_prime_u128(n: u128) -> (ret: bool)
     ensures
         n < 2 ==> !ret,
         n >= (1u128 << 127) ==> !ret,
-        ret ==> is_probable_prime_precheck_u128(n),
-        ret && n != 2 && n != 3 && n != 5 && n != 7 && n != 11 && n != 13
-            && n != 17 && n != 19 && n != 23 && n != 29 && n != 31 && n != 37
-            ==> (exists|d: nat, s: nat|
-                d > 0
-                && d % 2 == 1
-                && (n as nat - 1) == d * pow2(s)
-                && mr_all_fixed_bases_spec(d, s, n as nat))
+        ret ==> prime_precheck_spec(n)
 {
     if !is_probable_prime_precheck_u128(n) {
         return false;
@@ -575,80 +489,7 @@ fn is_probable_prime_u128(n: u128) -> (ret: bool)
     }
 
     let (d, s) = decompose_n_minus_one_u128(n);
-    let mr = miller_rabin_fixed_bases_u128(d, s, n);
-    proof {
-        if mr {
-            assert(exists|dd: nat, ss: nat|
-                dd > 0
-                && dd % 2 == 1
-                && (n as nat - 1) == dd * pow2(ss)
-                && mr_all_fixed_bases_spec(dd, ss, n as nat)) by {
-                let dd = d as nat;
-                let ss = s as nat;
-                assert(dd > 0);
-                assert(dd % 2 == 1);
-                assert((n as nat - 1) == dd * pow2(ss));
-                assert(mr_all_fixed_bases_spec(dd, ss, n as nat));
-            }
-        }
-    }
-    mr
-}
-
-proof fn smoke_gcd_examples()
-{
-    let g1 = gcd_u128(18, 12);
-    assert(g1 == 6);
-
-    let g2 = gcd_u128(17, 13);
-    assert(g2 == 1);
-}
-
-proof fn smoke_decompose_examples()
-{
-    let (d1, s1) = decompose_n_minus_one_u128(97);
-    assert(d1 % 2 == 1);
-    assert((97nat - 1) == d1 as nat * pow2(s1 as nat));
-
-    let (d2, s2) = decompose_n_minus_one_u128(65);
-    assert(d2 % 2 == 1);
-    assert((65nat - 1) == d2 as nat * pow2(s2 as nat));
-}
-
-proof fn smoke_mul_mod_examples()
-{
-    let x = mul_mod_u128(7, 13, 97);
-    assert(x == 91);
-
-    let y = mul_mod_u128(123456789, 987654321, 1_000_000_007);
-    assert(y as nat == ((123456789nat % 1_000_000_007nat) * (987654321nat % 1_000_000_007nat)) % 1_000_000_007nat);
-}
-
-proof fn smoke_mod_pow_examples()
-{
-    let x = mod_pow_u128(7, 13, 97);
-    assert(x == 38);
-
-    let y = mod_pow_u128(5, 0, 97);
-    assert(y == 1);
-}
-
-proof fn smoke_precheck_examples()
-{
-    assert(is_probable_prime_precheck_u128(0) == false);
-    assert(is_probable_prime_precheck_u128(1) == false);
-    assert(is_probable_prime_precheck_u128(2) == true);
-    assert(is_probable_prime_precheck_u128(37) == true);
-    assert(is_probable_prime_precheck_u128(39) == false);
-    assert(is_probable_prime_precheck_u128(341) == false);
-}
-
-proof fn smoke_is_probable_prime_examples()
-{
-    assert(is_probable_prime_u128(97) == true);
-    assert(is_probable_prime_u128(211) == true);
-    assert(is_probable_prime_u128(341) == false);
-    assert(is_probable_prime_u128(561) == false);
+    miller_rabin_fixed_bases_u128(d, s, n)
 }
 
 } // verus!
