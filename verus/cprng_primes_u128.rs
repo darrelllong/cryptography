@@ -37,6 +37,105 @@ proof fn lemma_even_div2_mul2(x: nat)
     assert(x == (x / 2) * 2 + (x % 2)) by (nonlinear_arith);
 }
 
+proof fn lemma_mod_add(x: nat, y: nat, m: nat)
+    requires
+        m > 0,
+    ensures
+        ((x % m) + (y % m)) % m == (x + y) % m
+{
+    assert(((x % m) + (y % m)) % m == (x + y) % m) by (nonlinear_arith);
+}
+
+proof fn lemma_mod_mul(x: nat, y: nat, m: nat)
+    requires
+        m > 0,
+    ensures
+        ((x % m) * (y % m)) % m == (x * y) % m
+{
+    assert(((x % m) * (y % m)) % m == (x * y) % m) by (nonlinear_arith);
+}
+
+// WHAT:
+//   Bounded-u128 modular multiplication via double-and-add.
+// WHY:
+//   Mirrors src/cprng/primes.rs::mul_mod and proves the loop computes
+//   (a mod m) * (b mod m) mod m under the same <2^127 bound assumption.
+fn mul_mod_u128(a_input: u128, b_input: u128, m: u128) -> (out: u128)
+    requires
+        m > 0,
+        m < (1u128 << 127),
+    ensures
+        out < m,
+        out as nat == ((a_input as nat % m as nat) * (b_input as nat % m as nat)) % m as nat
+{
+    let m_nat = m as nat;
+    let mut a = a_input % m;
+    let mut b = b_input % m;
+    let a0 = a;
+    let b0 = b;
+    let mut out = 0u128;
+
+    while b != 0
+        invariant
+            m > 0,
+            m < (1u128 << 127),
+            a < m,
+            b < m,
+            out < m,
+            (out as nat + (a as nat * b as nat)) % m_nat
+                == ((a0 as nat * b0 as nat) % m_nat)
+        decreases b
+    {
+        let a_prev = a;
+        let b_prev = b;
+        let out_prev = out;
+        let q = b_prev / 2;
+        let r = b_prev % 2;
+        if r == 1 {
+            out = (out_prev + a_prev) % m;
+        }
+        a = (a_prev << 1) % m;
+        b = q;
+
+        proof {
+            lemma_mod_add(out_prev as nat, a_prev as nat, m_nat);
+            lemma_mod_add(out_prev as nat, (a_prev as nat * b_prev as nat), m_nat);
+            lemma_mod_mul((2 * a_prev as nat), q as nat, m_nat);
+            lemma_mod_mul(a_prev as nat, b_prev as nat, m_nat);
+            assert(b_prev as nat == 2 * q as nat + r as nat) by (nonlinear_arith);
+            assert(r as nat == 0 || r as nat == 1) by (nonlinear_arith);
+            assert((a_prev << 1) as nat == 2 * a_prev as nat) by (nonlinear_arith);
+            assert(a_prev < (1u128 << 127));
+            assert((out_prev as nat + (a_prev as nat * b_prev as nat)) % m_nat
+                == ((a0 as nat * b0 as nat) % m_nat));
+
+            if r == 1 {
+                assert((out as nat + (a as nat * b as nat)) % m_nat
+                    == (out_prev as nat + a_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat) by (nonlinear_arith);
+                assert((out_prev as nat + a_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat
+                    == (out_prev as nat + a_prev as nat * (2 * q as nat + 1)) % m_nat) by (nonlinear_arith);
+                assert((2 * q as nat + 1) == b_prev as nat) by (nonlinear_arith);
+            } else {
+                assert(r == 0);
+                assert((out as nat + (a as nat * b as nat)) % m_nat
+                    == (out_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat) by (nonlinear_arith);
+                assert((out_prev as nat + (2 * a_prev as nat) * q as nat) % m_nat
+                    == (out_prev as nat + a_prev as nat * (2 * q as nat)) % m_nat) by (nonlinear_arith);
+                assert((2 * q as nat) == b_prev as nat) by (nonlinear_arith);
+            }
+        }
+    }
+
+    proof {
+        assert((out as nat + (a as nat * b as nat)) % m_nat == ((a0 as nat * b0 as nat) % m_nat));
+        assert(b == 0);
+        assert((a as nat * b as nat) == 0) by (nonlinear_arith);
+        assert(out as nat % m_nat == ((a0 as nat * b0 as nat) % m_nat));
+        assert(out as nat == ((a0 as nat * b0 as nat) % m_nat));
+    }
+    out
+}
+
 // WHAT:
 //   Executable Euclidean gcd over u128.
 // WHY:
@@ -130,6 +229,15 @@ proof fn smoke_decompose_examples()
     let (d2, s2) = decompose_n_minus_one_u128(65);
     assert(d2 % 2 == 1);
     assert((65nat - 1) == d2 as nat * pow2(s2 as nat));
+}
+
+proof fn smoke_mul_mod_examples()
+{
+    let x = mul_mod_u128(7, 13, 97);
+    assert(x == 91);
+
+    let y = mul_mod_u128(123456789, 987654321, 1_000_000_007);
+    assert(y as nat == ((123456789nat % 1_000_000_007nat) * (987654321nat % 1_000_000_007nat)) % 1_000_000_007nat);
 }
 
 } // verus!

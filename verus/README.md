@@ -11,10 +11,11 @@ It is intentionally isolated from normal `cargo` builds.
 
 - Euclidean `gcd` loop: proved to match a recursive mathematical specification.
 - Decomposition step: proved that `n - 1 = d * 2^s` with odd `d`.
+- Bounded `mul_mod` loop: proved to compute
+  `((a mod m) * (b mod m)) mod m` under `m < 2^127`.
 
 These are foundational lemmas for later full proofs of:
 
-- `mul_mod` correctness
 - `mod_pow` correctness
 - Miller-Rabin witness soundness for the fixed base set
 
