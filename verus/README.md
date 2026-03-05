@@ -25,6 +25,16 @@ It is intentionally isolated from normal `cargo` builds.
 - Full `is_probable_prime` mirror:
   precheck + decomposition + deterministic fixed-base Miller-Rabin.
 
+`public_key_bigint_algorithms.rs` provides a first proof slice for
+`src/public_key/bigint.rs`:
+
+- Bounded-`u128` executable mirror of the `mod_mul_plain` fallback loop with a
+  step-accurate recursive specification.
+- Executable mirror of the `montgomery_n0_inv` Newton iteration with an exact
+  spec-level correspondence proof.
+- Constant examples showing the Newton-derived value satisfies
+  `n0 * n0_inv == -1 (mod 2^64)` for representative odd moduli.
+
 ## Running
 
 Assuming Verus is installed and on `PATH`:
