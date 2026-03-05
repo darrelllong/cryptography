@@ -259,6 +259,64 @@ fn mod_pow_u128(base_input: u128, exp_input: u128, m: u128) -> (out: u128)
 }
 
 // WHAT:
+//   Deterministic precheck phase from src/cprng/primes.rs::is_probable_prime.
+// WHY:
+//   This stage is a complete, cheap filter: reject out-of-domain values and
+//   numbers divisible by the fixed small-prime set, while accepting the small
+//   primes themselves.
+fn is_probable_prime_precheck_u128(n: u128) -> (ret: bool)
+    ensures
+        n < 2 ==> !ret,
+        n >= (1u128 << 127) ==> !ret,
+
+        n == 2 ==> ret,
+        n == 3 ==> ret,
+        n == 5 ==> ret,
+        n == 7 ==> ret,
+        n == 11 ==> ret,
+        n == 13 ==> ret,
+        n == 17 ==> ret,
+        n == 19 ==> ret,
+        n == 23 ==> ret,
+        n == 29 ==> ret,
+        n == 31 ==> ret,
+        n == 37 ==> ret,
+
+        (n != 2 && n % 2 == 0) ==> !ret,
+        (n != 3 && n % 3 == 0) ==> !ret,
+        (n != 5 && n % 5 == 0) ==> !ret,
+        (n != 7 && n % 7 == 0) ==> !ret,
+        (n != 11 && n % 11 == 0) ==> !ret,
+        (n != 13 && n % 13 == 0) ==> !ret,
+        (n != 17 && n % 17 == 0) ==> !ret,
+        (n != 19 && n % 19 == 0) ==> !ret,
+        (n != 23 && n % 23 == 0) ==> !ret,
+        (n != 29 && n % 29 == 0) ==> !ret,
+        (n != 31 && n % 31 == 0) ==> !ret,
+        (n != 37 && n % 37 == 0) ==> !ret
+{
+    if n < 2 {
+        return false;
+    }
+    if n >= (1u128 << 127) {
+        return false;
+    }
+
+    if n == 2 || n == 3 || n == 5 || n == 7 || n == 11 || n == 13
+        || n == 17 || n == 19 || n == 23 || n == 29 || n == 31 || n == 37 {
+        return true;
+    }
+
+    if n % 2 == 0 || n % 3 == 0 || n % 5 == 0 || n % 7 == 0
+        || n % 11 == 0 || n % 13 == 0 || n % 17 == 0 || n % 19 == 0
+        || n % 23 == 0 || n % 29 == 0 || n % 31 == 0 || n % 37 == 0 {
+        return false;
+    }
+
+    true
+}
+
+// WHAT:
 //   Executable Euclidean gcd over u128.
 // WHY:
 //   Mirrors src/cprng/primes.rs::gcd and proves the loop computes gcd_spec.
@@ -369,6 +427,16 @@ proof fn smoke_mod_pow_examples()
 
     let y = mod_pow_u128(5, 0, 97);
     assert(y == 1);
+}
+
+proof fn smoke_precheck_examples()
+{
+    assert(is_probable_prime_precheck_u128(0) == false);
+    assert(is_probable_prime_precheck_u128(1) == false);
+    assert(is_probable_prime_precheck_u128(2) == true);
+    assert(is_probable_prime_precheck_u128(37) == true);
+    assert(is_probable_prime_precheck_u128(39) == false);
+    assert(is_probable_prime_precheck_u128(341) == false);
 }
 
 } // verus!

@@ -15,6 +15,8 @@ It is intentionally isolated from normal `cargo` builds.
   `((a mod m) * (b mod m)) mod m` under `m < 2^127`.
 - Bounded `mod_pow` loop: proved repeated-squaring correctness against a
   squaring-style recursive modular exponentiation spec.
+- Primality precheck stage: proved behavior for domain guards and all fixed
+  small-prime accept/reject branches used before Miller-Rabin rounds.
 
 These are foundational lemmas for later full proofs of:
 
