@@ -55,6 +55,50 @@ proof fn lemma_mod_mul(x: nat, y: nat, m: nat)
     assert(((x % m) * (y % m)) % m == (x * y) % m) by (nonlinear_arith);
 }
 
+spec fn mod_mul_spec(x: nat, y: nat, m: nat) -> nat
+    recommends
+        m > 0
+{
+    ((x % m) * (y % m)) % m
+}
+
+proof fn lemma_mod_mul_assoc(x: nat, y: nat, z: nat, m: nat)
+    requires
+        m > 0,
+    ensures
+        mod_mul_spec(mod_mul_spec(x, y, m), z, m) == mod_mul_spec(x, mod_mul_spec(y, z, m), m)
+{
+    assert(mod_mul_spec(mod_mul_spec(x, y, m), z, m) == mod_mul_spec(x, mod_mul_spec(y, z, m), m))
+        by (nonlinear_arith);
+}
+
+proof fn lemma_mod_mul_one_left(x: nat, m: nat)
+    requires
+        m > 0,
+    ensures
+        mod_mul_spec(1, x, m) == x % m
+{
+    assert(mod_mul_spec(1, x, m) == x % m) by (nonlinear_arith);
+}
+
+spec fn mod_pow_sq_spec(base: nat, exp: nat, m: nat) -> nat
+    recommends
+        m > 0
+    decreases exp
+{
+    if exp == 0 {
+        1 % m
+    } else {
+        let sq = mod_mul_spec(base, base, m);
+        let half = mod_pow_sq_spec(sq, exp / 2, m);
+        if exp % 2 == 1 {
+            mod_mul_spec(base, half, m)
+        } else {
+            half
+        }
+    }
+}
+
 // WHAT:
 //   Bounded-u128 modular multiplication via double-and-add.
 // WHY:
@@ -132,6 +176,84 @@ fn mul_mod_u128(a_input: u128, b_input: u128, m: u128) -> (out: u128)
         assert((a as nat * b as nat) == 0) by (nonlinear_arith);
         assert(out as nat % m_nat == ((a0 as nat * b0 as nat) % m_nat));
         assert(out as nat == ((a0 as nat * b0 as nat) % m_nat));
+    }
+    out
+}
+
+// WHAT:
+//   Bounded-u128 modular exponentiation by repeated squaring.
+// WHY:
+//   Mirrors src/cprng/primes.rs::mod_pow and proves the loop computes the
+//   squaring-based modular exponentiation specification.
+fn mod_pow_u128(base_input: u128, exp_input: u128, m: u128) -> (out: u128)
+    requires
+        m > 0,
+        m < (1u128 << 127),
+    ensures
+        out < m,
+        out as nat == mod_pow_sq_spec(base_input as nat % m as nat, exp_input as nat, m as nat)
+{
+    let m_nat = m as nat;
+    let mut out = 1u128 % m;
+    let mut power = base_input % m;
+    let base0 = power;
+    let exp0 = exp_input;
+    let mut exp = exp_input;
+
+    while exp != 0
+        invariant
+            m > 0,
+            m < (1u128 << 127),
+            out < m,
+            power < m,
+            mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat)
+                == mod_pow_sq_spec(base0 as nat, exp0 as nat, m_nat)
+        decreases exp
+    {
+        let out_prev = out;
+        let power_prev = power;
+        let exp_prev = exp;
+        let q = exp_prev / 2;
+        let r = exp_prev % 2;
+        if r == 1 {
+            out = mul_mod_u128(out_prev, power_prev, m);
+        }
+        power = mul_mod_u128(power_prev, power_prev, m);
+        exp = q;
+
+        proof {
+            assert(exp_prev as nat == 2 * q as nat + r as nat) by (nonlinear_arith);
+            assert(r as nat == 0 || r as nat == 1) by (nonlinear_arith);
+
+            if r == 1 {
+                assert(exp_prev as nat % 2 == 1);
+                assert(exp_prev as nat / 2 == q as nat);
+                assert(mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat)
+                    == mod_mul_spec(power_prev as nat, mod_pow_sq_spec(mod_mul_spec(power_prev as nat, power_prev as nat, m_nat), q as nat, m_nat), m_nat));
+
+                assert(out as nat == mod_mul_spec(out_prev as nat, power_prev as nat, m_nat));
+                lemma_mod_mul_assoc(out_prev as nat, power_prev as nat, mod_pow_sq_spec(mod_mul_spec(power_prev as nat, power_prev as nat, m_nat), q as nat, m_nat), m_nat);
+                assert(mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat)
+                    == mod_mul_spec(out_prev as nat, mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat), m_nat));
+            } else {
+                assert(r == 0);
+                assert(exp_prev as nat % 2 == 0);
+                assert(exp_prev as nat / 2 == q as nat);
+                assert(mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat)
+                    == mod_pow_sq_spec(mod_mul_spec(power_prev as nat, power_prev as nat, m_nat), q as nat, m_nat));
+                assert(out == out_prev);
+                assert(mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat)
+                    == mod_mul_spec(out_prev as nat, mod_pow_sq_spec(power_prev as nat, exp_prev as nat, m_nat), m_nat));
+            }
+        }
+    }
+
+    proof {
+        assert(exp == 0);
+        assert(mod_pow_sq_spec(power as nat, exp as nat, m_nat) == 1 % m_nat);
+        lemma_mod_mul_one_left(out as nat, m_nat);
+        assert(mod_mul_spec(out as nat, mod_pow_sq_spec(power as nat, exp as nat, m_nat), m_nat) == out as nat);
+        assert(out as nat == mod_pow_sq_spec(base0 as nat, exp0 as nat, m_nat));
     }
     out
 }
@@ -238,6 +360,15 @@ proof fn smoke_mul_mod_examples()
 
     let y = mul_mod_u128(123456789, 987654321, 1_000_000_007);
     assert(y as nat == ((123456789nat % 1_000_000_007nat) * (987654321nat % 1_000_000_007nat)) % 1_000_000_007nat);
+}
+
+proof fn smoke_mod_pow_examples()
+{
+    let x = mod_pow_u128(7, 13, 97);
+    assert(x == 38);
+
+    let y = mod_pow_u128(5, 0, 97);
+    assert(y == 1);
 }
 
 } // verus!

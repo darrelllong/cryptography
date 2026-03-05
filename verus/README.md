@@ -13,10 +13,11 @@ It is intentionally isolated from normal `cargo` builds.
 - Decomposition step: proved that `n - 1 = d * 2^s` with odd `d`.
 - Bounded `mul_mod` loop: proved to compute
   `((a mod m) * (b mod m)) mod m` under `m < 2^127`.
+- Bounded `mod_pow` loop: proved repeated-squaring correctness against a
+  squaring-style recursive modular exponentiation spec.
 
 These are foundational lemmas for later full proofs of:
 
-- `mod_pow` correctness
 - Miller-Rabin witness soundness for the fixed base set
 
 ## Running
