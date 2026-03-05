@@ -5,9 +5,10 @@ number-theory logic in `src/cprng/primes.rs`.
 
 It is intentionally isolated from normal `cargo` builds.
 
-## Scope (first slice)
+## Scope
 
-`cprng_primes_u128.rs` currently focuses on the Miller-Rabin setup mechanics:
+`cprng_primes_u128.rs` now covers the full bounded-`u128` flow used in
+`src/cprng/primes.rs`:
 
 - Euclidean `gcd` loop: proved to match a recursive mathematical specification.
 - Decomposition step: proved that `n - 1 = d * 2^s` with odd `d`.
@@ -17,10 +18,12 @@ It is intentionally isolated from normal `cargo` builds.
   squaring-style recursive modular exponentiation spec.
 - Primality precheck stage: proved behavior for domain guards and all fixed
   small-prime accept/reject branches used before Miller-Rabin rounds.
-
-These are foundational lemmas for later full proofs of:
-
-- Miller-Rabin witness soundness for the fixed base set
+- Miller-Rabin witness pipeline:
+  - one-base tail squaring/check recursion
+  - one-base pass spec alignment
+  - fixed-base conjunction (`3..37`)
+- Full `is_probable_prime` mirror:
+  precheck + decomposition + deterministic fixed-base Miller-Rabin.
 
 ## Running
 

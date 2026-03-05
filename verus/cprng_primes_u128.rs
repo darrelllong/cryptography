@@ -100,6 +100,61 @@ spec fn mod_pow_sq_spec(base: nat, exp: nat, m: nat) -> nat
 }
 
 // WHAT:
+//   Tail-recursive "square and check n-1" phase of one Miller-Rabin base run.
+// WHY:
+//   This captures the exact loop from src/cprng/primes.rs after the initial
+//   x = base^d mod n check, making the executable proof obligations local.
+spec fn mr_tail_pass_spec(x: nat, n: nat, remaining: nat) -> bool
+    recommends
+        n > 1
+    decreases remaining
+{
+    if remaining == 0 {
+        false
+    } else {
+        let x1 = mod_mul_spec(x, x, n);
+        if x1 == n - 1 {
+            true
+        } else {
+            mr_tail_pass_spec(x1, n, (remaining - 1) as nat)
+        }
+    }
+}
+
+// WHAT:
+//   One fixed-base Miller-Rabin pass over decomposition n-1 = d * 2^s.
+// WHY:
+//   This is the textbook base test used by the bounded-u128 implementation.
+spec fn mr_base_pass_spec(base: nat, d: nat, s: nat, n: nat) -> bool
+    recommends
+        n > 1
+{
+    let x0 = mod_pow_sq_spec(base % n, d, n);
+    x0 == 1 || x0 == n - 1 || (s > 0 && mr_tail_pass_spec(x0, n, (s - 1) as nat))
+}
+
+// WHAT:
+//   Conjunction of the fixed witness bases used by src/cprng/primes.rs.
+// WHY:
+//   This gives a precise spec-level meaning to the full witness loop.
+spec fn mr_all_fixed_bases_spec(d: nat, s: nat, n: nat) -> bool
+    recommends
+        n > 1
+{
+    mr_base_pass_spec(3, d, s, n)
+        && mr_base_pass_spec(5, d, s, n)
+        && mr_base_pass_spec(7, d, s, n)
+        && mr_base_pass_spec(11, d, s, n)
+        && mr_base_pass_spec(13, d, s, n)
+        && mr_base_pass_spec(17, d, s, n)
+        && mr_base_pass_spec(19, d, s, n)
+        && mr_base_pass_spec(23, d, s, n)
+        && mr_base_pass_spec(29, d, s, n)
+        && mr_base_pass_spec(31, d, s, n)
+        && mr_base_pass_spec(37, d, s, n)
+}
+
+// WHAT:
 //   Bounded-u128 modular multiplication via double-and-add.
 // WHY:
 //   Mirrors src/cprng/primes.rs::mul_mod and proves the loop computes
@@ -259,6 +314,107 @@ fn mod_pow_u128(base_input: u128, exp_input: u128, m: u128) -> (out: u128)
 }
 
 // WHAT:
+//   Executable tail recursion for one Miller-Rabin base pass.
+// WHY:
+//   This proves each square/check step matches mr_tail_pass_spec exactly.
+fn mr_tail_pass_u128(x: u128, remaining: u32, n: u128) -> (ret: bool)
+    requires
+        n > 1,
+        n < (1u128 << 127),
+        x < n,
+    ensures
+        ret == mr_tail_pass_spec(x as nat, n as nat, remaining as nat)
+    decreases remaining
+{
+    if remaining == 0 {
+        false
+    } else {
+        let x1 = mul_mod_u128(x, x, n);
+        if x1 == n - 1 {
+            true
+        } else {
+            mr_tail_pass_u128(x1, remaining - 1, n)
+        }
+    }
+}
+
+// WHAT:
+//   One fixed-base Miller-Rabin check for the bounded-u128 pipeline.
+// WHY:
+//   Mirrors the base loop body in src/cprng/primes.rs and ties it to a clear
+//   mathematical specification.
+fn miller_rabin_base_pass_u128(base: u128, d: u128, s: u32, n: u128) -> (ret: bool)
+    requires
+        n > 2,
+        n < (1u128 << 127),
+        d > 0,
+        d % 2 == 1,
+        (n as nat - 1) == d as nat * pow2(s as nat),
+    ensures
+        ret == mr_base_pass_spec(base as nat, d as nat, s as nat, n as nat)
+{
+    let x0 = mod_pow_u128(base, d, n);
+    if x0 == 1 || x0 == n - 1 {
+        true
+    } else if s == 0 {
+        false
+    } else {
+        mr_tail_pass_u128(x0, s - 1, n)
+    }
+}
+
+// WHAT:
+//   Deterministic Miller-Rabin over the fixed base set through 37.
+// WHY:
+//   The cprng implementation uses this exact fixed list for repeatable,
+//   bounded probable-prime screening.
+fn miller_rabin_fixed_bases_u128(d: u128, s: u32, n: u128) -> (ret: bool)
+    requires
+        n > 2,
+        n < (1u128 << 127),
+        d > 0,
+        d % 2 == 1,
+        (n as nat - 1) == d as nat * pow2(s as nat),
+    ensures
+        ret == mr_all_fixed_bases_spec(d as nat, s as nat, n as nat)
+{
+    let b3 = miller_rabin_base_pass_u128(3, d, s, n);
+    if !b3 { return false; }
+
+    let b5 = miller_rabin_base_pass_u128(5, d, s, n);
+    if !b5 { return false; }
+
+    let b7 = miller_rabin_base_pass_u128(7, d, s, n);
+    if !b7 { return false; }
+
+    let b11 = miller_rabin_base_pass_u128(11, d, s, n);
+    if !b11 { return false; }
+
+    let b13 = miller_rabin_base_pass_u128(13, d, s, n);
+    if !b13 { return false; }
+
+    let b17 = miller_rabin_base_pass_u128(17, d, s, n);
+    if !b17 { return false; }
+
+    let b19 = miller_rabin_base_pass_u128(19, d, s, n);
+    if !b19 { return false; }
+
+    let b23 = miller_rabin_base_pass_u128(23, d, s, n);
+    if !b23 { return false; }
+
+    let b29 = miller_rabin_base_pass_u128(29, d, s, n);
+    if !b29 { return false; }
+
+    let b31 = miller_rabin_base_pass_u128(31, d, s, n);
+    if !b31 { return false; }
+
+    let b37 = miller_rabin_base_pass_u128(37, d, s, n);
+    if !b37 { return false; }
+
+    true
+}
+
+// WHAT:
 //   Deterministic precheck phase from src/cprng/primes.rs::is_probable_prime.
 // WHY:
 //   This stage is a complete, cheap filter: reject out-of-domain values and
@@ -391,6 +547,54 @@ fn decompose_n_minus_one_u128(n: u128) -> (d: u128, s: u32)
     (d, s)
 }
 
+// WHAT:
+//   Full bounded-u128 probable-prime checker.
+// WHY:
+//   This is a proved mirror of src/cprng/primes.rs::is_probable_prime:
+//   precheck guards, n-1 decomposition, and fixed-base Miller-Rabin.
+fn is_probable_prime_u128(n: u128) -> (ret: bool)
+    ensures
+        n < 2 ==> !ret,
+        n >= (1u128 << 127) ==> !ret,
+        ret ==> is_probable_prime_precheck_u128(n),
+        ret && n != 2 && n != 3 && n != 5 && n != 7 && n != 11 && n != 13
+            && n != 17 && n != 19 && n != 23 && n != 29 && n != 31 && n != 37
+            ==> (exists|d: nat, s: nat|
+                d > 0
+                && d % 2 == 1
+                && (n as nat - 1) == d * pow2(s)
+                && mr_all_fixed_bases_spec(d, s, n as nat))
+{
+    if !is_probable_prime_precheck_u128(n) {
+        return false;
+    }
+
+    if n == 2 || n == 3 || n == 5 || n == 7 || n == 11 || n == 13
+        || n == 17 || n == 19 || n == 23 || n == 29 || n == 31 || n == 37 {
+        return true;
+    }
+
+    let (d, s) = decompose_n_minus_one_u128(n);
+    let mr = miller_rabin_fixed_bases_u128(d, s, n);
+    proof {
+        if mr {
+            assert(exists|dd: nat, ss: nat|
+                dd > 0
+                && dd % 2 == 1
+                && (n as nat - 1) == dd * pow2(ss)
+                && mr_all_fixed_bases_spec(dd, ss, n as nat)) by {
+                let dd = d as nat;
+                let ss = s as nat;
+                assert(dd > 0);
+                assert(dd % 2 == 1);
+                assert((n as nat - 1) == dd * pow2(ss));
+                assert(mr_all_fixed_bases_spec(dd, ss, n as nat));
+            }
+        }
+    }
+    mr
+}
+
 proof fn smoke_gcd_examples()
 {
     let g1 = gcd_u128(18, 12);
@@ -437,6 +641,14 @@ proof fn smoke_precheck_examples()
     assert(is_probable_prime_precheck_u128(37) == true);
     assert(is_probable_prime_precheck_u128(39) == false);
     assert(is_probable_prime_precheck_u128(341) == false);
+}
+
+proof fn smoke_is_probable_prime_examples()
+{
+    assert(is_probable_prime_u128(97) == true);
+    assert(is_probable_prime_u128(211) == true);
+    assert(is_probable_prime_u128(341) == false);
+    assert(is_probable_prime_u128(561) == false);
 }
 
 } // verus!
