@@ -23,6 +23,36 @@ spec fn pow2(e: nat) -> nat
     if e == 0 { 1 } else { 2 * pow2((e - 1) as nat) }
 }
 
+proof fn lemma_pow2_succ(k: nat)
+    ensures
+        pow2(k + 1) == 2 * pow2(k)
+{
+}
+
+proof fn lemma_even_div2_mul2(x: nat)
+    requires
+        x % 2 == 0,
+    ensures
+        (x / 2) * 2 == x
+{
+    assert(x == (x / 2) * 2 + (x % 2)) by (nonlinear_arith);
+}
+
+proof fn lemma_halve_pow2(d: nat, k: nat)
+    requires
+        d % 2 == 0,
+    ensures
+        d * pow2(k) == (d / 2) * pow2(k + 1)
+{
+    lemma_even_div2_mul2(d);
+    lemma_pow2_succ(k);
+    assert(((d / 2) * 2) == d);
+    assert((d / 2) * pow2(k + 1) == (d / 2) * (2 * pow2(k)));
+    assert((d / 2) * (2 * pow2(k)) == ((d / 2) * 2) * pow2(k)) by (nonlinear_arith);
+    assert(((d / 2) * 2) * pow2(k) == d * pow2(k));
+    assert((d / 2) * pow2(k + 1) == d * pow2(k));
+}
+
 // WHAT:
 //   Overflow-safe modular add branch used by mul_mod.
 // WHY:
@@ -449,22 +479,46 @@ fn decompose_n_minus_one_u128(n: u128) -> (out: (u128, u32))
         n < (1u128 << 127),
     ensures
         out.0 > 0,
-        out.0 % 2 == 1
+        out.0 % 2 == 1,
+        exists|k: nat| (n as nat - 1) == out.0 as nat * pow2(k)
 {
     let mut d = n - 1;
     let mut s: u32 = 0;
+    let ghost mut k: nat = 0;
+    proof {
+        assert(pow2(0) == 1);
+        assert((n as nat - 1) == d as nat);
+        assert((n as nat - 1) == d as nat * pow2(k));
+    }
 
     while d % 2 == 0
         invariant
-            d > 0
+            d > 0,
+            (n as nat - 1) == d as nat * pow2(k)
         decreases d
     {
-        d = d / 2;
+        let d_prev = d;
+        let ghost k_prev = k;
+        d = d_prev / 2;
         s = s.wrapping_add(1);
+        proof {
+            lemma_even_div2_mul2(d_prev as nat);
+            lemma_pow2_succ(k_prev);
+            assert(d_prev % 2 == 0);
+            assert(d as nat == d_prev as nat / 2);
+            assert((n as nat - 1) == d_prev as nat * pow2(k_prev));
+            lemma_halve_pow2(d_prev as nat, k_prev);
+            assert((n as nat - 1) == d as nat * pow2(k_prev + 1));
+            k = k_prev + 1;
+        }
     }
 
     proof {
         assert(d % 2 == 1);
+        assert(exists|kk: nat| (n as nat - 1) == d as nat * pow2(kk)) by {
+            let kk = k;
+            assert((n as nat - 1) == d as nat * pow2(kk));
+        };
     }
     (d, s)
 }
@@ -477,7 +531,14 @@ fn is_probable_prime_u128(n: u128) -> (ret: bool)
     ensures
         n < 2 ==> !ret,
         n >= (1u128 << 127) ==> !ret,
-        ret ==> prime_precheck_spec(n)
+        ret ==> prime_precheck_spec(n),
+        ret && n != 2 && n != 3 && n != 5 && n != 7 && n != 11 && n != 13
+            && n != 17 && n != 19 && n != 23 && n != 29 && n != 31 && n != 37
+            ==> (exists|d: u128, s: u32, k: nat|
+                d > 0
+                && d % 2 == 1
+                && (n as nat - 1) == d as nat * pow2(k)
+                && mr_all_fixed_bases_spec(d, s, n))
 {
     if !is_probable_prime_precheck_u128(n) {
         return false;
@@ -489,7 +550,27 @@ fn is_probable_prime_u128(n: u128) -> (ret: bool)
     }
 
     let (d, s) = decompose_n_minus_one_u128(n);
-    miller_rabin_fixed_bases_u128(d, s, n)
+    let mr = miller_rabin_fixed_bases_u128(d, s, n);
+    proof {
+        if mr {
+            let ghost k = choose|kk: nat| (n as nat - 1) == d as nat * pow2(kk);
+            assert((n as nat - 1) == d as nat * pow2(k));
+            assert(exists|dd: u128, ss: u32, kk: nat|
+                dd > 0
+                && dd % 2 == 1
+                && (n as nat - 1) == dd as nat * pow2(kk)
+                && mr_all_fixed_bases_spec(dd, ss, n)) by {
+                let dd = d;
+                let ss = s;
+                let kk = k;
+                assert(dd > 0);
+                assert(dd % 2 == 1);
+                assert((n as nat - 1) == dd as nat * pow2(kk));
+                assert(mr_all_fixed_bases_spec(dd, ss, n));
+            };
+        }
+    }
+    mr
 }
 
 } // verus!
