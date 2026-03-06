@@ -10,7 +10,7 @@
 //! The public-key APIs are layered, but not every scheme exposes every layer
 //! with the same shape:
 //! - arithmetic maps such as `encrypt_raw`, `encrypt_with_nonce`,
-//!   `encrypt_point_with_k`, or `sign_with_k`
+//!   `encrypt_point_with_nonce`, or `sign_digest_with_nonce`
 //! - typed wrappers such as `encrypt`, `decrypt`, `sign_message`, and
 //!   `verify_message`, which operate on the scheme's natural plaintext,
 //!   ciphertext, or signature representation
@@ -35,14 +35,12 @@
 //!   `SEQUENCE` of positive `INTEGER`s, custom PEM armor, and the shared flat
 //!   XML form
 //!
-//! For new APIs, keep the naming consistent even when legacy methods remain:
+//! Public-key naming is normalized crate-wide:
 //! - prefer `*_with_nonce` for deterministic/external-randomness entry points
 //! - prefer `to_wire_bytes` / `from_wire_bytes` for standard compact encodings
 //!   that omit curve or algorithm parameters
 //! - prefer `to_key_blob` / `from_key_blob` for crate-defined self-describing
 //!   binary formats
-//! - keep legacy `to_binary` / `from_binary` as compatibility aliases where
-//!   they already exist
 //!
 //! This follows the crate-wide design rule: keep the implementation in Rust,
 //! avoid intrinsics and FFI, and add dependencies only where they materially

@@ -50,8 +50,12 @@ cmake -DCMAKE_BUILD_TYPE=Release -DWITH_TUI=OFF ..
 make -j$(nproc) bench
 ```
 
-The binary lands at `~/pilot-bench/build/cli/bench`.  If you install it
-elsewhere, update the `BENCH=` variable at the top of the bench scripts.
+The binary lands at `~/pilot-bench/build/cli/bench` by default.
+Override paths without editing scripts via:
+
+- `PILOT_BENCH_CLI` for the pilot-bench CLI path
+- `PILOT_CIPHER_BIN` for `pilot_cipher`
+- `PILOT_PK_BIN` for `pilot_pk`
 
 ### Step 2 — build the Rust workload binaries
 
@@ -72,6 +76,8 @@ bash bench_all_pk.sh     # EC / Edwards operations — latency (ms/op)
 ```
 
 Each script emits Markdown tables ready to paste into the docs.
+The `±CI` column is the 95% confidence-interval half-width reported by
+pilot-bench.
 
 ---
 

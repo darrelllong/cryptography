@@ -78,7 +78,7 @@ impl<H: Digest> Hmac<H> {
     #[must_use]
     /// Compute and compare the tag in constant time.
     pub fn verify(key: &[u8], data: &[u8], tag: &[u8]) -> bool {
-        crate::ct::constant_time_eq(&Self::compute(key, data), tag)
+        crate::ct::constant_time_eq_mask(&Self::compute(key, data), tag) == u8::MAX
     }
 }
 

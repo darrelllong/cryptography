@@ -5,8 +5,9 @@
 # Heavy integer-arithmetic families stay on the legacy bench_public_key path.
 set -euo pipefail
 
-BENCH=~/pilot-bench/build/cli/bench
-PK=~/cryptography/target/release/pilot_pk
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
+PK="${PILOT_PK_BIN:-$ROOT_DIR/target/release/pilot_pk}"
 
 measure() {
     local name=$1

@@ -3,8 +3,9 @@
 # Columns: cipher, block bits, key bits, MB/s mean, ±CI (95%), runs-to-CI
 set -euo pipefail
 
-BENCH=~/pilot-bench/build/cli/bench
-CIPHER=~/cryptography/target/release/pilot_cipher
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
+CIPHER="${PILOT_CIPHER_BIN:-$ROOT_DIR/target/release/pilot_cipher}"
 
 measure() {
     local name=$1 block=$2 key=$3

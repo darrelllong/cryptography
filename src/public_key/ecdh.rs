@@ -90,7 +90,7 @@ impl EcdhPublicKey {
     ///
     /// This is the standard wire format for exchanging ECDH public keys.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.curve.encode_point(&self.q)
     }
 
@@ -99,7 +99,7 @@ impl EcdhPublicKey {
     /// Returns `None` if the encoding is malformed or the point is not on the
     /// curve.
     #[must_use]
-    pub fn from_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
+    pub fn from_wire_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
         Some(Self { curve, q })
     }
@@ -108,7 +108,7 @@ impl EcdhPublicKey {
 
     /// Encode in binary format: field-type byte then `[p, a, b, n, h, Gx, Gy, Qx, Qy]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         let h = BigUint::from_u64(self.curve.h);
         let field_byte = u8::from(self.curve.gf2m_degree().is_some());
         let mut out = vec![field_byte];
@@ -128,7 +128,7 @@ impl EcdhPublicKey {
 
     /// Decode from binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&field_type, rest) = blob.split_first()?;
         let mut fields = decode_biguints(rest)?.into_iter();
         let field_prime = fields.next()?;
@@ -178,13 +178,13 @@ impl EcdhPublicKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ECDH_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(ECDH_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_binary(&pem_unwrap(ECDH_PUBLIC_LABEL, pem)?)
+        Self::from_key_blob(&pem_unwrap(ECDH_PUBLIC_LABEL, pem)?)
     }
 
     /// # Panics
@@ -303,7 +303,7 @@ impl EcdhPrivateKey {
     /// indicates that `peer.q` is a low-order point — an invalid key or a
     /// small-subgroup attack.
     #[must_use]
-    pub fn agree(&self, peer: &EcdhPublicKey) -> Option<Vec<u8>> {
+    pub fn agree_x_coordinate(&self, peer: &EcdhPublicKey) -> Option<Vec<u8>> {
         let s = self.curve.diffie_hellman(&self.d, &peer.q);
         if s.is_infinity() {
             return None;
@@ -325,7 +325,7 @@ impl EcdhPrivateKey {
 
     /// Encode in binary format: field-type byte then `[p, a, b, n, h, Gx, Gy, d]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         let h = BigUint::from_u64(self.curve.h);
         let field_byte = u8::from(self.curve.gf2m_degree().is_some());
         let mut out = vec![field_byte];
@@ -344,7 +344,7 @@ impl EcdhPrivateKey {
 
     /// Decode from binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&field_type, rest) = blob.split_first()?;
         let mut fields = decode_biguints(rest)?.into_iter();
         let field_prime = fields.next()?;
@@ -394,13 +394,13 @@ impl EcdhPrivateKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ECDH_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(ECDH_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_binary(&pem_unwrap(ECDH_PRIVATE_LABEL, pem)?)
+        Self::from_key_blob(&pem_unwrap(ECDH_PRIVATE_LABEL, pem)?)
     }
 
     /// # Panics
@@ -543,8 +543,8 @@ mod tests {
         let mut rng = rng();
         let (pub_a, priv_a) = Ecdh::generate(p256(), &mut rng);
         let (pub_b, priv_b) = Ecdh::generate(p256(), &mut rng);
-        let shared_a = priv_a.agree(&pub_b).expect("agree A");
-        let shared_b = priv_b.agree(&pub_a).expect("agree B");
+        let shared_a = priv_a.agree_x_coordinate(&pub_b).expect("agree A");
+        let shared_b = priv_b.agree_x_coordinate(&pub_a).expect("agree B");
         assert_eq!(shared_a, shared_b);
         assert_eq!(shared_a.len(), 32); // P-256 coord_len
     }
@@ -554,8 +554,8 @@ mod tests {
         let mut rng = rng();
         let (pub_a, priv_a) = Ecdh::generate(p384(), &mut rng);
         let (pub_b, priv_b) = Ecdh::generate(p384(), &mut rng);
-        let shared_a = priv_a.agree(&pub_b).expect("agree A");
-        let shared_b = priv_b.agree(&pub_a).expect("agree B");
+        let shared_a = priv_a.agree_x_coordinate(&pub_b).expect("agree A");
+        let shared_b = priv_b.agree_x_coordinate(&pub_a).expect("agree B");
         assert_eq!(shared_a, shared_b);
         assert_eq!(shared_a.len(), 48); // P-384 coord_len
     }
@@ -565,8 +565,8 @@ mod tests {
         let mut rng = rng();
         let (pub_a, priv_a) = Ecdh::generate(secp256k1(), &mut rng);
         let (pub_b, priv_b) = Ecdh::generate(secp256k1(), &mut rng);
-        let shared_a = priv_a.agree(&pub_b).expect("agree A");
-        let shared_b = priv_b.agree(&pub_a).expect("agree B");
+        let shared_a = priv_a.agree_x_coordinate(&pub_b).expect("agree A");
+        let shared_b = priv_b.agree_x_coordinate(&pub_a).expect("agree B");
         assert_eq!(shared_a, shared_b);
     }
 
@@ -575,8 +575,8 @@ mod tests {
         let mut rng = rng();
         let (pub_a, priv_a) = Ecdh::generate(p521(), &mut rng);
         let (pub_b, priv_b) = Ecdh::generate(p521(), &mut rng);
-        let shared_a = priv_a.agree(&pub_b).expect("agree A");
-        let shared_b = priv_b.agree(&pub_a).expect("agree B");
+        let shared_a = priv_a.agree_x_coordinate(&pub_b).expect("agree A");
+        let shared_b = priv_b.agree_x_coordinate(&pub_a).expect("agree B");
         assert_eq!(shared_a, shared_b);
         assert_eq!(shared_a.len(), 66); // P-521 coord_len
     }
@@ -587,8 +587,8 @@ mod tests {
         let (_pub_a, priv_a) = Ecdh::generate(p256(), &mut rng);
         let (pub_b, _) = Ecdh::generate(p256(), &mut rng);
         let (pub_c, _) = Ecdh::generate(p256(), &mut rng);
-        let s1 = priv_a.agree(&pub_b).expect("agree with B");
-        let s2 = priv_a.agree(&pub_c).expect("agree with C");
+        let s1 = priv_a.agree_x_coordinate(&pub_b).expect("agree with B");
+        let s2 = priv_a.agree_x_coordinate(&pub_c).expect("agree with C");
         assert_ne!(s1, s2);
     }
 
@@ -598,9 +598,9 @@ mod tests {
     fn to_bytes_from_bytes_roundtrip() {
         let mut rng = rng();
         let (public, _) = Ecdh::generate(p256(), &mut rng);
-        let bytes = public.to_bytes();
+        let bytes = public.to_wire_bytes();
         assert_eq!(bytes[0], 0x04); // uncompressed prefix
-        let recovered = EcdhPublicKey::from_bytes(p256(), &bytes).expect("from_bytes");
+        let recovered = EcdhPublicKey::from_wire_bytes(p256(), &bytes).expect("from_bytes");
         assert_eq!(recovered.q, public.q);
     }
 
@@ -620,8 +620,8 @@ mod tests {
     fn public_key_binary_roundtrip() {
         let mut rng = rng();
         let (public, _) = Ecdh::generate(p256(), &mut rng);
-        let blob = public.to_binary();
-        let recovered = EcdhPublicKey::from_binary(&blob).expect("from_binary");
+        let blob = public.to_key_blob();
+        let recovered = EcdhPublicKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.q, public.q);
     }
 
@@ -629,8 +629,8 @@ mod tests {
     fn private_key_binary_roundtrip() {
         let mut rng = rng();
         let (_, private) = Ecdh::generate(p256(), &mut rng);
-        let blob = private.to_binary();
-        let recovered = EcdhPrivateKey::from_binary(&blob).expect("from_binary");
+        let blob = private.to_key_blob();
+        let recovered = EcdhPrivateKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.d, private.d);
     }
 

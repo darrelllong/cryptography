@@ -136,7 +136,7 @@ fn xex_decrypt_block<C: BlockCipher>(cipher: &C, tweak: &[u8; 16], block: &mut [
 }
 
 #[inline]
-fn ghash_mul(x: u128, y: u128) -> u128 {
+fn ghash_mul_vt(x: u128, y: u128) -> u128 {
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
     // Portable reference GHASH multiplication. This is not constant-time; use
@@ -157,37 +157,57 @@ fn ghash_mul(x: u128, y: u128) -> u128 {
     z
 }
 
-fn ghash_update(y: &mut u128, h: u128, data: &[u8]) {
+#[inline]
+fn ghash_mul_ct(x: u128, y: u128) -> u128 {
+    const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
+
+    let mut z = 0u128;
+    let mut v = y;
+    for i in 0..128 {
+        let bit = u8::try_from((x >> (127 - i)) & 1).expect("single bit fits in u8");
+        let bit_mask = 0u128.wrapping_sub(u128::from(bit));
+        z ^= v & bit_mask;
+
+        let lsb = u8::try_from(v & 1).expect("single bit fits in u8");
+        let lsb_mask = 0u128.wrapping_sub(u128::from(lsb));
+        v = (v >> 1) ^ (R & lsb_mask);
+    }
+    z
+}
+
+type GhashMulFn = fn(u128, u128) -> u128;
+
+fn ghash_update(y: &mut u128, h: u128, data: &[u8], mul: GhashMulFn) {
     let mut block = [0u8; 16];
     for chunk in data.chunks(16) {
         block.fill(0);
         block[..chunk.len()].copy_from_slice(chunk);
         *y ^= u128::from_be_bytes(block);
-        *y = ghash_mul(*y, h);
+        *y = mul(*y, h);
     }
 }
 
-fn ghash(h: u128, aad: &[u8], ciphertext: &[u8]) -> u128 {
+fn ghash(h: u128, aad: &[u8], ciphertext: &[u8], mul: GhashMulFn) -> u128 {
     let mut y = 0u128;
-    ghash_update(&mut y, h, aad);
-    ghash_update(&mut y, h, ciphertext);
+    ghash_update(&mut y, h, aad, mul);
+    ghash_update(&mut y, h, ciphertext, mul);
 
     let mut len_block = [0u8; 16];
     len_block[..8].copy_from_slice(&((aad.len() as u64) << 3).to_be_bytes());
     len_block[8..].copy_from_slice(&((ciphertext.len() as u64) << 3).to_be_bytes());
     y ^= u128::from_be_bytes(len_block);
-    ghash_mul(y, h)
+    mul(y, h)
 }
 
 #[inline]
-fn ghash_iv(h: u128, iv: &[u8]) -> [u8; 16] {
+fn ghash_iv(h: u128, iv: &[u8], mul: GhashMulFn) -> [u8; 16] {
     if iv.len() == 12 {
         let mut j0 = [0u8; 16];
         j0[..12].copy_from_slice(iv);
         j0[15] = 1;
         return j0;
     }
-    ghash(h, &[], iv).to_be_bytes()
+    ghash(h, &[], iv, mul).to_be_bytes()
 }
 
 #[inline]
@@ -209,11 +229,12 @@ fn gcm_compute_tag<C: BlockCipher>(
     nonce: &[u8],
     aad: &[u8],
     ciphertext: &[u8],
+    mul: GhashMulFn,
 ) -> [u8; 16] {
     assert_block_128::<C>();
     let h = gcm_hash_subkey(cipher);
-    let j0 = ghash_iv(h, nonce);
-    let s = ghash(h, aad, ciphertext);
+    let j0 = ghash_iv(h, nonce, mul);
+    let s = ghash(h, aad, ciphertext, mul);
     let tag_mask = u128::from_be_bytes(counter_keystream(cipher, &j0));
     (s ^ tag_mask).to_be_bytes()
 }
@@ -224,9 +245,10 @@ fn gcm_compute_tag_with_h<C: BlockCipher>(
     nonce: &[u8],
     aad: &[u8],
     ciphertext: &[u8],
+    mul: GhashMulFn,
 ) -> [u8; 16] {
-    let j0 = ghash_iv(h, nonce);
-    let s = ghash(h, aad, ciphertext);
+    let j0 = ghash_iv(h, nonce, mul);
+    let s = ghash(h, aad, ciphertext, mul);
     let tag_mask = u128::from_be_bytes(counter_keystream(cipher, &j0));
     (s ^ tag_mask).to_be_bytes()
 }
@@ -614,8 +636,28 @@ pub struct Gcm<C> {
     cipher: C,
 }
 
+/// Variable-time Galois/Counter Mode (GCM) reference path.
+///
+/// This keeps the historical GHASH implementation for comparison and legacy
+/// profiling. Use [`Gcm`] for the default constant-time software GHASH path.
+pub struct GcmVt<C> {
+    cipher: C,
+}
+
 impl<C> Gcm<C> {
     /// Wrap a 128-bit block cipher in SP 800-38D GCM mode.
+    pub fn new(cipher: C) -> Self {
+        Self { cipher }
+    }
+
+    /// Borrow the wrapped block cipher.
+    pub fn cipher(&self) -> &C {
+        &self.cipher
+    }
+}
+
+impl<C> GcmVt<C> {
+    /// Wrap a 128-bit block cipher in variable-time SP 800-38D GCM mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
@@ -629,7 +671,7 @@ impl<C> Gcm<C> {
 impl<C: BlockCipher> Gcm<C> {
     /// Compute the GCM authentication tag over `aad` and `ciphertext`.
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
-        gcm_compute_tag(&self.cipher, nonce, aad, ciphertext)
+        gcm_compute_tag(&self.cipher, nonce, aad, ciphertext, ghash_mul_ct)
     }
 
     /// Encrypt in place and return the 128-bit authentication tag.
@@ -638,7 +680,7 @@ impl<C: BlockCipher> Gcm<C> {
         let mut h = [0u8; 16];
         self.cipher.encrypt(&mut h);
         let h = u128::from_be_bytes(h);
-        let j0 = ghash_iv(h, nonce);
+        let j0 = ghash_iv(h, nonce, ghash_mul_ct);
         let mut counter = j0;
         increment_be32(&mut counter);
 
@@ -648,7 +690,7 @@ impl<C: BlockCipher> Gcm<C> {
             increment_be32(&mut counter);
         }
 
-        let s = ghash(h, aad, data);
+        let s = ghash(h, aad, data, ghash_mul_ct);
         let tag_mask = u128::from_be_bytes(counter_keystream(&self.cipher, &j0));
         (s ^ tag_mask).to_be_bytes()
     }
@@ -659,11 +701,62 @@ impl<C: BlockCipher> Gcm<C> {
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
         assert_block_128::<C>();
         let h = gcm_hash_subkey(&self.cipher);
-        let expected = gcm_compute_tag_with_h(&self.cipher, h, nonce, aad, data);
-        if !crate::ct::constant_time_eq(&expected, tag) {
+        let expected = gcm_compute_tag_with_h(&self.cipher, h, nonce, aad, data, ghash_mul_ct);
+        if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
             return false;
         }
-        let j0 = ghash_iv(h, nonce);
+        let j0 = ghash_iv(h, nonce, ghash_mul_ct);
+        let mut counter = j0;
+        increment_be32(&mut counter);
+
+        for chunk in data.chunks_mut(16) {
+            let stream = counter_keystream(&self.cipher, &counter);
+            xor_in_place(chunk, &stream[..chunk.len()]);
+            increment_be32(&mut counter);
+        }
+
+        true
+    }
+}
+
+impl<C: BlockCipher> GcmVt<C> {
+    /// Compute the GCM authentication tag over `aad` and `ciphertext`.
+    pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
+        gcm_compute_tag(&self.cipher, nonce, aad, ciphertext, ghash_mul_vt)
+    }
+
+    /// Encrypt in place and return the 128-bit authentication tag.
+    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
+        assert_block_128::<C>();
+        let mut h = [0u8; 16];
+        self.cipher.encrypt(&mut h);
+        let h = u128::from_be_bytes(h);
+        let j0 = ghash_iv(h, nonce, ghash_mul_vt);
+        let mut counter = j0;
+        increment_be32(&mut counter);
+
+        for chunk in data.chunks_mut(16) {
+            let stream = counter_keystream(&self.cipher, &counter);
+            xor_in_place(chunk, &stream[..chunk.len()]);
+            increment_be32(&mut counter);
+        }
+
+        let s = ghash(h, aad, data, ghash_mul_vt);
+        let tag_mask = u128::from_be_bytes(counter_keystream(&self.cipher, &j0));
+        (s ^ tag_mask).to_be_bytes()
+    }
+
+    /// Verify the tag and, if valid, decrypt in place.
+    ///
+    /// Returns `false` and leaves `data` unchanged if tag verification fails.
+    pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
+        assert_block_128::<C>();
+        let h = gcm_hash_subkey(&self.cipher);
+        let expected = gcm_compute_tag_with_h(&self.cipher, h, nonce, aad, data, ghash_mul_vt);
+        if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
+            return false;
+        }
+        let j0 = ghash_iv(h, nonce, ghash_mul_vt);
         let mut counter = j0;
         increment_be32(&mut counter);
 
@@ -682,8 +775,28 @@ pub struct Gmac<C> {
     cipher: C,
 }
 
+/// Variable-time Galois Message Authentication Code (GMAC) reference path.
+///
+/// This keeps the historical variable-time GHASH backend for comparison.
+/// Use [`Gmac`] for the constant-time default.
+pub struct GmacVt<C> {
+    cipher: C,
+}
+
 impl<C> Gmac<C> {
     /// Wrap a 128-bit block cipher in SP 800-38D GMAC mode.
+    pub fn new(cipher: C) -> Self {
+        Self { cipher }
+    }
+
+    /// Borrow the wrapped block cipher.
+    pub fn cipher(&self) -> &C {
+        &self.cipher
+    }
+}
+
+impl<C> GmacVt<C> {
+    /// Wrap a 128-bit block cipher in variable-time SP 800-38D GMAC mode.
     pub fn new(cipher: C) -> Self {
         Self { cipher }
     }
@@ -697,12 +810,24 @@ impl<C> Gmac<C> {
 impl<C: BlockCipher> Gmac<C> {
     /// Compute a GMAC tag over associated data only.
     pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; 16] {
-        gcm_compute_tag(&self.cipher, nonce, aad, &[])
+        gcm_compute_tag(&self.cipher, nonce, aad, &[], ghash_mul_ct)
     }
 
     /// Verify a GMAC tag in constant time.
     pub fn verify(&self, nonce: &[u8], aad: &[u8], tag: &[u8]) -> bool {
-        crate::ct::constant_time_eq(&self.compute(nonce, aad), tag)
+        crate::ct::constant_time_eq_mask(&self.compute(nonce, aad), tag) == u8::MAX
+    }
+}
+
+impl<C: BlockCipher> GmacVt<C> {
+    /// Compute a GMAC tag over associated data only.
+    pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; 16] {
+        gcm_compute_tag(&self.cipher, nonce, aad, &[], ghash_mul_vt)
+    }
+
+    /// Verify a GMAC tag in constant time.
+    pub fn verify(&self, nonce: &[u8], aad: &[u8], tag: &[u8]) -> bool {
+        crate::ct::constant_time_eq_mask(&self.compute(nonce, aad), tag) == u8::MAX
     }
 }
 
@@ -754,7 +879,7 @@ impl<C: BlockCipher> Cmac<C> {
 
     /// Verify a CMAC tag in constant time.
     pub fn verify(&self, data: &[u8], tag: &[u8]) -> bool {
-        crate::ct::constant_time_eq(&self.compute(data), tag)
+        crate::ct::constant_time_eq_mask(&self.compute(data), tag) == u8::MAX
     }
 }
 
@@ -1132,6 +1257,34 @@ mod tests {
     }
 
     #[test]
+    fn gcm_ct_and_vt_backends_match() {
+        let key = parse::<16>("feffe9928665731c6d6a8f9467308308");
+        let iv = parse::<12>("cafebabefacedbaddecaf888");
+        let aad = parse::<20>("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+        let plaintext = parse::<64>(
+            "d9313225f88406e5a55909c5aff5269a\
+             86a7a9531534f7da2e4c303d8a318a72\
+             1c3c0c95956809532fcf0e2449a6b525\
+             b16aedf5aa0de657ba637b391aafd255",
+        );
+
+        let gcm_ct = Gcm::new(Aes128::new(&key));
+        let gcm_vt = GcmVt::new(Aes128::new(&key));
+
+        let mut ct_data = plaintext;
+        let mut vt_data = plaintext;
+        let ct_tag = gcm_ct.encrypt(&iv, &aad, &mut ct_data);
+        let vt_tag = gcm_vt.encrypt(&iv, &aad, &mut vt_data);
+
+        assert_eq!(ct_data, vt_data);
+        assert_eq!(ct_tag, vt_tag);
+        assert!(gcm_ct.decrypt(&iv, &aad, &mut ct_data, &ct_tag));
+        assert!(gcm_vt.decrypt(&iv, &aad, &mut vt_data, &vt_tag));
+        assert_eq!(ct_data, plaintext);
+        assert_eq!(vt_data, plaintext);
+    }
+
+    #[test]
     fn gmac_matches_gcm_on_empty_plaintext() {
         let key = parse::<16>("feffe9928665731c6d6a8f9467308308");
         let iv = parse::<12>("cafebabefacedbaddecaf888");
@@ -1143,5 +1296,22 @@ mod tests {
 
         assert_eq!(tag, gcm.compute_tag(&iv, &aad, &[]));
         assert!(gmac.verify(&iv, &aad, &tag));
+    }
+
+    #[test]
+    fn gmac_ct_and_vt_backends_match() {
+        let key = parse::<16>("feffe9928665731c6d6a8f9467308308");
+        let iv = parse::<12>("cafebabefacedbaddecaf888");
+        let aad = parse::<20>("feedfacedeadbeeffeedfacedeadbeefabaddad2");
+
+        let gmac_ct = Gmac::new(Aes128::new(&key));
+        let gmac_vt = GmacVt::new(Aes128::new(&key));
+
+        let tag_ct = gmac_ct.compute(&iv, &aad);
+        let tag_vt = gmac_vt.compute(&iv, &aad);
+
+        assert_eq!(tag_ct, tag_vt);
+        assert!(gmac_ct.verify(&iv, &aad, &tag_ct));
+        assert!(gmac_vt.verify(&iv, &aad, &tag_vt));
     }
 }

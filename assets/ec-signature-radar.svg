@@ -22,10 +22,10 @@
   <line class="axis" x1="280" y1="240" x2="435.9" y2="330.0" />
   <line class="axis" x1="280" y1="240" x2="124.1" y2="330.0" />
 
-  <polygon points="280.0,115.7 385.9,301.2 216.9,276.4" fill="#0f766e" fill-opacity="0.18" stroke="#0f766e" stroke-width="2" />
+  <polygon points="280.0,115.9 383.7,299.9 219.9,274.7" fill="#0f766e" fill-opacity="0.18" stroke="#0f766e" stroke-width="2" />
   <rect x="20" y="550" width="14" height="14" rx="2" fill="#0f766e" />
   <text class="small" x="40" y="561">ECDSA (P-256)</text>
-  <polygon points="280.0,114.4 434.7,329.3 205.6,282.9" fill="#1d4ed8" fill-opacity="0.18" stroke="#1d4ed8" stroke-width="2" />
+  <polygon points="280.0,115.8 433.6,328.7 203.5,284.2" fill="#1d4ed8" fill-opacity="0.18" stroke="#1d4ed8" stroke-width="2" />
   <rect x="20" y="572" width="14" height="14" rx="2" fill="#1d4ed8" />
   <text class="small" x="40" y="583">Ed25519</text>
 

@@ -82,13 +82,13 @@ impl SchmidtSamoaPublicKey {
 
     /// Encode the public key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.n])
     }
 
     /// Decode the public key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let n = fields.next()?;
         if fields.next().is_some() || n <= BigUint::one() {
@@ -100,7 +100,7 @@ impl SchmidtSamoaPublicKey {
     /// Encode the public key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(SCHMIDT_SAMOA_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(SCHMIDT_SAMOA_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Encode the public key as the crate's flat XML form.
@@ -113,7 +113,7 @@ impl SchmidtSamoaPublicKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(SCHMIDT_SAMOA_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the public key from the crate's flat XML form.
@@ -170,13 +170,13 @@ impl SchmidtSamoaPrivateKey {
 
     /// Encode the private key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.d, &self.gamma])
     }
 
     /// Decode the private key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let d = fields.next()?;
         let gamma = fields.next()?;
@@ -189,7 +189,7 @@ impl SchmidtSamoaPrivateKey {
     /// Encode the private key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(SCHMIDT_SAMOA_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(SCHMIDT_SAMOA_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Encode the private key as the crate's flat XML form.
@@ -205,7 +205,7 @@ impl SchmidtSamoaPrivateKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(SCHMIDT_SAMOA_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the private key from the crate's flat XML form.
@@ -375,14 +375,14 @@ mod tests {
         let (public, private) =
             SchmidtSamoa::generate(&mut drbg, 48).expect("Schmidt-Samoa key generation");
 
-        let public_blob = public.to_binary();
-        let private_blob = private.to_binary();
+        let public_blob = public.to_key_blob();
+        let private_blob = private.to_key_blob();
         assert_eq!(
-            SchmidtSamoaPublicKey::from_binary(&public_blob),
+            SchmidtSamoaPublicKey::from_key_blob(&public_blob),
             Some(public.clone())
         );
         assert_eq!(
-            SchmidtSamoaPrivateKey::from_binary(&private_blob),
+            SchmidtSamoaPrivateKey::from_key_blob(&private_blob),
             Some(private.clone())
         );
 

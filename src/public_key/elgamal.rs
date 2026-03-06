@@ -96,7 +96,7 @@ impl ElGamalPublicKey {
     /// lower-level entry point keeps it explicit so callers can separate the
     /// arithmetic from the randomness when they need deterministic control.
     #[must_use]
-    pub fn encrypt_with_ephemeral(
+    pub fn encrypt_with_nonce(
         &self,
         message: &BigUint,
         ephemeral: &BigUint,
@@ -125,16 +125,6 @@ impl ElGamalPublicKey {
         Some(ElGamalCiphertext { gamma, delta })
     }
 
-    /// Preferred explicit name for encryption with a caller-supplied nonce.
-    #[must_use]
-    pub fn encrypt_with_nonce(
-        &self,
-        message: &BigUint,
-        nonce: &BigUint,
-    ) -> Option<ElGamalCiphertext> {
-        self.encrypt_with_ephemeral(message, nonce)
-    }
-
     /// Encrypt a byte string with a fresh random ephemeral exponent.
     ///
     /// This is the minimal "usable" layer for textbook `ElGamal`: it samples
@@ -147,7 +137,7 @@ impl ElGamalPublicKey {
     pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<ElGamalCiphertext> {
         let message_int = BigUint::from_be_bytes(message);
         let ephemeral = random_nonzero_below(rng, &self.exponent_bound)?;
-        self.encrypt_with_ephemeral(&message_int, &ephemeral)
+        self.encrypt_with_nonce(&message_int, &ephemeral)
     }
 
     /// Encrypt a byte string and return a serialized ciphertext blob.
@@ -158,18 +148,18 @@ impl ElGamalPublicKey {
     #[must_use]
     pub fn encrypt_bytes<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<Vec<u8>> {
         let ciphertext = self.encrypt(message, rng)?;
-        Some(ciphertext.to_binary())
+        Some(ciphertext.to_key_blob())
     }
 
     /// Encode the public key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.p, &self.exponent_bound, &self.g, &self.b])
     }
 
     /// Decode the public key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let exponent_bound = fields.next()?;
@@ -198,7 +188,7 @@ impl ElGamalPublicKey {
     /// Encode the public key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ELGAMAL_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(ELGAMAL_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Encode the public key as the crate's flat XML form.
@@ -219,7 +209,7 @@ impl ElGamalPublicKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(ELGAMAL_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the public key from the crate's flat XML form.
@@ -312,19 +302,19 @@ impl ElGamalPrivateKey {
     /// Decrypt a byte-encoded ciphertext produced by [`ElGamalPublicKey::encrypt_bytes`].
     #[must_use]
     pub fn decrypt_bytes(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
-        let ciphertext = ElGamalCiphertext::from_binary(ciphertext)?;
+        let ciphertext = ElGamalCiphertext::from_key_blob(ciphertext)?;
         Some(self.decrypt(&ciphertext))
     }
 
     /// Encode the private key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.p, &self.exponent_modulus, &self.a])
     }
 
     /// Decode the private key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let exponent_modulus = fields.next()?;
@@ -349,7 +339,7 @@ impl ElGamalPrivateKey {
     /// Encode the private key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ELGAMAL_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(ELGAMAL_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Encode the private key as the crate's flat XML form.
@@ -369,7 +359,7 @@ impl ElGamalPrivateKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(ELGAMAL_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the private key from the crate's flat XML form.
@@ -419,13 +409,13 @@ impl ElGamalCiphertext {
 
     /// Encode the ciphertext as a DER `SEQUENCE` of `(gamma, delta)`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.gamma, &self.delta])
     }
 
     /// Decode the ciphertext from the crate's binary `ElGamal` ciphertext form.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let gamma = fields.next()?;
         let delta = fields.next()?;
@@ -541,7 +531,7 @@ mod tests {
         for msg in [0u64, 1, 2, 11, 22] {
             let message = BigUint::from_u64(msg);
             let ciphertext = public
-                .encrypt_with_ephemeral(&message, &k)
+                .encrypt_with_nonce(&message, &k)
                 .expect("valid ephemeral exponent");
             let plaintext = private.decrypt_raw(&ciphertext);
             assert_eq!(plaintext, message);
@@ -558,7 +548,7 @@ mod tests {
             ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
         let message = BigUint::from_u64(11);
         let ciphertext = public
-            .encrypt_with_ephemeral(&message, &k)
+            .encrypt_with_nonce(&message, &k)
             .expect("valid ephemeral exponent");
         assert_eq!(ciphertext.gamma(), &BigUint::from_u64(10));
         assert_eq!(ciphertext.delta(), &BigUint::from_u64(16));
@@ -585,10 +575,10 @@ mod tests {
         let (public, _) = ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
         let message = BigUint::from_u64(11);
         assert!(public
-            .encrypt_with_ephemeral(&message, &BigUint::zero())
+            .encrypt_with_nonce(&message, &BigUint::zero())
             .is_none());
         assert!(public
-            .encrypt_with_ephemeral(&message, &BigUint::from_u64(22))
+            .encrypt_with_nonce(&message, &BigUint::from_u64(22))
             .is_none());
     }
 
@@ -598,13 +588,13 @@ mod tests {
         let (public, private) = ElGamal::generate(&mut drbg, 32).expect("ElGamal key generation");
         let message = BigUint::from_u64(42);
         let ciphertext = public
-            .encrypt_with_ephemeral(&message, &BigUint::from_u64(3))
+            .encrypt_with_nonce(&message, &BigUint::from_u64(3))
             .expect("valid ephemeral exponent");
         assert_eq!(private.decrypt_raw(&ciphertext), message);
     }
 
     #[test]
-    fn encrypt_with_nonce_matches_encrypt_with_ephemeral() {
+    fn encrypt_with_nonce_is_repeatable_for_fixed_nonce() {
         let p = BigUint::from_u64(23);
         let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
@@ -612,11 +602,11 @@ mod tests {
         let message = BigUint::from_u64(11);
         let nonce = BigUint::from_u64(3);
         let lhs = public
-            .encrypt_with_ephemeral(&message, &nonce)
-            .expect("legacy explicit nonce");
+            .encrypt_with_nonce(&message, &nonce)
+            .expect("first explicit nonce encryption");
         let rhs = public
             .encrypt_with_nonce(&message, &nonce)
-            .expect("canonical explicit nonce");
+            .expect("second explicit nonce encryption");
         assert_eq!(lhs, rhs);
     }
 
@@ -662,14 +652,14 @@ mod tests {
         let a = BigUint::from_u64(7);
         let (public, private) = ElGamal::from_secret_exponent(&p, &g, &a).expect("valid key");
 
-        let public_blob = public.to_binary();
-        let private_blob = private.to_binary();
+        let public_blob = public.to_key_blob();
+        let private_blob = private.to_key_blob();
         assert_eq!(
-            ElGamalPublicKey::from_binary(&public_blob),
+            ElGamalPublicKey::from_key_blob(&public_blob),
             Some(public.clone())
         );
         assert_eq!(
-            ElGamalPrivateKey::from_binary(&private_blob),
+            ElGamalPrivateKey::from_key_blob(&private_blob),
             Some(private.clone())
         );
 
@@ -697,7 +687,7 @@ mod tests {
             ElGamal::generate(&mut key_rng, 32).expect("ElGamal key generation");
         let message = [0x11];
 
-        let public = ElGamalPublicKey::from_binary(&public.to_binary()).expect("public binary");
+        let public = ElGamalPublicKey::from_key_blob(&public.to_key_blob()).expect("public binary");
         let private = ElGamalPrivateKey::from_xml(&private.to_xml()).expect("private XML");
         let ciphertext = public
             .encrypt(&message, &mut enc_rng)

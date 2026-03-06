@@ -95,13 +95,13 @@ impl EciesPublicKey {
 
     /// Encode the public point as a compact SEC 1 point string.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.curve.encode_point(&self.q)
     }
 
     /// Rebuild a public key from a compact SEC 1 point string plus explicit curve parameters.
     #[must_use]
-    pub fn from_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
+    pub fn from_wire_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
         Some(Self { curve, q })
     }
@@ -145,7 +145,7 @@ impl EciesPublicKey {
 
     /// Encode in binary format: field-type byte then `[p, a, b, n, h, Gx, Gy, Qx, Qy]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         let h = BigUint::from_u64(self.curve.h);
         let field_byte = u8::from(self.curve.gf2m_degree().is_some());
         let mut out = vec![field_byte];
@@ -165,7 +165,7 @@ impl EciesPublicKey {
 
     /// Decode from binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&field_type, rest) = blob.split_first()?;
         let mut fields = decode_biguints(rest)?.into_iter();
         let field_prime = fields.next()?;
@@ -215,13 +215,13 @@ impl EciesPublicKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ECIES_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(ECIES_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_binary(&pem_unwrap(ECIES_PUBLIC_LABEL, pem)?)
+        Self::from_key_blob(&pem_unwrap(ECIES_PUBLIC_LABEL, pem)?)
     }
 
     /// # Panics
@@ -375,7 +375,7 @@ impl EciesPrivateKey {
 
     /// Encode in binary format: field-type byte then `[p, a, b, n, h, Gx, Gy, d]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         let h = BigUint::from_u64(self.curve.h);
         let field_byte = u8::from(self.curve.gf2m_degree().is_some());
         let mut out = vec![field_byte];
@@ -394,7 +394,7 @@ impl EciesPrivateKey {
 
     /// Decode from binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&field_type, rest) = blob.split_first()?;
         let mut fields = decode_biguints(rest)?.into_iter();
         let field_prime = fields.next()?;
@@ -444,13 +444,13 @@ impl EciesPrivateKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ECIES_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(ECIES_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_binary(&pem_unwrap(ECIES_PRIVATE_LABEL, pem)?)
+        Self::from_key_blob(&pem_unwrap(ECIES_PRIVATE_LABEL, pem)?)
     }
 
     /// # Panics
@@ -751,8 +751,8 @@ mod tests {
     fn public_key_binary_roundtrip() {
         let mut rng = rng();
         let (public, _) = Ecies::generate(p256(), &mut rng);
-        let blob = public.to_binary();
-        let recovered = EciesPublicKey::from_binary(&blob).expect("from_binary");
+        let blob = public.to_key_blob();
+        let recovered = EciesPublicKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.q, public.q);
     }
 
@@ -760,8 +760,8 @@ mod tests {
     fn public_key_bytes_roundtrip() {
         let mut rng = rng();
         let (public, _) = Ecies::generate(p256(), &mut rng);
-        let bytes = public.to_bytes();
-        let recovered = EciesPublicKey::from_bytes(p256(), &bytes).expect("from_bytes");
+        let bytes = public.to_wire_bytes();
+        let recovered = EciesPublicKey::from_wire_bytes(p256(), &bytes).expect("from_bytes");
         assert_eq!(recovered.q, public.q);
     }
 
@@ -769,8 +769,8 @@ mod tests {
     fn private_key_binary_roundtrip() {
         let mut rng = rng();
         let (_, private) = Ecies::generate(p256(), &mut rng);
-        let blob = private.to_binary();
-        let recovered = EciesPrivateKey::from_binary(&blob).expect("from_binary");
+        let blob = private.to_key_blob();
+        let recovered = EciesPrivateKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.d, private.d);
     }
 

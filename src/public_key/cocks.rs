@@ -91,13 +91,13 @@ impl CocksPublicKey {
 
     /// Encode the public key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.n])
     }
 
     /// Decode the public key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let n = fields.next()?;
         if fields.next().is_some() || n <= BigUint::one() {
@@ -109,7 +109,7 @@ impl CocksPublicKey {
     /// Encode the public key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(COCKS_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(COCKS_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Encode the public key as the crate's flat XML form.
@@ -122,7 +122,7 @@ impl CocksPublicKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(COCKS_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the public key from the crate's flat XML form.
@@ -185,13 +185,13 @@ impl CocksPrivateKey {
 
     /// Encode the private key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.pi, &self.q])
     }
 
     /// Decode the private key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let pi = fields.next()?;
         let q = fields.next()?;
@@ -204,7 +204,7 @@ impl CocksPrivateKey {
     /// Encode the private key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(COCKS_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(COCKS_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Encode the private key as the crate's flat XML form.
@@ -217,7 +217,7 @@ impl CocksPrivateKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(COCKS_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the private key from the crate's flat XML form.
@@ -365,14 +365,14 @@ mod tests {
         let q = BigUint::from_u64(17);
         let (public, private) = Cocks::from_primes(&p, &q).expect("valid key");
 
-        let public_blob = public.to_binary();
-        let private_blob = private.to_binary();
+        let public_blob = public.to_key_blob();
+        let private_blob = private.to_key_blob();
         assert_eq!(
-            CocksPublicKey::from_binary(&public_blob),
+            CocksPublicKey::from_key_blob(&public_blob),
             Some(public.clone())
         );
         assert_eq!(
-            CocksPrivateKey::from_binary(&private_blob),
+            CocksPrivateKey::from_key_blob(&private_blob),
             Some(private.clone())
         );
 
@@ -396,7 +396,8 @@ mod tests {
         let message = [0x07];
 
         let public = CocksPublicKey::from_xml(&public.to_xml()).expect("public XML");
-        let private = CocksPrivateKey::from_binary(&private.to_binary()).expect("private binary");
+        let private =
+            CocksPrivateKey::from_key_blob(&private.to_key_blob()).expect("private binary");
         let ciphertext = public.encrypt(&message).expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), message.to_vec());
     }

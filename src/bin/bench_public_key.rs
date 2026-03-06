@@ -1,13 +1,13 @@
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
-use cryptography::public_key::bigint::BigUint;
-use cryptography::public_key::ec::p256;
 use cryptography::public_key::ec_edwards::ed25519 as edwards25519_curve;
-use cryptography::{
-    Cocks, CtrDrbgAes256, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
-    ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
+use cryptography::vt::{
+    p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, EcdhPublicKey, Ecdsa, Ecies, Ed25519, EdwardsDh,
+    EdwardsDhPublicKey, EdwardsElGamal, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPrivateKey,
+    RsaPss, RsaPublicKey, SchmidtSamoa,
 };
+use cryptography::{CtrDrbgAes256, Sha256};
 
 const MESSAGE: [u8; 32] = [0x42; 32];
 const EC_MESSAGE: [u8; 16] = [0x24; 16];
@@ -119,14 +119,7 @@ fn parse_args() -> (usize, bool, bool) {
     (bits, skip_elgamal, skip_dsa)
 }
 
-fn bench_rsa(
-    rng: &mut CtrDrbgAes256,
-    bits: usize,
-) -> (
-    cryptography::RsaPublicKey,
-    cryptography::RsaPrivateKey,
-    RsaTimings,
-) {
+fn bench_rsa(rng: &mut CtrDrbgAes256, bits: usize) -> (RsaPublicKey, RsaPrivateKey, RsaTimings) {
     announce("Generating RSA key");
     let start = Instant::now();
     let (rsa_public, rsa_private) = Rsa::generate(rng, bits).expect("RSA key generation");
@@ -199,7 +192,7 @@ fn bench_dsa(rng: &mut CtrDrbgAes256, bits: usize) -> DsaTimings {
     // Use the message-level API so the benchmark follows the same hashing path
     // a normal caller would take.
     let signature = private
-        .sign_message_bytes::<Sha256, _>(&MESSAGE, rng)
+        .sign_message_bytes::<Sha256>(&MESSAGE)
         .expect("DSA sign");
     let sign = start.elapsed();
 
@@ -326,17 +319,21 @@ fn bench_ecdh(rng: &mut CtrDrbgAes256) -> EcdhTimings {
     announce("Measuring ECDH");
     let (public_b, private_b) = Ecdh::generate(p256(), rng);
     let start = Instant::now();
-    let shared_a = private_a.agree(&public_b).expect("ECDH agree A");
-    let shared_b = private_b.agree(&public_a).expect("ECDH agree B");
+    let shared_a = private_a
+        .agree_x_coordinate(&public_b)
+        .expect("ECDH agree A");
+    let shared_b = private_b
+        .agree_x_coordinate(&public_a)
+        .expect("ECDH agree B");
     let agree = start.elapsed();
     assert_eq!(shared_a, shared_b);
     assert_eq!(shared_a.len(), 32);
 
     let start = Instant::now();
-    let blob = public_a.to_binary();
-    let recovered = cryptography::EcdhPublicKey::from_binary(&blob).expect("ECDH public roundtrip");
+    let blob = public_a.to_key_blob();
+    let recovered = EcdhPublicKey::from_key_blob(&blob).expect("ECDH public roundtrip");
     let serialize = start.elapsed();
-    assert_eq!(recovered.to_bytes(), public_a.to_bytes());
+    assert_eq!(recovered.to_wire_bytes(), public_a.to_wire_bytes());
 
     (keygen, agree, serialize)
 }
@@ -350,7 +347,7 @@ fn bench_ecdsa(rng: &mut CtrDrbgAes256) -> EcdsaTimings {
     announce("Measuring ECDSA");
     let start = Instant::now();
     let signature = private
-        .sign_message_bytes::<Sha256, _>(&MESSAGE, rng)
+        .sign_message_bytes::<Sha256>(&MESSAGE)
         .expect("ECDSA sign");
     let sign = start.elapsed();
 
@@ -371,18 +368,21 @@ fn bench_edwards_dh(rng: &mut CtrDrbgAes256) -> EdwardsDhTimings {
     announce("Measuring Edwards DH");
     let (public_b, private_b) = EdwardsDh::generate(edwards25519_curve(), rng);
     let start = Instant::now();
-    let shared_a = private_a.agree(&public_b).expect("Edwards DH agree A");
-    let shared_b = private_b.agree(&public_a).expect("Edwards DH agree B");
+    let shared_a = private_a
+        .agree_compressed_point(&public_b)
+        .expect("Edwards DH agree A");
+    let shared_b = private_b
+        .agree_compressed_point(&public_a)
+        .expect("Edwards DH agree B");
     let agree = start.elapsed();
     assert_eq!(shared_a, shared_b);
     assert_eq!(shared_a.len(), 32);
 
     let start = Instant::now();
-    let blob = public_a.to_binary();
-    let recovered =
-        cryptography::EdwardsDhPublicKey::from_binary(&blob).expect("Edwards DH public roundtrip");
+    let blob = public_a.to_key_blob();
+    let recovered = EdwardsDhPublicKey::from_key_blob(&blob).expect("Edwards DH public roundtrip");
     let serialize = start.elapsed();
-    assert_eq!(recovered.to_bytes(), public_a.to_bytes());
+    assert_eq!(recovered.to_wire_bytes(), public_a.to_wire_bytes());
 
     (keygen, agree, serialize)
 }

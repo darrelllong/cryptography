@@ -94,13 +94,13 @@ pub struct Dh;
 impl DhParams {
     /// Encode in binary format: `[p, q, g]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.p, &self.q, &self.g])
     }
 
     /// Decode from binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
@@ -113,14 +113,14 @@ impl DhParams {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(DH_PARAMS_LABEL, &self.to_binary())
+        pem_wrap(DH_PARAMS_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match, the payload is malformed,
     /// or the decoded parameters fail primality / subgroup checks.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_binary(&pem_unwrap(DH_PARAMS_LABEL, pem)?)
+        Self::from_key_blob(&pem_unwrap(DH_PARAMS_LABEL, pem)?)
     }
 
     #[must_use]
@@ -183,13 +183,13 @@ impl DhPublicKey {
 
     /// Encode in binary format: `[p, q, g, y]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.p, &self.q, &self.g, &self.y])
     }
 
     /// Decode from binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
@@ -204,13 +204,13 @@ impl DhPublicKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(DH_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(DH_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_binary(&pem_unwrap(DH_PUBLIC_LABEL, pem)?)
+        Self::from_key_blob(&pem_unwrap(DH_PUBLIC_LABEL, pem)?)
     }
 
     #[must_use]
@@ -294,7 +294,7 @@ impl DhPrivateKey {
     /// **Subgroup validation**: checks that `1 < y_peer < p` and that
     /// `y_peer^q ≡ 1 mod p`, rejecting low-order and small-subgroup inputs.
     #[must_use]
-    pub fn agree(&self, peer: &DhPublicKey) -> Option<BigUint> {
+    pub fn agree_element(&self, peer: &DhPublicKey) -> Option<BigUint> {
         // Domain parameters must match.
         if peer.p != self.p || peer.q != self.q || peer.g != self.g {
             return None;
@@ -315,13 +315,13 @@ impl DhPrivateKey {
 
     /// Encode in binary format: `[p, q, g, x]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.p, &self.q, &self.g, &self.x])
     }
 
     /// Decode from binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
@@ -336,13 +336,13 @@ impl DhPrivateKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(DH_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(DH_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_binary(&pem_unwrap(DH_PRIVATE_LABEL, pem)?)
+        Self::from_key_blob(&pem_unwrap(DH_PRIVATE_LABEL, pem)?)
     }
 
     #[must_use]
@@ -467,8 +467,8 @@ mod tests {
         let mut rng = rng();
         let (pub_a, priv_a) = Dh::generate(&params, &mut rng);
         let (pub_b, priv_b) = Dh::generate(&params, &mut rng);
-        let s_a = priv_a.agree(&pub_b).expect("agree A→B");
-        let s_b = priv_b.agree(&pub_a).expect("agree B→A");
+        let s_a = priv_a.agree_element(&pub_b).expect("agree A→B");
+        let s_b = priv_b.agree_element(&pub_a).expect("agree B→A");
         assert_eq!(s_a, s_b);
     }
 
@@ -478,8 +478,8 @@ mod tests {
         let params = Dh::generate_params(&mut rng, 512).expect("params");
         let (pub_a, priv_a) = Dh::generate(&params, &mut rng);
         let (pub_b, priv_b) = Dh::generate(&params, &mut rng);
-        let s_a = priv_a.agree(&pub_b).expect("agree A");
-        let s_b = priv_b.agree(&pub_a).expect("agree B");
+        let s_a = priv_a.agree_element(&pub_b).expect("agree A");
+        let s_b = priv_b.agree_element(&pub_a).expect("agree B");
         assert_eq!(s_a, s_b);
     }
 
@@ -506,7 +506,7 @@ mod tests {
         let mut rng = rng();
         let (pub_a, _) = Dh::generate(&p1, &mut rng);
         let (_, priv_b) = Dh::generate(&p2, &mut rng);
-        assert!(priv_b.agree(&pub_a).is_none());
+        assert!(priv_b.agree_element(&pub_a).is_none());
     }
 
     // ── Serialization ─────────────────────────────────────────────────────────
@@ -514,8 +514,8 @@ mod tests {
     #[test]
     fn params_binary_roundtrip() {
         let params = toy_params();
-        let blob = params.to_binary();
-        let recovered = DhParams::from_binary(&blob).expect("from_binary");
+        let blob = params.to_key_blob();
+        let recovered = DhParams::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered, params);
     }
 
@@ -542,8 +542,8 @@ mod tests {
         let params = toy_params();
         let mut rng = rng();
         let (public, _) = Dh::generate(&params, &mut rng);
-        let blob = public.to_binary();
-        let recovered = DhPublicKey::from_binary(&blob).expect("from_binary");
+        let blob = public.to_key_blob();
+        let recovered = DhPublicKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.y, public.y);
     }
 
@@ -552,8 +552,8 @@ mod tests {
         let params = toy_params();
         let mut rng = rng();
         let (_, private) = Dh::generate(&params, &mut rng);
-        let blob = private.to_binary();
-        let recovered = DhPrivateKey::from_binary(&blob).expect("from_binary");
+        let blob = private.to_key_blob();
+        let recovered = DhPrivateKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.x, private.x);
     }
 

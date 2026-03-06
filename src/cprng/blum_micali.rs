@@ -14,7 +14,6 @@
 //! generator (1984), implemented here as a tiny fixed-width reference form.
 
 use super::primes::{is_probable_prime, mod_pow};
-use crate::Csprng;
 
 /// Blum-Micali over a `u128` prime field.
 pub struct BlumMicali {
@@ -55,10 +54,9 @@ impl BlumMicali {
         self.state = mod_pow(self.g, self.state, self.p);
         u8::from(self.state <= (self.p - 1) / 2)
     }
-}
 
-impl Csprng for BlumMicali {
-    fn fill_bytes(&mut self, out: &mut [u8]) {
+    /// Fill `out` with generator output bytes, most-significant-bit first per byte.
+    pub fn fill_bytes(&mut self, out: &mut [u8]) {
         for byte in out.iter_mut() {
             let mut v = 0u8;
             for _ in 0..8 {

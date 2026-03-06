@@ -30,13 +30,12 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use cryptography::public_key::bigint::BigUint;
-use cryptography::public_key::ec::p256;
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
-use cryptography::{
-    Cocks, CtrDrbgAes256, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
-    ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa, Sha256,
+use cryptography::vt::{
+    p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
+    ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa,
 };
+use cryptography::{CtrDrbgAes256, Sha256};
 
 const MSG: [u8; 32] = [0x42; 32];
 const EC_MSG: [u8; 16] = [0x24; 16];
@@ -71,19 +70,13 @@ fn main() {
             let n = 1000;
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(
-                    priv_key
-                        .sign_message_bytes::<Sha256, _>(&MSG, &mut rng)
-                        .unwrap(),
-                );
+                black_box(priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap());
             }
             ms_per_op(t0.elapsed(), n)
         }
         "ecdsa_verify" => {
             let (pub_key, priv_key) = Ecdsa::generate(p256(), &mut rng);
-            let sig = priv_key
-                .sign_message_bytes::<Sha256, _>(&MSG, &mut rng)
-                .unwrap();
+            let sig = priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap();
             let n = 500;
             let t0 = Instant::now();
             for _ in 0..n {
@@ -106,7 +99,7 @@ fn main() {
             let n = 1000;
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(priv_b.agree(&pub_a).unwrap());
+                black_box(priv_b.agree_x_coordinate(&pub_a).unwrap());
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -115,7 +108,7 @@ fn main() {
             let n = 1000;
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(pub_key.to_bytes());
+                black_box(pub_key.to_wire_bytes());
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -210,7 +203,7 @@ fn main() {
             let n = 1000;
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(priv_b.agree(&pub_a).unwrap());
+                black_box(priv_b.agree_compressed_point(&pub_a).unwrap());
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -227,7 +220,7 @@ fn main() {
             let n = 1000;
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(pub_key.to_bytes());
+                black_box(pub_key.to_wire_bytes());
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -273,19 +266,13 @@ fn main() {
             let n = 100;
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(
-                    priv_key
-                        .sign_message_bytes::<Sha256, _>(&MSG, &mut rng)
-                        .unwrap(),
-                );
+                black_box(priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap());
             }
             ms_per_op(t0.elapsed(), n)
         }
         "dsa_verify_1024" => {
             let (pub_key, priv_key) = Dsa::generate(&mut rng, 1024).unwrap();
-            let sig = priv_key
-                .sign_message_bytes::<Sha256, _>(&MSG, &mut rng)
-                .unwrap();
+            let sig = priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap();
             let n = 100;
             let t0 = Instant::now();
             for _ in 0..n {

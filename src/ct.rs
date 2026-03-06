@@ -8,6 +8,7 @@
 //! - packed ANF construction for 8-bit and 4-bit S-boxes
 //! - runtime packed-ANF evaluators
 
+use core::hint::black_box;
 use core::ptr;
 use core::sync::atomic::{compiler_fence, Ordering};
 
@@ -25,7 +26,9 @@ fn eq_mask_u32(a: u8, b: u8) -> u32 {
 
 #[inline]
 fn eq_mask_u8(a: u8, b: u8) -> u8 {
-    u8::MAX.wrapping_mul(u8::from(a == b))
+    let x = u16::from(a ^ b);
+    let is_zero = u8::try_from((x.wrapping_sub(1) >> 8) & 1).expect("bit fits in u8");
+    0u8.wrapping_sub(is_zero)
 }
 
 pub(crate) fn zeroize_slice<T: Copy + Default>(slice: &mut [T]) {
@@ -61,15 +64,17 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
 }
 
 #[inline]
-pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq_mask(a: &[u8], b: &[u8]) -> u8 {
     if a.len() != b.len() {
-        return false;
+        return 0;
     }
     let mut diff = 0u8;
     for (x, y) in a.iter().zip(b.iter()) {
         diff |= *x ^ *y;
     }
-    diff == 0
+    let diff = black_box(diff);
+    compiler_fence(Ordering::SeqCst);
+    eq_mask_u8(diff, 0)
 }
 
 #[cfg(test)]

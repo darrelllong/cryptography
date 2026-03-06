@@ -58,13 +58,13 @@ impl EdwardsDhPublicKey {
 
     /// Encode the public point using the curve's RFC 8032-style compressed form.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.curve.encode_point(&self.q)
     }
 
     /// Decode a public key from the compressed Edwards point form.
     #[must_use]
-    pub fn from_bytes(curve: TwistedEdwardsCurve, bytes: &[u8]) -> Option<Self> {
+    pub fn from_wire_bytes(curve: TwistedEdwardsCurve, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
         if !validate_public_point(&curve, &q) {
             return None;
@@ -75,7 +75,7 @@ impl EdwardsDhPublicKey {
 
     /// Encode in the crate-defined binary format: `[p, a, d, n, Gx, Gy, Qx, Qy]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[
             &self.curve.p,
             &self.curve.a,
@@ -90,7 +90,7 @@ impl EdwardsDhPublicKey {
 
     /// Decode from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
@@ -114,13 +114,13 @@ impl EdwardsDhPublicKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(EDWARDS_DH_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(EDWARDS_DH_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDWARDS_DH_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     #[must_use]
@@ -198,7 +198,7 @@ impl EdwardsDhPrivateKey {
     /// callers should pass the bytes through a KDF before using them as key
     /// material.
     #[must_use]
-    pub fn agree(&self, peer: &EdwardsDhPublicKey) -> Option<Vec<u8>> {
+    pub fn agree_compressed_point(&self, peer: &EdwardsDhPublicKey) -> Option<Vec<u8>> {
         if !self.curve.same_curve(&peer.curve) {
             return None;
         }
@@ -211,7 +211,7 @@ impl EdwardsDhPrivateKey {
 
     /// Encode in the crate-defined binary format: `[p, a, d, n, Gx, Gy, d_scalar]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[
             &self.curve.p,
             &self.curve.a,
@@ -225,7 +225,7 @@ impl EdwardsDhPrivateKey {
 
     /// Decode from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
@@ -247,13 +247,13 @@ impl EdwardsDhPrivateKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(EDWARDS_DH_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(EDWARDS_DH_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDWARDS_DH_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     #[must_use]
@@ -335,7 +335,7 @@ fn validate_public_point(curve: &TwistedEdwardsCurve, point: &EdwardsPoint) -> b
 mod tests {
     use super::{EdwardsDh, EdwardsDhPrivateKey, EdwardsDhPublicKey};
     use crate::public_key::ec_edwards::ed25519;
-    use crate::BigUint;
+    use crate::vt::BigUint;
     use crate::CtrDrbgAes256;
 
     fn decode_hex(hex: &str) -> Vec<u8> {
@@ -357,8 +357,8 @@ mod tests {
     fn agreement_roundtrip_ed25519() {
         let (pub_a, priv_a) = EdwardsDh::generate(ed25519(), &mut rng(0x11));
         let (pub_b, priv_b) = EdwardsDh::generate(ed25519(), &mut rng(0x22));
-        let shared_a = priv_a.agree(&pub_b).expect("shared a");
-        let shared_b = priv_b.agree(&pub_a).expect("shared b");
+        let shared_a = priv_a.agree_compressed_point(&pub_b).expect("shared a");
+        let shared_b = priv_b.agree_compressed_point(&pub_a).expect("shared b");
         assert_eq!(shared_a, shared_b);
     }
 
@@ -372,8 +372,8 @@ mod tests {
         };
         let peer_bytes =
             decode_hex("1337036ac32d8f30d4589c3c1c595812ce0fff40e37c6f5a97ab213f318290ad");
-        let peer = EdwardsDhPublicKey::from_bytes(curve, &peer_bytes).expect("peer");
-        let shared = private.agree(&peer).expect("shared");
+        let peer = EdwardsDhPublicKey::from_wire_bytes(curve, &peer_bytes).expect("peer");
+        let shared = private.agree_compressed_point(&peer).expect("shared");
         assert_eq!(
             shared,
             decode_hex("aa6df914f7a0f04e7f852adf459873f17dba5b1671ea62e82cc10ed6aecc489c")
@@ -383,29 +383,29 @@ mod tests {
     #[test]
     fn public_serialization_roundtrip() {
         let (public, _) = EdwardsDh::generate(ed25519(), &mut rng(0x33));
-        let bin = public.to_binary();
+        let bin = public.to_key_blob();
         let pem = public.to_pem();
         let xml = public.to_xml();
-        let round_bin = EdwardsDhPublicKey::from_binary(&bin).expect("bin");
+        let round_bin = EdwardsDhPublicKey::from_key_blob(&bin).expect("bin");
         let round_pem = EdwardsDhPublicKey::from_pem(&pem).expect("pem");
         let round_xml = EdwardsDhPublicKey::from_xml(&xml).expect("xml");
-        assert_eq!(round_bin.to_binary(), public.to_binary());
-        assert_eq!(round_pem.to_binary(), public.to_binary());
-        assert_eq!(round_xml.to_binary(), public.to_binary());
+        assert_eq!(round_bin.to_key_blob(), public.to_key_blob());
+        assert_eq!(round_pem.to_key_blob(), public.to_key_blob());
+        assert_eq!(round_xml.to_key_blob(), public.to_key_blob());
     }
 
     #[test]
     fn private_serialization_roundtrip() {
         let (_, private) = EdwardsDh::generate(ed25519(), &mut rng(0x44));
-        let bin = private.to_binary();
+        let bin = private.to_key_blob();
         let pem = private.to_pem();
         let xml = private.to_xml();
-        let round_bin = EdwardsDhPrivateKey::from_binary(&bin).expect("bin");
+        let round_bin = EdwardsDhPrivateKey::from_key_blob(&bin).expect("bin");
         let round_pem = EdwardsDhPrivateKey::from_pem(&pem).expect("pem");
         let round_xml = EdwardsDhPrivateKey::from_xml(&xml).expect("xml");
-        assert_eq!(round_bin.to_binary(), private.to_binary());
-        assert_eq!(round_pem.to_binary(), private.to_binary());
-        assert_eq!(round_xml.to_binary(), private.to_binary());
+        assert_eq!(round_bin.to_key_blob(), private.to_key_blob());
+        assert_eq!(round_pem.to_key_blob(), private.to_key_blob());
+        assert_eq!(round_xml.to_key_blob(), private.to_key_blob());
     }
 
     #[test]

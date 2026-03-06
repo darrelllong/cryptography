@@ -100,13 +100,13 @@ impl EdDsaPublicKey {
 
     /// Encode just the public point using the curve's compressed Edwards form.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.curve.encode_point(&self.a_point)
     }
 
     /// Rebuild a public key from a compressed Edwards point plus explicit curve parameters.
     #[must_use]
-    pub fn from_bytes(curve: TwistedEdwardsCurve, bytes: &[u8]) -> Option<Self> {
+    pub fn from_wire_bytes(curve: TwistedEdwardsCurve, bytes: &[u8]) -> Option<Self> {
         let a_point = curve.decode_point(bytes)?;
         if !validate_public_point(&curve, &a_point) {
             return None;
@@ -146,7 +146,7 @@ impl EdDsaPublicKey {
     /// Verify a byte-encoded signature produced by [`EdDsaPrivateKey::sign_message_bytes`].
     #[must_use]
     pub fn verify_message_bytes<H: Digest>(&self, message: &[u8], signature: &[u8]) -> bool {
-        let Some(signature) = EdDsaSignature::from_binary(signature, &self.curve) else {
+        let Some(signature) = EdDsaSignature::from_key_blob(signature, &self.curve) else {
             return false;
         };
         self.verify_message::<H>(message, &signature)
@@ -156,7 +156,7 @@ impl EdDsaPublicKey {
     ///
     /// Field layout: `[p, a, d, n, Gx, Gy, Ax, Ay]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[
             &self.curve.p,
             &self.curve.a,
@@ -171,7 +171,7 @@ impl EdDsaPublicKey {
 
     /// Decode a public key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
@@ -199,13 +199,13 @@ impl EdDsaPublicKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(EDDSA_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(EDDSA_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDDSA_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     #[must_use]
@@ -293,7 +293,7 @@ impl EdDsaPrivateKey {
     /// scalar from two signatures, so this entry point is for deterministic
     /// tests and fixed vectors only.
     #[must_use]
-    pub fn sign_with_nonce<H: Digest>(
+    pub fn sign_message_with_nonce<H: Digest>(
         &self,
         message: &[u8],
         nonce: &BigUint,
@@ -312,16 +312,6 @@ impl EdDsaPrivateKey {
         Some(EdDsaSignature { r_point, s })
     }
 
-    /// Preferred explicit name for signing a raw message with a caller-supplied nonce.
-    #[must_use]
-    pub fn sign_message_with_nonce<H: Digest>(
-        &self,
-        message: &[u8],
-        nonce: &BigUint,
-    ) -> Option<EdDsaSignature> {
-        self.sign_with_nonce::<H>(message, nonce)
-    }
-
     /// Sign using a fresh random nonce.
     #[must_use]
     pub fn sign_message<H: Digest, R: Csprng>(
@@ -331,7 +321,7 @@ impl EdDsaPrivateKey {
     ) -> Option<EdDsaSignature> {
         loop {
             let nonce = self.curve.random_scalar(rng);
-            if let Some(signature) = self.sign_with_nonce::<H>(message, &nonce) {
+            if let Some(signature) = self.sign_message_with_nonce::<H>(message, &nonce) {
                 return Some(signature);
             }
         }
@@ -345,14 +335,14 @@ impl EdDsaPrivateKey {
         rng: &mut R,
     ) -> Option<Vec<u8>> {
         let signature = self.sign_message::<H, R>(message, rng)?;
-        Some(signature.to_binary())
+        Some(signature.to_key_blob())
     }
 
     /// Encode the private key in the crate-defined binary format.
     ///
     /// Field layout: `[p, a, d, n, Gx, Gy, private]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[
             &self.curve.p,
             &self.curve.a,
@@ -366,7 +356,7 @@ impl EdDsaPrivateKey {
 
     /// Decode a private key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
@@ -388,13 +378,13 @@ impl EdDsaPrivateKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(EDDSA_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(EDDSA_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDDSA_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     #[must_use]
@@ -463,13 +453,13 @@ impl EdDsaSignature {
     ///
     /// Field layout: `[Rx, Ry, S]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.r_point.x, &self.r_point.y, &self.s])
     }
 
     /// Decode a signature from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8], curve: &TwistedEdwardsCurve) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8], curve: &TwistedEdwardsCurve) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let rx = fields.next()?;
         let ry = fields.next()?;
@@ -583,24 +573,24 @@ mod tests {
         let nonce = BigUint::from_u64(11);
         let (public, private) = EdDsa::from_secret_scalar(curve, &secret).expect("explicit secret");
         let sig = private
-            .sign_with_nonce::<Sha512>(b"abc", &nonce)
+            .sign_message_with_nonce::<Sha512>(b"abc", &nonce)
             .expect("explicit nonce");
         assert!(public.verify_message::<Sha512>(b"abc", &sig));
     }
 
     #[test]
-    fn sign_message_with_nonce_matches_sign_with_nonce() {
+    fn sign_message_with_nonce_is_repeatable() {
         let curve = ed25519();
         let secret = BigUint::from_u64(7);
         let nonce = BigUint::from_u64(11);
         let (_public, private) =
             EdDsa::from_secret_scalar(curve, &secret).expect("explicit secret");
         let lhs = private
-            .sign_with_nonce::<Sha512>(b"abc", &nonce)
-            .expect("legacy");
+            .sign_message_with_nonce::<Sha512>(b"abc", &nonce)
+            .expect("first signature");
         let rhs = private
             .sign_message_with_nonce::<Sha512>(b"abc", &nonce)
-            .expect("canonical");
+            .expect("second signature");
         assert_eq!(lhs, rhs);
     }
 
@@ -623,11 +613,11 @@ mod tests {
         let curve = ed25519();
         let (public, private) = EdDsa::generate(curve, &mut rng());
 
-        let public_bin = public.to_binary();
+        let public_bin = public.to_key_blob();
         let public_pem = public.to_pem();
         let public_xml = public.to_xml();
         assert_eq!(
-            EdDsaPublicKey::from_binary(&public_bin).expect("public binary"),
+            EdDsaPublicKey::from_key_blob(&public_bin).expect("public binary"),
             public
         );
         assert_eq!(
@@ -639,10 +629,10 @@ mod tests {
             public
         );
 
-        let private_bin = private.to_binary();
+        let private_bin = private.to_key_blob();
         let private_pem = private.to_pem();
         let private_xml = private.to_xml();
-        let private_round = EdDsaPrivateKey::from_binary(&private_bin).expect("private binary");
+        let private_round = EdDsaPrivateKey::from_key_blob(&private_bin).expect("private binary");
         assert_eq!(private_round, private);
         assert_eq!(private_round.to_public_key(), public);
         assert_eq!(
@@ -659,8 +649,8 @@ mod tests {
     fn public_bytes_roundtrip() {
         let curve = ed25519();
         let (public, _) = EdDsa::generate(curve.clone(), &mut rng());
-        let bytes = public.to_bytes();
-        let round = EdDsaPublicKey::from_bytes(curve, &bytes).expect("public bytes");
+        let bytes = public.to_wire_bytes();
+        let round = EdDsaPublicKey::from_wire_bytes(curve, &bytes).expect("public bytes");
         assert_eq!(round, public);
     }
 
@@ -671,8 +661,8 @@ mod tests {
         let sig = private
             .sign_message::<Sha512, _>(b"serialize", &mut rng())
             .expect("sign");
-        let blob = sig.to_binary();
-        let decoded = EdDsaSignature::from_binary(&blob, public.curve()).expect("decode sig");
+        let blob = sig.to_key_blob();
+        let decoded = EdDsaSignature::from_key_blob(&blob, public.curve()).expect("decode sig");
         assert_eq!(decoded, sig);
         assert!(public.verify_message::<Sha512>(b"serialize", &decoded));
     }
@@ -682,6 +672,6 @@ mod tests {
         let curve = ed25519();
         let base = curve.base_point();
         let blob = encode_biguints(&[&base.x, &base.y, &curve.n]);
-        assert!(EdDsaSignature::from_binary(&blob, &curve).is_none());
+        assert!(EdDsaSignature::from_key_blob(&blob, &curve).is_none());
     }
 }

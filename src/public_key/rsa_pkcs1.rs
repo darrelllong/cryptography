@@ -14,7 +14,8 @@ use core::marker::PhantomData;
 
 use crate::hash::Digest;
 use crate::public_key::bigint::BigUint;
-use crate::{Csprng, RsaPrivateKey, RsaPublicKey};
+use crate::public_key::rsa::{RsaPrivateKey, RsaPublicKey};
+use crate::Csprng;
 
 // RFC 8017's `k`: the octet length of the RSA modulus `n`.
 fn modulus_len_bytes(modulus: &BigUint) -> usize {
@@ -55,6 +56,23 @@ fn os2ip(bytes: &[u8]) -> BigUint {
     // RFC 8017 Octet-String-to-Integer Primitive (OS2IP): big-endian octet
     // string to non-negative integer.
     BigUint::from_be_bytes(bytes)
+}
+
+#[inline]
+fn ct_eq_u8_mask(a: u8, b: u8) -> u8 {
+    let x = u16::from(a ^ b);
+    let is_zero = u8::try_from((x.wrapping_sub(1) >> 8) & 1).expect("bit fits in u8");
+    0u8.wrapping_sub(is_zero)
+}
+
+#[inline]
+fn ct_nonzero_u8_mask(x: u8) -> u8 {
+    ct_eq_u8_mask(x, 0) ^ u8::MAX
+}
+
+#[inline]
+fn ct_mask_to_usize(mask: u8) -> usize {
+    0usize.wrapping_sub(usize::from(mask >> 7))
 }
 
 /// RFC 8017 `RSAES-OAEP`.
@@ -164,23 +182,23 @@ impl<H: Digest> RsaOaep<H> {
         // malformed ciphertext does not become a timing oracle (the classic
         // Manger-style padding-oracle failure mode).
         let mut saw_separator = 0u8;
-        let mut bad_padding = u8::from(encoded[0] != 0);
-        bad_padding |= u8::from(!crate::ct::constant_time_eq(&db[..h_len], &l_hash));
+        let mut bad_padding = ct_nonzero_u8_mask(encoded[0]);
+        bad_padding |= crate::ct::constant_time_eq_mask(&db[..h_len], &l_hash) ^ u8::MAX;
         let mut msg_idx = 0usize;
         for (idx, &byte) in db[h_len..].iter().enumerate() {
-            let is_zero = u8::from(byte == 0);
-            let is_one = u8::from(byte == 0x01);
-            let before_separator = saw_separator ^ 1;
-            bad_padding |= before_separator & (is_zero ^ 1) & (is_one ^ 1);
+            let is_zero = ct_eq_u8_mask(byte, 0);
+            let is_one = ct_eq_u8_mask(byte, 0x01);
+            let before_separator = saw_separator ^ u8::MAX;
+            bad_padding |= before_separator & (is_zero ^ u8::MAX) & (is_one ^ u8::MAX);
 
             let take_separator = before_separator & is_one;
-            let mask = 0usize.wrapping_sub(usize::from(take_separator));
+            let mask = ct_mask_to_usize(take_separator);
             let candidate_idx = h_len + idx + 1;
             msg_idx = (msg_idx & !mask) | (candidate_idx & mask);
             saw_separator |= take_separator;
         }
 
-        if saw_separator == 0 || bad_padding != 0 {
+        if saw_separator != u8::MAX || bad_padding != 0 {
             return None;
         }
         Some(db[msg_idx..].to_vec())
@@ -274,7 +292,7 @@ impl<H: Digest> RsaPss<H> {
         let Some(mut encoded) = i2osp(&encoded_int, em_len) else {
             return false;
         };
-        let mut bad_padding = u8::from(encoded.last().copied() != Some(0xbc));
+        let mut bad_padding = ct_eq_u8_mask(encoded.last().copied().unwrap_or(0), 0xbc) ^ u8::MAX;
 
         let h_index = em_len - h_len - 1;
         let h = encoded[h_index..h_index + h_len].to_vec();
@@ -283,7 +301,7 @@ impl<H: Digest> RsaPss<H> {
         // RFC 8017 §9.1.2 step 6 checks the unused top bits in `maskedDB`
         // before the MGF1 mask is removed.
         if unused_bits != 0 {
-            bad_padding |= masked_db[0] >> (8 - unused_bits);
+            bad_padding |= ct_nonzero_u8_mask(masked_db[0] >> (8 - unused_bits));
         }
 
         let db_mask = mgf1::<H>(&h, h_index);
@@ -302,17 +320,17 @@ impl<H: Digest> RsaPss<H> {
         let mut saw_separator = 0u8;
         let mut one_index = 0usize;
         for (idx, &byte) in masked_db.iter().enumerate() {
-            let is_zero = u8::from(byte == 0);
-            let is_one = u8::from(byte == 0x01);
-            let before_separator = saw_separator ^ 1;
-            bad_padding |= before_separator & (is_zero ^ 1) & (is_one ^ 1);
+            let is_zero = ct_eq_u8_mask(byte, 0);
+            let is_one = ct_eq_u8_mask(byte, 0x01);
+            let before_separator = saw_separator ^ u8::MAX;
+            bad_padding |= before_separator & (is_zero ^ u8::MAX) & (is_one ^ u8::MAX);
 
             let take_separator = before_separator & is_one;
-            let mask = 0usize.wrapping_sub(usize::from(take_separator));
+            let mask = ct_mask_to_usize(take_separator);
             one_index = (one_index & !mask) | (idx & mask);
             saw_separator |= take_separator;
         }
-        bad_padding |= saw_separator ^ 1;
+        bad_padding |= saw_separator ^ u8::MAX;
         if bad_padding != 0 {
             return false;
         }
@@ -323,7 +341,7 @@ impl<H: Digest> RsaPss<H> {
         m_prime.extend_from_slice(&m_hash);
         m_prime.extend_from_slice(salt);
         let expected_h = H::digest(&m_prime);
-        crate::ct::constant_time_eq(&h, &expected_h)
+        crate::ct::constant_time_eq_mask(&h, &expected_h) == u8::MAX
     }
 }
 
@@ -331,10 +349,10 @@ impl<H: Digest> RsaPss<H> {
 mod tests {
     use super::{RsaOaep, RsaPss};
     use crate::public_key::bigint::BigUint;
-    use crate::public_key::rsa::Rsa;
+    use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
     use crate::{CtrDrbgAes256, Sha1};
 
-    fn large_reference_key() -> (crate::RsaPublicKey, crate::RsaPrivateKey) {
+    fn large_reference_key() -> (RsaPublicKey, RsaPrivateKey) {
         let p = BigUint::from_be_bytes(&[
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b,

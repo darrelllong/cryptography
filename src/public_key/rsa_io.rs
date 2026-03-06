@@ -483,7 +483,7 @@ impl<'a> DerReader<'a> {
 mod tests {
     use super::{RsaPrivateKey, RsaPublicKey};
     use crate::public_key::rsa::Rsa;
-    use crate::BigUint;
+    use crate::vt::BigUint;
 
     #[test]
     fn spki_roundtrip() {

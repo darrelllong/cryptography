@@ -160,13 +160,13 @@ impl PaillierPublicKey {
 
     /// Encode the public key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.n, &self.zeta])
     }
 
     /// Decode the public key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let n = fields.next()?;
         let zeta = fields.next()?;
@@ -180,7 +180,7 @@ impl PaillierPublicKey {
     /// Encode the public key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(PAILLIER_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(PAILLIER_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Encode the public key as the crate's flat XML form.
@@ -193,7 +193,7 @@ impl PaillierPublicKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(PAILLIER_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the public key from the crate's flat XML form.
@@ -267,13 +267,13 @@ impl PaillierPrivateKey {
 
     /// Encode the private key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.n, &self.lambda, &self.u])
     }
 
     /// Decode the private key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let n = fields.next()?;
         let lambda = fields.next()?;
@@ -298,7 +298,7 @@ impl PaillierPrivateKey {
     /// Encode the private key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(PAILLIER_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(PAILLIER_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Encode the private key as the crate's flat XML form.
@@ -314,7 +314,7 @@ impl PaillierPrivateKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(PAILLIER_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the private key from the crate's flat XML form.
@@ -614,14 +614,14 @@ mod tests {
         let q = BigUint::from_u64(5);
         let (public, private) = Paillier::from_primes(&p, &q).expect("valid key");
 
-        let public_blob = public.to_binary();
-        let private_blob = private.to_binary();
+        let public_blob = public.to_key_blob();
+        let private_blob = private.to_key_blob();
         assert_eq!(
-            PaillierPublicKey::from_binary(&public_blob),
+            PaillierPublicKey::from_key_blob(&public_blob),
             Some(public.clone())
         );
         assert_eq!(
-            PaillierPrivateKey::from_binary(&private_blob),
+            PaillierPrivateKey::from_key_blob(&private_blob),
             Some(private.clone())
         );
 
@@ -649,7 +649,8 @@ mod tests {
             Paillier::generate(&mut key_rng, 32).expect("Paillier key generation");
         let message = [0x03];
 
-        let public = PaillierPublicKey::from_binary(&public.to_binary()).expect("public binary");
+        let public =
+            PaillierPublicKey::from_key_blob(&public.to_key_blob()).expect("public binary");
         let private = PaillierPrivateKey::from_xml(&private.to_xml()).expect("private XML");
         let ciphertext = public
             .encrypt(&message, &mut enc_rng)

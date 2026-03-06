@@ -42,6 +42,7 @@ use crate::public_key::io::{
 };
 use crate::public_key::primes::{mod_inverse, random_nonzero_below};
 use crate::Csprng;
+use crate::Hmac;
 
 const ECDSA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ECDSA PUBLIC KEY";
 const ECDSA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ECDSA PRIVATE KEY";
@@ -107,13 +108,13 @@ impl EcdsaPublicKey {
 
     /// Encode the public point as a compact SEC 1 point string.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.curve.encode_point(&self.q)
     }
 
     /// Rebuild a public key from a compact SEC 1 point string plus explicit curve parameters.
     #[must_use]
-    pub fn from_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
+    pub fn from_wire_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
         Some(Self { curve, q })
     }
@@ -139,12 +140,12 @@ impl EcdsaPublicKey {
     #[must_use]
     pub fn verify(&self, digest: &[u8], signature: &EcdsaSignature) -> bool {
         let z = digest_to_scalar(digest, &self.curve.n);
-        self.verify_raw(&z, signature)
+        self.verify_digest_scalar(&z, signature)
     }
 
     /// Core ECDSA verification over a pre-reduced scalar `z`.
     #[must_use]
-    pub fn verify_raw(&self, hash: &BigUint, signature: &EcdsaSignature) -> bool {
+    pub fn verify_digest_scalar(&self, hash: &BigUint, signature: &EcdsaSignature) -> bool {
         let n = &self.curve.n;
 
         // Both components must lie in [1, n).
@@ -178,7 +179,7 @@ impl EcdsaPublicKey {
     /// Verify a byte-encoded signature produced by [`EcdsaPrivateKey::sign_bytes`].
     #[must_use]
     pub fn verify_bytes(&self, digest: &[u8], signature: &[u8]) -> bool {
-        let Some(sig) = EcdsaSignature::from_binary(signature) else {
+        let Some(sig) = EcdsaSignature::from_key_blob(signature) else {
             return false;
         };
         self.verify(digest, &sig)
@@ -190,7 +191,7 @@ impl EcdsaPublicKey {
     /// by `[p, a, b, n, h, Gx, Gy, Qx, Qy]` as a DER `SEQUENCE` of positive
     /// `INTEGER`s.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         let h = BigUint::from_u64(self.curve.h);
         let field_byte = u8::from(self.curve.gf2m_degree().is_some());
         let mut out = vec![field_byte];
@@ -210,7 +211,7 @@ impl EcdsaPublicKey {
 
     /// Decode a public key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&field_type, rest) = blob.split_first()?;
         let mut fields = decode_biguints(rest)?.into_iter();
         let field_prime = fields.next()?;
@@ -260,14 +261,14 @@ impl EcdsaPublicKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ECDSA_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(ECDSA_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(ECDSA_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// # Panics
@@ -378,16 +379,15 @@ impl EcdsaPrivateKey {
 
     /// Sign with an explicit nonce `k`.
     ///
-    /// ECDSA requires a fresh `k ∈ [1, n)` for every signature.  This
-    /// lower-level entry point keeps the arithmetic explicit for deterministic
+    /// ECDSA requires a fresh `k ∈ [1, n)` for every signature. This
+    /// lower-level entry point keeps the arithmetic explicit for fixed-vector
     /// tests.
     ///
     /// Reusing the same `k` for two different messages with the same key
-    /// immediately reveals the private scalar.  Outside of fixed vectors,
-    /// prefer [`Self::sign`] or [`Self::sign_message`], which sample a fresh
-    /// nonce internally.
+    /// immediately reveals the private scalar. Outside of fixed vectors,
+    /// prefer [`Self::sign_digest`] or [`Self::sign_message`].
     #[must_use]
-    pub fn sign_with_k(&self, digest: &[u8], nonce: &BigUint) -> Option<EcdsaSignature> {
+    pub fn sign_digest_with_nonce(&self, digest: &[u8], nonce: &BigUint) -> Option<EcdsaSignature> {
         let n = &self.curve.n;
         if nonce.is_zero() || nonce >= n {
             return None;
@@ -417,52 +417,82 @@ impl EcdsaPrivateKey {
         Some(EcdsaSignature { r, s })
     }
 
-    /// Preferred explicit name for signing a pre-hashed digest with a caller-supplied nonce.
+    /// Sign a digest using RFC 6979 deterministic nonce derivation.
     #[must_use]
-    pub fn sign_digest_with_nonce(&self, digest: &[u8], nonce: &BigUint) -> Option<EcdsaSignature> {
-        self.sign_with_k(digest, nonce)
+    pub fn sign_digest<H: Digest>(&self, digest: &[u8]) -> Option<EcdsaSignature> {
+        let nonce = rfc6979_nonce::<H>(&self.curve.n, &self.d, digest)?;
+        self.sign_digest_with_nonce(digest, &nonce)
     }
 
     /// Sign a digest using a fresh random nonce.
     ///
     /// Retries only in the negligible edge cases where `r = 0` or `s = 0`.
     #[must_use]
-    pub fn sign<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<EcdsaSignature> {
+    pub fn sign_digest_with_rng<R: Csprng>(
+        &self,
+        digest: &[u8],
+        rng: &mut R,
+    ) -> Option<EcdsaSignature> {
         loop {
             let nonce = random_nonzero_below(rng, &self.curve.n)?;
-            if let Some(sig) = self.sign_with_k(digest, &nonce) {
+            if let Some(sig) = self.sign_digest_with_nonce(digest, &nonce) {
                 return Some(sig);
             }
         }
     }
 
-    /// Convenience: hashes `message` with `H` then calls [`sign`][Self::sign].
+    /// Hash one message with `H`, then sign deterministically.
     #[must_use]
-    pub fn sign_message<H: Digest, R: Csprng>(
+    pub fn sign_message<H: Digest>(&self, message: &[u8]) -> Option<EcdsaSignature> {
+        let digest = H::digest(message);
+        self.sign_digest::<H>(&digest)
+    }
+
+    /// Hash one message with `H`, then sign with randomized nonces.
+    #[must_use]
+    pub fn sign_message_with_rng<H: Digest, R: Csprng>(
         &self,
         message: &[u8],
         rng: &mut R,
     ) -> Option<EcdsaSignature> {
         let digest = H::digest(message);
-        self.sign(&digest, rng)
+        self.sign_digest_with_rng(&digest, rng)
     }
 
-    /// Signs and serializes in one step; output is accepted by [`EcdsaPublicKey::verify_bytes`].
+    /// Sign and serialize a digest using deterministic nonce derivation.
     #[must_use]
-    pub fn sign_bytes<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<Vec<u8>> {
-        let sig = self.sign(digest, rng)?;
-        Some(sig.to_binary())
+    pub fn sign_digest_bytes<H: Digest>(&self, digest: &[u8]) -> Option<Vec<u8>> {
+        let sig = self.sign_digest::<H>(digest)?;
+        Some(sig.to_key_blob())
     }
 
-    /// Convenience: signs and serializes; output accepted by [`EcdsaPublicKey::verify_message_bytes`].
+    /// Sign and serialize a digest using randomized nonces.
     #[must_use]
-    pub fn sign_message_bytes<H: Digest, R: Csprng>(
+    pub fn sign_digest_bytes_with_rng<R: Csprng>(
+        &self,
+        digest: &[u8],
+        rng: &mut R,
+    ) -> Option<Vec<u8>> {
+        let sig = self.sign_digest_with_rng(digest, rng)?;
+        Some(sig.to_key_blob())
+    }
+
+    /// Hash one message with `H`, then sign and serialize deterministically.
+    #[must_use]
+    pub fn sign_message_bytes<H: Digest>(&self, message: &[u8]) -> Option<Vec<u8>> {
+        let sig = self.sign_message::<H>(message)?;
+        Some(sig.to_key_blob())
+    }
+
+    /// Hash one message with `H`, then sign and serialize with randomized nonces.
+    #[must_use]
+    pub fn sign_message_bytes_with_rng<H: Digest, R: Csprng>(
         &self,
         message: &[u8],
         rng: &mut R,
     ) -> Option<Vec<u8>> {
-        let sig = self.sign_message::<H, R>(message, rng)?;
-        Some(sig.to_binary())
+        let sig = self.sign_message_with_rng::<H, R>(message, rng)?;
+        Some(sig.to_key_blob())
     }
 
     /// Encode the private key in the crate-defined binary format.
@@ -470,7 +500,7 @@ impl EcdsaPrivateKey {
     /// Layout: one field-type byte (`0x00` = prime, `0x01` = binary) followed
     /// by `[p, a, b, n, h, Gx, Gy, d]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         let h = BigUint::from_u64(self.curve.h);
         let field_byte = u8::from(self.curve.gf2m_degree().is_some());
         let mut out = vec![field_byte];
@@ -489,7 +519,7 @@ impl EcdsaPrivateKey {
 
     /// Decode a private key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&field_type, rest) = blob.split_first()?;
         let mut fields = decode_biguints(rest)?.into_iter();
         let field_prime = fields.next()?;
@@ -539,14 +569,14 @@ impl EcdsaPrivateKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ECDSA_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(ECDSA_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Returns `None` if the PEM label does not match or the payload is malformed.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(ECDSA_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// # Panics
@@ -652,7 +682,7 @@ impl EcdsaSignature {
 
     /// Encode the signature as a DER `SEQUENCE` of `(r, s)`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.r, &self.s])
     }
 
@@ -662,7 +692,7 @@ impl EcdsaSignature {
     /// order happen during verification because the signature encoding does
     /// not carry the curve parameters.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let r = fields.next()?;
         let s = fields.next()?;
@@ -750,6 +780,83 @@ fn digest_to_scalar(digest: &[u8], modulus: &BigUint) -> BigUint {
     value
 }
 
+fn int_to_octets(value: &BigUint, len: usize) -> Vec<u8> {
+    let bytes = value.to_be_bytes();
+    if bytes.len() >= len {
+        return bytes[bytes.len() - len..].to_vec();
+    }
+    let mut out = vec![0u8; len];
+    out[len - bytes.len()..].copy_from_slice(&bytes);
+    out
+}
+
+fn bits_to_int(input: &[u8], target_bits: usize) -> BigUint {
+    let mut value = BigUint::from_be_bytes(input);
+    let input_bits = input.len() * 8;
+    if input_bits > target_bits {
+        for _ in 0..(input_bits - target_bits) {
+            value.shr1();
+        }
+    }
+    value
+}
+
+fn bits_to_octets(input: &[u8], q: &BigUint, q_bits: usize, ro_len: usize) -> Vec<u8> {
+    let z1 = bits_to_int(input, q_bits);
+    let z2 = z1.modulo(q);
+    int_to_octets(&z2, ro_len)
+}
+
+fn rfc6979_nonce<H: Digest>(q: &BigUint, x: &BigUint, digest: &[u8]) -> Option<BigUint> {
+    if q <= &BigUint::one() {
+        return None;
+    }
+
+    let q_bits = q.bits();
+    let ro_len = q_bits.div_ceil(8);
+    let bx = int_to_octets(x, ro_len);
+    let bh = bits_to_octets(digest, q, q_bits, ro_len);
+
+    let mut v = vec![0x01; H::OUTPUT_LEN];
+    let mut k = vec![0x00; H::OUTPUT_LEN];
+
+    let mut data = Vec::with_capacity(v.len() + 1 + bx.len() + bh.len());
+    data.extend_from_slice(&v);
+    data.push(0x00);
+    data.extend_from_slice(&bx);
+    data.extend_from_slice(&bh);
+    k = Hmac::<H>::compute(&k, &data);
+    v = Hmac::<H>::compute(&k, &v);
+
+    data.clear();
+    data.extend_from_slice(&v);
+    data.push(0x01);
+    data.extend_from_slice(&bx);
+    data.extend_from_slice(&bh);
+    k = Hmac::<H>::compute(&k, &data);
+    v = Hmac::<H>::compute(&k, &v);
+
+    loop {
+        let mut t = Vec::with_capacity(ro_len);
+        while t.len() < ro_len {
+            v = Hmac::<H>::compute(&k, &v);
+            let take = (ro_len - t.len()).min(v.len());
+            t.extend_from_slice(&v[..take]);
+        }
+
+        let candidate = bits_to_int(&t, q_bits);
+        if !candidate.is_zero() && &candidate < q {
+            return Some(candidate);
+        }
+
+        data.clear();
+        data.extend_from_slice(&v);
+        data.push(0x00);
+        k = Hmac::<H>::compute(&k, &data);
+        v = Hmac::<H>::compute(&k, &v);
+    }
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -770,9 +877,7 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecdsa::generate(p256(), &mut rng);
         let msg = b"hello world";
-        let sig = private
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
         assert!(public.verify_message::<Sha256>(msg, &sig));
     }
 
@@ -781,9 +886,7 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecdsa::generate(p384(), &mut rng);
         let msg = b"p384 test message";
-        let sig = private
-            .sign_message::<Sha384, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha384>(msg).expect("sign");
         assert!(public.verify_message::<Sha384>(msg, &sig));
     }
 
@@ -792,9 +895,7 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecdsa::generate(secp256k1(), &mut rng);
         let msg = b"secp256k1 test";
-        let sig = private
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
         assert!(public.verify_message::<Sha256>(msg, &sig));
     }
 
@@ -803,54 +904,60 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecdsa::generate(p521(), &mut rng);
         let msg = b"p521 test message";
-        let sig = private
-            .sign_message::<Sha512, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha512>(msg).expect("sign");
         assert!(public.verify_message::<Sha512>(msg, &sig));
     }
 
     // ── Deterministic signing via explicit nonce ──────────────────────────────
 
     #[test]
-    fn sign_with_k_is_deterministic() {
+    fn sign_digest_with_nonce_is_deterministic() {
         let mut rng = rng();
         let (_, private) = Ecdsa::generate(p256(), &mut rng);
         let digest = [0x42u8; 32];
         let k = BigUint::from_u64(12_345_678_901_234_567_u64);
-        let sig1 = private.sign_with_k(&digest, &k).expect("first sign");
-        let sig2 = private.sign_with_k(&digest, &k).expect("second sign");
+        let sig1 = private
+            .sign_digest_with_nonce(&digest, &k)
+            .expect("first sign");
+        let sig2 = private
+            .sign_digest_with_nonce(&digest, &k)
+            .expect("second sign");
         assert_eq!(sig1, sig2);
     }
 
     #[test]
-    fn sign_digest_with_nonce_matches_sign_with_k() {
+    fn sign_digest_with_nonce_repeatable_for_fixed_nonce() {
         let mut rng = rng();
         let (_, private) = Ecdsa::generate(p256(), &mut rng);
         let digest = [0x42u8; 32];
         let nonce = BigUint::from_u64(12_345_678_901_234_567_u64);
-        let lhs = private.sign_with_k(&digest, &nonce).expect("legacy");
+        let lhs = private
+            .sign_digest_with_nonce(&digest, &nonce)
+            .expect("first");
         let rhs = private
             .sign_digest_with_nonce(&digest, &nonce)
-            .expect("canonical");
+            .expect("second");
         assert_eq!(lhs, rhs);
     }
 
     #[test]
-    fn sign_with_k_zero_rejected() {
+    fn sign_digest_with_nonce_zero_rejected() {
         let mut rng = rng();
         let (_, private) = Ecdsa::generate(p256(), &mut rng);
         let digest = [0x00u8; 32];
-        assert!(private.sign_with_k(&digest, &BigUint::zero()).is_none());
+        assert!(private
+            .sign_digest_with_nonce(&digest, &BigUint::zero())
+            .is_none());
     }
 
     #[test]
-    fn sign_with_k_equal_to_n_rejected() {
+    fn sign_digest_with_nonce_equal_to_n_rejected() {
         let curve = p256();
         let n = curve.n.clone();
         let mut rng = rng();
         let (_, private) = Ecdsa::generate(curve, &mut rng);
         let digest = [0x01u8; 32];
-        assert!(private.sign_with_k(&digest, &n).is_none());
+        assert!(private.sign_digest_with_nonce(&digest, &n).is_none());
     }
 
     // ── Rejection tests ───────────────────────────────────────────────────────
@@ -861,9 +968,7 @@ mod tests {
         let (public, private) = Ecdsa::generate(p256(), &mut rng);
         let msg = b"correct message";
         let wrong = b"wrong message";
-        let sig = private
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
         assert!(!public.verify_message::<Sha256>(wrong, &sig));
     }
 
@@ -872,9 +977,7 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecdsa::generate(p256(), &mut rng);
         let msg = b"message";
-        let sig = private
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
         let bad = EcdsaSignature {
             r: sig.r.add_ref(&BigUint::one()),
             s: sig.s.clone(),
@@ -887,9 +990,7 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecdsa::generate(p256(), &mut rng);
         let msg = b"message";
-        let sig = private
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
         let bad = EcdsaSignature {
             r: sig.r.clone(),
             s: sig.s.add_ref(&BigUint::one()),
@@ -903,9 +1004,7 @@ mod tests {
         let (_, private1) = Ecdsa::generate(p256(), &mut rng);
         let (public2, _) = Ecdsa::generate(p256(), &mut rng);
         let msg = b"message";
-        let sig = private1
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private1.sign_message::<Sha256>(msg).expect("sign");
         assert!(!public2.verify_message::<Sha256>(msg, &sig));
     }
 
@@ -918,9 +1017,7 @@ mod tests {
         let derived = private.to_public_key();
         // Signing with private and verifying with the derived public key must work.
         let msg = b"derived key test";
-        let sig = private
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
         assert!(derived.verify_message::<Sha256>(msg, &sig));
         // The derived public point must match the original.
         assert_eq!(derived.q, public.q);
@@ -946,8 +1043,8 @@ mod tests {
     fn public_key_binary_roundtrip() {
         let mut rng = rng();
         let (public, _) = Ecdsa::generate(p256(), &mut rng);
-        let blob = public.to_binary();
-        let recovered = EcdsaPublicKey::from_binary(&blob).expect("from_binary");
+        let blob = public.to_key_blob();
+        let recovered = EcdsaPublicKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.q, public.q);
         assert_eq!(recovered.curve.n, public.curve.n);
     }
@@ -956,8 +1053,8 @@ mod tests {
     fn public_key_bytes_roundtrip() {
         let mut rng = rng();
         let (public, _) = Ecdsa::generate(p256(), &mut rng);
-        let bytes = public.to_bytes();
-        let recovered = EcdsaPublicKey::from_bytes(p256(), &bytes).expect("from_bytes");
+        let bytes = public.to_wire_bytes();
+        let recovered = EcdsaPublicKey::from_wire_bytes(p256(), &bytes).expect("from_bytes");
         assert_eq!(recovered.q, public.q);
         assert_eq!(recovered.curve.n, public.curve.n);
     }
@@ -966,8 +1063,8 @@ mod tests {
     fn private_key_binary_roundtrip() {
         let mut rng = rng();
         let (_, private) = Ecdsa::generate(p256(), &mut rng);
-        let blob = private.to_binary();
-        let recovered = EcdsaPrivateKey::from_binary(&blob).expect("from_binary");
+        let blob = private.to_key_blob();
+        let recovered = EcdsaPrivateKey::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered.d, private.d);
         assert_eq!(recovered.curve.n, private.curve.n);
     }
@@ -977,11 +1074,9 @@ mod tests {
         let mut rng = rng();
         let (_, private) = Ecdsa::generate(p256(), &mut rng);
         let msg = b"roundtrip test";
-        let sig = private
-            .sign_message::<Sha256, _>(msg, &mut rng)
-            .expect("sign");
-        let blob = sig.to_binary();
-        let recovered = EcdsaSignature::from_binary(&blob).expect("from_binary");
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
+        let blob = sig.to_key_blob();
+        let recovered = EcdsaSignature::from_key_blob(&blob).expect("from_binary");
         assert_eq!(recovered, sig);
     }
 
@@ -1036,7 +1131,9 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecdsa::generate(p256(), &mut rng);
         let digest = Sha256::digest(b"test message bytes");
-        let sig_bytes = private.sign_bytes(&digest, &mut rng).expect("sign_bytes");
+        let sig_bytes = private
+            .sign_digest_bytes::<Sha256>(&digest)
+            .expect("sign_digest_bytes");
         assert!(public.verify_bytes(&digest, &sig_bytes));
     }
 
@@ -1046,7 +1143,7 @@ mod tests {
         let (public, private) = Ecdsa::generate(p256(), &mut rng);
         let msg = b"end-to-end bytes test";
         let sig_bytes = private
-            .sign_message_bytes::<Sha256, _>(msg, &mut rng)
+            .sign_message_bytes::<Sha256>(msg)
             .expect("sign_message_bytes");
         assert!(public.verify_message_bytes::<Sha256>(msg, &sig_bytes));
     }

@@ -63,19 +63,19 @@ impl Ed25519PublicKey {
 
     /// Standard 32-byte compressed public key.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         curve().encode_point(&self.point)
     }
 
     /// Preferred explicit name for the standard 32-byte compressed public key.
     #[must_use]
     pub fn to_raw_bytes(&self) -> Vec<u8> {
-        self.to_binary()
+        self.to_key_blob()
     }
 
     /// Parse the standard 32-byte compressed public key.
     #[must_use]
-    pub fn from_binary(bytes: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
         let point = decode_point_strict(bytes)?;
         if !point_in_prime_subgroup(&point) {
             return None;
@@ -87,26 +87,26 @@ impl Ed25519PublicKey {
     /// Preferred explicit name for the standard 32-byte compressed public key.
     #[must_use]
     pub fn from_raw_bytes(bytes: &[u8]) -> Option<Self> {
-        Self::from_binary(bytes)
+        Self::from_key_blob(bytes)
     }
 
     /// PEM-armored wrapper around the standard 32-byte public key.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ED25519_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(ED25519_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Parse the PEM-armored public key.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let bytes = pem_unwrap(ED25519_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&bytes)
+        Self::from_key_blob(&bytes)
     }
 
     /// XML wrapper around the standard 32-byte public key.
     #[must_use]
     pub fn to_xml(&self) -> String {
-        let public = BigUint::from_be_bytes(&self.to_binary());
+        let public = BigUint::from_be_bytes(&self.to_key_blob());
         xml_wrap("Ed25519PublicKey", &[("public", &public)])
     }
 
@@ -119,7 +119,7 @@ impl Ed25519PublicKey {
             return None;
         }
         let bytes = biguint_to_fixed_be(&public, 32)?;
-        Self::from_binary(&bytes)
+        Self::from_key_blob(&bytes)
     }
 
     /// Verify a standard signature over the message.
@@ -144,7 +144,7 @@ impl Ed25519PublicKey {
     /// Verify a standard 64-byte signature.
     #[must_use]
     pub fn verify_message_bytes(&self, message: &[u8], signature: &[u8]) -> bool {
-        let Some(signature) = Ed25519Signature::from_binary(signature) else {
+        let Some(signature) = Ed25519Signature::from_key_blob(signature) else {
             return false;
         };
         self.verify_message(message, &signature)
@@ -154,7 +154,7 @@ impl Ed25519PublicKey {
 impl fmt::Debug for Ed25519PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Ed25519PublicKey")
-            .field(&hex_encode(&self.to_binary()))
+            .field(&hex_encode(&self.to_key_blob()))
             .finish()
     }
 }
@@ -188,19 +188,19 @@ impl Ed25519PrivateKey {
 
     /// Standard 32-byte private-key encoding (the seed).
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         self.seed.to_vec()
     }
 
     /// Preferred explicit name for the standard 32-byte private seed.
     #[must_use]
     pub fn to_raw_bytes(&self) -> Vec<u8> {
-        self.to_binary()
+        self.to_key_blob()
     }
 
     /// Parse the standard 32-byte private-key encoding (the seed).
     #[must_use]
-    pub fn from_binary(bytes: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
         let seed: [u8; 32] = bytes.try_into().ok()?;
         Some(expand_seed(seed))
     }
@@ -208,20 +208,20 @@ impl Ed25519PrivateKey {
     /// Preferred explicit name for the standard 32-byte private seed.
     #[must_use]
     pub fn from_raw_bytes(bytes: &[u8]) -> Option<Self> {
-        Self::from_binary(bytes)
+        Self::from_key_blob(bytes)
     }
 
     /// PEM-armored wrapper around the standard 32-byte seed.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ED25519_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(ED25519_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Parse the PEM-armored private key.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let bytes = pem_unwrap(ED25519_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&bytes)
+        Self::from_key_blob(&bytes)
     }
 
     /// XML wrapper around the standard 32-byte seed.
@@ -240,7 +240,7 @@ impl Ed25519PrivateKey {
             return None;
         }
         let bytes = biguint_to_fixed_be(&seed, 32)?;
-        Self::from_binary(&bytes)
+        Self::from_key_blob(&bytes)
     }
 
     /// Sign one message using the deterministic RFC 8032 nonce derivation.
@@ -260,7 +260,7 @@ impl Ed25519PrivateKey {
     /// Sign and return the standard 64-byte `R || S` form.
     #[must_use]
     pub fn sign_message_bytes(&self, message: &[u8]) -> Vec<u8> {
-        self.sign_message(message).to_binary()
+        self.sign_message(message).to_key_blob()
     }
 }
 
@@ -285,7 +285,7 @@ impl Ed25519Signature {
 
     /// Standard 64-byte signature encoding `R || S`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         let mut out = curve().encode_point(&self.r_point);
         out.extend_from_slice(&biguint_to_fixed_le(&self.s, 32));
         out
@@ -293,7 +293,7 @@ impl Ed25519Signature {
 
     /// Parse the standard 64-byte signature encoding `R || S`.
     #[must_use]
-    pub fn from_binary(bytes: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 64 {
             return None;
         }
@@ -309,7 +309,7 @@ impl Ed25519Signature {
 impl fmt::Debug for Ed25519Signature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Ed25519Signature")
-            .field(&hex_encode(&self.to_binary()))
+            .field(&hex_encode(&self.to_key_blob()))
             .finish()
     }
 }
@@ -476,11 +476,11 @@ mod tests {
 
         let seed: [u8; 32] = seed.try_into().expect("seed length");
         let (derived_public, private) = Ed25519::from_seed(seed);
-        assert_eq!(derived_public.to_binary(), public);
-        assert_eq!(private.to_binary(), seed);
+        assert_eq!(derived_public.to_key_blob(), public);
+        assert_eq!(private.to_key_blob(), seed);
 
         let sig = private.sign_message(&message);
-        assert_eq!(sig.to_binary(), signature);
+        assert_eq!(sig.to_key_blob(), signature);
         assert!(derived_public.verify_message(&message, &sig));
         assert!(derived_public.verify_message_bytes(&message, &signature));
     }
@@ -618,14 +618,14 @@ mod tests {
     fn public_key_rejects_neutral_encoding() {
         let mut neutral = vec![0u8; 32];
         neutral[0] = 0x01;
-        assert!(Ed25519PublicKey::from_binary(&neutral).is_none());
+        assert!(Ed25519PublicKey::from_key_blob(&neutral).is_none());
     }
 
     #[test]
     fn signature_rejects_neutral_r_encoding() {
         let mut signature = vec![0u8; 64];
         signature[0] = 0x01;
-        assert!(Ed25519Signature::from_binary(&signature).is_none());
+        assert!(Ed25519Signature::from_key_blob(&signature).is_none());
     }
 
     #[test]
@@ -633,7 +633,7 @@ mod tests {
         let (_, private) = Ed25519::generate(&mut CtrDrbgAes256::new(&[0x91; 48]));
         let mut signature = private.sign_message_bytes(b"non-canonical-s");
         signature[32..].copy_from_slice(&biguint_to_fixed_le(&curve().n, 32));
-        assert!(Ed25519Signature::from_binary(&signature).is_none());
+        assert!(Ed25519Signature::from_key_blob(&signature).is_none());
     }
 
     #[test]
@@ -648,8 +648,8 @@ mod tests {
     fn signature_binary_roundtrip() {
         let (public, private) = Ed25519::generate(&mut CtrDrbgAes256::new(&[0x24; 48]));
         let sig = private.sign_message(b"serialize");
-        let blob = sig.to_binary();
-        let decoded = Ed25519Signature::from_binary(&blob).expect("decode");
+        let blob = sig.to_key_blob();
+        let decoded = Ed25519Signature::from_key_blob(&blob).expect("decode");
         assert_eq!(decoded, sig);
         assert!(public.verify_message(b"serialize", &decoded));
     }
@@ -658,10 +658,11 @@ mod tests {
     fn key_binary_roundtrip() {
         let (public, private) = Ed25519::generate(&mut CtrDrbgAes256::new(&[0x11; 48]));
         assert_eq!(
-            Ed25519PublicKey::from_binary(&public.to_binary()).expect("public"),
+            Ed25519PublicKey::from_key_blob(&public.to_key_blob()).expect("public"),
             public
         );
-        let private_round = Ed25519PrivateKey::from_binary(&private.to_binary()).expect("private");
+        let private_round =
+            Ed25519PrivateKey::from_key_blob(&private.to_key_blob()).expect("private");
         assert_eq!(private_round, private);
         assert_eq!(private_round.to_public_key(), public);
     }
@@ -669,8 +670,8 @@ mod tests {
     #[test]
     fn raw_bytes_aliases_match_binary_encoding() {
         let (public, private) = Ed25519::generate(&mut CtrDrbgAes256::new(&[0x12; 48]));
-        assert_eq!(public.to_raw_bytes(), public.to_binary());
-        assert_eq!(private.to_raw_bytes(), private.to_binary());
+        assert_eq!(public.to_raw_bytes(), public.to_key_blob());
+        assert_eq!(private.to_raw_bytes(), private.to_key_blob());
         assert_eq!(
             Ed25519PublicKey::from_raw_bytes(&public.to_raw_bytes()).expect("public raw"),
             public

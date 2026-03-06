@@ -16,7 +16,6 @@
 //! (1986), translated here into a tiny fixed-width reference form.
 
 use super::primes::{gcd, is_probable_prime, mul_mod};
-use crate::Csprng;
 
 /// Blum Blum Shub over a `u128` modulus.
 pub struct BlumBlumShub {
@@ -77,10 +76,9 @@ impl BlumBlumShub {
         self.state = mul_mod(self.state, self.state, self.n);
         bit
     }
-}
 
-impl Csprng for BlumBlumShub {
-    fn fill_bytes(&mut self, out: &mut [u8]) {
+    /// Fill `out` with generator output bytes, most-significant-bit first per byte.
+    pub fn fill_bytes(&mut self, out: &mut [u8]) {
         for byte in out.iter_mut() {
             let mut v = 0u8;
             for _ in 0..8 {

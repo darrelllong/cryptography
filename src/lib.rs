@@ -1,6 +1,9 @@
 //! Classical and modern block ciphers, stream ciphers, and historical CSPRNGs
 //! implemented in pure, safe, portable Rust directly from their published
 //! specifications.
+//!
+//! Public-key primitives are variable-time and intentionally live under
+//! [`crate::vt`] to make that side-channel property explicit.
 
 mod ct;
 
@@ -79,40 +82,52 @@ pub use ciphers::twofish::{
 };
 pub use ciphers::zuc::{Zuc128, Zuc128Ct};
 
-pub use cprng::blum_blum_shub::BlumBlumShub;
-pub use cprng::blum_micali::BlumMicali;
 pub use cprng::ctr_drbg::CtrDrbgAes256;
 pub use hash::hmac::Hmac;
 pub use hash::sha1::Sha1;
 pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
-pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, Gmac, Ofb, Xts};
-pub use public_key::bigint::{BigInt, BigUint, MontgomeryCtx, Sign};
-pub use public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
-pub use public_key::dh::{Dh, DhParams, DhPrivateKey, DhPublicKey};
-pub use public_key::dsa::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
-pub use public_key::ec::{
-    AffinePoint, CurveParams,
-    b163, k163, b233, k233, b283, k283, b409, k409, b571, k571,
-    p192, p224, p256, p384, p521, secp256k1,
-};
-pub use public_key::ec_elgamal::{
-    EcElGamal, EcElGamalCiphertext, EcElGamalPrivateKey, EcElGamalPublicKey,
-};
-pub use public_key::ecdh::{Ecdh, EcdhPrivateKey, EcdhPublicKey};
-pub use public_key::ecdsa::{Ecdsa, EcdsaPrivateKey, EcdsaPublicKey, EcdsaSignature};
-pub use public_key::edwards_dh::{EdwardsDh, EdwardsDhPrivateKey, EdwardsDhPublicKey};
-pub use public_key::edwards_elgamal::{
-    EdwardsElGamal, EdwardsElGamalCiphertext, EdwardsElGamalPrivateKey, EdwardsElGamalPublicKey,
-};
-pub use public_key::eddsa::{EdDsa, EdDsaPrivateKey, EdDsaPublicKey, EdDsaSignature};
-pub use public_key::ed25519::{Ed25519, Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature};
-pub use public_key::ecies::{Ecies, EciesPrivateKey, EciesPublicKey};
-pub use public_key::elgamal::{ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey};
-pub use public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
-pub use public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};
-pub use public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
-pub use public_key::rsa_pkcs1::{RsaOaep, RsaPss};
-pub use public_key::schmidt_samoa::{SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey};
-pub use public_key::{bigint, primes};
+pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt, Ofb, Xts};
+
+/// Explicit variable-time public-key surface.
+///
+/// All items in this namespace use variable-time big-integer and ECC arithmetic
+/// and are unsuitable for side-channel exposed production signing/decryption.
+pub mod vt {
+    pub use crate::public_key::bigint::{BigInt, BigUint, MontgomeryCtx, Sign};
+    pub use crate::public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
+    pub use crate::public_key::dh::{Dh, DhParams, DhPrivateKey, DhPublicKey};
+    pub use crate::public_key::dsa::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
+    pub use crate::public_key::ec::{
+        b163, b233, b283, b409, b571, k163, k233, k283, k409, k571, p192, p224, p256, p384, p521,
+        secp256k1, AffinePoint, CurveParams,
+    };
+    pub use crate::public_key::ec_elgamal::{
+        EcElGamal, EcElGamalCiphertext, EcElGamalPrivateKey, EcElGamalPublicKey,
+    };
+    pub use crate::public_key::ecdh::{Ecdh, EcdhPrivateKey, EcdhPublicKey};
+    pub use crate::public_key::ecdsa::{Ecdsa, EcdsaPrivateKey, EcdsaPublicKey, EcdsaSignature};
+    pub use crate::public_key::ecies::{Ecies, EciesPrivateKey, EciesPublicKey};
+    pub use crate::public_key::ed25519::{
+        Ed25519, Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature,
+    };
+    pub use crate::public_key::eddsa::{EdDsa, EdDsaPrivateKey, EdDsaPublicKey, EdDsaSignature};
+    pub use crate::public_key::edwards_dh::{EdwardsDh, EdwardsDhPrivateKey, EdwardsDhPublicKey};
+    pub use crate::public_key::edwards_elgamal::{
+        EdwardsElGamal, EdwardsElGamalCiphertext, EdwardsElGamalPrivateKey, EdwardsElGamalPublicKey,
+    };
+    pub use crate::public_key::elgamal::{
+        ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey,
+    };
+    pub use crate::public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
+    pub use crate::public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};
+    pub use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
+    pub use crate::public_key::rsa_pkcs1::{RsaOaep, RsaPss};
+    pub use crate::public_key::schmidt_samoa::{
+        SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey,
+    };
+}
+
+#[cfg(test)]
+mod scrub;

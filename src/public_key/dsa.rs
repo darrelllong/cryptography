@@ -17,6 +17,7 @@ use crate::public_key::primes::{
     generate_prime_order_group, is_probable_prime, mod_inverse, mod_pow, random_nonzero_below,
 };
 use crate::Csprng;
+use crate::Hmac;
 
 const DSA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY DSA PUBLIC KEY";
 const DSA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY DSA PRIVATE KEY";
@@ -100,7 +101,7 @@ impl DsaPublicKey {
 
     /// Verify a signature over an explicit integer representative.
     #[must_use]
-    pub fn verify_raw(&self, hash: &BigUint, signature: &DsaSignature) -> bool {
+    pub fn verify_digest_scalar(&self, hash: &BigUint, signature: &DsaSignature) -> bool {
         if signature.r.is_zero()
             || signature.s.is_zero()
             || signature.r >= self.q
@@ -136,13 +137,13 @@ impl DsaPublicKey {
     /// DSA representative construction from the Digital Signature Standard.
     #[must_use]
     pub fn verify(&self, digest: &[u8], signature: &DsaSignature) -> bool {
-        self.verify_raw(&digest_to_scalar(digest, &self.q), signature)
+        self.verify_digest_scalar(&digest_to_scalar(digest, &self.q), signature)
     }
 
     /// Verify a byte-encoded signature produced by [`DsaPrivateKey::sign_bytes`].
     #[must_use]
     pub fn verify_bytes(&self, digest: &[u8], signature: &[u8]) -> bool {
-        let Some(signature) = DsaSignature::from_binary(signature) else {
+        let Some(signature) = DsaSignature::from_key_blob(signature) else {
             return false;
         };
         self.verify(digest, &signature)
@@ -150,13 +151,13 @@ impl DsaPublicKey {
 
     /// Encode the public key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.p, &self.q, &self.g, &self.y])
     }
 
     /// Decode the public key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
@@ -172,7 +173,7 @@ impl DsaPublicKey {
     /// Encode the public key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(DSA_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(DSA_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     /// Encode the public key as the crate's flat XML form.
@@ -193,7 +194,7 @@ impl DsaPublicKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(DSA_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the public key from the crate's flat XML form.
@@ -255,10 +256,9 @@ impl DsaPrivateKey {
     ///
     /// Reusing the same `k` for two different messages with the same key
     /// immediately reveals the private exponent. Outside of fixed vectors,
-    /// prefer [`Self::sign`] or [`Self::sign_message`], which sample a fresh
-    /// nonce internally.
+    /// prefer [`Self::sign_digest`] or [`Self::sign_message`].
     #[must_use]
-    pub fn sign_with_k(&self, digest: &[u8], nonce: &BigUint) -> Option<DsaSignature> {
+    pub fn sign_digest_with_nonce(&self, digest: &[u8], nonce: &BigUint) -> Option<DsaSignature> {
         if nonce.is_zero() || nonce >= &self.q {
             return None;
         }
@@ -280,63 +280,93 @@ impl DsaPrivateKey {
         Some(DsaSignature { r, s })
     }
 
-    /// Preferred explicit name for signing a pre-hashed digest with a caller-supplied nonce.
+    /// Sign a pre-hashed digest using RFC 6979 deterministic nonce derivation.
     #[must_use]
-    pub fn sign_digest_with_nonce(&self, digest: &[u8], nonce: &BigUint) -> Option<DsaSignature> {
-        self.sign_with_k(digest, nonce)
+    pub fn sign_digest<H: Digest>(&self, digest: &[u8]) -> Option<DsaSignature> {
+        let nonce = rfc6979_nonce::<H>(&self.q, &self.x, digest)?;
+        self.sign_digest_with_nonce(digest, &nonce)
     }
 
     /// Sign a digest using a fresh random nonce.
     #[must_use]
-    pub fn sign<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<DsaSignature> {
+    pub fn sign_digest_with_rng<R: Csprng>(
+        &self,
+        digest: &[u8],
+        rng: &mut R,
+    ) -> Option<DsaSignature> {
         loop {
             // Retry only in the negligible edge cases where `r = 0` or
             // `s = 0`; the fresh nonce changes the arithmetic path.
             let nonce = random_nonzero_below(rng, &self.q)?;
-            if let Some(signature) = self.sign_with_k(digest, &nonce) {
+            if let Some(signature) = self.sign_digest_with_nonce(digest, &nonce) {
                 return Some(signature);
             }
         }
     }
 
-    /// Hash one message with `H`, then sign the resulting digest.
+    /// Hash one message with `H`, then sign deterministically.
     #[must_use]
-    pub fn sign_message<H: Digest, R: Csprng>(
+    pub fn sign_message<H: Digest>(&self, message: &[u8]) -> Option<DsaSignature> {
+        let digest = H::digest(message);
+        self.sign_digest::<H>(&digest)
+    }
+
+    /// Hash one message with `H`, then sign with randomized nonces.
+    #[must_use]
+    pub fn sign_message_with_rng<H: Digest, R: Csprng>(
         &self,
         message: &[u8],
         rng: &mut R,
     ) -> Option<DsaSignature> {
         let digest = H::digest(message);
-        self.sign(&digest, rng)
+        self.sign_digest_with_rng(&digest, rng)
     }
 
-    /// Sign a digest and return the serialized signature bytes.
+    /// Sign a digest deterministically and return serialized signature bytes.
     #[must_use]
-    pub fn sign_bytes<R: Csprng>(&self, digest: &[u8], rng: &mut R) -> Option<Vec<u8>> {
-        let signature = self.sign(digest, rng)?;
-        Some(signature.to_binary())
+    pub fn sign_digest_bytes<H: Digest>(&self, digest: &[u8]) -> Option<Vec<u8>> {
+        let signature = self.sign_digest::<H>(digest)?;
+        Some(signature.to_key_blob())
     }
 
-    /// Hash one message with `H`, then sign and serialize the signature.
+    /// Sign a digest with randomized nonces and return serialized signature bytes.
     #[must_use]
-    pub fn sign_message_bytes<H: Digest, R: Csprng>(
+    pub fn sign_digest_bytes_with_rng<H: Digest, R: Csprng>(
+        &self,
+        digest: &[u8],
+        rng: &mut R,
+    ) -> Option<Vec<u8>> {
+        let signature = self.sign_digest_with_rng(digest, rng)?;
+        Some(signature.to_key_blob())
+    }
+
+    /// Hash one message with `H`, then sign and serialize deterministically.
+    #[must_use]
+    pub fn sign_message_bytes<H: Digest>(&self, message: &[u8]) -> Option<Vec<u8>> {
+        let signature = self.sign_message::<H>(message)?;
+        Some(signature.to_key_blob())
+    }
+
+    /// Hash one message with `H`, then sign and serialize with randomized nonces.
+    #[must_use]
+    pub fn sign_message_bytes_with_rng<H: Digest, R: Csprng>(
         &self,
         message: &[u8],
         rng: &mut R,
     ) -> Option<Vec<u8>> {
-        let signature = self.sign_message::<H, R>(message, rng)?;
-        Some(signature.to_binary())
+        let signature = self.sign_message_with_rng::<H, R>(message, rng)?;
+        Some(signature.to_key_blob())
     }
 
     /// Encode the private key in the crate-defined binary format.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.p, &self.q, &self.g, &self.x])
     }
 
     /// Decode the private key from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
@@ -352,7 +382,7 @@ impl DsaPrivateKey {
     /// Encode the private key in PEM using the crate-defined label.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(DSA_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(DSA_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     /// Encode the private key as the crate's flat XML form.
@@ -373,7 +403,7 @@ impl DsaPrivateKey {
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(DSA_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     /// Decode the private key from the crate's flat XML form.
@@ -413,7 +443,7 @@ impl DsaSignature {
 
     /// Encode the signature as a DER `SEQUENCE` of `(r, s)`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.r, &self.s])
     }
 
@@ -423,7 +453,7 @@ impl DsaSignature {
     /// subgroup order `q` happen during verification because the signature
     /// encoding does not carry `q`.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let r = fields.next()?;
         let s = fields.next()?;
@@ -531,6 +561,83 @@ fn digest_to_scalar(digest: &[u8], modulus: &BigUint) -> BigUint {
     value
 }
 
+fn int_to_octets(value: &BigUint, len: usize) -> Vec<u8> {
+    let bytes = value.to_be_bytes();
+    if bytes.len() >= len {
+        return bytes[bytes.len() - len..].to_vec();
+    }
+    let mut out = vec![0u8; len];
+    out[len - bytes.len()..].copy_from_slice(&bytes);
+    out
+}
+
+fn bits_to_int(input: &[u8], target_bits: usize) -> BigUint {
+    let mut value = BigUint::from_be_bytes(input);
+    let input_bits = input.len() * 8;
+    if input_bits > target_bits {
+        for _ in 0..(input_bits - target_bits) {
+            value.shr1();
+        }
+    }
+    value
+}
+
+fn bits_to_octets(input: &[u8], q: &BigUint, q_bits: usize, ro_len: usize) -> Vec<u8> {
+    let z1 = bits_to_int(input, q_bits);
+    let z2 = z1.modulo(q);
+    int_to_octets(&z2, ro_len)
+}
+
+fn rfc6979_nonce<H: Digest>(q: &BigUint, x: &BigUint, digest: &[u8]) -> Option<BigUint> {
+    if q <= &BigUint::one() {
+        return None;
+    }
+
+    let q_bits = q.bits();
+    let ro_len = q_bits.div_ceil(8);
+    let bx = int_to_octets(x, ro_len);
+    let bh = bits_to_octets(digest, q, q_bits, ro_len);
+
+    let mut v = vec![0x01; H::OUTPUT_LEN];
+    let mut k = vec![0x00; H::OUTPUT_LEN];
+
+    let mut data = Vec::with_capacity(v.len() + 1 + bx.len() + bh.len());
+    data.extend_from_slice(&v);
+    data.push(0x00);
+    data.extend_from_slice(&bx);
+    data.extend_from_slice(&bh);
+    k = Hmac::<H>::compute(&k, &data);
+    v = Hmac::<H>::compute(&k, &v);
+
+    data.clear();
+    data.extend_from_slice(&v);
+    data.push(0x01);
+    data.extend_from_slice(&bx);
+    data.extend_from_slice(&bh);
+    k = Hmac::<H>::compute(&k, &data);
+    v = Hmac::<H>::compute(&k, &v);
+
+    loop {
+        let mut t = Vec::with_capacity(ro_len);
+        while t.len() < ro_len {
+            v = Hmac::<H>::compute(&k, &v);
+            let take = (ro_len - t.len()).min(v.len());
+            t.extend_from_slice(&v[..take]);
+        }
+
+        let candidate = bits_to_int(&t, q_bits);
+        if !candidate.is_zero() && &candidate < q {
+            return Some(candidate);
+        }
+
+        data.clear();
+        data.extend_from_slice(&v);
+        data.push(0x00);
+        k = Hmac::<H>::compute(&k, &data);
+        v = Hmac::<H>::compute(&k, &v);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
@@ -560,7 +667,7 @@ mod tests {
         let (public, private) = derive_small_reference_key();
         let nonce = BigUint::from_u64(5);
         let signature = private
-            .sign_with_k(&[0x09], &nonce)
+            .sign_digest_with_nonce(&[0x09], &nonce)
             .expect("valid DSA nonce");
         assert_eq!(signature.r(), &BigUint::from_u64(1));
         // `q = 11` is 4 bits wide, so the 8-bit digest is reduced to its
@@ -590,7 +697,7 @@ mod tests {
         let mut drbg = CtrDrbgAes256::new(&seed);
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
         let digest = b"dsa-signature-digest";
-        let signature = private.sign(digest, &mut drbg).expect("signature");
+        let signature = private.sign_digest::<Sha256>(digest).expect("signature");
         assert!(public.verify(digest, &signature));
         assert!(!public.verify(b"wrong-digest", &signature));
     }
@@ -602,7 +709,7 @@ mod tests {
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
         let digest = b"dsa-bytes";
         let signature = private
-            .sign_bytes(digest, &mut drbg)
+            .sign_digest_bytes::<Sha256>(digest)
             .expect("signature bytes");
         assert!(public.verify_bytes(digest, &signature));
     }
@@ -614,7 +721,7 @@ mod tests {
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
         let message = b"dsa full message";
         let signature = private
-            .sign_message::<Sha256, _>(message, &mut drbg)
+            .sign_message::<Sha256>(message)
             .expect("message signature");
         assert!(public.verify_message::<Sha256>(message, &signature));
     }
@@ -625,7 +732,7 @@ mod tests {
         let mut drbg = CtrDrbgAes256::new(&seed);
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
         let digest = b"dsa-tamper";
-        let mut signature = private.sign(digest, &mut drbg).expect("signature");
+        let mut signature = private.sign_digest::<Sha256>(digest).expect("signature");
         signature.s = signature
             .s
             .add_ref(&BigUint::one())
@@ -643,31 +750,33 @@ mod tests {
         let (public_a, private_a) = Dsa::generate(&mut drbg_a, 64).expect("first key");
         let (public_b, _) = Dsa::generate(&mut drbg_b, 64).expect("second key");
         let digest = b"dsa-cross";
-        let signature = private_a.sign(digest, &mut drbg_a).expect("signature");
+        let signature = private_a.sign_digest::<Sha256>(digest).expect("signature");
         assert!(public_a.verify(digest, &signature));
         assert!(!public_b.verify(digest, &signature));
     }
 
     #[test]
-    fn sign_with_k_rejects_out_of_range_nonce() {
+    fn sign_digest_with_nonce_rejects_out_of_range_nonce() {
         let (_public, private) = derive_small_reference_key();
-        assert!(private.sign_with_k(&[0x09], &BigUint::zero()).is_none());
         assert!(private
-            .sign_with_k(&[0x09], private.subgroup_order())
+            .sign_digest_with_nonce(&[0x09], &BigUint::zero())
+            .is_none());
+        assert!(private
+            .sign_digest_with_nonce(&[0x09], private.subgroup_order())
             .is_none());
     }
 
     #[test]
-    fn sign_digest_with_nonce_matches_sign_with_k() {
+    fn sign_digest_with_nonce_is_deterministic_for_fixed_nonce() {
         let (_public, private) = derive_small_reference_key();
         let digest = [0x09];
         let nonce = BigUint::from_u64(7);
         let lhs = private
-            .sign_with_k(&digest, &nonce)
-            .expect("legacy explicit nonce");
+            .sign_digest_with_nonce(&digest, &nonce)
+            .expect("first explicit nonce signature");
         let rhs = private
             .sign_digest_with_nonce(&digest, &nonce)
-            .expect("canonical explicit nonce");
+            .expect("second explicit nonce signature");
         assert_eq!(lhs, rhs);
     }
 
@@ -685,7 +794,7 @@ mod tests {
         let mut drbg = CtrDrbgAes256::new(&seed);
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
         let digest = b"dsa-serialize";
-        let signature = private.sign(digest, &mut drbg).expect("signature");
+        let signature = private.sign_digest::<Sha256>(digest).expect("signature");
         let public_xml = public.to_xml();
         let public_again = DsaPublicKey::from_xml(&public_xml).expect("public xml");
         assert!(public_again.verify(digest, &signature));
@@ -705,17 +814,18 @@ mod tests {
         let mut drbg = CtrDrbgAes256::new(&seed);
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
 
-        let public_blob = public.to_binary();
+        let public_blob = public.to_key_blob();
         let public_pem = public.to_pem();
         let public_xml = public.to_xml();
-        let private_blob = private.to_binary();
+        let private_blob = private.to_key_blob();
         let private_pem = private.to_pem();
         let private_xml = private.to_xml();
 
-        let public_from_blob = DsaPublicKey::from_binary(&public_blob).expect("public binary");
+        let public_from_blob = DsaPublicKey::from_key_blob(&public_blob).expect("public binary");
         let public_from_pem = DsaPublicKey::from_pem(&public_pem).expect("public pem");
         let public_from_xml = DsaPublicKey::from_xml(&public_xml).expect("public xml");
-        let private_from_blob = DsaPrivateKey::from_binary(&private_blob).expect("private binary");
+        let private_from_blob =
+            DsaPrivateKey::from_key_blob(&private_blob).expect("private binary");
         let private_from_pem = DsaPrivateKey::from_pem(&private_pem).expect("private pem");
         let private_from_xml = DsaPrivateKey::from_xml(&private_xml).expect("private xml");
 
@@ -733,8 +843,8 @@ mod tests {
             r: BigUint::from_u64(1),
             s: BigUint::from_u64(9),
         };
-        let blob = signature.to_binary();
-        let parsed = DsaSignature::from_binary(&blob).expect("signature");
+        let blob = signature.to_key_blob();
+        let parsed = DsaSignature::from_key_blob(&blob).expect("signature");
         assert_eq!(parsed, signature);
     }
 
@@ -745,7 +855,7 @@ mod tests {
         let (public, private) = Dsa::generate(&mut drbg, 64).expect("generated DSA key");
         let message = b"dsa-digest";
         let digest = Sha384::digest(message);
-        let signature = private.sign(&digest, &mut drbg).expect("signature");
+        let signature = private.sign_digest::<Sha384>(&digest).expect("signature");
         assert!(public.verify_message::<Sha384>(message, &signature));
     }
 }

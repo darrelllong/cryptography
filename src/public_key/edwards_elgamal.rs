@@ -66,13 +66,13 @@ impl EdwardsElGamalPublicKey {
 
     /// Encode the public point using the curve's RFC 8032-style compressed form.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.curve.encode_point(&self.q)
     }
 
     /// Decode a public key from the compressed Edwards point form.
     #[must_use]
-    pub fn from_bytes(curve: TwistedEdwardsCurve, bytes: &[u8]) -> Option<Self> {
+    pub fn from_wire_bytes(curve: TwistedEdwardsCurve, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
         if !validate_public_point(&curve, &q) {
             return None;
@@ -129,7 +129,7 @@ impl EdwardsElGamalPublicKey {
 
     /// Encode in the crate-defined binary format: `[p, a, d, n, Gx, Gy, Qx, Qy]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[
             &self.curve.p,
             &self.curve.a,
@@ -144,7 +144,7 @@ impl EdwardsElGamalPublicKey {
 
     /// Decode from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
@@ -168,13 +168,13 @@ impl EdwardsElGamalPublicKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(EDWARDS_ELGAMAL_PUBLIC_LABEL, &self.to_binary())
+        pem_wrap(EDWARDS_ELGAMAL_PUBLIC_LABEL, &self.to_key_blob())
     }
 
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDWARDS_ELGAMAL_PUBLIC_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     #[must_use]
@@ -266,7 +266,7 @@ impl EdwardsElGamalPrivateKey {
 
     /// Encode in the crate-defined binary format: `[p, a, d, n, Gx, Gy, d_scalar]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[
             &self.curve.p,
             &self.curve.a,
@@ -280,7 +280,7 @@ impl EdwardsElGamalPrivateKey {
 
     /// Decode from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
@@ -302,13 +302,13 @@ impl EdwardsElGamalPrivateKey {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(EDWARDS_ELGAMAL_PRIVATE_LABEL, &self.to_binary())
+        pem_wrap(EDWARDS_ELGAMAL_PRIVATE_LABEL, &self.to_key_blob())
     }
 
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDWARDS_ELGAMAL_PRIVATE_LABEL, pem)?;
-        Self::from_binary(&blob)
+        Self::from_key_blob(&blob)
     }
 
     #[must_use]
@@ -375,13 +375,13 @@ impl EdwardsElGamalCiphertext {
 
     /// Encode in the crate-defined binary format: `[C1x, C1y, C2x, C2y]`.
     #[must_use]
-    pub fn to_binary(&self) -> Vec<u8> {
+    pub fn to_key_blob(&self) -> Vec<u8> {
         encode_biguints(&[&self.c1.x, &self.c1.y, &self.c2.x, &self.c2.y])
     }
 
     /// Decode from the crate-defined binary format.
     #[must_use]
-    pub fn from_binary(curve: &TwistedEdwardsCurve, blob: &[u8]) -> Option<Self> {
+    pub fn from_key_blob(curve: &TwistedEdwardsCurve, blob: &[u8]) -> Option<Self> {
         let mut fields = decode_biguints(blob)?.into_iter();
         let c1x = fields.next()?;
         let c1y = fields.next()?;
@@ -400,13 +400,13 @@ impl EdwardsElGamalCiphertext {
 
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(EDWARDS_ELGAMAL_CT_LABEL, &self.to_binary())
+        pem_wrap(EDWARDS_ELGAMAL_CT_LABEL, &self.to_key_blob())
     }
 
     #[must_use]
     pub fn from_pem(curve: &TwistedEdwardsCurve, pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDWARDS_ELGAMAL_CT_LABEL, pem)?;
-        Self::from_binary(curve, &blob)
+        Self::from_key_blob(curve, &blob)
     }
 
     #[must_use]
@@ -485,10 +485,10 @@ fn bsgs_dlog(curve: &TwistedEdwardsCurve, target: &EdwardsPoint, max_message: u6
         return Some(0);
     }
     let limit = max_message.checked_add(1)?;
-    let step = (limit as f64).sqrt().ceil() as u64 + 1;
+    let step = ceil_sqrt_u64(limit).checked_add(1)?;
     let base = curve.base_point();
 
-    let mut table = std::collections::HashMap::with_capacity(step as usize);
+    let mut table = std::collections::HashMap::new();
     let mut baby = EdwardsPoint::neutral();
     for j in 0..step {
         let key = curve.encode_point(&baby);
@@ -513,6 +513,24 @@ fn bsgs_dlog(curve: &TwistedEdwardsCurve, target: &EdwardsPoint, max_message: u6
     None
 }
 
+fn ceil_sqrt_u64(n: u64) -> u64 {
+    if n <= 1 {
+        return n;
+    }
+    let mut lo = 0u64;
+    let mut hi = 1u64 << 32;
+    while lo < hi {
+        let mid = lo + ((hi - lo) >> 1);
+        let sq = (mid as u128) * (mid as u128);
+        if sq >= n as u128 {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    lo
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -520,7 +538,7 @@ mod tests {
         EdwardsElGamalPublicKey,
     };
     use crate::public_key::ec_edwards::ed25519;
-    use crate::BigUint;
+    use crate::vt::BigUint;
     use crate::CtrDrbgAes256;
 
     fn decode_hex(hex: &str) -> Vec<u8> {
@@ -562,7 +580,7 @@ mod tests {
         let message_bytes =
             decode_hex("edc876d6831fd2105d0b4389ca2e283166469289146e2ce06faefe98b22548df");
         let public =
-            EdwardsElGamalPublicKey::from_bytes(curve.clone(), &public_bytes).expect("public");
+            EdwardsElGamalPublicKey::from_wire_bytes(curve.clone(), &public_bytes).expect("public");
         let private = EdwardsElGamalPrivateKey {
             curve: curve.clone(),
             d: BigUint::from_u64(7),
@@ -587,50 +605,61 @@ mod tests {
     }
 
     #[test]
+    fn ceil_sqrt_helper_is_exact_for_boundaries() {
+        assert_eq!(super::ceil_sqrt_u64(0), 0);
+        assert_eq!(super::ceil_sqrt_u64(1), 1);
+        assert_eq!(super::ceil_sqrt_u64(2), 2);
+        assert_eq!(super::ceil_sqrt_u64(15), 4);
+        assert_eq!(super::ceil_sqrt_u64(16), 4);
+        assert_eq!(super::ceil_sqrt_u64(17), 5);
+        assert_eq!(super::ceil_sqrt_u64(u64::MAX), 1u64 << 32);
+    }
+
+    #[test]
     fn public_serialization_roundtrip() {
         let (public, _) = EdwardsElGamal::generate(ed25519(), &mut rng(0x21));
-        let bin = public.to_binary();
+        let bin = public.to_key_blob();
         let pem = public.to_pem();
         let xml = public.to_xml();
-        let round_bin = EdwardsElGamalPublicKey::from_binary(&bin).expect("bin");
+        let round_bin = EdwardsElGamalPublicKey::from_key_blob(&bin).expect("bin");
         let round_pem = EdwardsElGamalPublicKey::from_pem(&pem).expect("pem");
         let round_xml = EdwardsElGamalPublicKey::from_xml(&xml).expect("xml");
-        assert_eq!(round_bin.to_binary(), public.to_binary());
-        assert_eq!(round_pem.to_binary(), public.to_binary());
-        assert_eq!(round_xml.to_binary(), public.to_binary());
+        assert_eq!(round_bin.to_key_blob(), public.to_key_blob());
+        assert_eq!(round_pem.to_key_blob(), public.to_key_blob());
+        assert_eq!(round_xml.to_key_blob(), public.to_key_blob());
     }
 
     #[test]
     fn public_bytes_roundtrip() {
         let (public, _) = EdwardsElGamal::generate(ed25519(), &mut rng(0x31));
-        let bytes = public.to_bytes();
-        let round = EdwardsElGamalPublicKey::from_bytes(ed25519(), &bytes).expect("bytes");
-        assert_eq!(round.to_binary(), public.to_binary());
+        let bytes = public.to_wire_bytes();
+        let round = EdwardsElGamalPublicKey::from_wire_bytes(ed25519(), &bytes).expect("bytes");
+        assert_eq!(round.to_key_blob(), public.to_key_blob());
     }
 
     #[test]
     fn private_serialization_roundtrip() {
         let (_, private) = EdwardsElGamal::generate(ed25519(), &mut rng(0x43));
-        let bin = private.to_binary();
+        let bin = private.to_key_blob();
         let pem = private.to_pem();
         let xml = private.to_xml();
-        let round_bin = EdwardsElGamalPrivateKey::from_binary(&bin).expect("bin");
+        let round_bin = EdwardsElGamalPrivateKey::from_key_blob(&bin).expect("bin");
         let round_pem = EdwardsElGamalPrivateKey::from_pem(&pem).expect("pem");
         let round_xml = EdwardsElGamalPrivateKey::from_xml(&xml).expect("xml");
-        assert_eq!(round_bin.to_binary(), private.to_binary());
-        assert_eq!(round_pem.to_binary(), private.to_binary());
-        assert_eq!(round_xml.to_binary(), private.to_binary());
+        assert_eq!(round_bin.to_key_blob(), private.to_key_blob());
+        assert_eq!(round_pem.to_key_blob(), private.to_key_blob());
+        assert_eq!(round_xml.to_key_blob(), private.to_key_blob());
     }
 
     #[test]
     fn ciphertext_serialization_roundtrip() {
         let (public, _) = EdwardsElGamal::generate(ed25519(), &mut rng(0x65));
         let ct = public.encrypt_int(4, &mut rng(0x87));
-        let bin = ct.to_binary();
+        let bin = ct.to_key_blob();
         let pem = ct.to_pem();
         let xml = ct.to_xml();
         let curve = public.curve();
-        let round_bin = EdwardsElGamalCiphertext::from_binary(curve, &bin).expect("bin");
+        let round_bin = EdwardsElGamalCiphertext::from_key_blob(curve, &bin).expect("bin");
         let round_pem = EdwardsElGamalCiphertext::from_pem(curve, &pem).expect("pem");
         let round_xml = EdwardsElGamalCiphertext::from_xml(curve, &xml).expect("xml");
         assert_eq!(round_bin, ct);
@@ -648,7 +677,7 @@ mod tests {
         );
         let blob = encode_biguints(&[&order_two.x, &order_two.y, &base.x, &base.y]);
         assert!(
-            EdwardsElGamalCiphertext::from_binary(&curve, &blob).is_none(),
+            EdwardsElGamalCiphertext::from_key_blob(&curve, &blob).is_none(),
             "ciphertext import must reject low-order components"
         );
     }

@@ -22,10 +22,10 @@
   <line class="axis" x1="280" y1="240" x2="435.9" y2="330.0" />
   <line class="axis" x1="280" y1="240" x2="124.1" y2="330.0" />
 
-  <polygon points="280.0,219.1 297.8,250.3 146.9,316.9" fill="#0f766e" fill-opacity="0.18" stroke="#0f766e" stroke-width="2" />
+  <polygon points="280.0,219.3 297.7,250.2 147.4,316.6" fill="#0f766e" fill-opacity="0.18" stroke="#0f766e" stroke-width="2" />
   <rect x="20" y="550" width="14" height="14" rx="2" fill="#0f766e" />
   <text class="small" x="40" y="561">ECDH (P-256)</text>
-  <polygon points="280.0,218.9 306.0,255.0 143.9,318.6" fill="#1d4ed8" fill-opacity="0.18" stroke="#1d4ed8" stroke-width="2" />
+  <polygon points="280.0,218.5 306.2,255.2 143.3,318.9" fill="#1d4ed8" fill-opacity="0.18" stroke="#1d4ed8" stroke-width="2" />
   <rect x="20" y="572" width="14" height="14" rx="2" fill="#1d4ed8" />
   <text class="small" x="40" y="583">Edwards DH</text>
 

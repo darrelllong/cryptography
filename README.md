@@ -15,6 +15,14 @@ alike. The goal is to keep the code readable, portable, and auditable in one
 language, and to add a dependency only when it clearly buys real
 interoperability or maintenance value.
 
+Security note:
+
+- Public-key operations are currently variable-time and are exported under
+  `cryptography::vt` to make that property explicit at the API boundary.
+- Constant-time symmetric implementations stay at the root namespace (for
+  example `Aes128Ct`, `Gcm`, `Gmac`), while variable-time reference paths are
+  explicitly named (`GcmVt`, `GmacVt`).
+
 Implemented families:
 
 - DES and Triple-DES
@@ -41,7 +49,8 @@ Supporting primitives:
 - SHA-3 (`Sha3_224/256/384/512`)
 - SHAKE (`Shake128`, `Shake256`)
 - Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`
-- Historical CSPRNGs: `BlumBlumShub`, `BlumMicali`
+- Historical/reference CSPRNGs under `cryptography::cprng`: `BlumBlumShub`,
+  `BlumMicali`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
 Documentation:
@@ -359,7 +368,8 @@ construction.
 
 ## Public-Key How To
 
-The public-key module exposes three layers:
+The variable-time public-key module is intentionally explicit under
+`cryptography::vt` and exposes three layers:
 
 - core arithmetic primitives: `Rsa`, `Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
 - shared arithmetic support: `BigUint`, `BigInt`, `MontgomeryCtx`
@@ -375,7 +385,8 @@ The public-key module exposes three layers:
 Generate an RSA key pair from a CSPRNG:
 
 ```rust
-use cryptography::{CtrDrbgAes256, Rsa};
+use cryptography::vt::Rsa;
+use cryptography::CtrDrbgAes256;
 
 let seed = [0x55u8; 48];
 let mut drbg = CtrDrbgAes256::new(&seed);
@@ -389,9 +400,9 @@ let private_pem = private.to_pkcs8_pem();
 let public_pem = public.to_spki_pem();
 
 let private_again =
-    cryptography::RsaPrivateKey::from_pkcs8_pem(&private_pem).expect("PKCS #8");
+    cryptography::vt::RsaPrivateKey::from_pkcs8_pem(&private_pem).expect("PKCS #8");
 let public_again =
-    cryptography::RsaPublicKey::from_spki_pem(&public_pem).expect("SPKI");
+    cryptography::vt::RsaPublicKey::from_spki_pem(&public_pem).expect("SPKI");
 
 assert_eq!(private_again, private);
 assert_eq!(public_again, public);
@@ -404,8 +415,8 @@ flat XML convenience format as the non-RSA schemes:
 let private_xml = private.to_xml();
 let public_xml = public.to_xml();
 
-let private_again = cryptography::RsaPrivateKey::from_xml(&private_xml).expect("xml");
-let public_again = cryptography::RsaPublicKey::from_xml(&public_xml).expect("xml");
+let private_again = cryptography::vt::RsaPrivateKey::from_xml(&private_xml).expect("xml");
+let public_again = cryptography::vt::RsaPublicKey::from_xml(&public_xml).expect("xml");
 
 assert_eq!(private_again, private);
 assert_eq!(public_again, public);
@@ -414,7 +425,8 @@ assert_eq!(public_again, public);
 Persist a non-RSA key pair in the crate-defined portable format:
 
 ```rust
-use cryptography::{CtrDrbgAes256, Paillier};
+use cryptography::vt::Paillier;
+use cryptography::CtrDrbgAes256;
 
 let mut drbg = CtrDrbgAes256::new(&[0x23; 48]);
 let (public, private) = Paillier::generate(&mut drbg, 512).expect("Paillier key");
@@ -422,8 +434,8 @@ let (public, private) = Paillier::generate(&mut drbg, 512).expect("Paillier key"
 let public_pem = public.to_pem();
 let private_pem = private.to_pem();
 
-let public_again = cryptography::PaillierPublicKey::from_pem(&public_pem).expect("public");
-let private_again = cryptography::PaillierPrivateKey::from_pem(&private_pem).expect("private");
+let public_again = cryptography::vt::PaillierPublicKey::from_pem(&public_pem).expect("public");
+let private_again = cryptography::vt::PaillierPrivateKey::from_pem(&private_pem).expect("private");
 
 assert_eq!(public_again, public);
 assert_eq!(private_again, private);
@@ -435,8 +447,8 @@ The same non-RSA keys can also be exported as flat XML:
 let public_xml = public.to_xml();
 let private_xml = private.to_xml();
 
-let public_again = cryptography::PaillierPublicKey::from_xml(&public_xml).expect("public");
-let private_again = cryptography::PaillierPrivateKey::from_xml(&private_xml).expect("private");
+let public_again = cryptography::vt::PaillierPublicKey::from_xml(&public_xml).expect("public");
+let private_again = cryptography::vt::PaillierPrivateKey::from_xml(&private_xml).expect("private");
 
 assert_eq!(public_again, public);
 assert_eq!(private_again, private);
@@ -445,7 +457,8 @@ assert_eq!(private_again, private);
 Encrypt and decrypt with `RSAES-OAEP`:
 
 ```rust
-use cryptography::{CtrDrbgAes256, RsaOaep, Sha256};
+use cryptography::vt::RsaOaep;
+use cryptography::{CtrDrbgAes256, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x11; 48]);
 // The OAEP label is an optional context string. The empty label is the
@@ -460,7 +473,8 @@ assert_eq!(plaintext, b"hello");
 Sign and verify with `RSASSA-PSS`:
 
 ```rust
-use cryptography::{CtrDrbgAes256, RsaPss, Sha256};
+use cryptography::vt::RsaPss;
+use cryptography::{CtrDrbgAes256, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x22; 48]);
 let signature = RsaPss::<Sha256>::sign_rng(&private, b"message", &mut drbg).expect("PSS");
@@ -470,12 +484,13 @@ assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
 Generate and use a `DSA` key pair:
 
 ```rust
-use cryptography::{CtrDrbgAes256, Dsa, Sha256};
+use cryptography::vt::Dsa;
+use cryptography::{CtrDrbgAes256, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x24; 48]);
 let (public, private) = Dsa::generate(&mut drbg, 256).expect("DSA key");
 let signature = private
-    .sign_message_bytes::<Sha256, _>(b"message", &mut drbg)
+    .sign_message_bytes::<Sha256>(b"message")
     .expect("DSA sign");
 assert!(public.verify_message_bytes::<Sha256>(b"message", &signature));
 ```
@@ -483,7 +498,8 @@ assert!(public.verify_message_bytes::<Sha256>(b"message", &signature));
 Generate and use an `ElGamal` key pair:
 
 ```rust
-use cryptography::{CtrDrbgAes256, ElGamal};
+use cryptography::vt::ElGamal;
+use cryptography::CtrDrbgAes256;
 
 let mut drbg = CtrDrbgAes256::new(&[0x33u8; 48]);
 let (public, private) = ElGamal::generate(&mut drbg, 256).expect("ElGamal key");
@@ -498,7 +514,8 @@ available, and the usable layer exposes byte-to-byte helpers. `Paillier` also
 keeps its homomorphic operations visible:
 
 ```rust
-use cryptography::{BigUint, CtrDrbgAes256, Paillier};
+use cryptography::vt::{BigUint, Paillier};
+use cryptography::CtrDrbgAes256;
 
 let p = BigUint::from_u64(257);
 let q = BigUint::from_u64(263);

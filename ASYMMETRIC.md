@@ -39,7 +39,7 @@ The public-key layer uses a common pattern, but it is not literally identical
 across every scheme:
 
 1. Arithmetic maps such as `encrypt_raw`, `encrypt_with_nonce`,
-   `encrypt_point_with_k`, or `sign_with_k`, which keep the underlying math
+   `encrypt_point_with_nonce`, or `sign_digest_with_nonce`, which keep the underlying math
    explicit.
 2. Typed wrappers such as `encrypt`, `decrypt`, `sign_message`, and
    `verify_message`, which work with the scheme's natural ciphertext or
@@ -61,12 +61,26 @@ The consistency target for new APIs is:
   omit curve or algorithm parameters
 - use `to_key_blob` / `from_key_blob` for the crate-defined self-describing
   binary formats
-- keep legacy `to_binary` / `from_binary` names as compatibility aliases where
-  they already exist
 
 Level 1 remains the right place for arithmetic tests and direct cross-checks.
 Level 2 is the normal typed interface. Level 3 is the byte-oriented convenience
 layer for schemes that naturally have one.
+
+## Migration Notes (Breaking Sweep)
+
+API cleanup now enforces explicit naming and side-channel intent:
+
+- `to_binary` / `from_binary` -> `to_key_blob` / `from_key_blob`
+- `to_bytes` / `from_bytes` -> `to_wire_bytes` / `from_wire_bytes`
+- `sign_with_k` -> `sign_digest_with_nonce`
+- `verify_raw` -> `verify_digest_scalar`
+- DH agreement methods are now explicit by returned form:
+  - finite-field DH: `agree_element`
+  - short-Weierstrass ECDH: `agree_x_coordinate`
+  - Edwards DH: `agree_compressed_point`
+
+Public-key exports are now intentionally grouped under `cryptography::vt` to
+make variable-time behavior explicit at import sites.
 
 ## Public-Key Surface
 
@@ -140,9 +154,10 @@ debugging convenience; the canonical interoperable formats remain PKCS / X.509.
 ### Non-RSA Schemes
 
 Most non-RSA key types use the crate-defined integer-sequence framing for
-`to_binary()` / `from_binary()`. `Ed25519` is the main exception: its binary
-form is the standard fixed-width raw encoding (32-byte compressed public key or
-32-byte seed), matching RFC 8032 rather than the crate's self-describing blob.
+`to_key_blob()` / `from_key_blob()`. `Ed25519` is the main exception: its
+canonical fixed-width forms are exposed as `to_raw_bytes()` /
+`from_raw_bytes()` (32-byte compressed public key or 32-byte seed), matching
+RFC 8032.
 
 `Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`, `Dh`,
 `Ecdsa`, `EcElGamal`, `Ecies`, `Ecdh`, `EdwardsDh`, `EdwardsElGamal`,
@@ -576,7 +591,7 @@ without a separate curve-identifier negotiation layer.
 On the representation side, the short-Weierstrass public key types now expose
 both of the forms the Edwards writeup already calls out:
 
-- compact SEC 1 point encodings via `to_bytes` / `from_bytes`
+- compact SEC 1 point encodings via `to_wire_bytes` / `from_wire_bytes`
 - the crate-defined self-describing key blob that carries the full curve
   parameters
 
@@ -924,93 +939,93 @@ exponentiation rather than a CRT-accelerated private path.
 
 #### RSA (1024-bit)
 
-| Operation                        |   ms/op    |    ±CI     | Runs  |
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| rsa_keygen_1024                  |      16.02 |   ±0.4013 |    43 |
-| rsa_encrypt_1024                 |    0.03228 | ±0.0002007 |    76 |
-| rsa_decrypt_1024                 |      0.681 |  ±0.02365 |    56 |
-| rsa_sign_1024                    |     0.6933 |  ±0.02252 |    90 |
-| rsa_verify_1024                  |     0.0324 | ±0.0005347 |    60 |
+| rsa_keygen_1024                  |      19.39 |    ±2.036 |    31 |
+| rsa_encrypt_1024                 |    0.03515 | ±0.001237 |   119 |
+| rsa_decrypt_1024                 |     0.8603 |  ±0.06596 |    38 |
+| rsa_sign_1024                    |      0.873 |  ±0.07821 |    46 |
+| rsa_verify_1024                  |     0.0348 | ±0.001232 |    60 |
 
 #### Prime-order subgroup over `Z_p^*` (1024-bit)
 
-| Operation                        |   ms/op    |    ±CI     | Runs  |
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| elgamal_keygen_1024              |      48.63 |   ±0.4083 |    30 |
-| elgamal_encrypt_1024             |     0.4124 | ±0.003134 |    60 |
-| elgamal_decrypt_1024             |     0.2212 | ±0.005175 |    33 |
-| dsa_keygen_1024                  |      54.07 |    ±1.199 |    30 |
-| dsa_sign_1024                    |       0.32 |  ±0.00196 |    53 |
-| dsa_verify_1024                  |     0.5129 | ±0.004096 |    99 |
+| elgamal_keygen_1024              |       58.1 |    ±3.336 |    30 |
+| elgamal_encrypt_1024             |     0.4887 |  ±0.02442 |    43 |
+| elgamal_decrypt_1024             |      0.259 |  ±0.01043 |    33 |
+| dsa_keygen_1024                  |      64.04 |    ±2.095 |    30 |
+| dsa_sign_1024                    |       0.35 |  ±0.02386 |    30 |
+| dsa_verify_1024                  |     0.5675 | ±0.004447 |    30 |
 
 #### Composite-modulus schemes (1024-bit)
 
-| Operation                        |   ms/op    |    ±CI     | Runs  |
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| paillier_keygen_1024             |      16.78 |  ±0.07887 |    96 |
-| paillier_encrypt_1024            |      6.383 |  ±0.03973 |    30 |
-| paillier_decrypt_1024            |      2.327 |   ±0.0179 |    34 |
-| paillier_rerandomize_1024        |      4.113 |  ±0.05597 |    47 |
-| paillier_add_1024                |    0.07652 | ±0.0005136 |    90 |
-| cocks_keygen_1024                |      13.63 |   ±0.3646 |    30 |
-| cocks_encrypt_1024               |     0.7711 | ±0.005889 |    60 |
-| cocks_decrypt_1024               |     0.1401 | ±0.008111 |    30 |
-| rabin_keygen_1024                |      20.79 |   ±0.0954 |    39 |
-| rabin_encrypt_1024               |    0.02683 | ±0.0002364 |    60 |
-| rabin_decrypt_1024               |      1.089 |  ±0.01946 |    48 |
-| schmidt_samoa_keygen_1024        |      6.333 |   ±0.1508 |    30 |
-| schmidt_samoa_encrypt_1024       |     0.7847 | ±0.009299 |    30 |
-| schmidt_samoa_decrypt_1024       |     0.2311 |  ±0.01224 |    30 |
+| paillier_keygen_1024             |      19.24 |    ±1.032 |    49 |
+| paillier_encrypt_1024            |       6.72 |  ±0.04294 |    45 |
+| paillier_decrypt_1024            |      2.654 |   ±0.1315 |    30 |
+| paillier_rerandomize_1024        |      4.378 |  ±0.03942 |    30 |
+| paillier_add_1024                |    0.07714 | ±0.0005552 |    70 |
+| cocks_keygen_1024                |      15.02 |   ±0.6039 |    30 |
+| cocks_encrypt_1024               |     0.9201 |  ±0.05472 |    30 |
+| cocks_decrypt_1024               |     0.1564 | ±0.008068 |    33 |
+| rabin_keygen_1024                |      23.58 |    ±1.493 |    60 |
+| rabin_encrypt_1024               |    0.02733 | ±0.0004724 |    30 |
+| rabin_decrypt_1024               |      1.115 |  ±0.02283 |    60 |
+| schmidt_samoa_keygen_1024        |      6.659 |   ±0.3017 |    30 |
+| schmidt_samoa_encrypt_1024       |     0.9439 |  ±0.06916 |    30 |
+| schmidt_samoa_decrypt_1024       |      0.265 |  ±0.02131 |    30 |
 
 #### RSA (2048-bit)
 
-| Operation                        |   ms/op    |    ±CI     | Runs  |
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| rsa_keygen_2048                  |      160.8 |    ±6.852 |    30 |
-| rsa_encrypt_2048                 |      0.104 | ±0.003918 |    30 |
-| rsa_decrypt_2048                 |       4.97 |   ±0.1465 |   107 |
-| rsa_sign_2048                    |      5.139 |   ±0.3859 |    30 |
-| rsa_verify_2048                  |     0.1031 |   ±0.0016 |    60 |
+| rsa_keygen_2048                  |      193.2 |    ±12.11 |    60 |
+| rsa_encrypt_2048                 |     0.1081 | ±0.001295 |    30 |
+| rsa_decrypt_2048                 |      5.521 |  ±0.06797 |    31 |
+| rsa_sign_2048                    |      5.518 |   ±0.2137 |    38 |
+| rsa_verify_2048                  |     0.1079 | ±0.002602 |    32 |
 
 ### Short-Weierstrass elliptic-curve schemes
 
 #### ECDSA / ECDH (P-256)
 
-| Operation                        |   ms/op    |    ±CI     | Runs  |
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| ecdsa_keygen                     |       2.04 |  ±0.07303 |    66 |
-| ecdsa_sign                       |      2.091 | ±0.009643 |    54 |
-| ecdsa_verify                     |      3.937 |  ±0.03526 |    30 |
-| ecdh_keygen                      |      2.018 |  ±0.05056 |    85 |
-| ecdh_agree                       |      2.064 |   ±0.1501 |    30 |
-| ecdh_serialize                   |  7.507e-05 | ±9.361e-06 |    56 |
+| ecdsa_keygen                     |      2.044 |   ±0.0371 |    30 |
+| ecdsa_sign                       |      2.161 | ±0.008399 |    47 |
+| ecdsa_verify                     |      4.115 |  ±0.01998 |    43 |
+| ecdh_keygen                      |      2.044 |  ±0.03762 |    30 |
+| ecdh_agree                       |      2.078 |   ±0.0149 |    30 |
+| ecdh_serialize                   |   7.86e-05 | ±6.779e-06 |    30 |
 
 #### ECIES / EC ElGamal (P-256)
 
-| Operation                        |   ms/op    |    ±CI     | Runs  |
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| ecies_keygen                     |      2.034 |  ±0.06731 |    84 |
-| ecies_encrypt                    |      3.903 |  ±0.02181 |    93 |
-| ecies_decrypt                    |      1.962 |  ±0.01575 |    79 |
-| ec_elgamal_keygen                |      2.033 |  ±0.08416 |    60 |
-| ec_elgamal_encrypt               |      4.061 |  ±0.02283 |    94 |
-| ec_elgamal_decrypt               |      1.984 |  ±0.01803 |    30 |
+| ecies_keygen                     |      2.047 |  ±0.05624 |    30 |
+| ecies_encrypt                    |      4.011 |  ±0.02071 |    30 |
+| ecies_decrypt                    |      1.988 |   ±0.00974 |    70 |
+| ec_elgamal_keygen                |      2.041 |  ±0.03559 |    32 |
+| ec_elgamal_encrypt               |      4.158 |  ±0.01559 |    30 |
+| ec_elgamal_decrypt               |      2.032 |  ±0.01333 |    30 |
 
 ### Twisted Edwards schemes
 
 #### Ed25519 / Edwards DH / Edwards ElGamal
 
-| Operation                        |   ms/op    |    ±CI     | Runs  |
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| ed25519_keygen                   |      2.006 |  ±0.02327 |    30 |
-| ed25519_sign                     |      1.017 |  ±0.01166 |    33 |
-| ed25519_verify                   |      3.333 |  ±0.02346 |    30 |
-| edwards_dh_keygen                |      1.984 |   ±0.0103 |    57 |
-| edwards_dh_agree                 |      0.994 |  ±0.01259 |    30 |
-| edwards_dh_serialize             |   5.75e-05 | ±7.701e-06 |    30 |
-| edwards_elgamal_keygen           |      1.983 |  ±0.01137 |   174 |
-| edwards_elgamal_encrypt          |      2.084 |  ±0.01445 |    37 |
-| edwards_elgamal_decrypt          |      1.608 |  ±0.01821 |    30 |
+| ed25519_keygen                   |      2.042 |   ±0.0118 |    30 |
+| ed25519_sign                     |      1.035 |  ±0.01058 |    30 |
+| ed25519_verify                   |      3.229 |  ±0.02865 |    60 |
+| edwards_dh_keygen                |      1.916 |  ±0.01216 |    40 |
+| edwards_dh_agree                 |     0.9766 |  ±0.01412 |    60 |
+| edwards_dh_serialize             |  5.483e-05 | ±1.388e-06 |    30 |
+| edwards_elgamal_keygen           |      1.911 |   ±0.0131 |    30 |
+| edwards_elgamal_encrypt          |      2.023 |  ±0.02177 |    41 |
+| edwards_elgamal_decrypt          |      1.567 | ±0.009682 |    30 |
 
 The tables above are measured in milliseconds per operation. The radar charts
 below use the reciprocal view, plotting operations per second on a log scale so
