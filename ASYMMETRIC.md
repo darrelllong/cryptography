@@ -935,97 +935,81 @@ For RSA specifically, the timing gap between `encrypt`/`verify` and
 `e = 65,537`, and the current raw private operation is a direct `c^d mod n`
 exponentiation rather than a CRT-accelerated private path.
 
-### Integer and finite-field schemes
-
-#### RSA (1024-bit)
+### Finite-field public key (1024-bit)
 
 | Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| rsa_keygen_1024                  |      19.39 |    ±2.036 |    31 |
-| rsa_encrypt_1024                 |    0.03515 | ±0.001237 |   119 |
-| rsa_decrypt_1024                 |     0.8603 |  ±0.06596 |    38 |
-| rsa_sign_1024                    |      0.873 |  ±0.07821 |    46 |
-| rsa_verify_1024                  |     0.0348 | ±0.001232 |    60 |
+| rsa_keygen_1024                  |      18.34 |    ±1.418 |    83 |
+| rsa_encrypt_1024                 |    0.03251 | ±0.0004018 |    32 |
+| rsa_decrypt_1024                 |     0.8078 |   ±0.0531 |    49 |
+| rsa_sign_1024                    |     0.7873 |  ±0.01495 |    90 |
+| rsa_verify_1024                  |    0.03274 | ±0.000573 |    30 |
+| elgamal_keygen_1024              |      56.44 |    ±4.128 |    30 |
+| elgamal_encrypt_1024             |     0.4723 |  ±0.02378 |    32 |
+| elgamal_decrypt_1024             |     0.2519 | ±0.006751 |    59 |
+| dsa_keygen_1024                  |      63.72 |    ±4.807 |    30 |
+| dsa_sign_1024                    |      0.337 |  ±0.01255 |    30 |
+| dsa_verify_1024                  |     0.5616 |  ±0.02014 |    60 |
+| paillier_keygen_1024             |      18.27 |   ±0.7715 |    30 |
+| paillier_encrypt_1024            |      6.745 |   ±0.2284 |    39 |
+| paillier_decrypt_1024            |      2.572 |  ±0.01267 |    35 |
+| paillier_rerandomize_1024        |      4.268 | ±0.009538 |    30 |
+| paillier_add_1024                |    0.07551 | ±0.0003555 |    60 |
+| cocks_keygen_1024                |      15.43 |    ±1.539 |    30 |
+| cocks_encrypt_1024               |     0.9039 |  ±0.05782 |    39 |
+| cocks_decrypt_1024               |     0.1583 | ±0.008898 |    50 |
+| rabin_keygen_1024                |      25.06 |     ±3.11 |    32 |
+| rabin_encrypt_1024               |    0.02779 | ±0.002704 |    30 |
+| rabin_decrypt_1024               |      1.072 |  ±0.02146 |    60 |
+| schmidt_samoa_keygen_1024        |       6.67 |   ±0.3048 |    80 |
+| schmidt_samoa_encrypt_1024       |     0.9123 |  ±0.04991 |    30 |
+| schmidt_samoa_decrypt_1024       |     0.2634 |  ±0.02192 |    30 |
 
-#### Prime-order subgroup over `Z_p^*` (1024-bit)
-
-| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
-|----------------------------------|------------|------------|-------|
-| elgamal_keygen_1024              |       58.1 |    ±3.336 |    30 |
-| elgamal_encrypt_1024             |     0.4887 |  ±0.02442 |    43 |
-| elgamal_decrypt_1024             |      0.259 |  ±0.01043 |    33 |
-| dsa_keygen_1024                  |      64.04 |    ±2.095 |    30 |
-| dsa_sign_1024                    |       0.35 |  ±0.02386 |    30 |
-| dsa_verify_1024                  |     0.5675 | ±0.004447 |    30 |
-
-#### Composite-modulus schemes (1024-bit)
-
-| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
-|----------------------------------|------------|------------|-------|
-| paillier_keygen_1024             |      19.24 |    ±1.032 |    49 |
-| paillier_encrypt_1024            |       6.72 |  ±0.04294 |    45 |
-| paillier_decrypt_1024            |      2.654 |   ±0.1315 |    30 |
-| paillier_rerandomize_1024        |      4.378 |  ±0.03942 |    30 |
-| paillier_add_1024                |    0.07714 | ±0.0005552 |    70 |
-| cocks_keygen_1024                |      15.02 |   ±0.6039 |    30 |
-| cocks_encrypt_1024               |     0.9201 |  ±0.05472 |    30 |
-| cocks_decrypt_1024               |     0.1564 | ±0.008068 |    33 |
-| rabin_keygen_1024                |      23.58 |    ±1.493 |    60 |
-| rabin_encrypt_1024               |    0.02733 | ±0.0004724 |    30 |
-| rabin_decrypt_1024               |      1.115 |  ±0.02283 |    60 |
-| schmidt_samoa_keygen_1024        |      6.659 |   ±0.3017 |    30 |
-| schmidt_samoa_encrypt_1024       |     0.9439 |  ±0.06916 |    30 |
-| schmidt_samoa_decrypt_1024       |      0.265 |  ±0.02131 |    30 |
-
-#### RSA (2048-bit)
+### RSA (2048-bit)
 
 | Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| rsa_keygen_2048                  |      193.2 |    ±12.11 |    60 |
-| rsa_encrypt_2048                 |     0.1081 | ±0.001295 |    30 |
-| rsa_decrypt_2048                 |      5.521 |  ±0.06797 |    31 |
-| rsa_sign_2048                    |      5.518 |   ±0.2137 |    38 |
-| rsa_verify_2048                  |     0.1079 | ±0.002602 |    32 |
+| rsa_keygen_2048                  |        187 |    ±10.51 |    30 |
+| rsa_encrypt_2048                 |     0.1056 | ±0.001139 |    30 |
+| rsa_decrypt_2048                 |      5.388 |  ±0.04582 |    32 |
+| rsa_sign_2048                    |      5.398 |  ±0.04561 |    35 |
+| rsa_verify_2048                  |     0.1056 | ±0.001179 |    60 |
 
-### Short-Weierstrass elliptic-curve schemes
-
-#### ECDSA / ECDH (P-256)
+### ECDSA / ECDH (P-256)
 
 | Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| ecdsa_keygen                     |      2.044 |   ±0.0371 |    30 |
-| ecdsa_sign                       |      2.161 | ±0.008399 |    47 |
-| ecdsa_verify                     |      4.115 |  ±0.01998 |    43 |
-| ecdh_keygen                      |      2.044 |  ±0.03762 |    30 |
-| ecdh_agree                       |      2.078 |   ±0.0149 |    30 |
-| ecdh_serialize                   |   7.86e-05 | ±6.779e-06 |    30 |
+| ecdsa_keygen                     |      2.021 |  ±0.05444 |    30 |
+| ecdsa_sign                       |      2.101 |  ±0.01505 |   120 |
+| ecdsa_verify                     |      4.006 |  ±0.01807 |    30 |
+| ecdh_keygen                      |      1.982 |  ±0.00955 |    41 |
+| ecdh_agree                       |      2.017 | ±0.008377 |    30 |
+| ecdh_serialize                   |  7.298e-05 | ±3.699e-06 |    93 |
 
-#### ECIES / EC ElGamal (P-256)
-
-| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
-|----------------------------------|------------|------------|-------|
-| ecies_keygen                     |      2.047 |  ±0.05624 |    30 |
-| ecies_encrypt                    |      4.011 |  ±0.02071 |    30 |
-| ecies_decrypt                    |      1.988 |   ±0.00974 |    70 |
-| ec_elgamal_keygen                |      2.041 |  ±0.03559 |    32 |
-| ec_elgamal_encrypt               |      4.158 |  ±0.01559 |    30 |
-| ec_elgamal_decrypt               |      2.032 |  ±0.01333 |    30 |
-
-### Twisted Edwards schemes
-
-#### Ed25519 / Edwards DH / Edwards ElGamal
+### ECIES / EC ElGamal (P-256)
 
 | Operation                        |   ms/op    | ±CI (95%)  | Runs  |
 |----------------------------------|------------|------------|-------|
-| ed25519_keygen                   |      2.042 |   ±0.0118 |    30 |
-| ed25519_sign                     |      1.035 |  ±0.01058 |    30 |
-| ed25519_verify                   |      3.229 |  ±0.02865 |    60 |
-| edwards_dh_keygen                |      1.916 |  ±0.01216 |    40 |
-| edwards_dh_agree                 |     0.9766 |  ±0.01412 |    60 |
-| edwards_dh_serialize             |  5.483e-05 | ±1.388e-06 |    30 |
-| edwards_elgamal_keygen           |      1.911 |   ±0.0131 |    30 |
-| edwards_elgamal_encrypt          |      2.023 |  ±0.02177 |    41 |
-| edwards_elgamal_decrypt          |      1.567 | ±0.009682 |    30 |
+| ecies_keygen                     |      2.006 |  ±0.06572 |    30 |
+| ecies_encrypt                    |      3.945 |  ±0.02763 |    60 |
+| ecies_decrypt                    |      1.934 | ±0.007443 |    60 |
+| ec_elgamal_keygen                |      1.997 |  ±0.05281 |    30 |
+| ec_elgamal_encrypt               |      4.056 |  ±0.01758 |    42 |
+| ec_elgamal_decrypt               |      1.988 |   ±0.0126 |   270 |
+
+### Ed25519 / Edwards DH / Edwards ElGamal
+
+| Operation                        |   ms/op    | ±CI (95%)  | Runs  |
+|----------------------------------|------------|------------|-------|
+| ed25519_keygen                   |      1.986 |  ±0.01006 |   123 |
+| ed25519_sign                     |      1.025 | ±0.008495 |   102 |
+| ed25519_verify                   |      3.322 |   ±0.0153 |    46 |
+| edwards_dh_keygen                |       1.97 |  ±0.01366 |   127 |
+| edwards_dh_agree                 |     0.9915 | ±0.007367 |    32 |
+| edwards_dh_serialize             |   5.59e-05 | ±3.336e-06 |    30 |
+| edwards_elgamal_keygen           |      1.974 |  ±0.01823 |   102 |
+| edwards_elgamal_encrypt          |      2.072 |  ±0.01631 |    30 |
+| edwards_elgamal_decrypt          |        1.6 |  ±0.01233 |    60 |
 
 The tables above are measured in milliseconds per operation. The radar charts
 below use the reciprocal view, plotting operations per second on a log scale so

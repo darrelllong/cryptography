@@ -22,13 +22,13 @@
   <line class="axis" x1="280" y1="235" x2="431.6" y2="322.5" />
   <line class="axis" x1="280" y1="235" x2="128.4" y2="322.5" />
 
-  <polygon points="280.0,114.4 340.1,269.7 173.7,296.4" fill="#0f766e" fill-opacity="0.18" stroke="#0f766e" stroke-width="2" />
+  <polygon points="280.0,112.9 341.2,270.3 171.9,297.4" fill="#0f766e" fill-opacity="0.18" stroke="#0f766e" stroke-width="2" />
   <rect x="20" y="540" width="14" height="14" rx="2" fill="#0f766e" />
   <text class="small" x="40" y="551">ECIES (P-256)</text>
-  <polygon points="280.0,114.2 337.8,268.3 175.1,295.6" fill="#1d4ed8" fill-opacity="0.18" stroke="#1d4ed8" stroke-width="2" />
+  <polygon points="280.0,112.6 339.4,269.3 173.7,296.4" fill="#1d4ed8" fill-opacity="0.18" stroke="#1d4ed8" stroke-width="2" />
   <rect x="20" y="562" width="14" height="14" rx="2" fill="#1d4ed8" />
   <text class="small" x="40" y="573">EC ElGamal (P-256)</text>
-  <polygon points="280.0,109.2 385.2,295.7 158.0,305.4" fill="#b45309" fill-opacity="0.18" stroke="#b45309" stroke-width="2" />
+  <polygon points="280.0,111.7 383.6,294.8 159.4,304.6" fill="#b45309" fill-opacity="0.18" stroke="#b45309" stroke-width="2" />
   <rect x="20" y="584" width="14" height="14" rx="2" fill="#b45309" />
   <text class="small" x="40" y="595">Edwards ElGamal</text>
 
