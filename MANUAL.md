@@ -25,7 +25,7 @@ use cryptography::{
 use cryptography::public_key::ec_edwards::ed25519;
 use cryptography::vt::{
     p256, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh,
-    ElGamal, Paillier, Rsa, RsaOaep, RsaPss,
+    ElGamal, MlKem, MlKemParameterSet, Paillier, Rsa, RsaOaep, RsaPss,
 };
 ```
 
@@ -1134,6 +1134,49 @@ Special DES-family constructors:
 ### Public-Key Surface
 
 #### Integer and finite-field types
+
+##### `MlKemParameterSet`
+
+- `MlKem512`, `MlKem768`, `MlKem1024`
+- `k()`
+- `public_key_len()`
+- `private_key_len()`
+- `ciphertext_len()`
+- `shared_secret_len()`
+
+##### `MlKemPublicKey`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+  - `to_key_blob()`, `from_key_blob(...)`
+
+##### `MlKemPrivateKey`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+  - `to_key_blob()`, `from_key_blob(...)`
+
+##### `MlKemCiphertext`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+
+##### `MlKemSharedSecret`
+
+- `to_wire_bytes()`
+- `from_wire_bytes(...)`
+
+##### `MlKem`
+
+- `keygen(params)` *(staged: arithmetic implementation pending)*
+- `encaps(public_key)` *(staged: arithmetic implementation pending)*
+- `decaps(private_key, ciphertext)` *(staged: arithmetic implementation pending)*
 
 ##### `RsaPublicKey`
 

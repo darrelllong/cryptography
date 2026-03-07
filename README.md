@@ -51,6 +51,12 @@ Supporting primitives:
 - Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
+Asymmetric work in progress:
+
+- ML-KEM (Kyber) integration scaffold under `cryptography::vt`:
+  `MlKem`, `MlKemParameterSet`, typed key/ciphertext containers, and strict
+  encoding validation. Arithmetic (`keygen`/`encaps`/`decaps`) is staged.
+
 Documentation:
 
 - [ANALYSIS.md](ANALYSIS.md): top-level overview, coverage, and experiment notes

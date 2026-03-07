@@ -99,6 +99,11 @@ make variable-time behavior explicit at import sites.
 - `SchmidtSamoa` — encryption
 - `Dh` — finite-field Diffie-Hellman key exchange
 
+### Post-quantum lattice schemes
+
+- `MlKem` (`ML-KEM-512/768/1024`) — key encapsulation mechanism (integration
+  scaffold present; arithmetic path staged)
+
 ### Short-Weierstrass elliptic-curve schemes
 
 - `Ecdh` — EC Diffie-Hellman key exchange (ANSI X9.63 / SEC 1)

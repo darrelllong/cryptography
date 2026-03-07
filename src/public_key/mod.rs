@@ -63,6 +63,7 @@ pub mod edwards_elgamal;
 pub mod elgamal;
 mod gf2m;
 mod io;
+pub mod ml_kem;
 pub mod paillier;
 pub mod primes;
 pub mod rabin;
