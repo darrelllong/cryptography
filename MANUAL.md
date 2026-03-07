@@ -29,6 +29,32 @@ use cryptography::vt::{
 };
 ```
 
+## Entropy Requirements
+
+This crate does **not** provide an operating-system entropy source.
+
+That is deliberate. If you use `CtrDrbgAes256`, key-generation APIs, randomized
+padding, or any other randomness-dependent operation, you must supply the seed
+material yourself from a high-entropy external source.
+
+What this means in practice:
+
+- `CtrDrbgAes256` is deterministic once seeded. A bad 48-byte seed gives bad
+  output forever until you reseed it correctly.
+- every `generate(rng, ...)` public-key API inherits the quality of the `rng`
+  you pass in
+- randomized schemes such as RSA OAEP, RSA PSS, ElGamal, Paillier
+  rerandomization, ECIES, ECDH key generation, ECDSA/DSA randomized signing,
+  and Edwards/EC key generation all depend on caller-supplied entropy
+- low-entropy seeds, repeated seeds, predictable seeds, or seeds derived from
+  clocks, PIDs, usernames, or other guessable values are cryptographic
+  failures, not merely quality issues
+
+The examples in this manual use fixed seed literals because the examples are
+also exercised by tests and need deterministic behavior. Those literals are
+for documentation only. Production callers must replace them with real external
+entropy before using any randomness-dependent API.
+
 ## API Conventions
 
 The public surface follows these naming rules:
@@ -47,7 +73,8 @@ The public surface follows these naming rules:
 
 ### Root-level practical DRBG
 
-The practical generator is `CtrDrbgAes256`, exported at the crate root.
+The practical generator is `CtrDrbgAes256`, exported at the crate root. It is a
+DRBG, not an entropy source.
 
 Key methods:
 
@@ -64,6 +91,8 @@ Example:
 ```rust
 use cryptography::{Csprng, CtrDrbgAes256};
 
+// Fixed seed for a reproducible example only.
+// Production code must replace this with high-entropy external seed material.
 let mut seed = [0x42u8; 48];
 let mut rng = CtrDrbgAes256::new_wiping(&mut seed);
 
@@ -90,6 +119,15 @@ They expose inherent byte-generation methods:
 - `fill_bytes(&mut [u8])`
 
 They are for study and experimentation, not as the crate's practical default.
+
+### Entropy checklist
+
+Before using `CtrDrbgAes256` or any public-key `generate(...)` API, make sure:
+
+- the seed came from a real external entropy source
+- the seed is not reused across machines, users, or runs
+- test/example literals never survive into deployment code
+- any reseed path is held to the same entropy standard as the initial seed
 
 ## Hash, XOF, and MAC
 
@@ -299,6 +337,58 @@ ctr.apply_keystream(&counter, &mut buf);
 assert_eq!(buf, b"plaintext");
 ```
 
+### Worked example: `encrypt_file` / `decrypt_file` with counter mode
+
+This is a minimal complete file-encryption example built directly from the
+surface API.
+
+Important caveat: `CTR` mode gives confidentiality only. It does **not**
+authenticate the ciphertext. In real deployments, pair this with a MAC or use
+`Gcm<Aes256>` instead unless a separate integrity layer already exists.
+
+```rust
+use std::fs;
+use std::path::Path;
+
+use cryptography::{Aes256, Ctr};
+
+fn encrypt_file(input: &Path, output: &Path, key: &[u8; 32], counter: &[u8; 16]) {
+    let ctr = Ctr::new(Aes256::new(key));
+    let mut data = fs::read(input).expect("read plaintext");
+    ctr.apply_keystream(counter, &mut data);
+    fs::write(output, data).expect("write ciphertext");
+}
+
+fn decrypt_file(input: &Path, output: &Path, key: &[u8; 32], counter: &[u8; 16]) {
+    let ctr = Ctr::new(Aes256::new(key));
+    let mut data = fs::read(input).expect("read ciphertext");
+    ctr.apply_keystream(counter, &mut data);
+    fs::write(output, data).expect("write plaintext");
+}
+```
+
+Round-trip usage:
+
+```rust
+use std::path::Path;
+
+let key = [0x11u8; 32];
+let counter = [0x22u8; 16];
+
+encrypt_file(
+    Path::new("plain.txt"),
+    Path::new("secret.bin"),
+    &key,
+    &counter,
+);
+decrypt_file(
+    Path::new("secret.bin"),
+    Path::new("roundtrip.txt"),
+    &key,
+    &counter,
+);
+```
+
 ### Stream ciphers
 
 The stream ciphers are byte-oriented inherent APIs rather than `BlockCipher`
@@ -357,7 +447,8 @@ assert!(stream.iter().any(|&b| b != 0));
 All public-key APIs live under `cryptography::vt`.
 
 ```rust
-use cryptography::vt::{p256, ed25519, Ecdsa, Ed25519, Rsa};
+use cryptography::public_key::ec_edwards::ed25519;
+use cryptography::vt::{p256, Ecdsa, Ed25519, Rsa};
 ```
 
 The public-key surface naturally splits into:
@@ -433,6 +524,7 @@ Example: RSA OAEP and PSS
 use cryptography::{CtrDrbgAes256, Sha256, Sha512};
 use cryptography::vt::{Rsa, RsaOaep, RsaPss};
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[7u8; 48]);
 let (public, private) = Rsa::generate(&mut rng, 1024).expect("rsa");
 
@@ -470,6 +562,7 @@ Example:
 use cryptography::CtrDrbgAes256;
 use cryptography::vt::Dh;
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[9u8; 48]);
 let params = Dh::generate_params(&mut rng, 256).expect("params");
 let (pub_a, priv_a) = Dh::generate(&params, &mut rng);
@@ -505,6 +598,7 @@ Example:
 use cryptography::{CtrDrbgAes256, Sha256};
 use cryptography::vt::Dsa;
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[3u8; 48]);
 let (public, private) = Dsa::generate(&mut rng, 1024).expect("dsa");
 
@@ -531,6 +625,7 @@ Example: Paillier homomorphic addition
 use cryptography::CtrDrbgAes256;
 use cryptography::vt::{BigUint, Paillier};
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[5u8; 48]);
 let (public, private) = Paillier::generate(&mut rng, 256).expect("paillier");
 
@@ -581,6 +676,7 @@ Example:
 use cryptography::CtrDrbgAes256;
 use cryptography::vt::{p256, Ecdh};
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[1u8; 48]);
 let (pub_a, priv_a) = Ecdh::generate(p256(), &mut rng);
 let (pub_b, priv_b) = Ecdh::generate(p256(), &mut rng);
@@ -619,6 +715,7 @@ Example:
 use cryptography::{CtrDrbgAes256, Sha256};
 use cryptography::vt::{p256, Ecdsa};
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[2u8; 48]);
 let (public, private) = Ecdsa::generate(p256(), &mut rng);
 
@@ -648,6 +745,7 @@ Example:
 use cryptography::CtrDrbgAes256;
 use cryptography::vt::{p256, Ecies};
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[4u8; 48]);
 let (public, private) = Ecies::generate(p256(), &mut rng);
 
@@ -727,6 +825,7 @@ Example:
 use cryptography::CtrDrbgAes256;
 use cryptography::vt::Ed25519;
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[6u8; 48]);
 let (public, private) = Ed25519::generate(&mut rng);
 
@@ -758,8 +857,10 @@ Example:
 
 ```rust
 use cryptography::{CtrDrbgAes256, Sha512};
-use cryptography::vt::{ed25519, EdDsa};
+use cryptography::public_key::ec_edwards::ed25519;
+use cryptography::vt::EdDsa;
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[8u8; 48]);
 let (public, private) = EdDsa::generate(ed25519(), &mut rng);
 
@@ -783,8 +884,10 @@ Example:
 
 ```rust
 use cryptography::CtrDrbgAes256;
-use cryptography::vt::{ed25519, EdwardsDh};
+use cryptography::public_key::ec_edwards::ed25519;
+use cryptography::vt::EdwardsDh;
 
+// Fixed seed for a deterministic example only.
 let mut rng = CtrDrbgAes256::new(&[10u8; 48]);
 let (pub_a, priv_a) = EdwardsDh::generate(ed25519(), &mut rng);
 let (pub_b, priv_b) = EdwardsDh::generate(ed25519(), &mut rng);

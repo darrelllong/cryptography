@@ -4,7 +4,7 @@
 # makes Pilot the preferred path for CI-backed numbers in ASYMMETRIC.md.
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
 PK="${PILOT_PK_BIN:-$ROOT_DIR/target/release/pilot_pk}"
 

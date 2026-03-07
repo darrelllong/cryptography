@@ -922,7 +922,7 @@ Public-key timing is measured with [pilot-bench](https://github.com/ascar-io/pil
 driving `pilot_pk` through:
 
 ```text
-bash bench_all_pk_full.sh
+bash scripts/bench_all_pk_full.sh
 ```
 
 The legacy `bench_public_key` binary remains useful as a fixed-iteration

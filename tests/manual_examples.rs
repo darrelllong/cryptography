@@ -46,6 +46,20 @@ fn decrypt_file(input: &Path, output: &Path, key: &[u8; 32], nonce: &[u8; 12], a
     fs::write(output, data).expect("write plaintext");
 }
 
+fn encrypt_file_ctr(input: &Path, output: &Path, key: &[u8; 32], counter: &[u8; 16]) {
+    let ctr = Ctr::new(Aes256::new(key));
+    let mut data = fs::read(input).expect("read plaintext");
+    ctr.apply_keystream(counter, &mut data);
+    fs::write(output, data).expect("write ciphertext");
+}
+
+fn decrypt_file_ctr(input: &Path, output: &Path, key: &[u8; 32], counter: &[u8; 16]) {
+    let ctr = Ctr::new(Aes256::new(key));
+    let mut data = fs::read(input).expect("read ciphertext");
+    ctr.apply_keystream(counter, &mut data);
+    fs::write(output, data).expect("write plaintext");
+}
+
 #[test]
 fn manual_csprng_hash_xof_and_mac_examples() {
     let mut seed = [0x42u8; 48];
@@ -118,6 +132,35 @@ fn manual_symmetric_examples() {
 
     let roundtrip = fs::read(&roundtrip_path).expect("read roundtrip");
     assert_eq!(roundtrip, b"file encryption example");
+
+    let _ = fs::remove_file(&plaintext_path);
+    let _ = fs::remove_file(&ciphertext_path);
+    let _ = fs::remove_file(&roundtrip_path);
+}
+
+#[test]
+fn manual_ctr_file_roundtrip_example() {
+    let plaintext_path = temp_path("ctr-plain.bin");
+    let ciphertext_path = temp_path("ctr-cipher.bin");
+    let roundtrip_path = temp_path("ctr-roundtrip.bin");
+
+    fs::write(&plaintext_path, b"counter mode file example").expect("write input");
+
+    encrypt_file_ctr(
+        &plaintext_path,
+        &ciphertext_path,
+        &[0x11u8; 32],
+        &[0x22u8; 16],
+    );
+    decrypt_file_ctr(
+        &ciphertext_path,
+        &roundtrip_path,
+        &[0x11u8; 32],
+        &[0x22u8; 16],
+    );
+
+    let roundtrip = fs::read(&roundtrip_path).expect("read roundtrip");
+    assert_eq!(roundtrip, b"counter mode file example");
 
     let _ = fs::remove_file(&plaintext_path);
     let _ = fs::remove_file(&ciphertext_path);

@@ -71,8 +71,8 @@ can drive them with `run_program`.
 ### Step 3 — run the suites
 
 ```bash
-bash bench_all.sh        # all symmetric ciphers — throughput (MB/s)
-bash bench_all_pk.sh     # EC / Edwards operations — latency (ms/op)
+bash scripts/bench_all.sh        # all symmetric ciphers — throughput (MB/s)
+bash scripts/bench_all_pk.sh     # EC / Edwards operations — latency (ms/op)
 ```
 
 Each script emits Markdown tables ready to paste into the docs.
