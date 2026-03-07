@@ -80,12 +80,9 @@ These provide integrity and authenticity, not signatures or non-repudiation.
 
 Implemented generators:
 
-- `BlumBlumShub`
-- `BlumMicali`
 - `CtrDrbgAes256`
 
-The first two are intentionally historical / reference generators. The
-standards-track generator is `CtrDrbgAes256`, which follows SP 800-90A Rev. 1
+The shipped generator is `CtrDrbgAes256`, which follows SP 800-90A Rev. 1
 CTR_DRBG with AES-256.
 
 ## Cipher Families

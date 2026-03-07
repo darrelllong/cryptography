@@ -103,23 +103,6 @@ let counter = rng.next_u64();
 assert_ne!(counter, 0);
 ```
 
-### Historical reference generators
-
-The historical generators are available from the `cprng` module rather than
-the crate root:
-
-- `cryptography::cprng::blum_blum_shub::BlumBlumShub`
-- `cryptography::cprng::blum_micali::BlumMicali`
-
-They expose inherent byte-generation methods:
-
-- `new(...)`
-- `state()`
-- `next_bit()`
-- `fill_bytes(&mut [u8])`
-
-They are for study and experimentation, not as the crate's practical default.
-
 ### Entropy checklist
 
 Before using `CtrDrbgAes256` or any public-key `generate(...)` API, make sure:
@@ -968,16 +951,6 @@ methods rather than implementation internals.
   - `next_u64()` via `Csprng`
 - state inspection:
   - `reseed_counter()`
-
-#### `BlumBlumShub` and `BlumMicali`
-
-- constructors:
-  - `new(...)`
-- inspection:
-  - `state()`
-- output:
-  - `next_bit()`
-  - `fill_bytes(&mut [u8])`
 
 ### Hash and XOF Surface
 

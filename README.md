@@ -49,8 +49,6 @@ Supporting primitives:
 - SHA-3 (`Sha3_224/256/384/512`)
 - SHAKE (`Shake128`, `Shake256`)
 - Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`
-- Historical/reference CSPRNGs under `cryptography::cprng`: `BlumBlumShub`,
-  `BlumMicali`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
 Documentation:

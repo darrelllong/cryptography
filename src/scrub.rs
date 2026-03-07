@@ -62,11 +62,13 @@ mod tests {
     }
 
     #[test]
-    fn reference_generators_do_not_implement_csprng_trait() {
-        let bbs = include_str!("cprng/blum_blum_shub.rs");
-        let bm = include_str!("cprng/blum_micali.rs");
-        assert_none("blum_blum_shub.rs", bbs, &["impl Csprng for BlumBlumShub"]);
-        assert_none("blum_micali.rs", bm, &["impl Csprng for BlumMicali"]);
+    fn removed_reference_generators_do_not_reappear() {
+        let cprng_mod = include_str!("cprng/mod.rs");
+        assert_none(
+            "cprng/mod.rs",
+            cprng_mod,
+            &["blum_blum_shub", "blum_micali"],
+        );
     }
 
     #[test]

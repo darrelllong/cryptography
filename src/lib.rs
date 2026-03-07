@@ -1,4 +1,4 @@
-//! Classical and modern block ciphers, stream ciphers, and historical CSPRNGs
+//! Classical and modern block ciphers, stream ciphers, and DRBGs
 //! implemented in pure, safe, portable Rust directly from their published
 //! specifications.
 //!
@@ -31,11 +31,7 @@ pub trait BlockCipher {
     fn decrypt(&self, block: &mut [u8]);
 }
 
-/// Common interface for byte-oriented CSPRNGs.
-///
-/// Historical generators like Blum Blum Shub and Blum-Micali naturally emit
-/// one bit at a time, but the public API is byte-oriented so later generators
-/// can share the same trait.
+/// Common interface for byte-oriented CSPRNG/DRBG outputs.
 pub trait Csprng {
     /// Fill `out` with pseudorandom bytes.
     fn fill_bytes(&mut self, out: &mut [u8]);
