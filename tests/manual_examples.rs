@@ -2,14 +2,14 @@ use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cryptography::{
-    Aes128, Aes256, Cbc, Cmac, Csprng, Ctr, CtrDrbgAes256, Gcm, Gmac, Hmac, Sha256, Sha512,
-    Shake256, Xof, ChaCha20, Rabbit, Snow3g,
-};
 use cryptography::public_key::ec_edwards::ed25519;
 use cryptography::vt::{
-    p256, BigUint, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh, ElGamal,
-    Paillier, Rsa, RsaOaep, RsaPss,
+    p256, BigUint, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh, ElGamal, Paillier, Rsa,
+    RsaOaep, RsaPss,
+};
+use cryptography::{
+    Aes128, Aes256, Cbc, ChaCha20, Cmac, Csprng, Ctr, CtrDrbgAes256, Gcm, Gmac, Hmac, Rabbit,
+    Sha256, Sha512, Shake256, Snow3g, Xof,
 };
 
 fn temp_path(name: &str) -> std::path::PathBuf {
@@ -222,13 +222,17 @@ fn manual_finite_field_examples() {
     assert_eq!(dh_shared_a, dh_shared_b);
 
     let (dsa_public, dsa_private) = Dsa::generate(&mut rng, 512).expect("dsa");
-    let dsa_sig = dsa_private.sign_message::<Sha256>(b"dsa message").expect("dsa sign");
+    let dsa_sig = dsa_private
+        .sign_message::<Sha256>(b"dsa message")
+        .expect("dsa sign");
     assert!(dsa_public.verify_message::<Sha256>(b"dsa message", &dsa_sig));
     let dsa_blob = dsa_sig.to_key_blob();
     assert!(dsa_public.verify_message_bytes::<Sha256>(b"dsa message", &dsa_blob));
 
     let (elg_public, elg_private) = ElGamal::generate(&mut rng, 256).expect("elgamal");
-    let elg_cipher = elg_public.encrypt(b"elgamal", &mut rng).expect("elgamal encrypt");
+    let elg_cipher = elg_public
+        .encrypt(b"elgamal", &mut rng)
+        .expect("elgamal encrypt");
     let elg_plain = elg_private.decrypt(&elg_cipher);
     assert_eq!(elg_plain, b"elgamal");
     let elg_ct_blob = elg_cipher.to_key_blob();
@@ -261,8 +265,8 @@ fn manual_ec_examples() {
     assert_eq!(ecdh_shared_a, ecdh_shared_b);
 
     let ecdh_wire = ecdh_pub_a.to_wire_bytes();
-    let ecdh_round = cryptography::vt::EcdhPublicKey::from_wire_bytes(p256(), &ecdh_wire)
-        .expect("ecdh wire");
+    let ecdh_round =
+        cryptography::vt::EcdhPublicKey::from_wire_bytes(p256(), &ecdh_wire).expect("ecdh wire");
     assert_eq!(ecdh_round.public_point(), ecdh_pub_a.public_point());
 
     let (ecdsa_public, ecdsa_private) = Ecdsa::generate(p256(), &mut rng);

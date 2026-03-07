@@ -8,7 +8,7 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
+use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
@@ -24,6 +24,7 @@ const SCHMIDT_SAMOA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PRIVATE KE
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SchmidtSamoaPublicKey {
     n: BigUint,
+    n_ctx: Option<MontgomeryCtx>,
 }
 
 /// Private key for the Schmidt-Samoa primitive.
@@ -31,6 +32,7 @@ pub struct SchmidtSamoaPublicKey {
 pub struct SchmidtSamoaPrivateKey {
     d: BigUint,
     gamma: BigUint,
+    gamma_ctx: Option<MontgomeryCtx>,
 }
 
 /// Namespace wrapper for the Schmidt-Samoa construction.
@@ -60,7 +62,11 @@ impl SchmidtSamoaPublicKey {
     /// interpreted in the range `[0, gamma)`, where `gamma = p q`.
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
-        mod_pow(message, &self.n, &self.n)
+        if let Some(ctx) = &self.n_ctx {
+            ctx.pow(message, &self.n)
+        } else {
+            mod_pow(message, &self.n, &self.n)
+        }
     }
 
     /// Encrypt a byte string using the conservative public plaintext bound.
@@ -94,7 +100,8 @@ impl SchmidtSamoaPublicKey {
         if fields.next().is_some() || n <= BigUint::one() {
             return None;
         }
-        Some(Self { n })
+        let n_ctx = MontgomeryCtx::new(&n);
+        Some(Self { n, n_ctx })
     }
 
     /// Encode the public key in PEM using the crate-defined label.
@@ -124,7 +131,8 @@ impl SchmidtSamoaPublicKey {
         if fields.next().is_some() || n <= BigUint::one() {
             return None;
         }
-        Some(Self { n })
+        let n_ctx = MontgomeryCtx::new(&n);
+        Some(Self { n, n_ctx })
     }
 }
 
@@ -147,7 +155,11 @@ impl SchmidtSamoaPrivateKey {
     /// the range `[0, gamma)`.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
-        mod_pow(ciphertext, &self.d, &self.gamma)
+        if let Some(ctx) = &self.gamma_ctx {
+            ctx.pow(ciphertext, &self.d)
+        } else {
+            mod_pow(ciphertext, &self.d, &self.gamma)
+        }
     }
 
     /// Decrypt a ciphertext back into the big-endian byte string that was
@@ -183,7 +195,12 @@ impl SchmidtSamoaPrivateKey {
         if fields.next().is_some() || d.is_zero() || gamma <= BigUint::one() {
             return None;
         }
-        Some(Self { d, gamma })
+        let gamma_ctx = MontgomeryCtx::new(&gamma);
+        Some(Self {
+            d,
+            gamma,
+            gamma_ctx,
+        })
     }
 
     /// Encode the private key in PEM using the crate-defined label.
@@ -217,7 +234,12 @@ impl SchmidtSamoaPrivateKey {
         if fields.next().is_some() || d.is_zero() || gamma <= BigUint::one() {
             return None;
         }
-        Some(Self { d, gamma })
+        let gamma_ctx = MontgomeryCtx::new(&gamma);
+        Some(Self {
+            d,
+            gamma,
+            gamma_ctx,
+        })
     }
 }
 
@@ -256,9 +278,15 @@ impl SchmidtSamoa {
         let n = p_squared.mul_ref(q);
         let d = mod_inverse(&n, &lambda)?;
 
+        let n_ctx = MontgomeryCtx::new(&n);
+        let gamma_ctx = MontgomeryCtx::new(&gamma);
         Some((
-            SchmidtSamoaPublicKey { n },
-            SchmidtSamoaPrivateKey { d, gamma },
+            SchmidtSamoaPublicKey { n, n_ctx },
+            SchmidtSamoaPrivateKey {
+                d,
+                gamma,
+                gamma_ctx,
+            },
         ))
     }
 

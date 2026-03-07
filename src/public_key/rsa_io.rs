@@ -11,7 +11,6 @@
 
 use crate::public_key::bigint::BigUint;
 use crate::public_key::io::{pem_unwrap, pem_wrap, xml_unwrap, xml_wrap};
-use crate::public_key::primes::mod_inverse;
 use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
 
 const RSA_ENCRYPTION_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
@@ -143,17 +142,9 @@ impl RsaPrivateKey {
     ///
     /// # Panics
     ///
-    /// Panics only if the stored RSA factors are internally inconsistent and
-    /// `q` is no longer invertible modulo `p`.
+    /// Panics only if the cached CRT values are internally inconsistent.
     #[must_use]
     pub fn to_pkcs1_der(&self) -> Vec<u8> {
-        let p_minus_one = self.prime1().sub_ref(&BigUint::one());
-        let q_minus_one = self.prime2().sub_ref(&BigUint::one());
-        let d_p = self.exponent().modulo(&p_minus_one);
-        let d_q = self.exponent().modulo(&q_minus_one);
-        let q_inv =
-            mod_inverse(self.prime2(), self.prime1()).expect("distinct RSA primes are invertible");
-
         let mut body = Vec::new();
         body.extend(der_integer_u8(0));
         body.extend(der_integer_biguint(self.modulus()));
@@ -161,9 +152,9 @@ impl RsaPrivateKey {
         body.extend(der_integer_biguint(self.exponent()));
         body.extend(der_integer_biguint(self.prime1()));
         body.extend(der_integer_biguint(self.prime2()));
-        body.extend(der_integer_biguint(&d_p));
-        body.extend(der_integer_biguint(&d_q));
-        body.extend(der_integer_biguint(&q_inv));
+        body.extend(der_integer_biguint(self.crt_exponent1()));
+        body.extend(der_integer_biguint(self.crt_exponent2()));
+        body.extend(der_integer_biguint(self.crt_coefficient()));
         der_sequence(&body)
     }
 
@@ -245,14 +236,10 @@ impl RsaPrivateKey {
             return None;
         }
 
-        let p_minus_one = prime1.sub_ref(&BigUint::one());
-        let q_minus_one = prime2.sub_ref(&BigUint::one());
-        if exponent1 != private_exponent.modulo(&p_minus_one)
-            || exponent2 != private_exponent.modulo(&q_minus_one)
-        {
+        if exponent1 != *private.crt_exponent1() || exponent2 != *private.crt_exponent2() {
             return None;
         }
-        if coefficient != mod_inverse(&prime2, &prime1)? {
+        if coefficient != *private.crt_coefficient() {
             return None;
         }
 

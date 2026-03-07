@@ -33,6 +33,14 @@ pub struct RabinPrivateKey {
     n: BigUint,
     p: BigUint,
     q: BigUint,
+    p_exponent: BigUint,
+    q_exponent: BigUint,
+    p_coeff: Option<BigUint>,
+    q_coeff: Option<BigUint>,
+    p_ctx: Option<MontgomeryCtx>,
+    q_ctx: Option<MontgomeryCtx>,
+    n_ctx: Option<MontgomeryCtx>,
+    half_n: BigUint,
 }
 
 /// Namespace wrapper for the Rabin construction.
@@ -121,6 +129,30 @@ impl RabinPublicKey {
 }
 
 impl RabinPrivateKey {
+    fn from_components(n: BigUint, p: BigUint, q: BigUint) -> Self {
+        let p_exponent = p.add_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
+        let q_exponent = q.add_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
+        let p_coeff = mod_inverse(&p, &q);
+        let q_coeff = mod_inverse(&q, &p);
+        let p_ctx = MontgomeryCtx::new(&p);
+        let q_ctx = MontgomeryCtx::new(&q);
+        let n_ctx = MontgomeryCtx::new(&n);
+        let half_n = half_modulus(&n);
+        Self {
+            n,
+            p,
+            q,
+            p_exponent,
+            q_exponent,
+            p_coeff,
+            q_coeff,
+            p_ctx,
+            q_ctx,
+            n_ctx,
+            half_n,
+        }
+    }
+
     /// Return the first Rabin prime.
     #[must_use]
     pub fn p(&self) -> &BigUint {
@@ -137,31 +169,27 @@ impl RabinPrivateKey {
     /// of the four square roots carries the embedded disambiguation tag.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> Option<BigUint> {
-        let half = half_modulus(&self.n);
         let tag_modulus = BigUint::from_u64(1u64 << 32);
+        let m_p = if let Some(ctx) = &self.p_ctx {
+            ctx.pow(ciphertext, &self.p_exponent)
+        } else {
+            mod_pow(ciphertext, &self.p_exponent, &self.p)
+        };
+        let m_q = if let Some(ctx) = &self.q_ctx {
+            ctx.pow(ciphertext, &self.q_exponent)
+        } else {
+            mod_pow(ciphertext, &self.q_exponent, &self.q)
+        };
 
-        let p_exponent = self
-            .p
-            .add_ref(&BigUint::one())
-            .div_rem(&BigUint::from_u64(4))
-            .0;
-        let q_exponent = self
-            .q
-            .add_ref(&BigUint::one())
-            .div_rem(&BigUint::from_u64(4))
-            .0;
-        let m_p = mod_pow(ciphertext, &p_exponent, &self.p);
-        let m_q = mod_pow(ciphertext, &q_exponent, &self.q);
-
-        let p_coeff = mod_inverse(&self.p, &self.q)?;
-        let q_coeff = mod_inverse(&self.q, &self.p)?;
+        let p_coeff = self.p_coeff.as_ref()?;
+        let q_coeff = self.q_coeff.as_ref()?;
         // Standard CRT lifting: rebuild the root that is congruent to `m_p`
         // modulo `p` and to `m_q` modulo `q`.
         // Valid Rabin keys always have an odd modulus, so the Montgomery path
         // is the normal case here.
-        let ctx = MontgomeryCtx::new(&self.n)?;
-        let term_from_q = ctx.mul(&ctx.mul(&p_coeff, &self.p), &m_q);
-        let term_from_p = ctx.mul(&ctx.mul(&q_coeff, &self.q), &m_p);
+        let ctx = self.n_ctx.as_ref()?;
+        let term_from_q = ctx.mul(&ctx.mul(p_coeff, &self.p), &m_q);
+        let term_from_p = ctx.mul(&ctx.mul(q_coeff, &self.q), &m_p);
 
         let x = term_from_q.add_ref(&term_from_p).modulo(&self.n);
         let y = sub_mod(&term_from_q, &term_from_p, &self.n);
@@ -174,11 +202,11 @@ impl RabinPrivateKey {
         ] {
             // The encoder added `n / 2`, so the intended root is the one that
             // lands in the upper half of the residue range.
-            if root < half {
+            if root < self.half_n {
                 continue;
             }
 
-            let candidate = root.sub_ref(&half);
+            let candidate = root.sub_ref(&self.half_n);
             if candidate.rem_u64(1u64 << 32) != u64::from(TAG) {
                 continue;
             }
@@ -232,7 +260,7 @@ impl RabinPrivateKey {
         if p.mul_ref(&q) != n {
             return None;
         }
-        Some(Self { n, p, q })
+        Some(Self::from_components(n, p, q))
     }
 
     /// Encode the private key in PEM using the crate-defined label.
@@ -274,7 +302,7 @@ impl RabinPrivateKey {
         if p.mul_ref(&q) != n {
             return None;
         }
-        Some(Self { n, p, q })
+        Some(Self::from_components(n, p, q))
     }
 }
 
@@ -303,11 +331,7 @@ impl Rabin {
 
         Some((
             RabinPublicKey { n: n.clone() },
-            RabinPrivateKey {
-                n,
-                p: p.clone(),
-                q: q.clone(),
-            },
+            RabinPrivateKey::from_components(n, p.clone(), q.clone()),
         ))
     }
 

@@ -33,6 +33,14 @@ pub struct DsaPublicKey {
     g: BigUint,
     /// Public component `y = g^x mod p`.
     y: BigUint,
+    /// Cached Montgomery encoding of `g` modulo `p`.
+    g_mont: Option<BigUint>,
+    /// Cached Montgomery encoding of `y` modulo `p`.
+    y_mont: Option<BigUint>,
+    /// Cached Montgomery context for arithmetic modulo `p`.
+    p_ctx: Option<MontgomeryCtx>,
+    /// Cached Montgomery context for arithmetic modulo `q`.
+    q_ctx: Option<MontgomeryCtx>,
 }
 
 /// Private key for `DSA`.
@@ -48,6 +56,14 @@ pub struct DsaPrivateKey {
     x: BigUint,
     /// Cached public component `y = g^x mod p`.
     y: BigUint,
+    /// Cached Montgomery encoding of `g` modulo `p`.
+    g_mont: Option<BigUint>,
+    /// Cached Montgomery encoding of `y` modulo `p`.
+    y_mont: Option<BigUint>,
+    /// Cached Montgomery context for arithmetic modulo `p`.
+    p_ctx: Option<MontgomeryCtx>,
+    /// Cached Montgomery context for arithmetic modulo `q`.
+    q_ctx: Option<MontgomeryCtx>,
 }
 
 /// Raw `DSA` signature pair `(r, s)`.
@@ -117,12 +133,28 @@ impl DsaPublicKey {
         // `z = leftmost-N-bits(H(M)) mod q`, then `u1 = z * w mod q` and
         // `u2 = r * w mod q`.
         let z = hash.modulo(&self.q);
-        let u1 = BigUint::mod_mul(&z, &w, &self.q);
-        let u2 = BigUint::mod_mul(&signature.r, &w, &self.q);
+        let u1 = if let Some(ctx) = &self.q_ctx {
+            ctx.mul(&z, &w)
+        } else {
+            BigUint::mod_mul(&z, &w, &self.q)
+        };
+        let u2 = if let Some(ctx) = &self.q_ctx {
+            ctx.mul(&signature.r, &w)
+        } else {
+            BigUint::mod_mul(&signature.r, &w, &self.q)
+        };
 
-        let g_term = mod_pow(&self.g, &u1, &self.p);
-        let y_term = mod_pow(&self.y, &u2, &self.p);
-        let combined = if let Some(ctx) = MontgomeryCtx::new(&self.p) {
+        let g_term = if let (Some(ctx), Some(g_mont)) = (&self.p_ctx, &self.g_mont) {
+            ctx.pow_encoded(g_mont, &u1)
+        } else {
+            mod_pow(&self.g, &u1, &self.p)
+        };
+        let y_term = if let (Some(ctx), Some(y_mont)) = (&self.p_ctx, &self.y_mont) {
+            ctx.pow_encoded(y_mont, &u2)
+        } else {
+            mod_pow(&self.y, &u2, &self.p)
+        };
+        let combined = if let Some(ctx) = &self.p_ctx {
             ctx.mul(&g_term, &y_term)
         } else {
             BigUint::mod_mul(&g_term, &y_term, &self.p)
@@ -167,7 +199,20 @@ impl DsaPublicKey {
         {
             return None;
         }
-        Some(Self { p, q, g, y })
+        let p_ctx = MontgomeryCtx::new(&p);
+        let q_ctx = MontgomeryCtx::new(&q);
+        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
+        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&y));
+        Some(Self {
+            p,
+            q,
+            g,
+            y,
+            g_mont,
+            y_mont,
+            p_ctx,
+            q_ctx,
+        })
     }
 
     /// Encode the public key in PEM using the crate-defined label.
@@ -209,7 +254,20 @@ impl DsaPublicKey {
         {
             return None;
         }
-        Some(Self { p, q, g, y })
+        let p_ctx = MontgomeryCtx::new(&p);
+        let q_ctx = MontgomeryCtx::new(&q);
+        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
+        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&y));
+        Some(Self {
+            p,
+            q,
+            g,
+            y,
+            g_mont,
+            y_mont,
+            p_ctx,
+            q_ctx,
+        })
     }
 }
 
@@ -246,6 +304,10 @@ impl DsaPrivateKey {
             q: self.q.clone(),
             g: self.g.clone(),
             y: self.y.clone(),
+            g_mont: self.g_mont.clone(),
+            y_mont: self.y_mont.clone(),
+            p_ctx: self.p_ctx.clone(),
+            q_ctx: self.q_ctx.clone(),
         }
     }
 
@@ -264,15 +326,28 @@ impl DsaPrivateKey {
         }
 
         let z = digest_to_scalar(digest, &self.q);
-        let r = mod_pow(&self.g, nonce, &self.p).modulo(&self.q);
+        let r = if let (Some(ctx), Some(g_mont)) = (&self.p_ctx, &self.g_mont) {
+            ctx.pow_encoded(g_mont, nonce)
+        } else {
+            mod_pow(&self.g, nonce, &self.p)
+        }
+        .modulo(&self.q);
         if r.is_zero() {
             return None;
         }
 
         let nonce_inv = mod_inverse(nonce, &self.q)?;
-        let xr = BigUint::mod_mul(&self.x, &r, &self.q);
+        let xr = if let Some(ctx) = &self.q_ctx {
+            ctx.mul(&self.x, &r)
+        } else {
+            BigUint::mod_mul(&self.x, &r, &self.q)
+        };
         let sum = z.add_ref(&xr).modulo(&self.q);
-        let s = BigUint::mod_mul(&nonce_inv, &sum, &self.q);
+        let s = if let Some(ctx) = &self.q_ctx {
+            ctx.mul(&nonce_inv, &sum)
+        } else {
+            BigUint::mod_mul(&nonce_inv, &sum, &self.q)
+        };
         if s.is_zero() {
             return None;
         }
@@ -376,7 +451,21 @@ impl DsaPrivateKey {
             return None;
         }
         let y = mod_pow(&g, &x, &p);
-        Some(Self { p, q, g, x, y })
+        let p_ctx = MontgomeryCtx::new(&p);
+        let q_ctx = MontgomeryCtx::new(&q);
+        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
+        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&y));
+        Some(Self {
+            p,
+            q,
+            g,
+            x,
+            y,
+            g_mont,
+            y_mont,
+            p_ctx,
+            q_ctx,
+        })
     }
 
     /// Encode the private key in PEM using the crate-defined label.
@@ -418,7 +507,21 @@ impl DsaPrivateKey {
             return None;
         }
         let y = mod_pow(&g, &x, &p);
-        Some(Self { p, q, g, x, y })
+        let p_ctx = MontgomeryCtx::new(&p);
+        let q_ctx = MontgomeryCtx::new(&q);
+        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
+        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&y));
+        Some(Self {
+            p,
+            q,
+            g,
+            x,
+            y,
+            g_mont,
+            y_mont,
+            p_ctx,
+            q_ctx,
+        })
     }
 }
 
@@ -481,12 +584,20 @@ impl Dsa {
         }
 
         let public_component = mod_pow(generator, secret, prime);
+        let p_ctx = MontgomeryCtx::new(prime);
+        let q_ctx = MontgomeryCtx::new(subgroup_order);
+        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(generator));
+        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&public_component));
         Some((
             DsaPublicKey {
                 p: prime.clone(),
                 q: subgroup_order.clone(),
                 g: generator.clone(),
                 y: public_component.clone(),
+                g_mont: g_mont.clone(),
+                y_mont: y_mont.clone(),
+                p_ctx: p_ctx.clone(),
+                q_ctx: q_ctx.clone(),
             },
             DsaPrivateKey {
                 p: prime.clone(),
@@ -494,6 +605,10 @@ impl Dsa {
                 g: generator.clone(),
                 x: secret.clone(),
                 y: public_component.clone(),
+                g_mont,
+                y_mont,
+                p_ctx,
+                q_ctx,
             },
         ))
     }
@@ -504,12 +619,20 @@ impl Dsa {
         let (prime, subgroup_order, _cofactor, generator) = generate_prime_order_group(rng, bits)?;
         let secret = random_nonzero_below(rng, &subgroup_order)?;
         let public_component = mod_pow(&generator, &secret, &prime);
+        let p_ctx = MontgomeryCtx::new(&prime);
+        let q_ctx = MontgomeryCtx::new(&subgroup_order);
+        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&generator));
+        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&public_component));
         Some((
             DsaPublicKey {
                 p: prime.clone(),
                 q: subgroup_order.clone(),
                 g: generator.clone(),
                 y: public_component.clone(),
+                g_mont: g_mont.clone(),
+                y_mont: y_mont.clone(),
+                p_ctx: p_ctx.clone(),
+                q_ctx: q_ctx.clone(),
             },
             DsaPrivateKey {
                 p: prime,
@@ -517,6 +640,10 @@ impl Dsa {
                 g: generator,
                 x: secret,
                 y: public_component.clone(),
+                g_mont,
+                y_mont,
+                p_ctx,
+                q_ctx,
             },
         ))
     }

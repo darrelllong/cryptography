@@ -14,6 +14,10 @@ uses Montgomery multiplication for repeated modular arithmetic under odd
 moduli. That is the common case for every implemented public-key
 scheme here.
 
+Implementation references for multiplication-kernel upgrades are tracked in
+`pubs/comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf` and
+`pubs/karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`.
+
 The design goal is:
 
 - keep the arithmetic visible and auditable
@@ -229,11 +233,10 @@ RSA uses PKCS#1, PKCS#8, and SPKI-compatible encodings, so it interoperates
 with external tooling instead of relying on the crate-defined integer-sequence
 format used elsewhere.
 
-One practical caveat matters for the benchmark tables: the current private
-operation is still a direct `c^d mod n` exponentiation rather than a
-CRT-accelerated private path. So `decrypt` and `sign` are slower than a tuned
-production RSA implementation even though the public side already uses the
-standard sparse `e = 65,537`.
+One practical caveat matters for the benchmark tables: private operations now
+use CRT recombination (`dP`, `dQ`, `qInv`), which substantially reduces
+`decrypt`/`sign` latency, but the public side still remains much faster because
+it uses the standard sparse `e = 65,537`.
 
 #### ElGamal
 
@@ -931,9 +934,9 @@ milliseconds per operation, 95% confidence-interval half-width, and rounds
 required to hit the stop rule.
 
 For RSA specifically, the timing gap between `encrypt`/`verify` and
-`decrypt`/`sign` is expected in this codebase: the default keys use
-`e = 65,537`, and the current raw private operation is a direct `c^d mod n`
-exponentiation rather than a CRT-accelerated private path.
+`decrypt`/`sign` is still expected: the private side now uses CRT, but the
+public side continues to benefit from the sparse default exponent
+`e = 65,537`.
 
 ### Finite-field public key (1024-bit)
 

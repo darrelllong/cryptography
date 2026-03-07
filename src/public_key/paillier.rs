@@ -33,6 +33,10 @@ pub struct PaillierPublicKey {
     n_squared: BigUint,
     /// Public encryption base, typically `n + 1`.
     zeta: BigUint,
+    /// Cached Montgomery encoding of `zeta` modulo `n^2`.
+    zeta_mont: Option<BigUint>,
+    /// Cached Montgomery context for arithmetic modulo `n^2`.
+    n_squared_ctx: Option<MontgomeryCtx>,
 }
 
 /// Private key for the Paillier primitive.
@@ -50,6 +54,10 @@ pub struct PaillierPrivateKey {
     lambda: BigUint,
     /// Precomputed inverse of `L(zeta^lambda mod n^2)` modulo `n`.
     u: BigUint,
+    /// Cached Montgomery context for arithmetic modulo `n^2`.
+    n_squared_ctx: Option<MontgomeryCtx>,
+    /// Cached Montgomery context for arithmetic modulo `n`.
+    n_ctx: Option<MontgomeryCtx>,
 }
 
 /// Namespace wrapper for the Paillier construction.
@@ -89,14 +97,22 @@ impl PaillierPublicKey {
             return None;
         }
 
-        let left = mod_pow(&self.zeta, message, &self.n_squared);
-        let right = mod_pow(nonce, &self.n, &self.n_squared);
+        let left = if let (Some(ctx), Some(zeta_mont)) = (&self.n_squared_ctx, &self.zeta_mont) {
+            ctx.pow_encoded(zeta_mont, message)
+        } else {
+            mod_pow(&self.zeta, message, &self.n_squared)
+        };
+        let right = if let Some(ctx) = &self.n_squared_ctx {
+            ctx.pow(nonce, &self.n)
+        } else {
+            mod_pow(nonce, &self.n, &self.n_squared)
+        };
         // `n^2` is cached in the key so the hot path does not redo the same
         // public multiplication on every operation. Valid Paillier keys
         // always use odd `n`, so `n^2` stays on the Montgomery fast path.
         // Keep the slow path as a defensive fallback for malformed
         // caller-supplied state.
-        let product = if let Some(ctx) = MontgomeryCtx::new(&self.n_squared) {
+        let product = if let Some(ctx) = &self.n_squared_ctx {
             ctx.mul(&left, &right)
         } else {
             BigUint::mod_mul(&left, &right, &self.n_squared)
@@ -131,8 +147,12 @@ impl PaillierPublicKey {
         if ciphertext >= &self.n_squared {
             return None;
         }
-        let factor = mod_pow(&nonce, &self.n, &self.n_squared);
-        let product = if let Some(ctx) = MontgomeryCtx::new(&self.n_squared) {
+        let factor = if let Some(ctx) = &self.n_squared_ctx {
+            ctx.pow(&nonce, &self.n)
+        } else {
+            mod_pow(&nonce, &self.n, &self.n_squared)
+        };
+        let product = if let Some(ctx) = &self.n_squared_ctx {
             ctx.mul(ciphertext, &factor)
         } else {
             BigUint::mod_mul(ciphertext, &factor, &self.n_squared)
@@ -151,7 +171,7 @@ impl PaillierPublicKey {
         if lhs >= &self.n_squared || rhs >= &self.n_squared {
             return None;
         }
-        if let Some(ctx) = MontgomeryCtx::new(&self.n_squared) {
+        if let Some(ctx) = &self.n_squared_ctx {
             Some(ctx.mul(lhs, rhs))
         } else {
             Some(BigUint::mod_mul(lhs, rhs, &self.n_squared))
@@ -174,7 +194,15 @@ impl PaillierPublicKey {
             return None;
         }
         let n_squared = n.mul_ref(&n);
-        Some(Self { n, n_squared, zeta })
+        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
+        let zeta_mont = n_squared_ctx.as_ref().map(|ctx| ctx.encode(&zeta));
+        Some(Self {
+            n,
+            n_squared,
+            zeta,
+            zeta_mont,
+            n_squared_ctx,
+        })
     }
 
     /// Encode the public key in PEM using the crate-defined label.
@@ -206,7 +234,15 @@ impl PaillierPublicKey {
             return None;
         }
         let n_squared = n.mul_ref(&n);
-        Some(Self { n, n_squared, zeta })
+        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
+        let zeta_mont = n_squared_ctx.as_ref().map(|ctx| ctx.encode(&zeta));
+        Some(Self {
+            n,
+            n_squared,
+            zeta,
+            zeta_mont,
+            n_squared_ctx,
+        })
     }
 }
 
@@ -232,7 +268,11 @@ impl PaillierPrivateKey {
     /// Decrypt the raw ciphertext.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
-        let value = mod_pow(ciphertext, &self.lambda, &self.n_squared);
+        let value = if let Some(ctx) = &self.n_squared_ctx {
+            ctx.pow(ciphertext, &self.lambda)
+        } else {
+            mod_pow(ciphertext, &self.lambda, &self.n_squared)
+        };
         // Valid Paillier ciphertexts produce values of the form `1 + k*n`
         // here, so `L(value)` is defined and extracts the linear term that
         // still carries the plaintext. `u` was precomputed as
@@ -240,7 +280,7 @@ impl PaillierPrivateKey {
         // cancels the fixed `L(zeta^lambda)` factor left by the public base
         // and recovers the plaintext representative `m`.
         let lifted = paillier_l(&value, &self.n);
-        if let Some(ctx) = MontgomeryCtx::new(&self.n) {
+        if let Some(ctx) = &self.n_ctx {
             ctx.mul(&lifted, &self.u)
         } else {
             BigUint::mod_mul(&lifted, &self.u, &self.n)
@@ -287,11 +327,15 @@ impl PaillierPrivateKey {
             return None;
         }
         let n_squared = n.mul_ref(&n);
+        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
+        let n_ctx = MontgomeryCtx::new(&n);
         Some(Self {
             n,
             n_squared,
             lambda,
             u,
+            n_squared_ctx,
+            n_ctx,
         })
     }
 
@@ -333,11 +377,15 @@ impl PaillierPrivateKey {
             return None;
         }
         let n_squared = n.mul_ref(&n);
+        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
+        let n_ctx = MontgomeryCtx::new(&n);
         Some(Self {
             n,
             n_squared,
             lambda,
             u,
+            n_squared_ctx,
+            n_ctx,
         })
     }
 }
@@ -383,17 +431,24 @@ impl Paillier {
         let lifted = paillier_l(&mod_pow(&zeta, &lambda, &n_squared), &n);
         let u = mod_inverse(&lifted, &n)?;
 
+        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
+        let n_ctx = MontgomeryCtx::new(&n);
+        let zeta_mont = n_squared_ctx.as_ref().map(|ctx| ctx.encode(&zeta));
         Some((
             PaillierPublicKey {
                 n: n.clone(),
                 n_squared: n_squared.clone(),
                 zeta,
+                zeta_mont,
+                n_squared_ctx: n_squared_ctx.clone(),
             },
             PaillierPrivateKey {
                 n,
                 n_squared,
                 lambda,
                 u,
+                n_squared_ctx,
+                n_ctx,
             },
         ))
     }

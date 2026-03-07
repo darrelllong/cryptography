@@ -668,6 +668,7 @@ family and supporting primitive covered in this repository:
 - SHA-3 / SHAKE: `fips202.pdf`
 - HMAC: `fips198-1.pdf`
 - DRBGs: `sp800-90a-r1.pdf`
+- Bigint arithmetic kernels: `comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`, `karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
 - Public-key primitives and RSA standards: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`, `rfc8017-pkcs1-v2_2.pdf`, `sp800-56b-r2.pdf`, `fips186-5.pdf`
 - Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
@@ -837,6 +838,26 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year      = {2006},
   publisher = {Elsevier},
   doi       = {10.1016/j.entcs.2005.11.052},
+}
+
+@article{comba-1990,
+  author  = {Paul G. Comba},
+  title   = {Exponentiation Cryptosystems on the {IBM} {PC}},
+  journal = {{IBM} Systems Journal},
+  volume  = {29},
+  number  = {4},
+  pages   = {526--538},
+  year    = {1990},
+}
+
+@article{karatsuba-ofman-1963,
+  author  = {Anatolii A. Karatsuba and Yuri Ofman},
+  title   = {Multiplication of Multidigit Numbers on Automata},
+  journal = {Soviet Physics Doklady},
+  volume  = {7},
+  pages   = {595--596},
+  year    = {1963},
+  note    = {English translation of Doklady Akademii Nauk SSSR 145(2):293--294 (1962)},
 }
 
 @misc{sp800-38a,

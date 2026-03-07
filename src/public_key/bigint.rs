@@ -5,8 +5,15 @@
 //! schoolbook multiplication and bitwise long division are easy to audit and
 //! track the public-key formulas directly, while keeping the public-key layer
 //! fully in Rust with no external arithmetic backend.
+//!
+//! Local references for planned multiplication-kernel upgrades:
+//! - `pubs/comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`
+//! - `pubs/karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
 
 use core::cmp::Ordering;
+
+const KARATSUBA_THRESHOLD_LIMBS: usize = 32;
+const KARATSUBA_MAX_IMBALANCE: usize = 2;
 
 /// Sign of a [`BigInt`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -239,7 +246,7 @@ impl BigUint {
         } {
             let mut middle = low.add_ref(&high);
             middle.shr1();
-            let square = middle.mul_ref(&middle);
+            let square = middle.square_ref();
             if square <= *self {
                 low = middle;
             } else {
@@ -357,7 +364,7 @@ impl BigUint {
         out
     }
 
-    /// Multiply using schoolbook limb multiplication.
+    /// Multiply two big integers.
     ///
     /// # Panics
     ///
@@ -369,17 +376,87 @@ impl BigUint {
             return Self::zero();
         }
 
-        let mut out = vec![0u64; self.limbs.len() + other.limbs.len()];
-        for (i, &lhs) in self.limbs.iter().enumerate() {
+        if Self::should_use_karatsuba(self, other) {
+            return self.mul_karatsuba_ref(other);
+        }
+
+        Self::mul_schoolbook_ref(self, other)
+    }
+
+    /// Multiply a value by itself.
+    #[must_use]
+    pub fn square_ref(&self) -> Self {
+        self.mul_ref(self)
+    }
+
+    fn split_at_limb(&self, split: usize) -> (Self, Self) {
+        let low_end = split.min(self.limbs.len());
+        let mut low = Self {
+            limbs: self.limbs[..low_end].to_vec(),
+        };
+        low.normalize();
+
+        if split >= self.limbs.len() {
+            return (low, Self::zero());
+        }
+
+        let mut high = Self {
+            limbs: self.limbs[split..].to_vec(),
+        };
+        high.normalize();
+        (low, high)
+    }
+
+    fn should_use_karatsuba(lhs: &Self, rhs: &Self) -> bool {
+        let short = lhs.limbs.len().min(rhs.limbs.len());
+        let long = lhs.limbs.len().max(rhs.limbs.len());
+        short >= KARATSUBA_THRESHOLD_LIMBS && long <= short * KARATSUBA_MAX_IMBALANCE
+    }
+
+    fn mul_karatsuba_ref(&self, other: &Self) -> Self {
+        let split = self.limbs.len().max(other.limbs.len()) / 2;
+        if split == 0 {
+            return Self::mul_schoolbook_ref(self, other);
+        }
+
+        let (a0, a1) = self.split_at_limb(split);
+        let (b0, b1) = other.split_at_limb(split);
+        if a1.is_zero() || b1.is_zero() {
+            return Self::mul_schoolbook_ref(self, other);
+        }
+
+        let z0 = a0.mul_ref(&b0);
+        let z2 = a1.mul_ref(&b1);
+
+        let a_sum = a0.add_ref(&a1);
+        let b_sum = b0.add_ref(&b1);
+        let mut z1 = a_sum.mul_ref(&b_sum);
+        z1.sub_assign_ref(&z0);
+        z1.sub_assign_ref(&z2);
+
+        let mut out = z0;
+        z1.shl_bits(split * 64);
+        out.add_assign_ref(&z1);
+
+        let mut z2_shifted = z2;
+        z2_shifted.shl_bits(split * 128);
+        out.add_assign_ref(&z2_shifted);
+        out
+    }
+
+    fn mul_schoolbook_ref(lhs: &Self, rhs: &Self) -> Self {
+        let mut out = vec![0u64; lhs.limbs.len() + rhs.limbs.len()];
+        for (i, &lhs_limb) in lhs.limbs.iter().enumerate() {
             let mut carry = 0u128;
-            for (j, &rhs) in other.limbs.iter().enumerate() {
+            for (j, &rhs_limb) in rhs.limbs.iter().enumerate() {
                 let idx = i + j;
-                let acc = u128::from(out[idx]) + u128::from(lhs) * u128::from(rhs) + carry;
+                let acc =
+                    u128::from(out[idx]) + u128::from(lhs_limb) * u128::from(rhs_limb) + carry;
                 out[idx] = low_u64(acc);
                 carry = acc >> 64;
             }
 
-            let mut idx = i + other.limbs.len();
+            let mut idx = i + rhs.limbs.len();
             while carry != 0 {
                 let acc = u128::from(out[idx]) + carry;
                 out[idx] = low_u64(acc);
@@ -611,12 +688,23 @@ impl BigUint {
         self.limbs.get(idx).copied().unwrap_or(0)
     }
 
-    fn montgomery_mul_odd(lhs: &Self, rhs: &Self, modulus: &Self, n0_inv: u64) -> Self {
+    fn montgomery_mul_odd_with_workspace(
+        lhs: &Self,
+        rhs: &Self,
+        modulus: &Self,
+        n0_inv: u64,
+        workspace: &mut Vec<u64>,
+    ) -> Self {
         debug_assert!(modulus.is_odd(), "Montgomery path requires an odd modulus");
         let width = modulus.limbs.len();
         // `2 * width` limbs hold the schoolbook product. The extra two limbs
         // are carry headroom so neither pass can run off the end.
-        let mut workspace = vec![0u64; width * 2 + 2];
+        let needed = width * 2 + 2;
+        if workspace.len() != needed {
+            workspace.resize(needed, 0);
+        } else {
+            workspace.fill(0);
+        }
 
         // First pass: accumulate the ordinary product `lhs * rhs`.
         for i in 0..width {
@@ -681,6 +769,65 @@ impl BigUint {
 }
 
 impl MontgomeryCtx {
+    fn encode_with_workspace(&self, value: &BigUint, workspace: &mut Vec<u64>) -> BigUint {
+        if value.is_zero() {
+            return BigUint::zero();
+        }
+
+        BigUint::montgomery_mul_odd_with_workspace(
+            &value.modulo(&self.modulus),
+            &self.r2_mod,
+            &self.modulus,
+            self.n0_inv,
+            workspace,
+        )
+    }
+
+    fn decode_with_workspace(&self, value: &BigUint, workspace: &mut Vec<u64>) -> BigUint {
+        BigUint::montgomery_mul_odd_with_workspace(
+            value,
+            &BigUint::one(),
+            &self.modulus,
+            self.n0_inv,
+            workspace,
+        )
+    }
+
+    fn pow_encoded_with_workspace(
+        &self,
+        base_mont: &BigUint,
+        exponent: &BigUint,
+        workspace: &mut Vec<u64>,
+    ) -> BigUint {
+        if self.modulus == BigUint::one() {
+            return BigUint::zero();
+        }
+
+        let mut result = self.one_mont.clone();
+        let mut power = base_mont.clone();
+
+        for bit in 0..exponent.bits() {
+            if exponent.bit(bit) {
+                result = BigUint::montgomery_mul_odd_with_workspace(
+                    &result,
+                    &power,
+                    &self.modulus,
+                    self.n0_inv,
+                    workspace,
+                );
+            }
+            power = BigUint::montgomery_mul_odd_with_workspace(
+                &power,
+                &power,
+                &self.modulus,
+                self.n0_inv,
+                workspace,
+            );
+        }
+
+        self.decode_with_workspace(&result, workspace)
+    }
+
     /// Build a Montgomery context for a non-zero odd modulus.
     #[must_use]
     pub fn new(modulus: &BigUint) -> Option<Self> {
@@ -721,73 +868,64 @@ impl MontgomeryCtx {
     /// Convert an ordinary residue into Montgomery form.
     #[must_use]
     pub fn encode(&self, value: &BigUint) -> BigUint {
-        if value.is_zero() {
-            return BigUint::zero();
-        }
-
-        // `a * R^2 * R^-1 = aR`, which is the Montgomery representation of
-        // the ordinary residue `a`.
-        BigUint::montgomery_mul_odd(
-            &value.modulo(&self.modulus),
-            &self.r2_mod,
-            &self.modulus,
-            self.n0_inv,
-        )
+        let mut workspace = Vec::new();
+        self.encode_with_workspace(value, &mut workspace)
     }
 
     /// Convert a Montgomery residue back to the ordinary representation.
     #[must_use]
     pub fn decode(&self, value: &BigUint) -> BigUint {
-        // Multiplying by the ordinary value 1 applies the final `R^-1` factor
-        // and lands back in the usual residue class.
-        BigUint::montgomery_mul_odd(value, &BigUint::one(), &self.modulus, self.n0_inv)
+        let mut workspace = Vec::new();
+        self.decode_with_workspace(value, &mut workspace)
     }
 
     /// Multiply two ordinary residues modulo the context modulus.
     #[must_use]
     pub fn mul(&self, lhs: &BigUint, rhs: &BigUint) -> BigUint {
-        let lhs_mont = self.encode(lhs);
-        let rhs_mont = self.encode(rhs);
-        let product_mont =
-            BigUint::montgomery_mul_odd(&lhs_mont, &rhs_mont, &self.modulus, self.n0_inv);
-        self.decode(&product_mont)
+        let mut workspace = Vec::new();
+        let lhs_mont = self.encode_with_workspace(lhs, &mut workspace);
+        let rhs_mont = self.encode_with_workspace(rhs, &mut workspace);
+        let product_mont = BigUint::montgomery_mul_odd_with_workspace(
+            &lhs_mont,
+            &rhs_mont,
+            &self.modulus,
+            self.n0_inv,
+            &mut workspace,
+        );
+        self.decode_with_workspace(&product_mont, &mut workspace)
     }
 
     /// Square one ordinary residue modulo the context modulus.
     #[must_use]
     pub fn square(&self, value: &BigUint) -> BigUint {
-        let value_mont = self.encode(value);
-        let square_mont =
-            BigUint::montgomery_mul_odd(&value_mont, &value_mont, &self.modulus, self.n0_inv);
-        self.decode(&square_mont)
+        let mut workspace = Vec::new();
+        let value_mont = self.encode_with_workspace(value, &mut workspace);
+        let square_mont = BigUint::montgomery_mul_odd_with_workspace(
+            &value_mont,
+            &value_mont,
+            &self.modulus,
+            self.n0_inv,
+            &mut workspace,
+        );
+        self.decode_with_workspace(&square_mont, &mut workspace)
     }
 
     /// Compute `base^exponent mod modulus` inside the context.
     #[must_use]
     pub fn pow(&self, base: &BigUint, exponent: &BigUint) -> BigUint {
-        if self.modulus == BigUint::one() {
-            return BigUint::zero();
-        }
+        let mut workspace = Vec::new();
+        let base_mont = self.encode_with_workspace(&base.modulo(&self.modulus), &mut workspace);
+        self.pow_encoded_with_workspace(&base_mont, exponent, &mut workspace)
+    }
 
-        let one = BigUint::one();
-        // Stay in Montgomery form for the whole square-and-multiply loop:
-        // start from encoded 1, keep all intermediate powers encoded, then
-        // decode once at the end. This avoids paying the encode/decode cost
-        // on every multiply inside the exponentiation loop.
-        let mut result = self.one_mont.clone();
-        let mut power = self.encode(&base.modulo(&self.modulus));
-
-        for bit in 0..exponent.bits() {
-            if exponent.bit(bit) {
-                result = BigUint::montgomery_mul_odd(&result, &power, &self.modulus, self.n0_inv);
-            }
-            power = BigUint::montgomery_mul_odd(&power, &power, &self.modulus, self.n0_inv);
-        }
-
-        // `result` is still encoded (`aR mod n`). Multiplying by the ordinary
-        // integer 1 applies the final `R^-1`: `(aR) * 1 * R^-1 = a`, so this
-        // one last Montgomery multiply is the decode step.
-        BigUint::montgomery_mul_odd(&result, &one, &self.modulus, self.n0_inv)
+    /// Compute `base^exponent mod modulus` with `base` already in Montgomery form.
+    ///
+    /// This is useful when callers reuse the same base and can cache the
+    /// encoded value once.
+    #[must_use]
+    pub fn pow_encoded(&self, base_mont: &BigUint, exponent: &BigUint) -> BigUint {
+        let mut workspace = Vec::new();
+        self.pow_encoded_with_workspace(base_mont, exponent, &mut workspace)
     }
 }
 
@@ -964,6 +1102,22 @@ impl BigInt {
 mod tests {
     use super::{BigInt, BigUint, MontgomeryCtx, Sign};
 
+    fn lcg_next(state: &mut u64) -> u64 {
+        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        *state
+    }
+
+    fn seeded_biguint(words: usize, state: &mut u64) -> BigUint {
+        let mut limbs = Vec::with_capacity(words);
+        for _ in 0..words {
+            limbs.push(lcg_next(state));
+        }
+        if words > 0 && limbs[words - 1] == 0 {
+            limbs[words - 1] = 1;
+        }
+        BigUint { limbs }
+    }
+
     #[test]
     fn bytes_roundtrip() {
         let value =
@@ -987,6 +1141,31 @@ mod tests {
             a.mul_ref(&b),
             BigUint::from_u128(777_777_777_777_000_000_000_000)
         );
+    }
+
+    #[test]
+    fn square_ref_matches_mul_ref() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15;
+        for words in [1usize, 2, 8, 32, 48] {
+            for _ in 0..8 {
+                let value = seeded_biguint(words, &mut seed);
+                assert_eq!(value.square_ref(), value.mul_ref(&value));
+            }
+        }
+    }
+
+    #[test]
+    fn karatsuba_dispatch_matches_schoolbook() {
+        let mut seed = 0x243f_6a88_85a3_08d3;
+        for words in [32usize, 40, 64] {
+            for _ in 0..6 {
+                let lhs = seeded_biguint(words, &mut seed);
+                let rhs = seeded_biguint(words, &mut seed);
+                let dispatched = lhs.mul_ref(&rhs);
+                let schoolbook = BigUint::mul_schoolbook_ref(&lhs, &rhs);
+                assert_eq!(dispatched, schoolbook);
+            }
+        }
     }
 
     #[test]

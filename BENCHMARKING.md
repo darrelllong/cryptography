@@ -29,6 +29,22 @@ cargo run --release --bin bench_public_key -- 2048
 Prints a table of keygen / encrypt / sign / verify latencies for every
 implemented scheme at the chosen key size.
 
+### Bigint kernel latency (ad hoc)
+
+```bash
+cargo run --release --bin bench_bigint
+cargo run --release --bin bench_bigint -- 256 512 1024 2048 4096
+cargo run --release --bin bench_bigint -- 4096 --repeat 20
+```
+
+Prints per-size kernel timings for:
+
+- `mul_ref`
+- `mod_mul` under an odd modulus
+- Montgomery exponentiation (`e = 65537` and random 256-bit exponent)
+- `div_rem`
+- `modulo`
+
 ---
 
 ## Rigorous path — pilot-bench

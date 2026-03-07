@@ -7,7 +7,7 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
+use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::primes::{
     gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime,
 };
@@ -28,6 +28,11 @@ pub struct RsaPrivateKey {
     n: BigUint,
     p: BigUint,
     q: BigUint,
+    d_p: BigUint,
+    d_q: BigUint,
+    q_inv: BigUint,
+    p_ctx: MontgomeryCtx,
+    q_ctx: MontgomeryCtx,
 }
 
 /// Namespace wrapper for the core RSA construction.
@@ -94,10 +99,44 @@ impl RsaPrivateKey {
         &self.q
     }
 
-    /// Apply the raw private operation `c^d mod n`.
+    /// Return the CRT exponent `d mod (p - 1)`.
+    #[must_use]
+    pub(crate) fn crt_exponent1(&self) -> &BigUint {
+        &self.d_p
+    }
+
+    /// Return the CRT exponent `d mod (q - 1)`.
+    #[must_use]
+    pub(crate) fn crt_exponent2(&self) -> &BigUint {
+        &self.d_q
+    }
+
+    /// Return the CRT coefficient `q^-1 mod p`.
+    #[must_use]
+    pub(crate) fn crt_coefficient(&self) -> &BigUint {
+        &self.q_inv
+    }
+
+    /// Apply the raw private operation with CRT recombination.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
-        mod_pow(ciphertext, &self.d, &self.n)
+        // RSA-CRT:
+        // m1 = c^dP mod p
+        // m2 = c^dQ mod q
+        // h  = (qInv * (m1 - m2)) mod p
+        // m  = m2 + h*q
+        let c_mod_p = ciphertext.modulo(&self.p);
+        let c_mod_q = ciphertext.modulo(&self.q);
+        let m1 = self.p_ctx.pow(&c_mod_p, &self.d_p);
+        let m2 = self.q_ctx.pow(&c_mod_q, &self.d_q);
+
+        let delta = if m1 >= m2 {
+            m1.sub_ref(&m2)
+        } else {
+            m1.add_ref(&self.p).sub_ref(&m2)
+        };
+        let h = BigUint::mod_mul(&self.q_inv, &delta, &self.p);
+        m2.add_ref(&self.q.mul_ref(&h))
     }
 }
 
@@ -135,6 +174,11 @@ impl Rsa {
 
         let d = mod_inverse(exponent, &lambda)?;
         let n = p.mul_ref(q);
+        let d_p = d.modulo(&p_minus_one);
+        let d_q = d.modulo(&q_minus_one);
+        let q_inv = mod_inverse(q, p)?;
+        let p_ctx = MontgomeryCtx::new(p)?;
+        let q_ctx = MontgomeryCtx::new(q)?;
 
         Some((
             RsaPublicKey {
@@ -147,6 +191,11 @@ impl Rsa {
                 n,
                 p: p.clone(),
                 q: q.clone(),
+                d_p,
+                d_q,
+                q_inv,
+                p_ctx,
+                q_ctx,
             },
         ))
     }
