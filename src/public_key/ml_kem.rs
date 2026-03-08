@@ -354,6 +354,8 @@ impl MlKem {
         d.copy_from_slice(&seed[..SYM_BYTES]);
         z.copy_from_slice(&seed[SYM_BYTES..]);
 
+        // WHAT: build CPA keypair from deterministic seed material and cache H(pk), z.
+        // WHY: decapsulation needs H(pk) and z for the implicit-rejection path from FIPS 203.
         let (pk_bytes, sk_pke) = indcpa_keypair(p, &d)?;
         let h_pk = hash_h(&pk_bytes);
 
@@ -400,6 +402,8 @@ impl MlKem {
         buf[..SYM_BYTES].copy_from_slice(randomness);
         buf[SYM_BYTES..].copy_from_slice(&h_pk);
 
+        // WHAT: derive (shared-secret || encryption coins) from randomness and H(pk).
+        // WHY: this ties encapsulation coins to the target public key and avoids reuse hazards.
         let kr = hash_g(&buf);
         let mut coins = [0u8; SYM_BYTES];
         coins.copy_from_slice(&kr[SYM_BYTES..]);
@@ -467,6 +471,8 @@ impl MlKem {
         rk_in.extend_from_slice(&ciphertext.bytes);
         let rk = hash_j(&rk_in);
 
+        // WHAT: select derived K on re-encryption match, else select fallback rk.
+        // WHY: implicit rejection must stay branchless so malformed ciphertexts do not leak via timing.
         let mask = crate::ct::constant_time_eq_mask(&cmp, &ciphertext.bytes);
         let mut ss = [0u8; SS_BYTES];
         let inv = !mask;
@@ -961,6 +967,8 @@ fn sample_uniform_ntt(seed: &[u8; SYM_BYTES], x: u8, y: u8) -> Poly {
         xof.squeeze(&mut buf);
         let mut pos = 0usize;
         while ctr < N && pos + 3 <= buf.len() {
+            // WHAT: unpack two 12-bit candidates from each 3-byte chunk.
+            // WHY: rejection sampling here preserves a uniform distribution over [0, q).
             let val0 = ((u16::from(buf[pos])) | (u16::from(buf[pos + 1]) << 8)) & 0x0FFF;
             let val1 = ((u16::from(buf[pos + 1]) >> 4) | (u16::from(buf[pos + 2]) << 4)) & 0x0FFF;
             pos += 3;
@@ -1035,6 +1043,8 @@ fn gen_matrix(p: Profile, seed: &[u8; SYM_BYTES], transposed: bool) -> [PolyVec;
     for i in 0..p.k {
         let mut row = PolyVec::zero(p.k);
         for j in 0..p.k {
+            // WHAT: swap matrix coordinates when `transposed` is requested.
+            // WHY: keygen needs A while encapsulation needs A^T; one sampler serves both.
             let (x, y) = if transposed {
                 (i as u8, j as u8)
             } else {
@@ -1118,6 +1128,8 @@ fn indcpa_keypair(p: Profile, d: &[u8; SYM_BYTES]) -> Option<(Vec<u8>, Vec<u8>)>
         t_hat.polys[i] = t;
     }
 
+    // WHAT: keep the secret vector serialized as s-hat (NTT domain).
+    // WHY: decapsulation consumes s-hat directly in NTT space and avoids an extra transform.
     let sk_pke = polyvec_to_bytes(&s_hat);
     let pk = pack_public_key(&t_hat, &rho);
     Some((pk, sk_pke))
@@ -1130,6 +1142,8 @@ fn indcpa_encrypt(
     coins: &[u8; SYM_BYTES],
 ) -> Option<Vec<u8>> {
     let (t_hat, rho) = unpack_public_key(p, pk_bytes)?;
+    // WHAT: expand the transposed public matrix from `rho`.
+    // WHY: Kyber encapsulation multiplies by A^T as specified.
     let at = gen_matrix(p, &rho, true);
     let m_poly = poly_from_message(msg);
 

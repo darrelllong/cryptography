@@ -472,6 +472,8 @@ impl MlDsa {
 
         let mut nonce = 0u16;
         loop {
+            // WHAT: sample candidate y and attempt one Fiat-Shamir signature round.
+            // WHY: Dilithium signing is rejection-based; out-of-bound intermediates must be retried.
             let y = polyvecl_uniform_gamma1(p, &rhoprime, nonce);
             nonce = nonce.wrapping_add(1);
 
@@ -515,6 +517,8 @@ impl MlDsa {
 
             polyveck_add_assign(&mut w0, &h);
             let (hint, n) = polyveck_make_hint(p, &w0, &w1_hi);
+            // WHAT: reject signatures whose hint weight exceeds omega.
+            // WHY: omega is part of the wire-format validity contract and verifier cost bound.
             if n > p.omega {
                 continue;
             }
@@ -605,6 +609,8 @@ impl MlDsa {
 
         let mut c2 = vec![0u8; p.ctilde_bytes];
         shake256_absorb_squeeze(&[&mu, &packed_w1], &mut c2);
+        // WHAT: recompute challenge from reconstructed w1 and compare to signature c.
+        // WHY: this is the core FS consistency check that binds (z, h) to the message and public key.
         c == c2
     }
 
@@ -625,6 +631,8 @@ fn build_pre(context: &[u8]) -> Option<Vec<u8>> {
     if context.len() > u8::MAX as usize {
         return None;
     }
+    // WHAT: encode context as [0x00 || len || context].
+    // WHY: FIPS 204 signs a framed context string, not raw context bytes.
     let mut out = Vec::with_capacity(2 + context.len());
     out.push(0);
     out.push(context.len() as u8);
@@ -1411,6 +1419,8 @@ fn polyvec_matrix_expand(p: Profile, rho: &[u8; SEED_BYTES]) -> [Polyvecl; MAX_K
     let mut mat = core::array::from_fn(|_| Polyvecl::zero(p.l));
     for (i, row) in mat.iter_mut().enumerate().take(p.k) {
         for j in 0..p.l {
+            // WHAT: derive A[i][j] from rho and a unique 16-bit nonce.
+            // WHY: deterministic expansion keeps key material compact while preserving domain separation.
             row.vec[j] = poly_uniform(rho, ((i << 8) + j) as u16);
         }
     }
@@ -1553,6 +1563,8 @@ fn pack_sig(p: Profile, c: &[u8], z: &Polyvecl, h: &Polyveck) -> Vec<u8> {
     for i in 0..p.k {
         for j in 0..N {
             if h.vec[i][j] != 0 {
+                // WHAT: store set-bit positions of each hint polynomial in ascending order.
+                // WHY: sparse index encoding keeps signatures compact and canonically ordered.
                 out[hint_pos + k] = j as u8;
                 k += 1;
             }
@@ -1589,6 +1601,8 @@ fn unpack_sig(p: Profile, sig: &[u8]) -> Option<(Vec<u8>, Polyvecl, Polyveck)> {
         }
         for j in k..end {
             let idx = usize::from(hint[j]);
+            // WHAT: enforce strictly increasing indices within each hint polynomial.
+            // WHY: rejecting non-canonical duplicates/orderings closes alternate encodings of the same hint set.
             if j > k && idx <= usize::from(hint[j - 1]) {
                 return None;
             }

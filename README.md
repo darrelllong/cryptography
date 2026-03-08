@@ -65,6 +65,7 @@ Documentation:
 - [ANALYSIS.md](ANALYSIS.md): top-level overview, coverage, and experiment notes
 - [SYMMETRIC.md](SYMMETRIC.md): symmetric ciphers, modes, hashes, and throughput
 - [ASYMMETRIC.md](ASYMMETRIC.md): public-key primitives, wrappers, serialization, and latency
+- [POSTQUANTUM.md](POSTQUANTUM.md): ML-KEM/ML-DSA APIs, design rationale, and PQ benchmarks
 
 ## HOWTO
 

@@ -103,6 +103,8 @@ make variable-time behavior explicit at import sites.
 
 - `MlKem` (`ML-KEM-512/768/1024`) — key encapsulation mechanism
 - `MlDsa` (`ML-DSA-44/65/87`) — digital signatures
+- Details, usage notes, and PQ-specific benchmarks are documented in
+  [POSTQUANTUM.md](POSTQUANTUM.md).
 
 ### Short-Weierstrass elliptic-curve schemes
 
@@ -1022,33 +1024,8 @@ public side continues to benefit from the sparse default exponent
 | edwards_elgamal_encrypt | 2.176 | ±0.01241 | 90 | 2.916 | ±0.1484 | 60 |
 | edwards_elgamal_decrypt | 1.648 | ±0.005687 | 91 | 2.297 | ±0.121 | 30 |
 
-### ML-KEM (Kyber)
-
-| Operation | M1 Max ms/op | M1 Max ±CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
-|---|---:|---:|---:|---:|---:|---:|
-| mlkem512_keygen | 0.01947 | ±2.831e-05 | 90 | 0.02968 | ±9.867e-05 | 31 |
-| mlkem512_encaps | 0.01937 | ±0.0001085 | 61 | 0.03102 | ±0.0001033 | 60 |
-| mlkem512_decaps | 0.01935 | ±5.455e-05 | 137 | 0.03489 | ±0.0002393 | 60 |
-| mlkem768_keygen | 0.03204 | ±4.69e-05 | 74 | 0.04913 | ±0.000296 | 30 |
-| mlkem768_encaps | 0.03123 | ±3.038e-05 | 162 | 0.05036 | ±0.001314 | 30 |
-| mlkem768_decaps | 0.03189 | ±0.000216 | 150 | 0.05708 | ±0.003447 | 40 |
-| mlkem1024_keygen | 0.05098 | ±0.0001014 | 240 | 0.07745 | ±0.0002653 | 30 |
-| mlkem1024_encaps | 0.04864 | ±4.308e-05 | 120 | 0.07629 | ±0.0002343 | 30 |
-| mlkem1024_decaps | 0.04946 | ±5.068e-05 | 30 | 0.08396 | ±0.0001918 | 30 |
-
-### ML-DSA (Dilithium)
-
-| Operation | M1 Max ms/op | M1 Max ±CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
-|---|---:|---:|---:|---:|---:|---:|
-| mldsa44_keygen | 0.07784 | ±0.002088 | 60 | 0.1142 | ±0.0002587 | 60 |
-| mldsa44_sign | 0.2071 | ±0.0006633 | 350 | 0.4592 | ±0.0006615 | 41 |
-| mldsa44_verify | 0.07184 | ±0.000123 | 152 | 0.119 | ±0.00325 | 30 |
-| mldsa65_keygen | 0.1379 | ±0.0002734 | 157 | 0.2068 | ±0.001588 | 30 |
-| mldsa65_sign | 0.3587 | ±0.05607 | 30 | 0.7465 | ±0.001896 | 37 |
-| mldsa65_verify | 0.1214 | ±0.001442 | 181 | 0.1893 | ±0.000978 | 30 |
-| mldsa87_keygen | 0.2101 | ±0.0001558 | 65 | 0.3138 | ±0.009709 | 30 |
-| mldsa87_sign | 0.4731 | ±0.001884 | 156 | 1.019 | ±0.00348 | 30 |
-| mldsa87_verify | 0.207 | ±0.0003116 | 151 | 0.3107 | ±0.001124 | 40 |
+Post-quantum benchmarks and discussion for `ML-KEM` / `ML-DSA` now live in
+[POSTQUANTUM.md](POSTQUANTUM.md).
 
 The tables above are measured in milliseconds per operation. The radar charts
 below use the reciprocal view, plotting operations per second on a log scale so
