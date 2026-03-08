@@ -10,8 +10,8 @@ from pathlib import Path
 OUTPUT = Path(__file__).with_name("ec-signature-radar.svg")
 
 SERIES = [
-    ("ECDSA (P-256)", "#0f766e", [494.8, 476.0, 249.6]),
-    ("Ed25519", "#1d4ed8", [503.5, 975.6, 301.0]),
+    ("ECDSA (P-256)", "#0f766e", [485.7, 448.8, 236.9]),
+    ("Ed25519", "#1d4ed8", [478.2, 881.1, 289.9]),
 ]
 LABELS = ["Keygen", "Sign", "Verify"]
 SCALE_LABELS = [100, 200, 400, 800, 1_000]

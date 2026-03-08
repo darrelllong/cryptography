@@ -10,9 +10,9 @@ from pathlib import Path
 OUTPUT = Path(__file__).with_name("ec-encryption-radar.svg")
 
 SERIES = [
-    ("ECIES (P-256)", "#0f766e", [498.5, 253.5, 517.1]),
-    ("EC ElGamal (P-256)", "#1d4ed8", [500.8, 246.5, 503.0]),
-    ("Edwards ElGamal", "#b45309", [506.6, 482.6, 625.0]),
+    ("ECIES (P-256)", "#0f766e", [489.7, 244.9, 495.5]),
+    ("EC ElGamal (P-256)", "#1d4ed8", [489.5, 233.7, 487.1]),
+    ("Edwards ElGamal", "#b45309", [481.0, 459.6, 606.8]),
 ]
 LABELS = ["Keygen", "Encrypt", "Decrypt"]
 SCALE_LABELS = [100, 200, 400, 800, 1_000]

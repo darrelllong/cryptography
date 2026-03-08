@@ -59,4 +59,26 @@ measure edwards_elgamal_keygen
 measure edwards_elgamal_encrypt
 measure edwards_elgamal_decrypt
 
+hdr "ML-KEM (Kyber)"
+measure mlkem512_keygen
+measure mlkem512_encaps
+measure mlkem512_decaps
+measure mlkem768_keygen
+measure mlkem768_encaps
+measure mlkem768_decaps
+measure mlkem1024_keygen
+measure mlkem1024_encaps
+measure mlkem1024_decaps
+
+hdr "ML-DSA (Dilithium)"
+measure mldsa44_keygen
+measure mldsa44_sign
+measure mldsa44_verify
+measure mldsa65_keygen
+measure mldsa65_sign
+measure mldsa65_verify
+measure mldsa87_keygen
+measure mldsa87_sign
+measure mldsa87_verify
+
 echo ""

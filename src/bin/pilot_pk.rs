@@ -27,13 +27,20 @@
 ///   rsa_verify_1024
 ///   rsa_keygen_2048, rsa_encrypt_2048, rsa_decrypt_2048, rsa_sign_2048,
 ///   rsa_verify_2048
+///   mlkem512_keygen, mlkem512_encaps, mlkem512_decaps
+///   mlkem768_keygen, mlkem768_encaps, mlkem768_decaps
+///   mlkem1024_keygen, mlkem1024_encaps, mlkem1024_decaps
+///   mldsa44_keygen, mldsa44_sign, mldsa44_verify
+///   mldsa65_keygen, mldsa65_sign, mldsa65_verify
+///   mldsa87_keygen, mldsa87_sign, mldsa87_verify
 use std::hint::black_box;
 use std::time::Instant;
 
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
-    ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPss, SchmidtSamoa,
+    ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, Paillier, Rabin, Rsa, RsaOaep,
+    RsaPss, SchmidtSamoa,
 };
 use cryptography::{CtrDrbgAes256, Sha256};
 
@@ -540,6 +547,170 @@ fn main() {
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(RsaPss::<Sha256>::verify(&pub_key, &MSG, &sig));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── ML-KEM (Kyber) ───────────────────────────────────────────────────
+        "mlkem512_keygen" => {
+            let n = 200;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::keygen(MlKemParameterSet::MlKem512, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem512_encaps" => {
+            let (pk, _) = MlKem::keygen(MlKemParameterSet::MlKem512, &mut rng).unwrap();
+            let n = 200;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::encaps(&pk, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem512_decaps" => {
+            let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem512, &mut rng).unwrap();
+            let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
+            let n = 200;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::decaps(&sk, &ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem768_keygen" => {
+            let n = 120;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem768_encaps" => {
+            let (pk, _) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).unwrap();
+            let n = 120;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::encaps(&pk, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem768_decaps" => {
+            let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).unwrap();
+            let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
+            let n = 120;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::decaps(&sk, &ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem1024_keygen" => {
+            let n = 80;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::keygen(MlKemParameterSet::MlKem1024, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem1024_encaps" => {
+            let (pk, _) = MlKem::keygen(MlKemParameterSet::MlKem1024, &mut rng).unwrap();
+            let n = 80;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::encaps(&pk, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mlkem1024_decaps" => {
+            let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem1024, &mut rng).unwrap();
+            let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
+            let n = 80;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlKem::decaps(&sk, &ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── ML-DSA (Dilithium) ───────────────────────────────────────────────
+        "mldsa44_keygen" => {
+            let n = 120;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa44_sign" => {
+            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap();
+            let n = 120;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa44_verify" => {
+            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap();
+            let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
+            let n = 120;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::verify(&pk, &MSG, &sig));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa65_keygen" => {
+            let n = 80;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa65_sign" => {
+            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap();
+            let n = 80;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa65_verify" => {
+            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap();
+            let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
+            let n = 80;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::verify(&pk, &MSG, &sig));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa87_keygen" => {
+            let n = 60;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa87_sign" => {
+            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap();
+            let n = 60;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "mldsa87_verify" => {
+            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap();
+            let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
+            let n = 60;
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(MlDsa::verify(&pk, &MSG, &sig));
             }
             ms_per_op(t0.elapsed(), n)
         }

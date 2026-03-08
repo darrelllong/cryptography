@@ -116,6 +116,9 @@ pub mod vt {
     pub use crate::public_key::elgamal::{
         ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey,
     };
+    pub use crate::public_key::ml_dsa::{
+        MlDsa, MlDsaParameterSet, MlDsaPrivateKey, MlDsaPublicKey, MlDsaSignature,
+    };
     pub use crate::public_key::ml_kem::{
         MlKem, MlKemCiphertext, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
         MlKemSharedSecret,

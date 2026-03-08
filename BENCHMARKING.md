@@ -129,6 +129,8 @@ pilot-bench.
 | Ed25519 | `ed25519_keygen`, `ed25519_sign`, `ed25519_verify` |
 | Edwards DH | `edwards_dh_keygen`, `edwards_dh_agree`, `edwards_dh_serialize` |
 | Edwards ElGamal | `edwards_elgamal_keygen`, `edwards_elgamal_encrypt`, `edwards_elgamal_decrypt` |
+| ML-KEM | `mlkem512_keygen`, `mlkem512_encaps`, `mlkem512_decaps`, `mlkem768_keygen`, `mlkem768_encaps`, `mlkem768_decaps`, `mlkem1024_keygen`, `mlkem1024_encaps`, `mlkem1024_decaps` |
+| ML-DSA | `mldsa44_keygen`, `mldsa44_sign`, `mldsa44_verify`, `mldsa65_keygen`, `mldsa65_sign`, `mldsa65_verify`, `mldsa87_keygen`, `mldsa87_sign`, `mldsa87_verify` |
 | DSA 1024 | `dsa_sign_1024`, `dsa_verify_1024` |
 | ElGamal 1024 | `elgamal_encrypt_1024`, `elgamal_decrypt_1024` |
 | Paillier 1024 | `paillier_encrypt_1024`, `paillier_decrypt_1024` |
@@ -151,3 +153,17 @@ pilot-bench.
 
 `--preset quick` targets 20 % CI.  Use `--preset normal` for 10 % or
 `--preset strict` for tighter bounds.
+
+For a portable wall-clock baseline from the vendored Kyber reference C code,
+run:
+
+```bash
+bash scripts/bench_mlkem_ref.sh
+```
+
+For a portable wall-clock baseline from the vendored Dilithium reference C
+code, run:
+
+```bash
+bash scripts/bench_mldsa_ref.sh
+```
