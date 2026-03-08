@@ -322,7 +322,10 @@ fn manual_postquantum_examples() {
     let (kem_pk, kem_sk) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).expect("ml-kem");
     let (kem_ct, kem_ss_sender) = MlKem::encaps(&kem_pk, &mut rng).expect("encaps");
     let kem_ss_receiver = MlKem::decaps(&kem_sk, &kem_ct).expect("decaps");
-    assert_eq!(kem_ss_sender.to_wire_bytes(), kem_ss_receiver.to_wire_bytes());
+    assert_eq!(
+        kem_ss_sender.to_wire_bytes(),
+        kem_ss_receiver.to_wire_bytes()
+    );
 
     let kem_pk_wire = kem_pk.to_wire_bytes();
     let kem_pk_round =
@@ -347,7 +350,9 @@ fn manual_postquantum_examples() {
     let fixed_rnd = [0x5Cu8; 32];
     let sig_ctx = MlDsa::sign_with_randomness_and_context(&dsa_sk, b"payload", &fixed_rnd, ctx)
         .expect("sign with context");
-    assert!(MlDsa::verify_with_context(&dsa_pk, b"payload", &sig_ctx, ctx));
+    assert!(MlDsa::verify_with_context(
+        &dsa_pk, b"payload", &sig_ctx, ctx
+    ));
     assert!(!MlDsa::verify_with_context(
         &dsa_pk,
         b"payload",
@@ -356,7 +361,7 @@ fn manual_postquantum_examples() {
     ));
 
     let sig_wire = sig.to_wire_bytes();
-    let sig_round = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa65, &sig_wire)
-        .expect("signature");
+    let sig_round =
+        MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa65, &sig_wire).expect("signature");
     assert!(MlDsa::verify(&dsa_pk, b"release manifest", &sig_round));
 }

@@ -77,4 +77,21 @@ mod tests {
         assert!(lib.contains("pub mod vt"));
         assert_none("lib.rs", lib, &["pub use public_key::"]);
     }
+
+    #[test]
+    fn stream_and_aead_traits_remain_in_root_surface() {
+        let lib = include_str!("lib.rs");
+        assert!(lib.contains("pub trait StreamCipher"));
+        assert!(lib.contains("pub trait Aead"));
+        assert!(lib.contains("pub use modes::{"));
+        assert!(lib.contains("ChaCha20Poly1305"));
+    }
+
+    #[test]
+    fn hkdf_surface_remains_exported() {
+        let hash_mod = include_str!("hash/mod.rs");
+        let lib = include_str!("lib.rs");
+        assert!(hash_mod.contains("pub mod hkdf;"));
+        assert!(lib.contains("pub use hash::hkdf::Hkdf;"));
+    }
 }

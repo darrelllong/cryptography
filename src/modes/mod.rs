@@ -6,6 +6,7 @@
 //! - SP 800-38B authentication mode: CMAC
 //! - SP 800-38D authenticated mode: GCM / GMAC
 //! - SP 800-38E storage mode: XTS (128-bit block ciphers only)
+//! - RFC 8439 AEAD: ChaCha20-Poly1305
 //!
 //! These adapters are generic over any `BlockCipher` in the crate, so the same
 //! wrapper works with AES, DES, Camellia, PRESENT, and the other block
@@ -21,6 +22,9 @@
 //! adapters here.
 
 use crate::BlockCipher;
+
+pub mod chacha20_poly1305;
+pub use chacha20_poly1305::ChaCha20Poly1305;
 
 #[inline]
 fn assert_block_multiple<C: BlockCipher>(buf: &[u8]) {

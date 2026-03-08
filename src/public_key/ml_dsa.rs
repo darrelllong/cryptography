@@ -286,6 +286,35 @@ struct CachedPrivateKey {
     mat: [Polyvecl; MAX_K],
 }
 
+fn zeroize_poly(poly: &mut Poly) {
+    crate::ct::zeroize_slice(poly.as_mut_slice());
+}
+
+fn zeroize_polyvecl(polyvec: &mut Polyvecl) {
+    for poly in polyvec.vec.iter_mut() {
+        zeroize_poly(poly);
+    }
+    polyvec.l = 0;
+}
+
+fn zeroize_polyveck(polyvec: &mut Polyveck) {
+    for poly in polyvec.vec.iter_mut() {
+        zeroize_poly(poly);
+    }
+    polyvec.k = 0;
+}
+
+fn zeroize_cached_private_key(cache: &mut CachedPrivateKey) {
+    crate::ct::zeroize_slice(cache.tr.as_mut_slice());
+    crate::ct::zeroize_slice(cache.key.as_mut_slice());
+    zeroize_polyveck(&mut cache.t0_ntt);
+    zeroize_polyvecl(&mut cache.s1_ntt);
+    zeroize_polyveck(&mut cache.s2_ntt);
+    for mat_row in cache.mat.iter_mut() {
+        zeroize_polyvecl(mat_row);
+    }
+}
+
 /// Namespace wrapper for ML-DSA operations.
 pub struct MlDsa;
 
@@ -333,6 +362,23 @@ impl PartialEq for MlDsaPrivateKey {
 }
 
 impl Eq for MlDsaPrivateKey {}
+
+impl Drop for MlDsaPrivateKey {
+    fn drop(&mut self) {
+        // WHAT: wipe the serialized secret key bytes.
+        // WHY: this buffer is the canonical ML-DSA private key material.
+        crate::ct::zeroize_slice(self.bytes.as_mut_slice());
+
+        // WHAT: wipe expanded signing cache if it has been initialized.
+        // WHY: the cache contains derived secret polynomials and seeds.
+        if let Some(cache_opt) = self.expanded.get_mut() {
+            if let Some(cache) = cache_opt.as_mut() {
+                zeroize_cached_private_key(cache);
+            }
+            *cache_opt = None;
+        }
+    }
+}
 
 impl MlDsaPublicKey {
     fn expanded(&self) -> Option<&CachedPublicKey> {

@@ -39,6 +39,7 @@ Implemented families:
 - Grasshopper plus `GrasshopperCt`
 - SM4 / SMS4 plus `Sm4Ct`
 - ChaCha20 and XChaCha20
+- ChaCha20-Poly1305 (RFC 8439 AEAD)
 - Salsa20
 - Rabbit
 - SNOW 3G plus `Snow3gCt`
@@ -48,6 +49,7 @@ Supporting primitives:
 
 - SHA-3 (`Sha3_224/256/384/512`)
 - SHAKE (`Shake128`, `Shake256`)
+- HMAC (`Hmac<H>`) and HKDF (`Hkdf<H>`)
 - Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
@@ -179,6 +181,10 @@ let aad = b"header";
 let tag = Gcm::new(Aes128::new(&key)).encrypt(&nonce, aad, &mut gcm_buf);
 assert!(Gcm::new(Aes128::new(&key)).decrypt(&nonce, aad, &mut gcm_buf, &tag));
 
+let aead = cryptography::ChaCha20Poly1305::new(&[0u8; 32]);
+let (ct, tag) = aead.encrypt(&nonce, aad, b"hello");
+assert_eq!(aead.decrypt(&nonce, aad, &ct, &tag), Some(b"hello".to_vec()));
+
 let mut sector = [0u8; 32];
 let tweak = [0u8; 16]; // one 16-byte tweak block
 let data_key = [0u8; 16];
@@ -192,6 +198,7 @@ The mode layer implements:
 - SP 800-38B: CMAC
 - SP 800-38D: GCM, GMAC
 - SP 800-38E: XTS (for 128-bit block ciphers)
+- RFC 8439: ChaCha20-Poly1305
 
 RFC 8452's AES-GCM-SIV is a nonce-misuse-resistant AEAD built around AES and
 `POLYVAL`, so it belongs in a later authenticated-encryption layer rather than
@@ -220,6 +227,12 @@ xchacha.apply_keystream(&mut msg);
 snow.fill(&mut buf);
 zuc.fill(&mut buf);
 ```
+
+The crate root exports:
+
+- `StreamCipher` for byte-oriented keystream APIs
+- `Aead` for detached-tag authenticated encryption wrappers (`Gcm`, `GcmVt`,
+  `ChaCha20Poly1305`)
 
 ### Hash / XOF / HMAC example
 

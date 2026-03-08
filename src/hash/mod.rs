@@ -5,6 +5,7 @@
 //! - FIPS 180-4 (`Sha1`, SHA-2)
 //! - FIPS 202 (`Sha3_*`, `Shake*`)
 //! - FIPS 198-1 / RFC 2104 (`Hmac<H>`)
+//! - RFC 5869 (`Hkdf<H>`)
 //!
 //! The shared traits in this module are the glue that lets one keyed
 //! construction (`Hmac<H>`) work across multiple named hash families without
@@ -77,6 +78,7 @@ pub trait Xof {
     fn squeeze(&mut self, out: &mut [u8]);
 }
 
+pub mod hkdf;
 pub mod hmac;
 pub mod sha1;
 pub mod sha2;

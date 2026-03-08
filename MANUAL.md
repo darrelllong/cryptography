@@ -197,6 +197,27 @@ let tag = Hmac::<Sha256>::compute(b"secret", b"message");
 assert!(Hmac::<Sha256>::verify(b"secret", b"message", &tag));
 ```
 
+### HKDF
+
+`Hkdf<H>` implements RFC 5869 extract+expand over any in-tree `Digest`.
+
+Key methods:
+
+- `Hkdf::<H>::extract(salt, ikm)`
+- `Hkdf::<H>::from_prk(prk)`
+- `expand(info, out)`
+- `derive(salt, ikm, info, len)`
+
+Example:
+
+```rust
+use cryptography::{Hkdf, Sha256};
+
+let hkdf = Hkdf::<Sha256>::extract(Some(b"salt"), b"input keying material");
+let mut okm = [0u8; 32];
+assert!(hkdf.expand(b"context", &mut okm));
+```
+
 ### Block-cipher MACs
 
 The mode layer also exports:
@@ -276,6 +297,7 @@ The mode layer exports:
 - `GcmVt<C>`
 - `Gmac<C>`
 - `GmacVt<C>`
+- `ChaCha20Poly1305`
 
 Constructor pattern:
 
@@ -287,10 +309,14 @@ Representative methods:
 - `apply_keystream` for `Ofb`, `Ctr`
 - `encrypt_sector` / `decrypt_sector` for `Xts`
 - `encrypt`, `decrypt`, `compute_tag` for `Gcm` and `GcmVt`
+- `encrypt`, `decrypt`, `encrypt_in_place`, `decrypt_in_place` for
+  `ChaCha20Poly1305`
 
 `Gcm` and `Gmac` are the safe-default constant-time GHASH-backed variants.
 `GcmVt` and `GmacVt` are the explicit variable-time reference/performance
 variants.
+`Aead` is the shared detached-tag trait implemented by `Gcm`, `GcmVt`, and
+`ChaCha20Poly1305`.
 
 Example: AES-256-GCM
 
@@ -318,6 +344,21 @@ let mut buf = b"plaintext".to_vec();
 ctr.apply_keystream(&counter, &mut buf);
 ctr.apply_keystream(&counter, &mut buf);
 assert_eq!(buf, b"plaintext");
+```
+
+Example: ChaCha20-Poly1305 AEAD
+
+```rust
+use cryptography::ChaCha20Poly1305;
+
+let aead = ChaCha20Poly1305::new(&[0u8; 32]);
+let nonce = [0u8; 12];
+let aad = b"header";
+let (ct, tag) = aead.encrypt(&nonce, aad, b"secret message");
+assert_eq!(
+    aead.decrypt(&nonce, aad, &ct, &tag),
+    Some(b"secret message".to_vec())
+);
 ```
 
 ### Worked example: `encrypt_file` / `decrypt_file` with counter mode
@@ -376,6 +417,10 @@ decrypt_file(
 
 The stream ciphers are byte-oriented inherent APIs rather than `BlockCipher`
 implementations.
+
+Shared trait:
+
+- `StreamCipher` with `fill(&mut [u8])` and `apply_keystream(&mut [u8])`
 
 Root-level exports:
 

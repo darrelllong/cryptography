@@ -489,6 +489,15 @@ impl fmt::Debug for MlKemPrivateKey {
     }
 }
 
+impl Drop for MlKemPrivateKey {
+    fn drop(&mut self) {
+        // WHAT: wipe the packed secret-key buffer on drop.
+        // WHY: ML-KEM private keys are stored as raw bytes and should not stay
+        // resident after the owner goes out of scope.
+        crate::ct::zeroize_slice(self.bytes.as_mut_slice());
+    }
+}
+
 fn hash_h(data: &[u8]) -> [u8; SYM_BYTES] {
     Sha3_256::digest(data)
 }

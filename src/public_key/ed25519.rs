@@ -270,6 +270,21 @@ impl fmt::Debug for Ed25519PrivateKey {
     }
 }
 
+impl Drop for Ed25519PrivateKey {
+    fn drop(&mut self) {
+        // WHAT: wipe seed-derived secret material that lives in fixed arrays.
+        // WHY: Ed25519 keys are long-lived, and these buffers otherwise remain
+        // in process memory until allocator reuse.
+        crate::ct::zeroize_slice(self.seed.as_mut_slice());
+        crate::ct::zeroize_slice(self.prefix.as_mut_slice());
+
+        // WHAT: force-drop the old scalar now, then leave a benign zero value.
+        // WHY: scalar is heap-backed bigint state and should not survive longer
+        // than this private key object.
+        self.scalar = BigUint::zero();
+    }
+}
+
 impl Ed25519Signature {
     /// Return the nonce point `R`.
     #[must_use]

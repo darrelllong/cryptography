@@ -621,7 +621,7 @@ fn biguint_to_u64(value: &BigUint) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{Ecies, EciesPrivateKey, EciesPublicKey};
-    use crate::public_key::ec::{p256, p384, p521, secp256k1};
+    use crate::public_key::ec::{b163, p256, p384, p521, secp256k1};
     use crate::CtrDrbgAes256;
 
     fn rng() -> CtrDrbgAes256 {
@@ -674,6 +674,16 @@ mod tests {
         let mut rng = rng();
         let (public, private) = Ecies::generate(p521(), &mut rng);
         let msg = b"p521 ecies with a longer message to check padding";
+        let ct = public.encrypt(msg, &mut rng);
+        let pt = private.decrypt(&ct).expect("decrypt");
+        assert_eq!(pt, msg);
+    }
+
+    #[test]
+    fn roundtrip_b163() {
+        let mut rng = rng();
+        let (public, private) = Ecies::generate(b163(), &mut rng);
+        let msg = b"binary ecies";
         let ct = public.encrypt(msg, &mut rng);
         let pt = private.decrypt(&ct).expect("decrypt");
         assert_eq!(pt, msg);

@@ -31,6 +31,54 @@ pub trait BlockCipher {
     fn decrypt(&self, block: &mut [u8]);
 }
 
+/// Common interface for stream ciphers.
+///
+/// Stream ciphers encrypt and decrypt by XORing keystream bytes into a mutable
+/// buffer. The same operation is used in both directions.
+pub trait StreamCipher {
+    /// XOR keystream bytes into `buf` in place.
+    fn fill(&mut self, buf: &mut [u8]);
+
+    /// Alias for [`Self::fill`] for callers that prefer this terminology.
+    fn apply_keystream(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+/// Common interface for AEAD constructions with detached tags.
+pub trait Aead {
+    /// Detached authentication tag type.
+    type Tag;
+
+    /// Encrypt `data` in place and return its authentication tag.
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag;
+
+    /// Decrypt `data` in place after authenticating `tag`.
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool;
+
+    /// Encrypt `plaintext` and return `(ciphertext, tag)`.
+    fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> (Vec<u8>, Self::Tag) {
+        let mut out = plaintext.to_vec();
+        let tag = self.encrypt_in_place(nonce, aad, &mut out);
+        (out, tag)
+    }
+
+    /// Decrypt `ciphertext` and return plaintext on successful authentication.
+    fn decrypt(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext: &[u8],
+        tag: &Self::Tag,
+    ) -> Option<Vec<u8>> {
+        let mut out = ciphertext.to_vec();
+        if !self.decrypt_in_place(nonce, aad, &mut out, tag) {
+            return None;
+        }
+        Some(out)
+    }
+}
+
 /// Common interface for byte-oriented CSPRNG/DRBG outputs.
 pub trait Csprng {
     /// Fill `out` with pseudorandom bytes.
@@ -79,12 +127,103 @@ pub use ciphers::twofish::{
 pub use ciphers::zuc::{Zuc128, Zuc128Ct};
 
 pub use cprng::ctr_drbg::CtrDrbgAes256;
+pub use hash::hkdf::Hkdf;
 pub use hash::hmac::Hmac;
 pub use hash::sha1::Sha1;
 pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
-pub use modes::{Cbc, Cfb, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt, Ofb, Xts};
+pub use modes::{Cbc, Cfb, ChaCha20Poly1305, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt, Ofb, Xts};
+
+impl StreamCipher for ChaCha20 {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl StreamCipher for XChaCha20 {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl StreamCipher for Salsa20 {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl StreamCipher for Rabbit {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl StreamCipher for Snow3g {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl StreamCipher for Snow3gCt {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl StreamCipher for Zuc128 {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl StreamCipher for Zuc128Ct {
+    fn fill(&mut self, buf: &mut [u8]) {
+        self.fill(buf);
+    }
+}
+
+impl<C: BlockCipher> Aead for Gcm<C> {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        self.encrypt(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        self.decrypt(nonce, aad, data, tag)
+    }
+}
+
+impl<C: BlockCipher> Aead for GcmVt<C> {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        self.encrypt(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        self.decrypt(nonce, aad, data, tag)
+    }
+}
+
+impl Aead for ChaCha20Poly1305 {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        let nonce: &[u8; 12] = nonce
+            .try_into()
+            .expect("ChaCha20-Poly1305 nonce must be 12 bytes");
+        self.encrypt_in_place(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        let nonce: &[u8; 12] = nonce
+            .try_into()
+            .expect("ChaCha20-Poly1305 nonce must be 12 bytes");
+        self.decrypt_in_place(nonce, aad, data, tag)
+    }
+}
 
 /// Explicit variable-time public-key surface.
 ///

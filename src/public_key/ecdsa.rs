@@ -863,7 +863,7 @@ fn rfc6979_nonce<H: Digest>(q: &BigUint, x: &BigUint, digest: &[u8]) -> Option<B
 mod tests {
     use super::{Ecdsa, EcdsaPrivateKey, EcdsaPublicKey, EcdsaSignature};
     use crate::public_key::bigint::BigUint;
-    use crate::public_key::ec::{p256, p384, p521, secp256k1};
+    use crate::public_key::ec::{b163, p256, p384, p521, secp256k1};
     use crate::{CtrDrbgAes256, Sha256, Sha384, Sha512};
 
     fn rng() -> CtrDrbgAes256 {
@@ -906,6 +906,15 @@ mod tests {
         let msg = b"p521 test message";
         let sig = private.sign_message::<Sha512>(msg).expect("sign");
         assert!(public.verify_message::<Sha512>(msg, &sig));
+    }
+
+    #[test]
+    fn sign_verify_roundtrip_b163() {
+        let mut rng = rng();
+        let (public, private) = Ecdsa::generate(b163(), &mut rng);
+        let msg = b"binary curve ecdsa";
+        let sig = private.sign_message::<Sha256>(msg).expect("sign");
+        assert!(public.verify_message::<Sha256>(msg, &sig));
     }
 
     // ── Deterministic signing via explicit nonce ──────────────────────────────

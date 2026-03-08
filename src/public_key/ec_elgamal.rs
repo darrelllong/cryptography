@@ -846,7 +846,7 @@ fn biguint_to_u64(value: &BigUint) -> Option<u64> {
 mod tests {
     use super::{EcElGamal, EcElGamalCiphertext, EcElGamalPrivateKey, EcElGamalPublicKey};
     use crate::public_key::bigint::BigUint;
-    use crate::public_key::ec::{p256, p384, secp256k1};
+    use crate::public_key::ec::{b163, p256, p384, secp256k1};
     use crate::CtrDrbgAes256;
 
     fn rng() -> CtrDrbgAes256 {
@@ -874,6 +874,17 @@ mod tests {
         let ct = public.encrypt_point(&m, &mut rng);
         let recovered = private.decrypt_point(&ct);
         assert!(recovered.is_infinity());
+    }
+
+    #[test]
+    fn point_roundtrip_b163() {
+        let mut rng = rng();
+        let (public, private) = EcElGamal::generate(b163(), &mut rng);
+        let g = public.curve().base_point();
+        let m = public.curve().scalar_mul(&g, &BigUint::from_u64(29));
+        let ct = public.encrypt_point(&m, &mut rng);
+        let recovered = private.decrypt_point(&ct);
+        assert_eq!(recovered, m);
     }
 
     // ── Byte-level encrypt / decrypt ──────────────────────────────────────────

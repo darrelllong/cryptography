@@ -529,7 +529,7 @@ fn biguint_to_u64(value: &BigUint) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{Ecdh, EcdhPrivateKey, EcdhPublicKey};
-    use crate::public_key::ec::{p256, p384, p521, secp256k1};
+    use crate::public_key::ec::{b163, p256, p384, p521, secp256k1};
     use crate::CtrDrbgAes256;
 
     fn rng() -> CtrDrbgAes256 {
@@ -579,6 +579,16 @@ mod tests {
         let shared_b = priv_b.agree_x_coordinate(&pub_a).expect("agree B");
         assert_eq!(shared_a, shared_b);
         assert_eq!(shared_a.len(), 66); // P-521 coord_len
+    }
+
+    #[test]
+    fn agreement_b163() {
+        let mut rng = rng();
+        let (pub_a, priv_a) = Ecdh::generate(b163(), &mut rng);
+        let (pub_b, priv_b) = Ecdh::generate(b163(), &mut rng);
+        let shared_a = priv_a.agree_x_coordinate(&pub_b).expect("agree A");
+        let shared_b = priv_b.agree_x_coordinate(&pub_a).expect("agree B");
+        assert_eq!(shared_a, shared_b);
     }
 
     #[test]
