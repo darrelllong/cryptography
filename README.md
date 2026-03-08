@@ -22,6 +22,12 @@ Security note:
 - Constant-time symmetric implementations stay at the root namespace (for
   example `Aes128Ct`, `Gcm`, `Gmac`), while variable-time reference paths are
   explicitly named (`GcmVt`, `GmacVt`).
+- This crate intentionally does **not** provide an OS entropy source.
+  `CtrDrbgAes256` is deterministic once seeded. All key generation, randomized
+  padding, and nonce-dependent operations inherit seed quality from caller-
+  supplied external entropy. Obtain entropy from OS APIs (`getentropy`,
+  `SecRandomCopyBytes`, `getrandom`, or platform equivalent), and do not invent
+  your own entropy source.
 
 Implemented families:
 
@@ -689,6 +695,7 @@ family and supporting primitive covered in this repository:
 - SHA-3 / SHAKE: `fips202.pdf`
 - HMAC: `fips198-1.pdf`
 - DRBGs: `sp800-90a-r1.pdf`
+- Entropy engineering and failure analysis: `hughes-2022-badrandom-the-effect-and-mitigations-for-low-entropy-random-numbers-in-tls.pdf`
 - Bigint arithmetic kernels: `comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`, `karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
 - Public-key primitives and RSA standards: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`, `rfc8017-pkcs1-v2_2.pdf`, `sp800-56b-r2.pdf`, `fips186-5.pdf`
 - Post-quantum standards: `fips203-ml-kem.pdf`, `fips204-ml-dsa.pdf`
@@ -781,6 +788,15 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year         = {2015},
   month        = jun,
   url          = {https://csrc.nist.gov/pubs/sp/800/90/a/r1/final},
+}
+
+@phdthesis{hughes-2022-badrandom,
+  author = {James P. Hughes},
+  title  = {{BADRANDOM: The Effect and Mitigations for Low Entropy Random Numbers in TLS}},
+  school = {University of California, Santa Cruz},
+  year   = {2022},
+  month  = feb,
+  note   = {Local copy: pubs/hughes-2022-badrandom-the-effect-and-mitigations-for-low-entropy-random-numbers-in-tls.pdf},
 }
 
 @misc{sp800-56b-r2,

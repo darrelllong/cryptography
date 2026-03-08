@@ -4,6 +4,12 @@
 //!
 //! Public-key primitives are variable-time and intentionally live under
 //! [`crate::vt`] to make that side-channel property explicit.
+//!
+//! Entropy warning:
+//! - This crate does not provide an operating-system entropy source.
+//! - [`CtrDrbgAes256`] is a deterministic DRBG, not a seed generator.
+//! - Callers must provide high-entropy external seed material for all
+//!   randomness-dependent operations.
 
 mod ct;
 

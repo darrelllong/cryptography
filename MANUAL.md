@@ -36,6 +36,9 @@ This crate does **not** provide an operating-system entropy source.
 That is deliberate. If you use `CtrDrbgAes256`, key-generation APIs, randomized
 padding, or any other randomness-dependent operation, you must supply the seed
 material yourself from a high-entropy external source.
+Use OS-provided entropy APIs for this (`getentropy`, `SecRandomCopyBytes`,
+`getrandom`, or equivalent on your target). Do not invent your own entropy
+source in application code.
 
 What this means in practice:
 
@@ -54,6 +57,11 @@ The examples in this manual use fixed seed literals because the examples are
 also exercised by tests and need deterministic behavior. Those literals are
 for documentation only. Production callers must replace them with real external
 entropy before using any randomness-dependent API.
+
+For concrete failure modes caused by low-entropy randomness in deployed TLS
+implementations, see James P. Hughes, *BADRANDOM: The Effect and Mitigations
+for Low Entropy Random Numbers in TLS* (PhD thesis, 2022). Local copy:
+`pubs/hughes-2022-badrandom-the-effect-and-mitigations-for-low-entropy-random-numbers-in-tls.pdf`.
 
 ## API Conventions
 
