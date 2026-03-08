@@ -4,8 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cryptography::public_key::ec_edwards::ed25519;
 use cryptography::vt::{
-    p256, BigUint, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh, ElGamal, Paillier, Rsa,
-    RsaOaep, RsaPss,
+    p256, BigUint, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh, ElGamal, MlDsa,
+    MlDsaParameterSet, MlDsaSignature, MlKem, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
+    Paillier, Rsa, RsaOaep, RsaPss,
 };
 use cryptography::{
     Aes128, Aes256, Cbc, ChaCha20, Cmac, Csprng, Ctr, CtrDrbgAes256, Gcm, Gmac, Hmac, Rabbit,
@@ -312,4 +313,50 @@ fn manual_edwards_examples() {
         .agree_compressed_point(&eddh_pub_a)
         .expect("eddh b");
     assert_eq!(eddh_shared_a, eddh_shared_b);
+}
+
+#[test]
+fn manual_postquantum_examples() {
+    let mut rng = CtrDrbgAes256::new(&[11u8; 48]);
+
+    let (kem_pk, kem_sk) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).expect("ml-kem");
+    let (kem_ct, kem_ss_sender) = MlKem::encaps(&kem_pk, &mut rng).expect("encaps");
+    let kem_ss_receiver = MlKem::decaps(&kem_sk, &kem_ct).expect("decaps");
+    assert_eq!(kem_ss_sender.to_wire_bytes(), kem_ss_receiver.to_wire_bytes());
+
+    let kem_pk_wire = kem_pk.to_wire_bytes();
+    let kem_pk_round =
+        MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem768, &kem_pk_wire).expect("pk");
+    assert_eq!(kem_pk_round, kem_pk);
+
+    let kem_sk_blob = kem_sk.to_key_blob();
+    let kem_sk_round = MlKemPrivateKey::from_key_blob(&kem_sk_blob).expect("sk");
+    assert_eq!(kem_sk_round, kem_sk);
+
+    let fixed_randomness = [0xA5u8; 32];
+    let (_, ss1) = MlKem::encaps_with_randomness(&kem_pk_round, &fixed_randomness).expect("ss1");
+    let (_, ss2) = MlKem::encaps_with_randomness(&kem_pk_round, &fixed_randomness).expect("ss2");
+    assert_eq!(ss1.to_wire_bytes(), ss2.to_wire_bytes());
+
+    let (dsa_pk, dsa_sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).expect("ml-dsa");
+    let sig = MlDsa::sign(&dsa_sk, b"release manifest", &mut rng).expect("sign");
+    assert!(MlDsa::verify(&dsa_pk, b"release manifest", &sig));
+    assert!(!MlDsa::verify(&dsa_pk, b"tampered", &sig));
+
+    let ctx = b"bundle:v1";
+    let fixed_rnd = [0x5Cu8; 32];
+    let sig_ctx = MlDsa::sign_with_randomness_and_context(&dsa_sk, b"payload", &fixed_rnd, ctx)
+        .expect("sign with context");
+    assert!(MlDsa::verify_with_context(&dsa_pk, b"payload", &sig_ctx, ctx));
+    assert!(!MlDsa::verify_with_context(
+        &dsa_pk,
+        b"payload",
+        &sig_ctx,
+        b"bundle:v2"
+    ));
+
+    let sig_wire = sig.to_wire_bytes();
+    let sig_round = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa65, &sig_wire)
+        .expect("signature");
+    assert!(MlDsa::verify(&dsa_pk, b"release manifest", &sig_round));
 }

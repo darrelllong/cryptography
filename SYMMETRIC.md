@@ -367,15 +367,16 @@ on:
 | zuc128 | stream | 128 | 361.7 | ±5.657 | 189 | 222 | ±4.073 | 48 |
 | zuc128ct | stream | 128 | 18.69 | ±0.04068 | 137 | 3.26 | ±0.03818 | 30 |
 
-Cross-platform summary radar:
+Cross-platform summary Kiviat diagram (radar chart):
 
-![Symmetric platform radar chart](assets/symmetric-platform-radar.svg)
+![Symmetric platform Kiviat diagram (radar chart)](assets/symmetric-platform-radar.svg)
 
-The radar below compares representative fast-vs-`Ct` pairs across
+The Kiviat diagram (radar chart) below compares representative fast-vs-`Ct`
+pairs across
 table-driven ciphers. Simon and Speck are absent because their designs are
 already table-free bitwise/ARX, so there is no software `Ct` variant to compare.
 
-![Fast vs Ct throughput radar chart](assets/fast-vs-ct-radar.svg)
+![Fast vs Ct throughput Kiviat diagram (radar chart)](assets/fast-vs-ct-radar.svg)
 
 ## References
 

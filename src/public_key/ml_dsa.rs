@@ -12,6 +12,7 @@
 //! - no C/FFI backends are used in production code paths
 
 use core::fmt;
+use std::sync::OnceLock;
 
 use crate::hash::sha3::{Shake128, Shake256};
 use crate::hash::Xof;
@@ -20,6 +21,11 @@ use crate::Csprng;
 const N: usize = 256;
 const MAX_K: usize = 8;
 const MAX_L: usize = 7;
+const MAX_CONTEXT_BYTES: usize = u8::MAX as usize;
+const MAX_PRE_BYTES: usize = 2 + MAX_CONTEXT_BYTES;
+const MAX_CTILDE_BYTES: usize = 64;
+const MAX_POLYW1_PACKED_BYTES: usize = 192;
+const MAX_W1_PACKED_BYTES: usize = MAX_K * MAX_POLYW1_PACKED_BYTES;
 
 const SEED_BYTES: usize = 32;
 const CRH_BYTES: usize = 64;
@@ -243,17 +249,17 @@ impl MlDsaParameterSet {
 }
 
 /// ML-DSA public key.
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MlDsaPublicKey {
     params: MlDsaParameterSet,
     bytes: Vec<u8>,
+    expanded: OnceLock<Option<CachedPublicKey>>,
 }
 
 /// ML-DSA private key.
-#[derive(Clone, Eq, PartialEq)]
 pub struct MlDsaPrivateKey {
     params: MlDsaParameterSet,
     bytes: Vec<u8>,
+    expanded: OnceLock<Option<CachedPrivateKey>>,
 }
 
 /// ML-DSA signature.
@@ -263,10 +269,93 @@ pub struct MlDsaSignature {
     bytes: Vec<u8>,
 }
 
+#[derive(Clone)]
+struct CachedPublicKey {
+    tr: [u8; TR_BYTES],
+    t1_shift_ntt: Polyveck,
+    mat: [Polyvecl; MAX_K],
+}
+
+#[derive(Clone)]
+struct CachedPrivateKey {
+    tr: [u8; TR_BYTES],
+    key: [u8; SEED_BYTES],
+    t0_ntt: Polyveck,
+    s1_ntt: Polyvecl,
+    s2_ntt: Polyveck,
+    mat: [Polyvecl; MAX_K],
+}
+
 /// Namespace wrapper for ML-DSA operations.
 pub struct MlDsa;
 
+impl Clone for MlDsaPublicKey {
+    fn clone(&self) -> Self {
+        Self {
+            params: self.params,
+            bytes: self.bytes.clone(),
+            expanded: OnceLock::new(),
+        }
+    }
+}
+
+impl PartialEq for MlDsaPublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.params == other.params && self.bytes == other.bytes
+    }
+}
+
+impl Eq for MlDsaPublicKey {}
+
+impl fmt::Debug for MlDsaPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MlDsaPublicKey")
+            .field("params", &self.params)
+            .field("bytes_len", &self.bytes.len())
+            .finish()
+    }
+}
+
+impl Clone for MlDsaPrivateKey {
+    fn clone(&self) -> Self {
+        Self {
+            params: self.params,
+            bytes: self.bytes.clone(),
+            expanded: OnceLock::new(),
+        }
+    }
+}
+
+impl PartialEq for MlDsaPrivateKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.params == other.params && self.bytes == other.bytes
+    }
+}
+
+impl Eq for MlDsaPrivateKey {}
+
 impl MlDsaPublicKey {
+    fn expanded(&self) -> Option<&CachedPublicKey> {
+        // WHAT: lazily cache parsed/expanded public-key state (rho, tr, A-matrix, shifted+NTT t1).
+        // WHY: verify() is often called many times per key; redoing unpack/expand every call is avoidable work.
+        self.expanded
+            .get_or_init(|| {
+                let p = self.params.profile();
+                let (rho, mut t1) = unpack_pk(p, &self.bytes)?;
+                let mut tr = [0u8; TR_BYTES];
+                shake256_absorb_squeeze(&[&self.bytes], &mut tr);
+                polyveck_shiftl(&mut t1);
+                polyveck_ntt(&mut t1);
+                let mat = polyvec_matrix_expand(p, &rho);
+                Some(CachedPublicKey {
+                    tr,
+                    t1_shift_ntt: t1,
+                    mat,
+                })
+            })
+            .as_ref()
+    }
+
     #[must_use]
     pub fn parameter_set(&self) -> MlDsaParameterSet {
         self.params
@@ -285,6 +374,7 @@ impl MlDsaPublicKey {
         Some(Self {
             params,
             bytes: bytes.to_vec(),
+            expanded: OnceLock::new(),
         })
     }
 
@@ -305,6 +395,29 @@ impl MlDsaPublicKey {
 }
 
 impl MlDsaPrivateKey {
+    fn expanded(&self) -> Option<&CachedPrivateKey> {
+        // WHAT: lazily cache parsed/expanded private-key state (A-matrix and NTT-domain secret vectors).
+        // WHY: repeated signing with the same key should reuse deterministic precomputation safely.
+        self.expanded
+            .get_or_init(|| {
+                let p = self.params.profile();
+                let (rho, tr, key, mut t0, mut s1, mut s2) = unpack_sk(p, &self.bytes)?;
+                let mat = polyvec_matrix_expand(p, &rho);
+                polyvecl_ntt(&mut s1);
+                polyveck_ntt(&mut s2);
+                polyveck_ntt(&mut t0);
+                Some(CachedPrivateKey {
+                    tr,
+                    key,
+                    t0_ntt: t0,
+                    s1_ntt: s1,
+                    s2_ntt: s2,
+                    mat,
+                })
+            })
+            .as_ref()
+    }
+
     #[must_use]
     pub fn parameter_set(&self) -> MlDsaParameterSet {
         self.params
@@ -323,6 +436,7 @@ impl MlDsaPrivateKey {
         Some(Self {
             params,
             bytes: bytes.to_vec(),
+            expanded: OnceLock::new(),
         })
     }
 
@@ -426,10 +540,12 @@ impl MlDsa {
             MlDsaPublicKey {
                 params,
                 bytes: pk_bytes,
+                expanded: OnceLock::new(),
             },
             MlDsaPrivateKey {
                 params,
                 bytes: sk_bytes,
+                expanded: OnceLock::new(),
             },
         ))
     }
@@ -456,21 +572,19 @@ impl MlDsa {
         context: &[u8],
     ) -> Option<MlDsaSignature> {
         let p = private_key.params.profile();
-        let pre = build_pre(context)?;
-        let (rho, tr, key, mut t0, mut s1, mut s2) = unpack_sk(p, &private_key.bytes)?;
+        let mut pre_buf = [0u8; MAX_PRE_BYTES];
+        let pre = build_pre_into(context, &mut pre_buf)?;
+        let expanded = private_key.expanded()?;
 
         let mut mu = [0u8; CRH_BYTES];
-        shake256_absorb_squeeze(&[&tr, &pre, message], &mut mu);
+        shake256_absorb_squeeze(&[&expanded.tr, pre, message], &mut mu);
 
         let mut rhoprime = [0u8; CRH_BYTES];
-        shake256_absorb_squeeze(&[&key, randomness, &mu], &mut rhoprime);
-
-        let mat = polyvec_matrix_expand(p, &rho);
-        polyvecl_ntt(&mut s1);
-        polyveck_ntt(&mut s2);
-        polyveck_ntt(&mut t0);
+        shake256_absorb_squeeze(&[&expanded.key, randomness, &mu], &mut rhoprime);
 
         let mut nonce = 0u16;
+        let mut w1_packed = [0u8; MAX_W1_PACKED_BYTES];
+        let mut c = [0u8; MAX_CTILDE_BYTES];
         loop {
             // WHAT: sample candidate y and attempt one Fiat-Shamir signature round.
             // WHY: Dilithium signing is rejection-based; out-of-bound intermediates must be retried.
@@ -479,20 +593,22 @@ impl MlDsa {
 
             let mut z = y.clone();
             polyvecl_ntt(&mut z);
-            let mut w1 = polyvec_matrix_pointwise_montgomery(p, &mat, &z);
+            let mut w1 = polyvec_matrix_pointwise_montgomery(p, &expanded.mat, &z);
             polyveck_reduce(&mut w1);
             polyveck_invntt_tomont(&mut w1);
 
             polyveck_caddq(&mut w1);
             let (w1_hi, mut w0) = polyveck_decompose(p, &w1);
-            let w1_packed = polyveck_pack_w1(p, &w1_hi);
+            let w1_packed_len = p.k * p.polyw1_packed_bytes;
+            let w1_packed = &mut w1_packed[..w1_packed_len];
+            polyveck_pack_w1_into(p, &w1_hi, w1_packed);
 
-            let mut c = vec![0u8; p.ctilde_bytes];
-            shake256_absorb_squeeze(&[&mu, &w1_packed], &mut c);
-            let mut cp = poly_challenge(p, &c);
+            let c = &mut c[..p.ctilde_bytes];
+            shake256_absorb_squeeze(&[&mu, w1_packed], c);
+            let mut cp = poly_challenge(p, c);
             poly_ntt(&mut cp);
 
-            let mut z = polyvecl_pointwise_poly_montgomery(p, &cp, &s1);
+            let mut z = polyvecl_pointwise_poly_montgomery(p, &cp, &expanded.s1_ntt);
             polyvecl_invntt_tomont(&mut z);
             polyvecl_add_assign(&mut z, &y);
             polyvecl_reduce(&mut z);
@@ -500,7 +616,7 @@ impl MlDsa {
                 continue;
             }
 
-            let mut h = polyveck_pointwise_poly_montgomery(p, &cp, &s2);
+            let mut h = polyveck_pointwise_poly_montgomery(p, &cp, &expanded.s2_ntt);
             polyveck_invntt_tomont(&mut h);
             polyveck_sub_assign(&mut w0, &h);
             polyveck_reduce(&mut w0);
@@ -508,7 +624,7 @@ impl MlDsa {
                 continue;
             }
 
-            let mut h = polyveck_pointwise_poly_montgomery(p, &cp, &t0);
+            let mut h = polyveck_pointwise_poly_montgomery(p, &cp, &expanded.t0_ntt);
             polyveck_invntt_tomont(&mut h);
             polyveck_reduce(&mut h);
             if polyveck_chknorm(&h, p.gamma2) {
@@ -523,7 +639,7 @@ impl MlDsa {
                 continue;
             }
 
-            let sig_bytes = pack_sig(p, &c, &z, &hint);
+            let sig_bytes = pack_sig(p, c, &z, &hint);
             return Some(MlDsaSignature {
                 params: private_key.params,
                 bytes: sig_bytes,
@@ -565,12 +681,12 @@ impl MlDsa {
             return false;
         }
         let p = public_key.params.profile();
-        let pre = match build_pre(context) {
+        let mut pre_buf = [0u8; MAX_PRE_BYTES];
+        let pre = match build_pre_into(context, &mut pre_buf) {
             Some(pre) => pre,
             None => return false,
         };
-
-        let (rho, mut t1) = match unpack_pk(p, &public_key.bytes) {
+        let expanded = match public_key.expanded() {
             Some(v) => v,
             None => return false,
         };
@@ -582,22 +698,16 @@ impl MlDsa {
             return false;
         }
 
-        let mut tr = [0u8; TR_BYTES];
-        shake256_absorb_squeeze(&[&public_key.bytes], &mut tr);
-
         let mut mu = [0u8; CRH_BYTES];
-        shake256_absorb_squeeze(&[&tr, &pre, message], &mut mu);
+        shake256_absorb_squeeze(&[&expanded.tr, pre, message], &mut mu);
 
         let mut cp = poly_challenge(p, &c);
-        let mat = polyvec_matrix_expand(p, &rho);
 
         polyvecl_ntt(&mut z);
-        let mut w1 = polyvec_matrix_pointwise_montgomery(p, &mat, &z);
+        let mut w1 = polyvec_matrix_pointwise_montgomery(p, &expanded.mat, &z);
 
         poly_ntt(&mut cp);
-        polyveck_shiftl(&mut t1);
-        polyveck_ntt(&mut t1);
-        let t1_cp = polyveck_pointwise_poly_montgomery(p, &cp, &t1);
+        let t1_cp = polyveck_pointwise_poly_montgomery(p, &cp, &expanded.t1_shift_ntt);
 
         polyveck_sub_assign(&mut w1, &t1_cp);
         polyveck_reduce(&mut w1);
@@ -605,13 +715,16 @@ impl MlDsa {
 
         polyveck_caddq(&mut w1);
         let w1 = polyveck_use_hint(p, &w1, &h);
-        let packed_w1 = polyveck_pack_w1(p, &w1);
+        let mut packed_w1 = [0u8; MAX_W1_PACKED_BYTES];
+        let packed_w1 = &mut packed_w1[..p.k * p.polyw1_packed_bytes];
+        polyveck_pack_w1_into(p, &w1, packed_w1);
 
-        let mut c2 = vec![0u8; p.ctilde_bytes];
-        shake256_absorb_squeeze(&[&mu, &packed_w1], &mut c2);
+        let mut c2 = [0u8; MAX_CTILDE_BYTES];
+        let c2 = &mut c2[..p.ctilde_bytes];
+        shake256_absorb_squeeze(&[&mu, packed_w1], c2);
         // WHAT: recompute challenge from reconstructed w1 and compare to signature c.
         // WHY: this is the core FS consistency check that binds (z, h) to the message and public key.
-        c == c2
+        c.as_slice() == c2
     }
 
     /// Verify with empty context.
@@ -627,17 +740,16 @@ impl fmt::Debug for MlDsaPrivateKey {
     }
 }
 
-fn build_pre(context: &[u8]) -> Option<Vec<u8>> {
-    if context.len() > u8::MAX as usize {
+fn build_pre_into<'a>(context: &[u8], out: &'a mut [u8; MAX_PRE_BYTES]) -> Option<&'a [u8]> {
+    if context.len() > MAX_CONTEXT_BYTES {
         return None;
     }
     // WHAT: encode context as [0x00 || len || context].
     // WHY: FIPS 204 signs a framed context string, not raw context bytes.
-    let mut out = Vec::with_capacity(2 + context.len());
-    out.push(0);
-    out.push(context.len() as u8);
-    out.extend_from_slice(context);
-    Some(out)
+    out[0] = 0;
+    out[1] = context.len() as u8;
+    out[2..2 + context.len()].copy_from_slice(context);
+    Some(&out[..2 + context.len()])
 }
 
 fn shake256_absorb_squeeze(parts: &[&[u8]], out: &mut [u8]) {
@@ -648,16 +760,19 @@ fn shake256_absorb_squeeze(parts: &[&[u8]], out: &mut [u8]) {
     xof.squeeze(out);
 }
 
+#[inline(always)]
 fn montgomery_reduce(a: i64) -> i32 {
     let t = ((a as i32 as i64) * (QINV as i64)) as i32;
     ((a - (t as i64) * (Q as i64)) >> 32) as i32
 }
 
+#[inline(always)]
 fn reduce32(a: i32) -> i32 {
     let t = (a + (1 << 22)) >> 23;
     a - t * Q
 }
 
+#[inline(always)]
 fn caddq(a: i32) -> i32 {
     a + ((a >> 31) & Q)
 }
@@ -726,12 +841,14 @@ fn poly_caddq(poly: &mut Poly) {
     }
 }
 
+#[inline(always)]
 fn poly_add_assign(dst: &mut Poly, rhs: &Poly) {
     for i in 0..N {
         dst[i] += rhs[i];
     }
 }
 
+#[inline(always)]
 fn poly_sub_assign(dst: &mut Poly, rhs: &Poly) {
     for i in 0..N {
         dst[i] -= rhs[i];
@@ -786,6 +903,7 @@ fn poly_invntt_tomont(poly: &mut Poly) {
     }
 }
 
+#[inline(always)]
 fn poly_pointwise_montgomery(a: &Poly, b: &Poly) -> Poly {
     let mut out = [0i32; N];
     for i in 0..N {
@@ -1275,10 +1393,15 @@ fn polyvecl_pointwise_poly_montgomery(p: Profile, a: &Poly, v: &Polyvecl) -> Pol
 fn polyvecl_pointwise_acc_montgomery(p: Profile, u: &Polyvecl, v: &Polyvecl) -> Poly {
     debug_assert_eq!(u.l, p.l);
     debug_assert_eq!(v.l, p.l);
-    let mut w = poly_pointwise_montgomery(&u.vec[0], &v.vec[0]);
+    let mut w = [0i32; N];
+    for j in 0..N {
+        w[j] = montgomery_reduce((u.vec[0][j] as i64) * (v.vec[0][j] as i64));
+    }
     for i in 1..p.l {
-        let t = poly_pointwise_montgomery(&u.vec[i], &v.vec[i]);
-        poly_add_assign(&mut w, &t);
+        for j in 0..N {
+            let t = montgomery_reduce((u.vec[i][j] as i64) * (v.vec[i][j] as i64));
+            w[j] = w[j].wrapping_add(t);
+        }
     }
     w
 }
@@ -1403,8 +1526,8 @@ fn polyveck_use_hint(p: Profile, u: &Polyveck, h: &Polyveck) -> Polyveck {
     w
 }
 
-fn polyveck_pack_w1(p: Profile, w1: &Polyveck) -> Vec<u8> {
-    let mut out = vec![0u8; p.k * p.polyw1_packed_bytes];
+fn polyveck_pack_w1_into(p: Profile, w1: &Polyveck, out: &mut [u8]) {
+    debug_assert_eq!(out.len(), p.k * p.polyw1_packed_bytes);
     for i in 0..p.k {
         polyw1_pack(
             p,
@@ -1412,7 +1535,6 @@ fn polyveck_pack_w1(p: Profile, w1: &Polyveck) -> Vec<u8> {
             &mut out[i * p.polyw1_packed_bytes..(i + 1) * p.polyw1_packed_bytes],
         );
     }
-    out
 }
 
 fn polyvec_matrix_expand(p: Profile, rho: &[u8; SEED_BYTES]) -> [Polyvecl; MAX_K] {

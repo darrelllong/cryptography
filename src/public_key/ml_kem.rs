@@ -505,18 +505,20 @@ fn hash_j(data: &[u8]) -> [u8; SS_BYTES] {
     out
 }
 
+#[inline(always)]
 fn montgomery_reduce(a: i32) -> i16 {
     let t = (a as i16).wrapping_mul(QINV) as i32;
     ((a - t * Q_I32) >> 16) as i16
 }
 
+#[inline(always)]
 fn barrett_reduce(a: i16) -> i16 {
     let v: i16 = (((1i32 << 26) + Q_I32 / 2) / Q_I32) as i16;
     let t = (((v as i32) * (a as i32) + (1i32 << 25)) >> 26) as i16;
     a - t * Q
 }
 
-#[inline]
+#[inline(always)]
 fn fqmul(a: i16, b: i16) -> i16 {
     montgomery_reduce((a as i32) * (b as i32))
 }
@@ -527,12 +529,14 @@ fn poly_reduce(poly: &mut Poly) {
     }
 }
 
+#[inline(always)]
 fn poly_add_assign(dst: &mut Poly, rhs: &Poly) {
     for i in 0..N {
         dst[i] = dst[i].wrapping_add(rhs[i]);
     }
 }
 
+#[inline(always)]
 fn poly_sub_assign(dst: &mut Poly, rhs: &Poly) {
     for i in 0..N {
         dst[i] = dst[i].wrapping_sub(rhs[i]);
@@ -581,6 +585,7 @@ fn invntt(poly: &mut Poly) {
     }
 }
 
+#[inline(always)]
 fn basemul_pair(a: &[i16], b: &[i16], zeta: i16) -> (i16, i16) {
     let mut r0 = fqmul(a[1], b[1]);
     r0 = fqmul(r0, zeta);
@@ -589,19 +594,17 @@ fn basemul_pair(a: &[i16], b: &[i16], zeta: i16) -> (i16, i16) {
     (r0, r1)
 }
 
-fn poly_basemul_montgomery(a: &Poly, b: &Poly) -> Poly {
-    let mut out = [0i16; N];
+fn poly_basemul_montgomery_add_assign(dst: &mut Poly, a: &Poly, b: &Poly) {
     for i in 0..(N / 4) {
         let zeta = ZETAS[64 + i];
         let ai = 4 * i;
         let (r0, r1) = basemul_pair(&a[ai..ai + 2], &b[ai..ai + 2], zeta);
-        out[ai] = r0;
-        out[ai + 1] = r1;
+        dst[ai] = dst[ai].wrapping_add(r0);
+        dst[ai + 1] = dst[ai + 1].wrapping_add(r1);
         let (s0, s1) = basemul_pair(&a[ai + 2..ai + 4], &b[ai + 2..ai + 4], -zeta);
-        out[ai + 2] = s0;
-        out[ai + 3] = s1;
+        dst[ai + 2] = dst[ai + 2].wrapping_add(s0);
+        dst[ai + 3] = dst[ai + 3].wrapping_add(s1);
     }
-    out
 }
 
 fn poly_tomont(poly: &mut Poly) {
@@ -642,10 +645,9 @@ fn polyvec_add_assign(dst: &mut PolyVec, rhs: &PolyVec) {
 
 fn polyvec_basemul_acc_montgomery(a: &PolyVec, b: &PolyVec) -> Poly {
     debug_assert_eq!(a.k(), b.k());
-    let mut out = poly_basemul_montgomery(&a.polys[0], &b.polys[0]);
-    for i in 1..a.k() {
-        let t = poly_basemul_montgomery(&a.polys[i], &b.polys[i]);
-        poly_add_assign(&mut out, &t);
+    let mut out = [0i16; N];
+    for i in 0..a.k() {
+        poly_basemul_montgomery_add_assign(&mut out, &a.polys[i], &b.polys[i]);
     }
     poly_reduce(&mut out);
     out

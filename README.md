@@ -678,6 +678,7 @@ family and supporting primitive covered in this repository:
 - DRBGs: `sp800-90a-r1.pdf`
 - Bigint arithmetic kernels: `comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`, `karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
 - Public-key primitives and RSA standards: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`, `rfc8017-pkcs1-v2_2.pdf`, `sp800-56b-r2.pdf`, `fips186-5.pdf`
+- Post-quantum standards: `fips203-ml-kem.pdf`, `fips204-ml-dsa.pdf`
 - Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
@@ -1171,5 +1172,51 @@ Boyar-Peralta AES S-box circuit paper is stored at
   month        = jan,
   url          = {https://www.ietf.org/archive/id/draft-irtf-cfrg-xchacha-03.txt},
   note         = {Local PDF copy in `pubs/` generated from the IETF draft text},
+}
+
+@inproceedings{ajtai-1996,
+  author    = {Mikl{\'o}s Ajtai},
+  title     = {Generating Hard Instances of Lattice Problems (Extended Abstract)},
+  booktitle = {Proceedings of the Twenty-Eighth Annual ACM Symposium on Theory of Computing},
+  series    = {STOC '96},
+  pages     = {99--108},
+  year      = {1996},
+  publisher = {Association for Computing Machinery},
+  doi       = {10.1145/237814.237838},
+}
+
+@inproceedings{ajtai-dwork-1997,
+  author    = {Mikl{\'o}s Ajtai and Cynthia Dwork},
+  title     = {A Public-Key Cryptosystem with Worst-Case/Average-Case Equivalence},
+  booktitle = {Proceedings of the Twenty-Ninth Annual ACM Symposium on Theory of Computing},
+  series    = {STOC '97},
+  pages     = {284--293},
+  year      = {1997},
+  publisher = {Association for Computing Machinery},
+  doi       = {10.1145/258533.258604},
+}
+
+@techreport{fips203,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Module-Lattice-Based Key-Encapsulation Mechanism Standard},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 203},
+  year        = {2024},
+  month       = aug,
+  doi         = {10.6028/NIST.FIPS.203},
+  url         = {https://csrc.nist.gov/pubs/fips/203/final},
+}
+
+@techreport{fips204,
+  author      = {{National Institute of Standards and Technology}},
+  title       = {Module-Lattice-Based Digital Signature Standard},
+  institution = {National Institute of Standards and Technology},
+  type        = {{Federal Information Processing Standard}},
+  number      = {FIPS PUB 204},
+  year        = {2024},
+  month       = aug,
+  doi         = {10.6028/NIST.FIPS.204},
+  url         = {https://csrc.nist.gov/pubs/fips/204/final},
 }
 ```

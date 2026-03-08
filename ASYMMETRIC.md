@@ -1027,19 +1027,20 @@ public side continues to benefit from the sparse default exponent
 Post-quantum benchmarks and discussion for `ML-KEM` / `ML-DSA` now live in
 [POSTQUANTUM.md](POSTQUANTUM.md).
 
-The tables above are measured in milliseconds per operation. The radar charts
+The tables above are measured in milliseconds per operation. The Kiviat
+diagrams (radar charts)
 below use the reciprocal view, plotting operations per second on a log scale so
 the faster operations sit farther from the center.
 
-Cross-platform summary radar:
+Cross-platform summary Kiviat diagram (radar chart):
 
-![Public-key platform radar chart](assets/public-key-platform-radar.svg)
+![Public-key platform Kiviat diagram (radar chart)](assets/public-key-platform-radar.svg)
 
 The integer-arithmetic chart plots 1024-bit encrypt/decrypt throughput for the
 mixed integer-based public-key schemes. Signature-only and rerandomization/addition
 rows stay in the tables because they do not have matching encrypt/decrypt axes:
 
-![Public-key encrypt/decrypt radar chart](assets/public-key-encdec-radar.svg)
+![Public-key encrypt/decrypt Kiviat diagram (radar chart)](assets/public-key-encdec-radar.svg)
 
 The elliptic-curve code benefits from lower-constant-factor group operations, so
 the EC families are easier to compare in separate charts. The key-agreement
@@ -1050,15 +1051,15 @@ wider radial scale than the signature and encryption charts.
 
 These charts also use operations per second on a log scale.
 
-![EC signature radar chart](assets/ec-signature-radar.svg)
+![EC signature Kiviat diagram (radar chart)](assets/ec-signature-radar.svg)
 
 ### EC Key Agreement Throughput
 
-![EC key-agreement radar chart](assets/ec-key-agreement-radar.svg)
+![EC key-agreement Kiviat diagram (radar chart)](assets/ec-key-agreement-radar.svg)
 
 ### EC Encryption Throughput
 
-![EC encryption radar chart](assets/ec-encryption-radar.svg)
+![EC encryption Kiviat diagram (radar chart)](assets/ec-encryption-radar.svg)
 
 ## Practical Guidance
 

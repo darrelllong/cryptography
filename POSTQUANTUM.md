@@ -64,6 +64,93 @@ Both PQ schemes separate compact payloads from self-describing blobs:
 This keeps wire-format usage explicit while preserving one portable crate-native
 blob format for storage and fixtures.
 
+## Theory of Operation
+
+### ML-KEM (FIPS 203)
+
+At a high level:
+
+1. `keygen` samples a public matrix seed and secret short vectors, then derives
+   `(pk, sk)` where `sk` includes auxiliary values required for CCA security.
+2. `encaps` samples ephemeral randomness, derives `(ciphertext, shared_secret)`
+   against a recipient `pk`.
+3. `decaps` recomputes and validates the encapsulation relation and returns the
+   same `shared_secret` as the encapsulator (or an implicit-rejection value for
+   malformed ciphertexts).
+
+Operationally, treat the returned shared secret as KDF input, not as a final
+application key.
+
+### ML-DSA (FIPS 204)
+
+At a high level:
+
+1. `keygen` expands a deterministic seed into matrix and short vectors, then
+   packs `(pk, sk)` with the hash/transcript material required by verification.
+2. `sign` computes a Fiat-Shamir challenge over message transcript data and
+   uses rejection sampling until the signature bounds are satisfied.
+3. `verify` reconstructs the challenge transcript from `(pk, message,
+   signature)` and accepts iff it matches.
+
+The optional context is part of the signed transcript and must match exactly at
+verification time.
+
+## Working Examples
+
+These examples are executable and mirrored by
+`tests/manual_examples.rs::manual_postquantum_examples`.
+
+### ML-KEM end-to-end + wire/blob roundtrips
+
+```rust
+use cryptography::vt::{
+    MlKem, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
+};
+use cryptography::CtrDrbgAes256;
+
+let mut rng = CtrDrbgAes256::new(&[0x11u8; 48]);
+
+let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).expect("keygen");
+let (ct, ss_sender) = MlKem::encaps(&pk, &mut rng).expect("encaps");
+let ss_receiver = MlKem::decaps(&sk, &ct).expect("decaps");
+assert_eq!(ss_sender.to_wire_bytes(), ss_receiver.to_wire_bytes());
+
+let pk_wire = pk.to_wire_bytes();
+let pk_round = MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem768, &pk_wire).expect("pk");
+assert_eq!(pk_round, pk);
+
+let sk_blob = sk.to_key_blob();
+let sk_round = MlKemPrivateKey::from_key_blob(&sk_blob).expect("sk");
+assert_eq!(sk_round, sk);
+```
+
+### ML-DSA sign/verify + context + signature wire roundtrip
+
+```rust
+use cryptography::vt::{
+    MlDsa, MlDsaParameterSet, MlDsaSignature,
+};
+use cryptography::CtrDrbgAes256;
+
+let mut rng = CtrDrbgAes256::new(&[0x22u8; 48]);
+let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).expect("keygen");
+
+let sig = MlDsa::sign(&sk, b"release manifest", &mut rng).expect("sign");
+assert!(MlDsa::verify(&pk, b"release manifest", &sig));
+assert!(!MlDsa::verify(&pk, b"tampered", &sig));
+
+let ctx = b"bundle:v1";
+let rnd = [0x5Cu8; 32];
+let sig_ctx = MlDsa::sign_with_randomness_and_context(&sk, b"payload", &rnd, ctx).expect("sign");
+assert!(MlDsa::verify_with_context(&pk, b"payload", &sig_ctx, ctx));
+assert!(!MlDsa::verify_with_context(&pk, b"payload", &sig_ctx, b"bundle:v2"));
+
+let sig_wire = sig.to_wire_bytes();
+let sig_round =
+    MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa65, &sig_wire).expect("sig");
+assert!(MlDsa::verify(&pk, b"release manifest", &sig_round));
+```
+
 ## Benchmarks
 
 Measured with [pilot-bench](https://github.com/ascar-io/pilot-bench) via:
@@ -130,9 +217,24 @@ integration.
 
 ## References
 
-- Ajtai, M. (1996). "Generating hard instances of lattice problems."
-- Ajtai, M., and Dwork, C. (1997). "A public-key cryptosystem with worst-case/average-case equivalence."
-- FIPS 203 (ML-KEM): `pubs/fips203-ml-kem.pdf`
-- FIPS 204 (ML-DSA): `pubs/fips204-ml-dsa.pdf`
-- Vendored reference code: `third_party/ml-dsa/dilithium-ref`,
-  `third_party/ml-kem/kyber-ref`
+Primary standards PDFs are stored in `pubs/`. The canonical BibTeX entries are
+in [README.md](README.md).
+
+- Miklos Ajtai, "Generating Hard Instances of Lattice Problems (Extended
+  Abstract)," *Proceedings of the Twenty-Eighth Annual ACM Symposium on Theory
+  of Computing (STOC '96)*, pp. 99-108, 1996.
+  DOI: [10.1145/237814.237838](https://doi.org/10.1145/237814.237838)
+- Miklos Ajtai and Cynthia Dwork, "A Public-Key Cryptosystem with
+  Worst-Case/Average-Case Equivalence," *Proceedings of the Twenty-Ninth
+  Annual ACM Symposium on Theory of Computing (STOC '97)*, pp. 284-293, 1997.
+  DOI: [10.1145/258533.258604](https://doi.org/10.1145/258533.258604)
+- National Institute of Standards and Technology, *Module-Lattice-Based
+  Key-Encapsulation Mechanism Standard (FIPS 203)*, 2024.
+  DOI: [10.6028/NIST.FIPS.203](https://doi.org/10.6028/NIST.FIPS.203)
+  (local copy: `pubs/fips203-ml-kem.pdf`)
+- National Institute of Standards and Technology, *Module-Lattice-Based Digital
+  Signature Standard (FIPS 204)*, 2024.
+  DOI: [10.6028/NIST.FIPS.204](https://doi.org/10.6028/NIST.FIPS.204)
+  (local copy: `pubs/fips204-ml-dsa.pdf`)
+- Vendored reference code (for differential testing/benchmark calibration):
+  `third_party/ml-kem/kyber-ref`, `third_party/ml-dsa/dilithium-ref`
