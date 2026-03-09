@@ -5,8 +5,11 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 ## Track A: Constant-Time Symmetric Paths
 
 - [x] Remove panic-checked integer conversions from `src/ct.rs` tight loops.
-- [~] Build first isolated Apple-Silicon alternative kernel outside baseline
-      tree (`aarch64-alt` AES-128 FEAT_AES path + parity harness).
+- [x] Build first isolated Apple-Silicon alternative kernels outside baseline
+      tree (`aarch64-alt` AES-128/AES-256 FEAT_AES paths + parity harnesses).
+- [~] Add first non-AES acceleration paths in `aarch64-alt`:
+      SHA-256 (ARM FEAT_SHA2) done; GHASH (ARM FEAT_PMULL) and ChaCha20
+      (NEON) pending.
 - [ ] Profile `src/ct.rs` ANF evaluators (`subset_mask8`, `eval_byte_sbox`,
       `parity128`) on M-series and quantify cycle share by cipher.
 - [ ] Reduce repeated ANF evaluation overhead in high-gap Ct ciphers:

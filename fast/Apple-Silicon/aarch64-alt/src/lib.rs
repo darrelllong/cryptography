@@ -4,3 +4,5 @@
 //! It must stay behavior-compatible with the baseline `cryptography` crate.
 
 pub mod aes128_armv8;
+pub mod aes256_armv8;
+pub mod sha256_armv8;

@@ -24,15 +24,19 @@ using algorithmic/layout improvements and compiler-friendly code structure.
 Implemented in:
 
 - `fast/Apple-Silicon/aarch64-alt/src/aes128_armv8.rs`
+- `fast/Apple-Silicon/aarch64-alt/src/aes256_armv8.rs`
 
-It provides an opt-in AES-128 path using ARM FEAT_AES intrinsics on
-Apple-Silicon machines and includes parity checks against the baseline
-`cryptography::Aes128`.
+It provides opt-in AES-128, AES-256, and SHA-256 paths using ARM FEAT_AES /
+FEAT_SHA2 intrinsics on Apple-Silicon machines and includes parity checks
+against baseline `cryptography::Aes128`, `cryptography::Aes256`, and
+`cryptography::Sha256`.
 
 Run parity + microbench:
 
 ```bash
 bash fast/Apple-Silicon/scripts/compare_aes128_alt.sh 5000
+bash fast/Apple-Silicon/scripts/compare_aes256_alt.sh 5000
+bash fast/Apple-Silicon/scripts/compare_sha256_alt.sh 5000
 ```
 
 ## Scope
