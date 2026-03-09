@@ -56,7 +56,8 @@ Supporting primitives:
 - SHA-3 (`Sha3_224/256/384/512`)
 - SHAKE (`Shake128`, `Shake256`)
 - HMAC (`Hmac<H>`) and HKDF (`Hkdf<H>`)
-- Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`, `Cmac`
+- Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Cfb8`, `Ofb`, `Ctr`,
+  `Cmac`, `Ccm`, `Gcm`, `GcmVt`, `Gmac`, `GmacVt`, `Xts`, `AesKeyWrap`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
 Asymmetric post-quantum work:

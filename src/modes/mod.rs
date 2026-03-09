@@ -7,6 +7,7 @@
 //! - SP 800-38C authenticated mode: CCM
 //! - SP 800-38D authenticated mode: GCM / GMAC
 //! - SP 800-38E storage mode: XTS (128-bit block ciphers only)
+//! - RFC 3394 / SP 800-38F key wrap mode: AES Key Wrap (no padding)
 //! - RFC 8439 AEAD: ChaCha20-Poly1305
 //!
 //! These adapters are generic over any `BlockCipher` in the crate, so the same
@@ -17,10 +18,9 @@
 //! one block cipher implementation can be dropped into several standardized
 //! operating modes without duplicating the mode logic in every cipher module.
 //!
-//! Higher-level special-purpose modes such as key wrap (SP 800-38F) and
-//! AES-GCM-SIV (RFC 8452) are still intentionally left for a later layer; they
-//! need additional domain-specific machinery beyond the basic block-cipher
-//! adapters here.
+//! Higher-level special-purpose modes such as AES-GCM-SIV (RFC 8452) are still
+//! intentionally left for a later layer; they need additional domain-specific
+//! machinery beyond the basic block-cipher adapters here.
 
 use crate::BlockCipher;
 
@@ -377,6 +377,145 @@ fn ccm_apply_ctr<C: BlockCipher>(cipher: &C, nonce: &[u8], data: &mut [u8]) {
         let ctr = ccm_counter_block(nonce, u64::try_from(i + 1).expect("counter fits u64"));
         let stream = counter_keystream(cipher, &ctr);
         xor_in_place(chunk, &stream[..chunk.len()]);
+    }
+}
+
+const AES_KEY_WRAP_DEFAULT_IV: [u8; 8] = [0xA6; 8];
+
+#[inline]
+fn xor_aes_kw_t(a: &mut [u8; 8], t: u64) {
+    let t_be = t.to_be_bytes();
+    for i in 0..8 {
+        a[i] ^= t_be[i];
+    }
+}
+
+/// AES Key Wrap (RFC 3394) over 64-bit semiblocks with the default IV.
+///
+/// This is the no-padding variant standardized in RFC 3394 and SP 800-38F.
+/// Inputs must be a multiple of 8 bytes and at least 16 bytes long.
+pub struct AesKeyWrap<C> {
+    cipher: C,
+}
+
+impl<C> AesKeyWrap<C> {
+    /// Wrap an AES cipher instance for RFC 3394 key wrap operations.
+    pub fn new(cipher: C) -> Self {
+        Self { cipher }
+    }
+
+    /// Borrow the wrapped AES cipher.
+    pub fn cipher(&self) -> &C {
+        &self.cipher
+    }
+}
+
+impl<C: BlockCipher> AesKeyWrap<C> {
+    /// Wrap key material with the RFC 3394 default IV (`A6A6A6A6A6A6A6A6`).
+    ///
+    /// Returns `None` when `key_data` is not a multiple of 8 bytes or is
+    /// shorter than 16 bytes.
+    pub fn wrap_key(&self, key_data: &[u8]) -> Option<Vec<u8>> {
+        self.wrap_key_with_iv(key_data, &AES_KEY_WRAP_DEFAULT_IV)
+    }
+
+    /// Wrap key material with an explicit 64-bit initial register value.
+    ///
+    /// Returns `None` when `key_data` is not a multiple of 8 bytes or is
+    /// shorter than 16 bytes.
+    pub fn wrap_key_with_iv(&self, key_data: &[u8], iv: &[u8; 8]) -> Option<Vec<u8>> {
+        assert_block_128::<C>();
+        if !key_data.len().is_multiple_of(8) || key_data.len() < 16 {
+            return None;
+        }
+
+        let n = key_data.len() / 8;
+        let mut a = *iv;
+        let mut r = Vec::with_capacity(n);
+        for chunk in key_data.chunks_exact(8) {
+            let mut block = [0u8; 8];
+            block.copy_from_slice(chunk);
+            r.push(block);
+        }
+
+        for j in 0..6usize {
+            for (i, ri) in r.iter_mut().enumerate() {
+                let mut b = [0u8; 16];
+                b[..8].copy_from_slice(&a);
+                b[8..].copy_from_slice(ri);
+                self.cipher.encrypt(&mut b);
+
+                a.copy_from_slice(&b[..8]);
+                let t =
+                    u64::try_from(j * n + i + 1).expect("AES-KW step index must fit in 64 bits");
+                xor_aes_kw_t(&mut a, t);
+                ri.copy_from_slice(&b[8..]);
+            }
+        }
+
+        let mut wrapped = Vec::with_capacity((n + 1) * 8);
+        wrapped.extend_from_slice(&a);
+        for ri in r {
+            wrapped.extend_from_slice(&ri);
+        }
+        Some(wrapped)
+    }
+
+    /// Unwrap RFC 3394 key material and verify the default IV integrity check.
+    ///
+    /// Returns `None` when input length is invalid or the integrity check
+    /// fails.
+    pub fn unwrap_key(&self, wrapped: &[u8]) -> Option<Vec<u8>> {
+        self.unwrap_key_with_iv(wrapped, &AES_KEY_WRAP_DEFAULT_IV)
+    }
+
+    /// Unwrap RFC 3394 key material and verify against an explicit IV value.
+    ///
+    /// Returns `None` when input length is invalid or the integrity check
+    /// fails.
+    pub fn unwrap_key_with_iv(&self, wrapped: &[u8], iv: &[u8; 8]) -> Option<Vec<u8>> {
+        assert_block_128::<C>();
+        if !wrapped.len().is_multiple_of(8) || wrapped.len() < 24 {
+            return None;
+        }
+
+        let n = (wrapped.len() / 8) - 1;
+        let mut a = [0u8; 8];
+        a.copy_from_slice(&wrapped[..8]);
+
+        let mut r = Vec::with_capacity(n);
+        for chunk in wrapped[8..].chunks_exact(8) {
+            let mut block = [0u8; 8];
+            block.copy_from_slice(chunk);
+            r.push(block);
+        }
+
+        for j in (0..6usize).rev() {
+            for i in (0..n).rev() {
+                let t =
+                    u64::try_from(j * n + i + 1).expect("AES-KW step index must fit in 64 bits");
+                let mut a_xor_t = a;
+                xor_aes_kw_t(&mut a_xor_t, t);
+
+                let mut b = [0u8; 16];
+                b[..8].copy_from_slice(&a_xor_t);
+                b[8..].copy_from_slice(&r[i]);
+                self.cipher.decrypt(&mut b);
+
+                a.copy_from_slice(&b[..8]);
+                r[i].copy_from_slice(&b[8..]);
+            }
+        }
+
+        if crate::ct::constant_time_eq_mask(&a, iv) != u8::MAX {
+            return None;
+        }
+
+        let mut key_data = Vec::with_capacity(n * 8);
+        for ri in r {
+            key_data.extend_from_slice(&ri);
+        }
+        Some(key_data)
     }
 }
 
@@ -1141,7 +1280,7 @@ impl<C: BlockCipher> Cmac<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Aes128;
+    use crate::{Aes128, Aes192, Aes256};
     fn parse<const N: usize>(s: &str) -> [u8; N] {
         let mut out = [0u8; N];
         assert_eq!(s.len(), 2 * N);
@@ -1623,5 +1762,91 @@ mod tests {
 
         assert!(mode.decrypt(&nonce, aad, &mut data, &tag));
         assert_eq!(data, *b"ccm plaintext data");
+    }
+
+    #[test]
+    fn aes_key_wrap_rfc3394_4_1() {
+        let kek = parse::<16>("000102030405060708090A0B0C0D0E0F");
+        let key_data = parse::<16>("00112233445566778899AABBCCDDEEFF");
+        let expected = parse::<24>("1FA68B0A8112B447AEF34BD8FB5A7B829D3E862371D2CFE5");
+        let kw = AesKeyWrap::new(Aes128::new(&kek));
+
+        assert_eq!(kw.wrap_key(&key_data), Some(expected.to_vec()));
+        assert_eq!(kw.unwrap_key(&expected), Some(key_data.to_vec()));
+    }
+
+    #[test]
+    fn aes_key_wrap_rfc3394_4_2() {
+        let kek = parse::<24>("000102030405060708090A0B0C0D0E0F1011121314151617");
+        let key_data = parse::<16>("00112233445566778899AABBCCDDEEFF");
+        let expected = parse::<24>("96778B25AE6CA435F92B5B97C050AED2468AB8A17AD84E5D");
+        let kw = AesKeyWrap::new(Aes192::new(&kek));
+
+        assert_eq!(kw.wrap_key(&key_data), Some(expected.to_vec()));
+        assert_eq!(kw.unwrap_key(&expected), Some(key_data.to_vec()));
+    }
+
+    #[test]
+    fn aes_key_wrap_rfc3394_4_3() {
+        let kek = parse::<32>("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+        let key_data = parse::<16>("00112233445566778899AABBCCDDEEFF");
+        let expected = parse::<24>("64E8C3F9CE0F5BA263E9777905818A2A93C8191E7D6E8AE7");
+        let kw = AesKeyWrap::new(Aes256::new(&kek));
+
+        assert_eq!(kw.wrap_key(&key_data), Some(expected.to_vec()));
+        assert_eq!(kw.unwrap_key(&expected), Some(key_data.to_vec()));
+    }
+
+    #[test]
+    fn aes_key_wrap_rfc3394_4_4() {
+        let kek = parse::<24>("000102030405060708090A0B0C0D0E0F1011121314151617");
+        let key_data = parse::<24>("00112233445566778899AABBCCDDEEFF0001020304050607");
+        let expected =
+            parse::<32>("031D33264E15D33268F24EC260743EDCE1C6C7DDEE725A936BA814915C6762D2");
+        let kw = AesKeyWrap::new(Aes192::new(&kek));
+
+        assert_eq!(kw.wrap_key(&key_data), Some(expected.to_vec()));
+        assert_eq!(kw.unwrap_key(&expected), Some(key_data.to_vec()));
+    }
+
+    #[test]
+    fn aes_key_wrap_rfc3394_4_5() {
+        let kek = parse::<32>("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+        let key_data = parse::<24>("00112233445566778899AABBCCDDEEFF0001020304050607");
+        let expected =
+            parse::<32>("A8F9BC1612C68B3FF6E6F4FBE30E71E4769C8B80A32CB8958CD5D17D6B254DA1");
+        let kw = AesKeyWrap::new(Aes256::new(&kek));
+
+        assert_eq!(kw.wrap_key(&key_data), Some(expected.to_vec()));
+        assert_eq!(kw.unwrap_key(&expected), Some(key_data.to_vec()));
+    }
+
+    #[test]
+    fn aes_key_wrap_rfc3394_4_6() {
+        let kek = parse::<32>("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+        let key_data =
+            parse::<32>("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F");
+        let expected = parse::<40>(
+            "28C9F404C4B810F4CBCCB35CFB87F8263F5786E2D80ED326CBC7F0E71A99F43BFB988B9B7A02DD21",
+        );
+        let kw = AesKeyWrap::new(Aes256::new(&kek));
+
+        assert_eq!(kw.wrap_key(&key_data), Some(expected.to_vec()));
+        assert_eq!(kw.unwrap_key(&expected), Some(key_data.to_vec()));
+    }
+
+    #[test]
+    fn aes_key_wrap_rejects_bad_lengths_and_tampering() {
+        let kw = AesKeyWrap::new(Aes128::new(&[0u8; 16]));
+
+        assert!(kw.wrap_key(&[]).is_none());
+        assert!(kw.wrap_key(&[0u8; 8]).is_none());
+        assert!(kw.wrap_key(&[0u8; 15]).is_none());
+        assert!(kw.unwrap_key(&[]).is_none());
+        assert!(kw.unwrap_key(&[0u8; 16]).is_none());
+
+        let mut wrapped = kw.wrap_key(&[0u8; 16]).expect("wrap");
+        wrapped[0] ^= 1;
+        assert!(kw.unwrap_key(&wrapped).is_none());
     }
 }

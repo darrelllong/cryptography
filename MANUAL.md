@@ -297,14 +297,17 @@ The mode layer exports:
 - `Ecb<C>`
 - `Cbc<C>`
 - `Cfb<C>`
+- `Cfb8<C>`
 - `Ofb<C>`
 - `Ctr<C>`
 - `Xts<C>`
 - `Cmac<C>`
+- `Ccm<C>`
 - `Gcm<C>`
 - `GcmVt<C>`
 - `Gmac<C>`
 - `GmacVt<C>`
+- `AesKeyWrap<C>`
 - `ChaCha20Poly1305`
 
 Constructor pattern:
@@ -314,9 +317,12 @@ Constructor pattern:
 Representative methods:
 
 - `encrypt_nopad` / `decrypt_nopad` for `Ecb`, `Cbc`, `Cfb`
+- `encrypt` / `decrypt` for `Cfb8`
 - `apply_keystream` for `Ofb`, `Ctr`
 - `encrypt_sector` / `decrypt_sector` for `Xts`
+- `encrypt` / `decrypt` / `compute_tag` for `Ccm`
 - `encrypt`, `decrypt`, `compute_tag` for `Gcm` and `GcmVt`
+- `wrap_key` / `unwrap_key` for `AesKeyWrap` (RFC 3394, no padding)
 - `encrypt`, `decrypt`, `encrypt_in_place`, `decrypt_in_place` for
   `ChaCha20Poly1305`
 

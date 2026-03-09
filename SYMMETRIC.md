@@ -33,10 +33,12 @@ functions are already table-free ARX / bitwise designs.
 
 The generic mode layer in `src/modes/` supplies:
 
-- SP 800-38A: `Ecb`, `Cbc`, `Cfb`, `Ofb`, `Ctr`
+- SP 800-38A: `Ecb`, `Cbc`, `Cfb`, `Cfb8`, `Ofb`, `Ctr`
 - SP 800-38B: `Cmac`
-- SP 800-38D: `Gcm`, `Gmac`
+- SP 800-38C: `Ccm`
+- SP 800-38D: `Gcm`, `GcmVt`, `Gmac`, `GmacVt`
 - SP 800-38E: `Xts`
+- SP 800-38F / RFC 3394: `AesKeyWrap` (no-padding AES key wrap)
 
 These wrappers are generic over any `BlockCipher`, so the same mode code works
 across AES, DES, Camellia, PRESENT, CAST-128, and the other block ciphers.

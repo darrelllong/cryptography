@@ -142,7 +142,8 @@ pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
 pub use modes::{
-    Cbc, Ccm, Cfb, Cfb8, ChaCha20Poly1305, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt, Ofb, Xts,
+    AesKeyWrap, Cbc, Ccm, Cfb, Cfb8, ChaCha20Poly1305, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt,
+    Ofb, Xts,
 };
 
 impl StreamCipher for ChaCha20 {
