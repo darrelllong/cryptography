@@ -7,8 +7,8 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [x] Remove panic-checked integer conversions from `src/ct.rs` tight loops.
 - [x] Build first isolated Apple-Silicon alternative kernels outside baseline
       tree (`aarch64-alt` AES-128/AES-256 FEAT_AES paths + parity harnesses).
-- [~] Add first non-AES acceleration paths in `aarch64-alt`:
-      SHA-256 and GHASH done; ChaCha20 (NEON) pending.
+- [x] Add first non-AES acceleration paths in `aarch64-alt`:
+      SHA-256, GHASH, and ChaCha20 (NEON) all implemented with parity harnesses.
 - [ ] Profile `src/ct.rs` ANF evaluators (`subset_mask8`, `eval_byte_sbox`,
       `parity128`) on M-series and quantify cycle share by cipher.
 - [ ] Reduce repeated ANF evaluation overhead in high-gap Ct ciphers:

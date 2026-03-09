@@ -37,6 +37,7 @@ bash fast/Apple-Silicon/scripts/compare_aes128_alt.sh 5000
 bash fast/Apple-Silicon/scripts/compare_aes256_alt.sh 5000
 bash fast/Apple-Silicon/scripts/compare_sha256_alt.sh 5000
 bash fast/Apple-Silicon/scripts/compare_ghash_alt.sh 5000
+bash fast/Apple-Silicon/scripts/compare_chacha20_alt.sh 5000
 ```
 
 ## Scope
