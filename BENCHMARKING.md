@@ -73,6 +73,14 @@ Override paths without editing scripts via:
 - `PILOT_CIPHER_BIN` for `pilot_cipher`
 - `PILOT_PK_BIN` for `pilot_pk`
 
+For Apple Silicon optimization loops (no assembly, in-repo code only), use:
+
+- [fast/Apple-Silicon/README.md](fast/Apple-Silicon/README.md)
+- `bash fast/Apple-Silicon/scripts/run_hotspots_symmetric.sh`
+- `bash fast/Apple-Silicon/scripts/run_hotspots_pk.sh`
+
+Use the split scripts so unchanged PK or symmetric areas are not re-run.
+
 ### Step 2 — build the Rust workload binaries
 
 ```bash

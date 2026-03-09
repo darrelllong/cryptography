@@ -940,8 +940,8 @@ fallback, but the publication-facing numbers below come from Pilot and report
 milliseconds per operation, 95% confidence-interval half-width, and rounds
 required to hit the stop rule. The tables below are parallel runs on:
 
-- Apple M1 Max (`wigner.local`)
-- Intel Xeon 6740E (`ssh.soe.ucsc.edu`, single-core slice)
+- Apple M4 Pro (`Dyson.local`)
+- Intel Xeon 6740E (`moore.soe.ucsc.edu`, single-core slice)
 
 For RSA specifically, the timing gap between `encrypt`/`verify` and
 `decrypt`/`sign` is still expected: the private side now uses CRT, but the
@@ -950,88 +950,107 @@ public side continues to benefit from the sparse default exponent
 
 ### Finite-field public key (1024-bit)
 
-| Operation | M1 Max ms/op | M1 Max ±CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| rsa_keygen_1024 | 20.68 | ±1.515 | 30 | 30.2 | ±0.08879 | 30 |
-| rsa_encrypt_1024 | 0.04352 | ±0.0003031 | 37 | 0.06179 | ±0.0001327 | 67 |
-| rsa_decrypt_1024 | 0.3404 | ±0.01596 | 30 | 0.5078 | ±0.002999 | 30 |
-| rsa_sign_1024 | 0.3344 | ±0.01186 | 30 | 0.5089 | ±0.00582 | 34 |
-| rsa_verify_1024 | 0.04359 | ±0.0001821 | 30 | 0.06234 | ±0.0001731 | 30 |
-| elgamal_keygen_1024 | 58.95 | ±0.4074 | 30 | 101.7 | ±0.3517 | 72 |
-| elgamal_encrypt_1024 | 0.4198 | ±0.001166 | 40 | 0.7567 | ±0.005752 | 30 |
-| elgamal_decrypt_1024 | 0.2152 | ±0.001063 | 90 | 0.383 | ±0.001533 | 38 |
-| dsa_keygen_1024 | 66.06 | ±1.484 | 58 | 113.9 | ±0.4557 | 107 |
-| dsa_sign_1024 | 0.3568 | ±0.002195 | 91 | 0.6148 | ±0.002104 | 30 |
-| dsa_verify_1024 | 0.5335 | ±0.002635 | 60 | 0.9434 | ±0.004741 | 34 |
-| paillier_keygen_1024 | 20.88 | ±0.697 | 77 | 32.24 | ±0.1154 | 30 |
-| paillier_encrypt_1024 | 7.758 | ±0.08014 | 30 | 13.16 | ±0.05059 | 35 |
-| paillier_decrypt_1024 | 2.947 | ±0.03198 | 128 | 5.283 | ±0.01132 | 30 |
-| paillier_rerandomize_1024 | 5.032 | ±0.03233 | 34 | 8.655 | ±0.01802 | 105 |
-| paillier_add_1024 | 0.009283 | ±0.0001845 | 46 | 0.01646 | ±4.002e-05 | 30 |
-| cocks_keygen_1024 | 17.32 | ±1.26 | 184 | 24.92 | ±0.04996 | 130 |
-| cocks_encrypt_1024 | 0.9466 | ±0.004162 | 30 | 1.639 | ±0.00922 | 31 |
-| cocks_decrypt_1024 | 0.1778 | ±0.01352 | 60 | 0.2599 | ±0.00453 | 94 |
-| rabin_keygen_1024 | 26.94 | ±1.502 | 30 | 40 | ±0.1458 | 30 |
-| rabin_encrypt_1024 | 0.03731 | ±0.0008013 | 165 | 0.05009 | ±0.000302 | 32 |
-| rabin_decrypt_1024 | 0.3312 | ±0.01492 | 134 | 0.5001 | ±0.006152 | 30 |
-| schmidt_samoa_keygen_1024 | 7.725 | ±0.09004 | 65 | 10.29 | ±0.06361 | 83 |
-| schmidt_samoa_encrypt_1024 | 0.9295 | ±0.003643 | 60 | 1.638 | ±0.01457 | 40 |
-| schmidt_samoa_decrypt_1024 | 0.2677 | ±0.01973 | 30 | 0.4679 | ±0.00994 | 31 |
+| rsa_keygen_1024 | 14.66 | ±0.0793 | 90 | 25.72 | ±0.06282 | 38 |
+| rsa_encrypt_1024 | 0.03122 | ±0.0002236 | 30 | 0.05377 | ±0.0002585 | 41 |
+| rsa_decrypt_1024 | 0.2465 | ±0.00371 | 44 | 0.4189 | ±0.002157 | 35 |
+| rsa_sign_1024 | 0.2431 | ±0.002273 | 38 | 0.4182 | ±0.002251 | 30 |
+| rsa_verify_1024 | 0.03202 | ±0.0009226 | 30 | 0.05419 | ±0.000315 | 40 |
+| elgamal_keygen_1024 | 48.6 | ±0.9629 | 90 | 82.22 | ±0.3403 | 32 |
+| elgamal_encrypt_1024 | 0.3472 | ±0.01123 | 31 | 0.5924 | ±0.002446 | 30 |
+| elgamal_decrypt_1024 | 0.1764 | ±0.005602 | 31 | 0.3044 | ±0.001789 | 30 |
+| dsa_keygen_1024 | 52.23 | ±0.328 | 30 | 91.79 | ±0.3258 | 32 |
+| dsa_sign_1024 | 0.2662 | ±0.002421 | 30 | 0.5371 | ±0.003304 | 60 |
+| dsa_verify_1024 | 0.409 | ±0.001662 | 49 | 0.789 | ±0.00439 | 30 |
+| paillier_keygen_1024 | 16.02 | ±0.2481 | 92 | 27.24 | ±0.05102 | 61 |
+| paillier_encrypt_1024 | 6.014 | ±0.02396 | 153 | 11.26 | ±0.04603 | 33 |
+| paillier_decrypt_1024 | 2.154 | ±0.01687 | 30 | 4.069 | ±0.0118 | 30 |
+| paillier_rerandomize_1024 | 3.875 | ±0.05316 | 30 | 7.193 | ±0.02091 | 31 |
+| paillier_add_1024 | 0.006705 | ±3.593e-05 | 120 | 0.01299 | ±0.0001632 | 30 |
+| cocks_keygen_1024 | 12.1 | ±0.1091 | 30 | 21.26 | ±0.08089 | 30 |
+| cocks_encrypt_1024 | 0.7823 | ±0.06647 | 41 | 1.34 | ±0.01414 | 30 |
+| cocks_decrypt_1024 | 0.128 | ±0.001349 | 60 | 0.2143 | ±0.001473 | 30 |
+| rabin_keygen_1024 | 20.7 | ±0.2649 | 32 | 34.33 | ±0.08489 | 30 |
+| rabin_encrypt_1024 | 0.02713 | ±0.0004221 | 30 | 0.04801 | ±0.0002185 | 34 |
+| rabin_decrypt_1024 | 0.2524 | ±0.003722 | 32 | 0.4088 | ±0.002009 | 30 |
+| schmidt_samoa_keygen_1024 | 5.243 | ±0.06046 | 35 | 9.114 | ±0.02107 | 45 |
+| schmidt_samoa_encrypt_1024 | 0.7884 | ±0.01059 | 36 | 1.33 | ±0.003566 | 52 |
+| schmidt_samoa_decrypt_1024 | 0.2163 | ±0.02033 | 30 | 0.384 | ±0.004574 | 30 |
 
 ### RSA (2048-bit)
 
-| Operation | M1 Max ms/op | M1 Max ±CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| rsa_keygen_2048 | 197.7 | ±1.108 | 33 | 348.1 | ±1.784 | 59 |
-| rsa_encrypt_2048 | 0.1347 | ±0.001558 | 30 | 0.2261 | ±0.0004235 | 120 |
-| rsa_decrypt_2048 | 1.859 | ±0.01035 | 70 | 3.269 | ±0.02209 | 66 |
-| rsa_sign_2048 | 1.857 | ±0.02496 | 30 | 3.262 | ±0.02486 | 30 |
-| rsa_verify_2048 | 0.1337 | ±0.001533 | 30 | 0.2251 | ±0.0007094 | 30 |
+| rsa_keygen_2048 | 163.6 | ±1.27 | 138 | 276.5 | ±0.6028 | 36 |
+| rsa_encrypt_2048 | 0.1031 | ±0.002526 | 30 | 0.1817 | ±0.0006752 | 30 |
+| rsa_decrypt_2048 | 1.53 | ±0.02579 | 30 | 2.564 | ±0.01125 | 30 |
+| rsa_sign_2048 | 1.53 | ±0.02604 | 31 | 2.557 | ±0.04079 | 33 |
+| rsa_verify_2048 | 0.1049 | ±0.002369 | 90 | 0.182 | ±0.003274 | 112 |
 
 ### ECDSA / ECDH (P-256)
 
-| Operation | M1 Max ms/op | M1 Max ±CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| ecdsa_keygen | 2.059 | ±0.02154 | 30 | 2.658 | ±0.07247 | 30 |
-| ecdsa_sign | 2.228 | ±0.02013 | 60 | 2.851 | ±0.04458 | 153 |
-| ecdsa_verify | 4.222 | ±0.05237 | 30 | 5.416 | ±0.1091 | 30 |
-| ecdh_keygen | 2.047 | ±0.006855 | 43 | 2.676 | ±0.09133 | 36 |
-| ecdh_agree | 2.11 | ±0.009285 | 32 | 2.773 | ±0.1359 | 48 |
-| ecdh_serialize | 8.983e-05 | ±1.207e-06 | 90 | 7.447e-05 | ±3.674e-06 | 60 |
+| ecdsa_keygen | 1.729 | ±0.01064 | 126 | 2.488 | ±0.007344 | 30 |
+| ecdsa_sign | 1.864 | ±0.01145 | 90 | 2.769 | ±0.02059 | 30 |
+| ecdsa_verify | 3.543 | ±0.018 | 30 | 5.165 | ±0.01012 | 48 |
+| ecdh_keygen | 1.738 | ±0.008593 | 30 | 2.487 | ±0.007875 | 31 |
+| ecdh_agree | 1.789 | ±0.007137 | 33 | 2.561 | ±0.01425 | 32 |
+| ecdh_serialize | 7.34e-05 | ±2.622e-06 | 47 | 7.248e-05 | ±2.586e-06 | 60 |
 
 ### ECIES / EC ElGamal (P-256)
 
-| Operation | M1 Max ms/op | M1 Max ±CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| ecies_keygen | 2.042 | ±0.005082 | 60 | 2.606 | ±0.06139 | 31 |
-| ecies_encrypt | 4.084 | ±0.05585 | 61 | 5.202 | ±0.1424 | 30 |
-| ecies_decrypt | 2.018 | ±0.01234 | 37 | 2.653 | ±0.1668 | 30 |
-| ec_elgamal_keygen | 2.043 | ±0.004739 | 79 | 2.628 | ±0.08047 | 30 |
-| ec_elgamal_encrypt | 4.279 | ±0.1936 | 33 | 5.616 | ±0.1941 | 60 |
-| ec_elgamal_decrypt | 2.053 | ±0.003459 | 48 | 2.744 | ±0.1541 | 32 |
+| ecies_keygen | 1.743 | ±0.01122 | 30 | 2.485 | ±0.004821 | 119 |
+| ecies_encrypt | 3.467 | ±0.03362 | 60 | 4.939 | ±0.01199 | 30 |
+| ecies_decrypt | 1.703 | ±0.007077 | 90 | 2.451 | ±0.009648 | 30 |
+| ec_elgamal_keygen | 1.737 | ±0.006457 | 132 | 2.485 | ±0.01201 | 36 |
+| ec_elgamal_encrypt | 3.554 | ±0.01666 | 60 | 5.071 | ±0.01498 | 32 |
+| ec_elgamal_decrypt | 1.834 | ±0.02305 | 90 | 2.492 | ±0.006394 | 38 |
 
 ### Ed25519 / Edwards DH / Edwards ElGamal
 
-| Operation | M1 Max ms/op | M1 Max ±CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| ed25519_keygen | 2.091 | ±0.005803 | 37 | 3.004 | ±0.1446 | 115 |
-| ed25519_sign | 1.135 | ±0.007925 | 30 | 1.621 | ±0.1576 | 32 |
-| ed25519_verify | 3.449 | ±0.01585 | 63 | 5.014 | ±0.2424 | 32 |
-| edwards_dh_keygen | 2.09 | ±0.01137 | 55 | 2.853 | ±0.1504 | 31 |
-| edwards_dh_agree | 1.039 | ±0.00231 | 181 | 1.543 | ±0.1536 | 30 |
-| edwards_dh_serialize | 6.626e-05 | ±1.54e-06 | 64 | 5.71e-05 | ±2.213e-06 | 30 |
-| edwards_elgamal_keygen | 2.079 | ±0.01131 | 90 | 2.745 | ±0.08159 | 59 |
-| edwards_elgamal_encrypt | 2.176 | ±0.01241 | 90 | 2.916 | ±0.1484 | 60 |
-| edwards_elgamal_decrypt | 1.648 | ±0.005687 | 91 | 2.297 | ±0.121 | 30 |
+| ed25519_keygen | 1.712 | ±0.008143 | 60 | 2.489 | ±0.01036 | 38 |
+| ed25519_sign | 0.8694 | ±0.007153 | 30 | 1.255 | ±0.005077 | 74 |
+| ed25519_verify | 2.844 | ±0.0204 | 30 | 4.107 | ±0.01058 | 30 |
+| edwards_dh_keygen | 1.713 | ±0.0115 | 30 | 2.463 | ±0.00685 | 60 |
+| edwards_dh_agree | 0.8591 | ±0.0119 | 30 | 1.235 | ±0.00418 | 30 |
+| edwards_dh_serialize | 5.541e-05 | ±1.764e-06 | 167 | 5.213e-05 | ±1.673e-06 | 60 |
+| edwards_elgamal_keygen | 1.718 | ±0.01146 | 30 | 2.464 | ±0.008973 | 63 |
+| edwards_elgamal_encrypt | 1.793 | ±0.01397 | 60 | 2.577 | ±0.007879 | 30 |
+| edwards_elgamal_decrypt | 1.332 | ±0.009984 | 102 | 1.94 | ±0.008723 | 30 |
 
-Post-quantum benchmarks and discussion for `ML-KEM` / `ML-DSA` now live in
-[POSTQUANTUM.md](POSTQUANTUM.md).
+### ML-KEM (Kyber)
 
-The tables above are measured in milliseconds per operation. The Kiviat
-diagrams (radar charts)
-below use the reciprocal view, plotting operations per second on a log scale so
-the faster operations sit farther from the center.
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+|---|---:|---:|---:|---:|---:|---:|
+| mlkem512_keygen | 0.01718 | ±0.000234 | 30 | 0.02535 | ±0.000181 | 30 |
+| mlkem512_encaps | 0.01672 | ±0.001943 | 64 | 0.02645 | ±0.0001389 | 30 |
+| mlkem512_decaps | 0.01643 | ±0.0001751 | 68 | 0.02986 | ±0.0001348 | 99 |
+| mlkem768_keygen | 0.02793 | ±0.0002995 | 103 | 0.04219 | ±0.0002948 | 30 |
+| mlkem768_encaps | 0.02669 | ±0.0003204 | 192 | 0.04235 | ±0.0002188 | 30 |
+| mlkem768_decaps | 0.02721 | ±0.0003639 | 30 | 0.0472 | ±0.0002714 | 30 |
+| mlkem1024_keygen | 0.0444 | ±0.0006144 | 30 | 0.06597 | ±0.0003494 | 30 |
+| mlkem1024_encaps | 0.04177 | ±0.000618 | 120 | 0.06426 | ±0.0003829 | 60 |
+| mlkem1024_decaps | 0.04266 | ±0.0006011 | 60 | 0.07125 | ±0.000454 | 30 |
 
+### ML-DSA (Dilithium)
+
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+|---|---:|---:|---:|---:|---:|---:|
+| mldsa44_keygen | 0.06451 | ±0.0004568 | 63 | 0.09407 | ±0.0003329 | 53 |
+| mldsa44_sign | 0.1119 | ±0.00051 | 30 | 0.3144 | ±0.001112 | 32 |
+| mldsa44_verify | 0.01292 | ±0.0001693 | 44 | 0.03809 | ±0.0002823 | 30 |
+| mldsa65_keygen | 0.1205 | ±0.0007272 | 95 | 0.1688 | ±0.001594 | 42 |
+| mldsa65_sign | 0.1706 | ±0.0008673 | 30 | 0.5102 | ±0.001827 | 30 |
+| mldsa65_verify | 0.01695 | ±0.0003647 | 60 | 0.05305 | ±0.0004285 | 30 |
+| mldsa87_keygen | 0.1814 | ±0.0009118 | 33 | 0.2437 | ±0.00125 | 30 |
+| mldsa87_sign | 0.2232 | ±0.01663 | 36 | 0.6558 | ±0.002738 | 33 |
+| mldsa87_verify | 0.02451 | ±0.0004441 | 30 | 0.07612 | ±0.000488 | 30 |
 Cross-platform summary Kiviat diagram (radar chart):
 
 ![Public-key platform Kiviat diagram (radar chart)](assets/public-key-platform-radar.svg)

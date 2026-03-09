@@ -27,7 +27,7 @@ fn eq_mask_u32(a: u8, b: u8) -> u32 {
 #[inline]
 fn eq_mask_u8(a: u8, b: u8) -> u8 {
     let x = u16::from(a ^ b);
-    let is_zero = u8::try_from((x.wrapping_sub(1) >> 8) & 1).expect("bit fits in u8");
+    let is_zero = ((x.wrapping_sub(1) >> 8) & 1) as u8;
     0u8.wrapping_sub(is_zero)
 }
 
@@ -45,7 +45,7 @@ pub(crate) fn ct_lookup_u32(table: &[u32; 256], idx: u8) -> u32 {
     let mut out = 0u32;
     let mut i = 0usize;
     while i < 256 {
-        let table_index = u8::try_from(i).expect("byte table index fits in u8");
+        let table_index = i as u8;
         out |= table[i] & eq_mask_u32(table_index, idx);
         i += 1;
     }
@@ -56,7 +56,7 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
     let mut out = 0u8;
     let mut i = 0usize;
     while i < 16 {
-        let table_index = u8::try_from(i).expect("nibble table index fits in u8");
+        let table_index = i as u8;
         out |= table[i] & eq_mask_u8(table_index, idx);
         i += 1;
     }
@@ -250,8 +250,8 @@ pub(crate) fn parity128(mut x: u128) -> u8 {
     x ^= x >> 8;
     x ^= x >> 4;
     x &= 0x0f;
-    let nibble = u16::try_from(x).expect("masked parity nibble fits in u16");
-    u8::try_from((0x6996u16 >> nibble) & 1).expect("parity bit fits in u8")
+    let nibble = x as u16;
+    ((0x6996u16 >> nibble) & 1) as u8
 }
 
 #[inline]
