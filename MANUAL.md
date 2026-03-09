@@ -310,6 +310,12 @@ The mode layer exports:
 - `Gmac<C>`
 - `GmacVt<C>`
 - `AesKeyWrap<C>`
+- `Eax<C>`
+- `Ocb<C>`
+- `Siv<C>`
+- `Aes128GcmSiv`
+- `Aes256GcmSiv`
+- `Poly1305`
 - `ChaCha20Poly1305`
 
 Constructor pattern:
@@ -325,14 +331,17 @@ Representative methods:
 - `encrypt` / `decrypt` / `compute_tag` for `Ccm`
 - `encrypt`, `decrypt`, `compute_tag` for `Gcm` and `GcmVt`
 - `wrap_key` / `unwrap_key` for `AesKeyWrap` (RFC 3394, no padding)
+- `encrypt` / `decrypt` for `Eax`, `Ocb`, and `Siv`
+- `encrypt` / `decrypt` for `Aes128GcmSiv` and `Aes256GcmSiv`
+- `compute` / `verify` for `Poly1305`
 - `encrypt`, `decrypt`, `encrypt_in_place`, `decrypt_in_place` for
   `ChaCha20Poly1305`
 
 `Gcm` and `Gmac` are the safe-default constant-time GHASH-backed variants.
 `GcmVt` and `GmacVt` are the explicit variable-time reference/performance
 variants.
-`Aead` is the shared detached-tag trait implemented by `Gcm`, `GcmVt`, and
-`ChaCha20Poly1305`.
+`Aead` is the shared detached-tag trait implemented by `Gcm`, `GcmVt`,
+`Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`, and `ChaCha20Poly1305`.
 
 Example: AES-256-GCM
 

@@ -142,8 +142,8 @@ pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
 pub use modes::{
-    AesKeyWrap, Cbc, Ccm, Cfb, Cfb8, ChaCha20Poly1305, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt,
-    Ofb, Xts,
+    Aes128GcmSiv, Aes256GcmSiv, AesKeyWrap, Cbc, Ccm, Cfb, Cfb8, ChaCha20Poly1305, Cmac, Ctr, Eax,
+    Ecb, Gcm, GcmVt, Gmac, GmacVt, Ocb, Ofb, Poly1305, Siv, Xts,
 };
 
 impl StreamCipher for ChaCha20 {
@@ -245,6 +245,80 @@ impl Aead for ChaCha20Poly1305 {
             .try_into()
             .expect("ChaCha20-Poly1305 nonce must be 12 bytes");
         self.decrypt_in_place(nonce, aad, data, tag)
+    }
+}
+
+impl<C: BlockCipher> Aead for Siv<C> {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        let (ciphertext, tag) = self.encrypt(nonce, aad, data);
+        data.copy_from_slice(&ciphertext);
+        tag
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        self.decrypt(nonce, aad, data, tag)
+    }
+}
+
+impl<C: BlockCipher> Aead for Eax<C> {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        self.encrypt(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        self.decrypt(nonce, aad, data, tag)
+    }
+}
+
+impl<C: BlockCipher> Aead for Ocb<C> {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        self.encrypt(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        self.decrypt(nonce, aad, data, tag)
+    }
+}
+
+impl Aead for Aes128GcmSiv {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        let nonce: &[u8; 12] = nonce
+            .try_into()
+            .expect("AES-GCM-SIV nonce must be 12 bytes");
+        self.encrypt(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        let nonce: &[u8; 12] = nonce
+            .try_into()
+            .expect("AES-GCM-SIV nonce must be 12 bytes");
+        self.decrypt(nonce, aad, data, tag)
+    }
+}
+
+impl Aead for Aes256GcmSiv {
+    type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        let nonce: &[u8; 12] = nonce
+            .try_into()
+            .expect("AES-GCM-SIV nonce must be 12 bytes");
+        self.encrypt(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        let nonce: &[u8; 12] = nonce
+            .try_into()
+            .expect("AES-GCM-SIV nonce must be 12 bytes");
+        self.decrypt(nonce, aad, data, tag)
     }
 }
 

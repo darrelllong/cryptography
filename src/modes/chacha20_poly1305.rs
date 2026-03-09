@@ -5,62 +5,8 @@
 //! - payload encryption with ChaCha20 block counter 1+
 //! - AEAD MAC input `AAD || pad16 || CT || pad16 || len(AAD) || len(CT)`
 
-use crate::public_key::bigint::BigUint;
+use crate::modes::poly1305::poly1305_mac;
 use crate::ChaCha20;
-
-fn le_bytes_to_biguint(bytes: &[u8]) -> BigUint {
-    let mut be = bytes.to_vec();
-    be.reverse();
-    BigUint::from_be_bytes(&be)
-}
-
-fn biguint_to_16_le(value: &BigUint) -> [u8; 16] {
-    let be = value.to_be_bytes();
-    let mut out = [0u8; 16];
-    if be.len() >= 16 {
-        out.copy_from_slice(&be[be.len() - 16..]);
-    } else {
-        out[16 - be.len()..].copy_from_slice(&be);
-    }
-    out.reverse();
-    out
-}
-
-fn poly1305_mac(msg: &[u8], key: &[u8; 32]) -> [u8; 16] {
-    let mut r = [0u8; 16];
-    r.copy_from_slice(&key[..16]);
-
-    // RFC 8439 clamping.
-    r[3] &= 15;
-    r[7] &= 15;
-    r[11] &= 15;
-    r[15] &= 15;
-    r[4] &= 252;
-    r[8] &= 252;
-    r[12] &= 252;
-
-    let r_big = le_bytes_to_biguint(&r);
-    let s_big = le_bytes_to_biguint(&key[16..32]);
-
-    let mut p = BigUint::one();
-    p.shl_bits(130);
-    p = p.sub_ref(&BigUint::from_u64(5));
-
-    let mut acc = BigUint::zero();
-    for chunk in msg.chunks(16) {
-        let mut block = Vec::with_capacity(chunk.len() + 1);
-        block.extend_from_slice(chunk);
-        block.push(1);
-        let n = le_bytes_to_biguint(&block);
-        acc = acc.add_ref(&n).modulo(&p);
-        acc = BigUint::mod_mul(&acc, &r_big, &p);
-    }
-
-    let mut mod_2_128 = BigUint::one();
-    mod_2_128.shl_bits(128);
-    let tag = acc.add_ref(&s_big).modulo(&mod_2_128);
-    biguint_to_16_le(&tag)
-}
 
 fn build_poly1305_input(aad: &[u8], ciphertext: &[u8]) -> Vec<u8> {
     let mut data = Vec::with_capacity(

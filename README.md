@@ -45,7 +45,9 @@ Implemented families:
 - Grasshopper plus `GrasshopperCt`
 - SM4 / SMS4 plus `Sm4Ct`
 - ChaCha20 and XChaCha20
+- Poly1305 (one-time authenticator)
 - ChaCha20-Poly1305 (RFC 8439 AEAD)
+- EAX, OCB3, SIV, and AES-GCM-SIV AEADs
 - Salsa20
 - Rabbit
 - SNOW 3G plus `Snow3gCt`
@@ -59,7 +61,8 @@ Supporting primitives:
 - SHAKE (`Shake128`, `Shake256`)
 - HMAC (`Hmac<H>`) and HKDF (`Hkdf<H>`)
 - Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Cfb8`, `Ofb`, `Ctr`,
-  `Cmac`, `Ccm`, `Gcm`, `GcmVt`, `Gmac`, `GmacVt`, `Xts`, `AesKeyWrap`
+  `Cmac`, `Ccm`, `Gcm`, `GcmVt`, `Gmac`, `GmacVt`, `Xts`, `AesKeyWrap`,
+  `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
 Asymmetric post-quantum work:
@@ -703,7 +706,7 @@ family and supporting primitive covered in this repository:
 - Public-key primitives and RSA standards: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`, `rfc8017-pkcs1-v2_2.pdf`, `sp800-56b-r2.pdf`, `fips186-5.pdf`
 - Post-quantum standards: `fips203-ml-kem.pdf`, `fips204-ml-dsa.pdf`
 - Hash standards/papers: `rfc1321-md5.pdf`, `ripemd-160-a-strengthened-version-of-ripemd.pdf`, `fips180-4.pdf`, `fips202.pdf`
-- Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38c.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc3394-aes-key-wrap.pdf`, `rfc8452-aes-gcm-siv.pdf`
+- Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38c.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc3394-aes-key-wrap.pdf`, `rfc5297-siv.pdf`, `rfc7253-ocb.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
 - Magma: `rfc8891-magma.pdf`
@@ -995,6 +998,32 @@ Boyar-Peralta AES S-box circuit paper is stored at
   doi         = {10.17487/RFC3394},
   url         = {https://www.rfc-editor.org/rfc/rfc3394},
   note        = {Local copy: pubs/rfc3394-aes-key-wrap.pdf},
+}
+
+@techreport{rfc5297,
+  author      = {P. Rogaway and T. Shrimpton},
+  title       = {Synthetic Initialization Vector ({SIV}) Authenticated Encryption Using the Advanced Encryption Standard ({AES})},
+  type        = {{RFC}},
+  number      = {5297},
+  institution = {IETF},
+  year        = {2008},
+  month       = oct,
+  doi         = {10.17487/RFC5297},
+  url         = {https://www.rfc-editor.org/rfc/rfc5297},
+  note        = {Local copy: pubs/rfc5297-siv.pdf},
+}
+
+@techreport{rfc7253,
+  author      = {T. Krovetz and P. Rogaway},
+  title       = {The {OCB} Authenticated-Encryption Algorithm},
+  type        = {{RFC}},
+  number      = {7253},
+  institution = {IETF},
+  year        = {2014},
+  month       = may,
+  doi         = {10.17487/RFC7253},
+  url         = {https://www.rfc-editor.org/rfc/rfc7253},
+  note        = {Local copy: pubs/rfc7253-ocb.pdf},
 }
 
 @techreport{rfc8452,

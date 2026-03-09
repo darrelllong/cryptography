@@ -39,12 +39,21 @@ The generic mode layer in `src/modes/` supplies:
 - SP 800-38D: `Gcm`, `GcmVt`, `Gmac`, `GmacVt`
 - SP 800-38E: `Xts`
 - SP 800-38F / RFC 3394: `AesKeyWrap` (no-padding AES key wrap)
+- RFC 5297: `Siv`
+- RFC 7253: `Ocb`
+- Bellare-Rogaway-Wagner EAX: `Eax`
+- RFC 8452: `Aes128GcmSiv`, `Aes256GcmSiv`
+- RFC 8439: `Poly1305`, `ChaCha20Poly1305`
 
 Reference set for the newly added mode paths:
 
 - `Ccm`: NIST SP 800-38C (`pubs/sp800-38c.pdf`)
 - `AesKeyWrap`: RFC 3394 and NIST SP 800-38F
   (`pubs/rfc3394-aes-key-wrap.pdf`, `pubs/sp800-38f.pdf`)
+- `Siv`: RFC 5297 (`pubs/rfc5297-siv.pdf`)
+- `Ocb`: RFC 7253 (`pubs/rfc7253-ocb.pdf`)
+- `Aes128GcmSiv` / `Aes256GcmSiv`: RFC 8452 (`pubs/rfc8452-aes-gcm-siv.pdf`)
+- `Poly1305` / `ChaCha20Poly1305`: RFC 8439 (`pubs/rfc8439-chacha20-poly1305.pdf`)
 
 These wrappers are generic over any `BlockCipher`, so the same mode code works
 across AES, DES, Camellia, PRESENT, CAST-128, and the other block ciphers.
@@ -55,8 +64,8 @@ Operational caveats:
   good default.
 - `CBC`, `CFB`, `OFB`, and block-cipher `CTR` require correct IV / counter
   discipline from the caller.
-- `GCM` requires nonce uniqueness, and the portable `GHASH` path is documented
-  as not constant-time.
+- `GCM` requires nonce uniqueness. `Gcm`/`Gmac` are the default constant-time
+  GHASH path and `GcmVt`/`GmacVt` are explicit variable-time reference paths.
 - `XTS` is for storage-style sector encryption, not general message transport.
 
 ### Hashes and XOFs

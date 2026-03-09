@@ -8,6 +8,10 @@
 //! - SP 800-38D authenticated mode: GCM / GMAC
 //! - SP 800-38E storage mode: XTS (128-bit block ciphers only)
 //! - RFC 3394 / SP 800-38F key wrap mode: AES Key Wrap (no padding)
+//! - EAX authenticated mode
+//! - OCB3 authenticated mode (RFC 7253)
+//! - AES-GCM-SIV misuse-resistant mode (RFC 8452)
+//! - RFC 5297 misuse-resistant mode: SIV
 //! - RFC 8439 AEAD: ChaCha20-Poly1305
 //!
 //! These adapters are generic over any `BlockCipher` in the crate, so the same
@@ -25,7 +29,17 @@
 use crate::BlockCipher;
 
 pub mod chacha20_poly1305;
+pub mod eax;
+pub mod gcm_siv;
+pub mod ocb;
+pub mod poly1305;
+pub mod siv;
 pub use chacha20_poly1305::ChaCha20Poly1305;
+pub use eax::Eax;
+pub use gcm_siv::{Aes128GcmSiv, Aes256GcmSiv};
+pub use ocb::Ocb;
+pub use poly1305::Poly1305;
+pub use siv::Siv;
 
 #[inline]
 fn assert_block_multiple<C: BlockCipher>(buf: &[u8]) {
@@ -1281,11 +1295,28 @@ impl<C: BlockCipher> Cmac<C> {
 mod tests {
     use super::*;
     use crate::{Aes128, Aes192, Aes256};
+
     fn parse<const N: usize>(s: &str) -> [u8; N] {
         let mut out = [0u8; N];
         assert_eq!(s.len(), 2 * N);
         for i in 0..N {
             out[i] = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
+        }
+        out
+    }
+
+    fn parse_vec(s: &str) -> Vec<u8> {
+        assert_eq!(s.len() % 2, 0);
+        let mut out = Vec::with_capacity(s.len() / 2);
+        let bytes = s.as_bytes();
+        let mut i = 0usize;
+        while i + 1 < bytes.len() {
+            let hi =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i..i + 1]).unwrap(), 16).unwrap();
+            let lo =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 2]).unwrap(), 16).unwrap();
+            out.push((hi << 4) | lo);
+            i += 2;
         }
         out
     }
@@ -1405,6 +1436,21 @@ mod tests {
         assert_ne!(data, plaintext);
         mode.decrypt(&iv, &mut data);
         assert_eq!(data, plaintext);
+    }
+
+    #[test]
+    fn cfb8_aes128_sp800_38a_prefix_vector() {
+        // NIST SP 800-38A, F.3.7 (first 18 CFB8 segments).
+        let key = parse::<16>("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
+        let mut data = parse_vec("6bc1bee22e409f96e93d7e117393172aae2d");
+        let expected = parse_vec("3b79424c9c0dd436bace9e0ed4586a4f32b9");
+
+        let mode = Cfb8::new(Aes128::new(&key));
+        mode.encrypt(&iv, &mut data);
+        assert_eq!(data, expected);
+        mode.decrypt(&iv, &mut data);
+        assert_eq!(data, parse_vec("6bc1bee22e409f96e93d7e117393172aae2d"));
     }
 
     #[test]
@@ -1742,6 +1788,28 @@ mod tests {
         assert_eq!(
             msg,
             parse::<23>("08090a0b0c0d0e0f101112131415161718191a1b1c1d1e")
+        );
+    }
+
+    #[test]
+    fn ccm_aes128_rfc3610_packet_vector_2() {
+        // RFC 3610, section 8, Packet Vector #2.
+        let key = parse::<16>("c0c1c2c3c4c5c6c7c8c9cacbcccdcecf");
+        let nonce = parse::<13>("00000004030201a0a1a2a3a4a5");
+        let aad = parse::<8>("0001020304050607");
+        let mut msg = parse::<24>("08090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let expected_ct = parse::<24>("72c91a36e135f8cf291ca894085c87e3cc15c439c9e43a3b");
+        let expected_tag = parse::<8>("a091d56e10400916");
+
+        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 8);
+        let tag = mode.encrypt(&nonce, &aad, &mut msg);
+        assert_eq!(msg, expected_ct);
+        assert_eq!(tag, expected_tag.to_vec());
+
+        assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
+        assert_eq!(
+            msg,
+            parse::<24>("08090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
         );
     }
 
