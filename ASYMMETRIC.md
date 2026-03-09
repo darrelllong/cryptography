@@ -941,7 +941,7 @@ milliseconds per operation, 95% confidence-interval half-width, and rounds
 required to hit the stop rule. The tables below are parallel runs on:
 
 - Apple M4 Pro (`Dyson.local`)
-- Intel Xeon 6740E (`moore.soe.ucsc.edu`, single-core slice)
+- AMD EPYC 7452 (`moore.soe.ucsc.edu`, single-core slice)
 
 For RSA specifically, the timing gap between `encrypt`/`verify` and
 `decrypt`/`sign` is still expected: the private side now uses CRT, but the
@@ -950,7 +950,7 @@ public side continues to benefit from the sparse default exponent
 
 ### Finite-field public key (1024-bit)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | rsa_keygen_1024 | 14.66 | ±0.0793 | 90 | 25.72 | ±0.06282 | 38 |
 | rsa_encrypt_1024 | 0.03122 | ±0.0002236 | 30 | 0.05377 | ±0.0002585 | 41 |
@@ -980,7 +980,7 @@ public side continues to benefit from the sparse default exponent
 
 ### RSA (2048-bit)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | rsa_keygen_2048 | 163.6 | ±1.27 | 138 | 276.5 | ±0.6028 | 36 |
 | rsa_encrypt_2048 | 0.1031 | ±0.002526 | 30 | 0.1817 | ±0.0006752 | 30 |
@@ -990,7 +990,7 @@ public side continues to benefit from the sparse default exponent
 
 ### ECDSA / ECDH (P-256)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | ecdsa_keygen | 1.729 | ±0.01064 | 126 | 2.488 | ±0.007344 | 30 |
 | ecdsa_sign | 1.864 | ±0.01145 | 90 | 2.769 | ±0.02059 | 30 |
@@ -1001,7 +1001,7 @@ public side continues to benefit from the sparse default exponent
 
 ### ECIES / EC ElGamal (P-256)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | ecies_keygen | 1.743 | ±0.01122 | 30 | 2.485 | ±0.004821 | 119 |
 | ecies_encrypt | 3.467 | ±0.03362 | 60 | 4.939 | ±0.01199 | 30 |
@@ -1012,7 +1012,7 @@ public side continues to benefit from the sparse default exponent
 
 ### Ed25519 / Edwards DH / Edwards ElGamal
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | ed25519_keygen | 1.712 | ±0.008143 | 60 | 2.489 | ±0.01036 | 38 |
 | ed25519_sign | 0.8694 | ±0.007153 | 30 | 1.255 | ±0.005077 | 74 |
@@ -1026,7 +1026,7 @@ public side continues to benefit from the sparse default exponent
 
 ### ML-KEM (Kyber)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mlkem512_keygen | 0.01718 | ±0.000234 | 30 | 0.02535 | ±0.000181 | 30 |
 | mlkem512_encaps | 0.01672 | ±0.001943 | 64 | 0.02645 | ±0.0001389 | 30 |
@@ -1040,7 +1040,7 @@ public side continues to benefit from the sparse default exponent
 
 ### ML-DSA (Dilithium)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E ms/op | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mldsa44_keygen | 0.06451 | ±0.0004568 | 63 | 0.09407 | ±0.0003329 | 53 |
 | mldsa44_sign | 0.1119 | ±0.00051 | 30 | 0.3144 | ±0.001112 | 32 |

@@ -29,6 +29,17 @@ functions are already table-free ARX / bitwise designs.
 
 ## Modes, Hashes, and MACs
 
+### Recent Additions
+
+To make the delta explicit: this pass mainly filled in missing hash and mode
+surface APIs, not new block-cipher families.
+
+- Hashes completed for compatibility: `Md5`, `Sha1`
+- Stream-cipher extended-nonce variant: `XChaCha20`
+- Newly documented AEAD/misuse-resistant mode surface:
+  `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`, `ChaCha20Poly1305`
+- AES key wrapping surface: `AesKeyWrap`
+
 ### Modes
 
 The generic mode layer in `src/modes/` supplies:
@@ -251,11 +262,11 @@ Columns: **Block** and **Key** in bits; **MB/s** mean; **±CI** half-width at
 on:
 
 - Apple M4 Pro (`Dyson.local`)
-- Intel Xeon 6740E (`moore.soe.ucsc.edu`, single-core slice)
+- AMD EPYC 7452 (`moore.soe.ucsc.edu`, single-core slice)
 
 ### AES
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | aes128 | 128 | 128 | 480.2 | ±5 | 57 | 230.6 | ±7.088 | 30 |
 | aes128ct | 128 | 128 | 61.85 | ±1.897 | 40 | 33.75 | ±0.1116 | 67 |
@@ -266,7 +277,7 @@ on:
 
 ### Camellia
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | camellia128 | 128 | 128 | 140.1 | ±1.296 | 31 | 85.6 | ±0.3457 | 117 |
 | camellia128ct | 128 | 128 | 6.266 | ±0.0719 | 30 | 2.004 | ±0.003011 | 30 |
@@ -277,14 +288,14 @@ on:
 
 ### CAST-128
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | cast128 | 64 | 128 | 310.1 | ±2.876 | 36 | 103.7 | ±0.5374 | 58 |
 | cast128ct | 64 | 128 | 3.965 | ±0.0415 | 30 | 1.825 | ±0.01507 | 30 |
 
 ### DES / 3DES
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | des | 64 | 56 | 78.2 | ±0.3919 | 30 | 54.64 | ±0.7965 | 30 |
 | desct | 64 | 56 | 7.743 | ±0.02073 | 30 | 3.448 | ±0.008777 | 30 |
@@ -292,21 +303,21 @@ on:
 
 ### Grasshopper (GOST R 34.12-2015)
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | grasshopper | 128 | 256 | 25.62 | ±0.09658 | 95 | 12.74 | ±0.05128 | 60 |
 | grasshopperct | 128 | 256 | 4.059 | ±0.05462 | 30 | 1.577 | ±0.002743 | 30 |
 
 ### Magma (GOST R 34.12-2015)
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | magma | 64 | 256 | 60.38 | ±0.3278 | 90 | 41.29 | ±0.112 | 57 |
 | magmact | 64 | 256 | 14.09 | ±0.1227 | 42 | 6.367 | ±0.01607 | 30 |
 
 ### PRESENT
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | present80 | 64 | 80 | 12.37 | ±0.07412 | 36 | 2.735 | ±0.003738 | 37 |
 | present80ct | 64 | 80 | 3.977 | ±0.01763 | 30 | 1.308 | ±0.003027 | 30 |
@@ -315,14 +326,14 @@ on:
 
 ### SEED
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | seed | 128 | 128 | 73.57 | ±0.2741 | 150 | 46.13 | ±0.1755 | 30 |
 | seedct | 128 | 128 | 4.589 | ±0.02159 | 61 | 1.491 | ±0.002914 | 45 |
 
 ### Serpent
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | serpent128 | 128 | 128 | 10.83 | ±0.04038 | 30 | 4.751 | ±0.01487 | 30 |
 | serpent128ct | 128 | 128 | 7.03 | ±0.02025 | 32 | 1.851 | ±0.003566 | 88 |
@@ -333,14 +344,14 @@ on:
 
 ### SM4
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | sm4 | 128 | 128 | 184 | ±1.413 | 128 | 128.2 | ±0.9843 | 30 |
 | sm4ct | 128 | 128 | 6.738 | ±0.06807 | 30 | 2.24 | ±0.005738 | 30 |
 
 ### Twofish
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | twofish128 | 128 | 128 | 14.55 | ±0.09168 | 31 | 9.156 | ±0.171 | 30 |
 | twofish128ct | 128 | 128 | 2.702 | ±0.005262 | 30 | 1.12 | ±0.00286 | 60 |
@@ -351,7 +362,7 @@ on:
 
 ### Simon
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | simon32_64 | 32 | 64 | 82.52 | ±0.3267 | 32 | 51.64 | ±0.1995 | 32 |
 | simon48_72 | 48 | 72 | 105.3 | ±0.5297 | 60 | 68.16 | ±0.2938 | 31 |
@@ -366,7 +377,7 @@ on:
 
 ### Speck
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | speck32_64 | 32 | 64 | 202.6 | ±1.301 | 66 | 102.4 | ±0.4766 | 47 |
 | speck48_72 | 48 | 72 | 296.7 | ±1.755 | 30 | 150.6 | ±1.134 | 30 |
@@ -381,7 +392,7 @@ on:
 
 ### Stream ciphers
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | Xeon 6740E MB/s | Xeon 6740E ±CI | Xeon 6740E Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | chacha20 | stream | 256 | 775.9 | ±8.859 | 39 | 414.6 | ±7.206 | 31 |
 | xchacha20 | stream | 256 | 778.9 | ±11.46 | 30 | 417.9 | ±5.124 | 38 |
