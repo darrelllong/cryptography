@@ -53,6 +53,8 @@ Implemented families:
 
 Supporting primitives:
 
+- MD5 (`Md5`) for legacy compatibility
+- RIPEMD-160 (`Ripemd160`) for legacy compatibility
 - SHA-3 (`Sha3_224/256/384/512`)
 - SHAKE (`Shake128`, `Shake256`)
 - HMAC (`Hmac<H>`) and HKDF (`Hkdf<H>`)
@@ -700,7 +702,8 @@ family and supporting primitive covered in this repository:
 - Bigint arithmetic kernels: `comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`, `karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
 - Public-key primitives and RSA standards: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`, `rfc8017-pkcs1-v2_2.pdf`, `sp800-56b-r2.pdf`, `fips186-5.pdf`
 - Post-quantum standards: `fips203-ml-kem.pdf`, `fips204-ml-dsa.pdf`
-- Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc8452-aes-gcm-siv.pdf`
+- Hash standards/papers: `rfc1321-md5.pdf`, `ripemd-160-a-strengthened-version-of-ripemd.pdf`, `fips180-4.pdf`, `fips202.pdf`
+- Modes of operation: `sp800-38a.pdf`, `sp800-38b.pdf`, `sp800-38c.pdf`, `sp800-38d.pdf`, `sp800-38e.pdf`, `sp800-38f.pdf`, `rfc3394-aes-key-wrap.pdf`, `rfc8452-aes-gcm-siv.pdf`
 - SIMON / SPECK: `simon_speck_2013.pdf`
 - Grasshopper: `rfc7801-kuznyechik.pdf`
 - Magma: `rfc8891-magma.pdf`
@@ -758,6 +761,33 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year        = {2015},
   month       = aug,
   url         = {https://csrc.nist.gov/pubs/fips/180-4/upd1/final},
+}
+
+@techreport{rfc1321,
+  author      = {R. Rivest},
+  title       = {The {MD5} Message-Digest Algorithm},
+  type        = {{RFC}},
+  number      = {1321},
+  institution = {IETF},
+  year        = {1992},
+  month       = apr,
+  doi         = {10.17487/RFC1321},
+  url         = {https://www.rfc-editor.org/rfc/rfc1321},
+  note        = {Local copy: pubs/rfc1321-md5.pdf},
+}
+
+@inproceedings{dobbertin-bosselaers-preneel-1996-ripemd160,
+  author    = {Hans Dobbertin and Antoon Bosselaers and Bart Preneel},
+  title     = {{RIPEMD}-160: A Strengthened Version of {RIPEMD}},
+  booktitle = {Fast Software Encryption},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {1039},
+  pages     = {71--82},
+  year      = {1996},
+  publisher = {Springer},
+  doi       = {10.1007/3-540-60865-6_46},
+  url       = {https://link.springer.com/chapter/10.1007/3-540-60865-6_46},
+  note      = {Local copy: pubs/ripemd-160-a-strengthened-version-of-ripemd.pdf},
 }
 
 @techreport{fips198-1,
@@ -917,6 +947,16 @@ Boyar-Peralta AES S-box circuit paper is stored at
   url          = {https://csrc.nist.gov/pubs/sp/800/38/b/final},
 }
 
+@misc{sp800-38c,
+  author       = {{National Institute of Standards and Technology}},
+  title        = {Recommendation for Block Cipher Modes of Operation: The {CCM} Mode for Authentication and Confidentiality},
+  howpublished = {Special Publication 800-38C},
+  year         = {2004},
+  month        = may,
+  url          = {https://csrc.nist.gov/pubs/sp/800/38/c/final},
+  note         = {Local copy: pubs/sp800-38c.pdf},
+}
+
 @misc{sp800-38d,
   author       = {{National Institute of Standards and Technology}},
   title        = {Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode ({GCM}) and {GMAC}},
@@ -942,6 +982,19 @@ Boyar-Peralta AES S-box circuit paper is stored at
   year         = {2012},
   month        = dec,
   url          = {https://csrc.nist.gov/pubs/sp/800/38/f/final},
+}
+
+@techreport{rfc3394,
+  author      = {J. Schaad and R. Housley},
+  title       = {Advanced Encryption Standard ({AES}) Key Wrap Algorithm},
+  type        = {{RFC}},
+  number      = {3394},
+  institution = {IETF},
+  year        = {2002},
+  month       = sep,
+  doi         = {10.17487/RFC3394},
+  url         = {https://www.rfc-editor.org/rfc/rfc3394},
+  note        = {Local copy: pubs/rfc3394-aes-key-wrap.pdf},
 }
 
 @techreport{rfc8452,

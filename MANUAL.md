@@ -126,6 +126,8 @@ Before using `CtrDrbgAes256` or any public-key `generate(...)` API, make sure:
 
 The crate exports:
 
+- `Md5`
+- `Ripemd160`
 - `Sha1`
 - `Sha224`, `Sha256`, `Sha384`, `Sha512`, `Sha512_224`, `Sha512_256`
 - `Sha3_224`, `Sha3_256`, `Sha3_384`, `Sha3_512`
@@ -1017,6 +1019,8 @@ methods rather than implementation internals.
 
 Applies to:
 
+- `Md5`
+- `Ripemd160`
 - `Sha1`
 - `Sha224`, `Sha256`, `Sha384`, `Sha512`, `Sha512_224`, `Sha512_256`
 - `Sha3_224`, `Sha3_256`, `Sha3_384`, `Sha3_512`

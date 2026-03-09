@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     fn assert_none(label: &str, haystack: &str, forbidden: &[&str]) {
         for needle in forbidden {
             assert!(
@@ -93,5 +95,83 @@ mod tests {
         let lib = include_str!("lib.rs");
         assert!(hash_mod.contains("pub mod hkdf;"));
         assert!(lib.contains("pub use hash::hkdf::Hkdf;"));
+    }
+
+    #[test]
+    fn cipher_modules_are_classified_for_ct_policy() {
+        // Policy gate:
+        // - each public cipher module must be explicitly categorized as either
+        //   requiring a separate Ct variant, or exempt because the primitive
+        //   is already table-free and the fast path is constant-time by design.
+        // This makes "any new cipher needs a Ct path" mechanically enforced:
+        // adding a new module without classifying it fails CI immediately.
+        let ciphers_mod = include_str!("ciphers/mod.rs");
+        let lib = include_str!("lib.rs");
+
+        let mut public_modules = BTreeSet::<String>::new();
+        for line in ciphers_mod.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("pub mod ") {
+                let module = rest.trim_end_matches(';').trim().to_string();
+                public_modules.insert(module);
+            }
+        }
+
+        let required_ct_modules = BTreeSet::from([
+            "aes",
+            "camellia",
+            "cast128",
+            "des",
+            "grasshopper",
+            "magma",
+            "present",
+            "seed",
+            "serpent",
+            "sm4",
+            "snow3g",
+            "twofish",
+            "zuc",
+        ]);
+        let ct_exempt_modules = BTreeSet::from(["chacha20", "rabbit", "salsa20", "simon", "speck"]);
+
+        let mut classified = BTreeSet::new();
+        classified.extend(required_ct_modules.iter().copied());
+        classified.extend(ct_exempt_modules.iter().copied());
+
+        for module in &public_modules {
+            assert!(
+                classified.contains(module.as_str()),
+                "new cipher module `{module}` is not classified for Ct policy",
+            );
+        }
+
+        for module in &required_ct_modules {
+            assert!(
+                public_modules.contains(*module),
+                "Ct-required module `{module}` missing from ciphers/mod.rs",
+            );
+        }
+
+        // Root export checks for Ct-required modules.
+        for ct_export in [
+            "Aes128Ct",
+            "Camellia128Ct",
+            "Cast128Ct",
+            "DesCt",
+            "GrasshopperCt",
+            "MagmaCt",
+            "Present80Ct",
+            "SeedCt",
+            "Serpent128Ct",
+            "Sm4Ct",
+            "Snow3gCt",
+            "Twofish128Ct",
+            "Zuc128Ct",
+        ] {
+            assert!(
+                lib.contains(ct_export),
+                "missing required Ct export `{ct_export}` in lib.rs"
+            );
+        }
     }
 }

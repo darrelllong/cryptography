@@ -40,6 +40,12 @@ The generic mode layer in `src/modes/` supplies:
 - SP 800-38E: `Xts`
 - SP 800-38F / RFC 3394: `AesKeyWrap` (no-padding AES key wrap)
 
+Reference set for the newly added mode paths:
+
+- `Ccm`: NIST SP 800-38C (`pubs/sp800-38c.pdf`)
+- `AesKeyWrap`: RFC 3394 and NIST SP 800-38F
+  (`pubs/rfc3394-aes-key-wrap.pdf`, `pubs/sp800-38f.pdf`)
+
 These wrappers are generic over any `BlockCipher`, so the same mode code works
 across AES, DES, Camellia, PRESENT, CAST-128, and the other block ciphers.
 
@@ -57,10 +63,18 @@ Operational caveats:
 
 Implemented hash families:
 
+- MD5 (`Md5`) for legacy compatibility
+- RIPEMD-160 (`Ripemd160`) for legacy compatibility
 - SHA-1
 - SHA-2: `Sha224`, `Sha256`, `Sha384`, `Sha512`, `Sha512_224`, `Sha512_256`
 - SHA-3: `Sha3_224`, `Sha3_256`, `Sha3_384`, `Sha3_512`
 - XOFs: `Shake128`, `Shake256`
+
+Reference set for the newly added hash paths:
+
+- MD5: RFC 1321 (`pubs/rfc1321-md5.pdf`)
+- RIPEMD-160: Dobbertin/Bosselaers/Preneel, FSE 1996
+  (`pubs/ripemd-160-a-strengthened-version-of-ripemd.pdf`)
 
 SHA-1 / SHA-2 are Merkle-Damgard constructions and therefore inherit the usual
 length-extension caveat when used as raw keyed digests. For keyed integrity:
