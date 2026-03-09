@@ -5,6 +5,7 @@
 //! - RFC 1321 (`Md5`)
 //! - FIPS 180-4 (`Sha1`, SHA-2)
 //! - FIPS 202 (`Sha3_*`, `Shake*`)
+//! - RIPEMD-160 (`Ripemd160`)
 //! - FIPS 198-1 / RFC 2104 (`Hmac<H>`)
 //! - RFC 5869 (`Hkdf<H>`)
 //!
@@ -82,6 +83,7 @@ pub trait Xof {
 pub mod hkdf;
 pub mod hmac;
 pub mod md5;
+pub mod ripemd160;
 pub mod sha1;
 pub mod sha2;
 pub mod sha3;

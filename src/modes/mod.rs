@@ -2,8 +2,9 @@
 //!
 //! Implemented in this layer:
 //!
-//! - SP 800-38A confidentiality modes: ECB, CBC, CFB (full-block), OFB, CTR
+//! - SP 800-38A confidentiality modes: ECB, CBC, CFB (full-block), CFB8, OFB, CTR
 //! - SP 800-38B authentication mode: CMAC
+//! - SP 800-38C authenticated mode: CCM
 //! - SP 800-38D authenticated mode: GCM / GMAC
 //! - SP 800-38E storage mode: XTS (128-bit block ciphers only)
 //! - RFC 8439 AEAD: ChaCha20-Poly1305
@@ -257,6 +258,128 @@ fn gcm_compute_tag_with_h<C: BlockCipher>(
     (s ^ tag_mask).to_be_bytes()
 }
 
+#[inline]
+fn ccm_l_from_nonce(nonce: &[u8]) -> usize {
+    assert!(
+        (7..=13).contains(&nonce.len()),
+        "CCM nonce length must be in 7..=13 bytes"
+    );
+    15 - nonce.len()
+}
+
+#[inline]
+fn assert_ccm_tag_len(tag_len: usize) {
+    assert!(
+        (4..=16).contains(&tag_len) && tag_len.is_multiple_of(2),
+        "CCM tag length must be one of {{4,6,8,10,12,14,16}}"
+    );
+}
+
+#[inline]
+fn ccm_pack_len(block: &mut [u8; 16], l: usize, value: u64) {
+    let needed_bits = l * 8;
+    assert!(
+        needed_bits >= 64 || value < (1u64 << needed_bits),
+        "CCM length/counter does not fit in L bytes"
+    );
+    for i in 0..l {
+        block[15 - i] = u8::try_from((value >> (8 * i)) & 0xff).expect("single byte");
+    }
+}
+
+#[inline]
+fn ccm_b0(nonce: &[u8], msg_len: usize, aad_len: usize, tag_len: usize) -> [u8; 16] {
+    let l = ccm_l_from_nonce(nonce);
+    assert_ccm_tag_len(tag_len);
+    let msg_len_u64 = u64::try_from(msg_len).expect("message length fits u64");
+
+    let mut b0 = [0u8; 16];
+    let aad_flag = u8::from(aad_len != 0) << 6;
+    let t_field = u8::try_from((tag_len - 2) / 2).expect("CCM tag field fits u8") << 3;
+    let l_field = u8::try_from(l - 1).expect("CCM L field fits u8");
+    b0[0] = aad_flag | t_field | l_field;
+    b0[1..1 + nonce.len()].copy_from_slice(nonce);
+    ccm_pack_len(&mut b0, l, msg_len_u64);
+    b0
+}
+
+#[inline]
+fn ccm_counter_block(nonce: &[u8], counter: u64) -> [u8; 16] {
+    let l = ccm_l_from_nonce(nonce);
+    let mut ctr = [0u8; 16];
+    ctr[0] = u8::try_from(l - 1).expect("CCM L field fits u8");
+    ctr[1..1 + nonce.len()].copy_from_slice(nonce);
+    ccm_pack_len(&mut ctr, l, counter);
+    ctr
+}
+
+fn ccm_encode_aad(aad: &[u8]) -> Vec<u8> {
+    if aad.is_empty() {
+        return Vec::new();
+    }
+
+    let mut out = Vec::with_capacity(aad.len() + 16);
+    let aad_len = aad.len() as u64;
+    if aad_len < ((1u64 << 16) - (1u64 << 8)) {
+        out.extend_from_slice(
+            &u16::try_from(aad_len)
+                .expect("length range checked")
+                .to_be_bytes(),
+        );
+    } else if aad_len < (1u64 << 32) {
+        out.extend_from_slice(&[0xff, 0xfe]);
+        out.extend_from_slice(&(aad_len as u32).to_be_bytes());
+    } else {
+        out.extend_from_slice(&[0xff, 0xff]);
+        out.extend_from_slice(&aad_len.to_be_bytes());
+    }
+    out.extend_from_slice(aad);
+    if !out.len().is_multiple_of(16) {
+        out.resize(out.len().next_multiple_of(16), 0);
+    }
+    out
+}
+
+fn ccm_cbc_mac<C: BlockCipher>(
+    cipher: &C,
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+    tag_len: usize,
+) -> [u8; 16] {
+    assert_block_128::<C>();
+    let mut y = [0u8; 16];
+
+    let b0 = ccm_b0(nonce, plaintext.len(), aad.len(), tag_len);
+    xor_block16_in_place(&mut y, &b0);
+    cipher.encrypt(&mut y);
+
+    let aad_encoded = ccm_encode_aad(aad);
+    for chunk in aad_encoded.chunks(16) {
+        let mut block = [0u8; 16];
+        block.copy_from_slice(chunk);
+        xor_block16_in_place(&mut y, &block);
+        cipher.encrypt(&mut y);
+    }
+
+    for chunk in plaintext.chunks(16) {
+        let mut block = [0u8; 16];
+        block[..chunk.len()].copy_from_slice(chunk);
+        xor_block16_in_place(&mut y, &block);
+        cipher.encrypt(&mut y);
+    }
+
+    y
+}
+
+fn ccm_apply_ctr<C: BlockCipher>(cipher: &C, nonce: &[u8], data: &mut [u8]) {
+    for (i, chunk) in data.chunks_mut(16).enumerate() {
+        let ctr = ccm_counter_block(nonce, u64::try_from(i + 1).expect("counter fits u64"));
+        let stream = counter_keystream(cipher, &ctr);
+        xor_in_place(chunk, &stream[..chunk.len()]);
+    }
+}
+
 /// Electronic Codebook (ECB) mode.
 ///
 /// This is included because SP 800-38A defines it, but it should only be used
@@ -405,6 +528,61 @@ impl<C: BlockCipher> Cfb<C> {
             self.cipher.encrypt(&mut keystream);
             xor_in_place(block, &keystream);
             feedback.copy_from_slice(&tmp);
+        }
+    }
+}
+
+/// Cipher Feedback (CFB) mode with an 8-bit segment size (CFB8).
+pub struct Cfb8<C> {
+    cipher: C,
+}
+
+impl<C> Cfb8<C> {
+    /// Wrap a block cipher in CFB8 mode.
+    pub fn new(cipher: C) -> Self {
+        Self { cipher }
+    }
+
+    /// Borrow the wrapped block cipher.
+    pub fn cipher(&self) -> &C {
+        &self.cipher
+    }
+}
+
+impl<C: BlockCipher> Cfb8<C> {
+    /// # Panics
+    ///
+    /// Panics if `iv.len()` does not match the block size.
+    pub fn encrypt(&self, iv: &[u8], data: &mut [u8]) {
+        assert_eq!(iv.len(), C::BLOCK_LEN, "wrong IV length");
+        let mut state = iv.to_vec();
+        let mut stream = vec![0u8; C::BLOCK_LEN];
+
+        for byte in data.iter_mut() {
+            stream.copy_from_slice(&state);
+            self.cipher.encrypt(&mut stream);
+            let ct = *byte ^ stream[0];
+            state.rotate_left(1);
+            state[C::BLOCK_LEN - 1] = ct;
+            *byte = ct;
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if `iv.len()` does not match the block size.
+    pub fn decrypt(&self, iv: &[u8], data: &mut [u8]) {
+        assert_eq!(iv.len(), C::BLOCK_LEN, "wrong IV length");
+        let mut state = iv.to_vec();
+        let mut stream = vec![0u8; C::BLOCK_LEN];
+
+        for byte in data.iter_mut() {
+            let ct = *byte;
+            stream.copy_from_slice(&state);
+            self.cipher.encrypt(&mut stream);
+            *byte = ct ^ stream[0];
+            state.rotate_left(1);
+            state[C::BLOCK_LEN - 1] = ct;
         }
     }
 }
@@ -632,6 +810,79 @@ impl<C> Cmac<C> {
     /// Borrow the wrapped block cipher.
     pub fn cipher(&self) -> &C {
         &self.cipher
+    }
+}
+
+/// Counter with CBC-MAC (CCM) with configurable detached tag length.
+pub struct Ccm<C> {
+    cipher: C,
+    tag_len: usize,
+}
+
+impl<C> Ccm<C> {
+    /// Wrap a 128-bit block cipher in SP 800-38C CCM mode with a 16-byte tag.
+    pub fn new(cipher: C) -> Self {
+        Self::new_with_tag_len(cipher, 16)
+    }
+
+    /// Wrap a 128-bit block cipher in SP 800-38C CCM mode with custom tag length.
+    pub fn new_with_tag_len(cipher: C, tag_len: usize) -> Self {
+        assert_ccm_tag_len(tag_len);
+        Self { cipher, tag_len }
+    }
+
+    /// Borrow the wrapped block cipher.
+    pub fn cipher(&self) -> &C {
+        &self.cipher
+    }
+
+    /// Return the detached authentication tag length in bytes.
+    pub fn tag_len(&self) -> usize {
+        self.tag_len
+    }
+}
+
+impl<C: BlockCipher> Ccm<C> {
+    /// Compute a detached CCM tag over `plaintext` and associated data.
+    pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
+        let t = ccm_cbc_mac(&self.cipher, nonce, aad, plaintext, self.tag_len);
+        let s0 = counter_keystream(&self.cipher, &ccm_counter_block(nonce, 0));
+        let mut tag = vec![0u8; self.tag_len];
+        for i in 0..self.tag_len {
+            tag[i] = t[i] ^ s0[i];
+        }
+        tag
+    }
+
+    /// Encrypt `data` in place and return the detached CCM authentication tag.
+    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Vec<u8> {
+        assert_block_128::<C>();
+        let tag = self.compute_tag(nonce, aad, data);
+        ccm_apply_ctr(&self.cipher, nonce, data);
+        tag
+    }
+
+    /// Verify `tag` and decrypt in place on success.
+    ///
+    /// Returns `false` and leaves `data` unchanged when verification fails.
+    pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
+        assert_block_128::<C>();
+        if tag.len() != self.tag_len {
+            return false;
+        }
+
+        // In CCM, authentication is over plaintext, so decrypt to a temporary
+        // buffer first and only commit if tag verification succeeds.
+        let mut plaintext = data.to_vec();
+        ccm_apply_ctr(&self.cipher, nonce, &mut plaintext);
+
+        let expected = self.compute_tag(nonce, aad, &plaintext);
+        if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
+            return false;
+        }
+
+        data.copy_from_slice(&plaintext);
+        true
     }
 }
 
@@ -1004,6 +1255,20 @@ mod tests {
     }
 
     #[test]
+    fn cfb8_aes128_roundtrip() {
+        let key = parse::<16>("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
+        let plaintext = *b"cfb8 mode roundtrip check";
+        let mut data = plaintext;
+
+        let mode = Cfb8::new(Aes128::new(&key));
+        mode.encrypt(&iv, &mut data);
+        assert_ne!(data, plaintext);
+        mode.decrypt(&iv, &mut data);
+        assert_eq!(data, plaintext);
+    }
+
+    #[test]
     fn ofb_aes128_sp800_38a() {
         let key = parse::<16>("2b7e151628aed2a6abf7158809cf4f3c");
         let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
@@ -1317,5 +1582,46 @@ mod tests {
         assert_eq!(tag_ct, tag_vt);
         assert!(gmac_ct.verify(&iv, &aad, &tag_ct));
         assert!(gmac_vt.verify(&iv, &aad, &tag_vt));
+    }
+
+    #[test]
+    fn ccm_aes128_rfc3610_packet_vector_1() {
+        // RFC 3610, section 8, Packet Vector #1.
+        let key = parse::<16>("c0c1c2c3c4c5c6c7c8c9cacbcccdcecf");
+        let nonce = parse::<13>("00000003020100a0a1a2a3a4a5");
+        let aad = parse::<8>("0001020304050607");
+        let mut msg = parse::<23>("08090a0b0c0d0e0f101112131415161718191a1b1c1d1e");
+        let expected_ct = parse::<23>("588c979a61c663d2f066d0c2c0f989806d5f6b61dac384");
+        let expected_tag = parse::<8>("17e8d12cfdf926e0");
+
+        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 8);
+        let tag = mode.encrypt(&nonce, &aad, &mut msg);
+        assert_eq!(msg, expected_ct);
+        assert_eq!(tag, expected_tag.to_vec());
+
+        assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
+        assert_eq!(
+            msg,
+            parse::<23>("08090a0b0c0d0e0f101112131415161718191a1b1c1d1e")
+        );
+    }
+
+    #[test]
+    fn ccm_tag_mismatch_rejected() {
+        let key = [0x11u8; 16];
+        let nonce = [0x22u8; 13];
+        let aad = b"header";
+        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 12);
+        let mut data = *b"ccm plaintext data";
+        let tag = mode.encrypt(&nonce, aad, &mut data);
+        let ciphertext = data;
+
+        let mut bad_tag = tag.clone();
+        bad_tag[0] ^= 0x80;
+        assert!(!mode.decrypt(&nonce, aad, &mut data, &bad_tag));
+        assert_eq!(data, ciphertext);
+
+        assert!(mode.decrypt(&nonce, aad, &mut data, &tag));
+        assert_eq!(data, *b"ccm plaintext data");
     }
 }

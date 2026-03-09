@@ -136,11 +136,14 @@ pub use cprng::ctr_drbg::CtrDrbgAes256;
 pub use hash::hkdf::Hkdf;
 pub use hash::hmac::Hmac;
 pub use hash::md5::Md5;
+pub use hash::ripemd160::Ripemd160;
 pub use hash::sha1::Sha1;
 pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
-pub use modes::{Cbc, Cfb, ChaCha20Poly1305, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt, Ofb, Xts};
+pub use modes::{
+    Cbc, Ccm, Cfb, Cfb8, ChaCha20Poly1305, Cmac, Ctr, Ecb, Gcm, GcmVt, Gmac, GmacVt, Ofb, Xts,
+};
 
 impl StreamCipher for ChaCha20 {
     fn fill(&mut self, buf: &mut [u8]) {
@@ -204,6 +207,18 @@ impl<C: BlockCipher> Aead for Gcm<C> {
 
 impl<C: BlockCipher> Aead for GcmVt<C> {
     type Tag = [u8; 16];
+
+    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
+        self.encrypt(nonce, aad, data)
+    }
+
+    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
+        self.decrypt(nonce, aad, data, tag)
+    }
+}
+
+impl<C: BlockCipher> Aead for Ccm<C> {
+    type Tag = Vec<u8>;
 
     fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
         self.encrypt(nonce, aad, data)
