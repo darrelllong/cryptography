@@ -135,6 +135,7 @@ pub use ciphers::zuc::{Zuc128, Zuc128Ct};
 pub use cprng::ctr_drbg::CtrDrbgAes256;
 pub use hash::hkdf::Hkdf;
 pub use hash::hmac::Hmac;
+pub use hash::md5::Md5;
 pub use hash::sha1::Sha1;
 pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
