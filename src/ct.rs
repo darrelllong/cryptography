@@ -270,31 +270,6 @@ pub(crate) fn eval_byte_sbox(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
 }
 
 #[inline]
-pub(crate) fn eval_byte_sbox4(coeffs: &[[u128; 2]; 8], inputs: [u8; 4]) -> [u8; 4] {
-    let (active0_lo, active0_hi) = subset_mask8(inputs[0]);
-    let (active1_lo, active1_hi) = subset_mask8(inputs[1]);
-    let (active2_lo, active2_hi) = subset_mask8(inputs[2]);
-    let (active3_lo, active3_hi) = subset_mask8(inputs[3]);
-
-    let mut out = [0u8; 4];
-    let mut bit_idx = 0usize;
-    while bit_idx < 8 {
-        let coeff_lo = coeffs[bit_idx][0];
-        let coeff_hi = coeffs[bit_idx][1];
-        let b0 = parity128(active0_lo & coeff_lo) ^ parity128(active0_hi & coeff_hi);
-        let b1 = parity128(active1_lo & coeff_lo) ^ parity128(active1_hi & coeff_hi);
-        let b2 = parity128(active2_lo & coeff_lo) ^ parity128(active2_hi & coeff_hi);
-        let b3 = parity128(active3_lo & coeff_lo) ^ parity128(active3_hi & coeff_hi);
-        out[0] |= b0 << bit_idx;
-        out[1] |= b1 << bit_idx;
-        out[2] |= b2 << bit_idx;
-        out[3] |= b3 << bit_idx;
-        bit_idx += 1;
-    }
-    out
-}
-
-#[inline]
 pub(crate) fn subset_mask4(x: u8) -> u16 {
     let mut mask = 1u16;
 
@@ -377,31 +352,6 @@ mod tests {
         let table = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
         for i in 0u8..16 {
             assert_eq!(ct_lookup_u8_16(&table, i), i);
-        }
-    }
-
-    #[test]
-    fn eval_byte_sbox4_matches_scalar_path() {
-        let mut table = [0u8; 256];
-        let mut i = 0usize;
-        while i < 256 {
-            table[i] = ((i as u8).rotate_left(1)) ^ 0x63;
-            i += 1;
-        }
-        let coeffs = build_byte_sbox_anf(&table);
-
-        let mut x = 0u16;
-        while x < 256 {
-            let in0 = x as u8;
-            let in1 = in0.wrapping_add(1);
-            let in2 = in0 ^ 0x5a;
-            let in3 = !in0;
-            let batch = eval_byte_sbox4(&coeffs, [in0, in1, in2, in3]);
-            assert_eq!(batch[0], eval_byte_sbox(&coeffs, in0));
-            assert_eq!(batch[1], eval_byte_sbox(&coeffs, in1));
-            assert_eq!(batch[2], eval_byte_sbox(&coeffs, in2));
-            assert_eq!(batch[3], eval_byte_sbox(&coeffs, in3));
-            x += 1;
         }
     }
 }
