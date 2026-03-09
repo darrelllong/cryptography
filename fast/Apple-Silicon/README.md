@@ -7,6 +7,15 @@ strict constraints:
 - No external crypto crates or copied implementations.
 - Improvements must be authored in this repository and maintain existing tests.
 
+Baseline policy:
+
+- `src/` is the canonical pure safe Rust baseline.
+- Apple-Silicon acceleration work is an alternative path for macOS users and
+  must not change baseline algorithm behavior or baseline API contracts.
+- Any acceleration-specific code lives under `fast/Apple-Silicon/` (or a
+  clearly isolated opt-in path), not as silent behavior changes in baseline
+  implementations.
+
 The initial focus is software-level throughput and latency wins on M-series CPUs
 using algorithmic/layout improvements and compiler-friendly code structure.
 
