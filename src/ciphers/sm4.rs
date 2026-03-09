@@ -124,16 +124,26 @@ fn tau(x: u32) -> u32 {
 }
 
 #[inline]
+#[cfg(test)]
 fn sbox_ct_byte(input: u8) -> u8 {
     crate::ct::eval_byte_sbox(&SBOX_ANF, input)
 }
 
 #[inline]
 fn tau_ct(x: u32) -> u32 {
-    (u32::from(sbox_ct_byte((x >> 24) as u8)) << 24)
-        | (u32::from(sbox_ct_byte(((x >> 16) & 0xff) as u8)) << 16)
-        | (u32::from(sbox_ct_byte(((x >> 8) & 0xff) as u8)) << 8)
-        | u32::from(sbox_ct_byte((x & 0xff) as u8))
+    let out = crate::ct::eval_byte_sbox4(
+        &SBOX_ANF,
+        [
+            (x >> 24) as u8,
+            ((x >> 16) & 0xff) as u8,
+            ((x >> 8) & 0xff) as u8,
+            (x & 0xff) as u8,
+        ],
+    );
+    (u32::from(out[0]) << 24)
+        | (u32::from(out[1]) << 16)
+        | (u32::from(out[2]) << 8)
+        | u32::from(out[3])
 }
 
 #[inline]
