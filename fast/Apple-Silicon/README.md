@@ -19,6 +19,22 @@ Baseline policy:
 The initial focus is software-level throughput and latency wins on M-series CPUs
 using algorithmic/layout improvements and compiler-friendly code structure.
 
+## First Alternative Kernel
+
+Implemented in:
+
+- `fast/Apple-Silicon/aarch64-alt/src/aes128_armv8.rs`
+
+It provides an opt-in AES-128 path using ARM FEAT_AES intrinsics on
+Apple-Silicon machines and includes parity checks against the baseline
+`cryptography::Aes128`.
+
+Run parity + microbench:
+
+```bash
+bash fast/Apple-Silicon/scripts/compare_aes128_alt.sh 5000
+```
+
 ## Scope
 
 1. Constant-time symmetric hot paths with large `fast` vs `Ct` gaps.
