@@ -39,9 +39,10 @@ LABELS = [
     "Schmidt-Samoa",
 ]
 
-# Values are operations/second derived from the measured 1024-bit latencies.
-ENC_VALUES = [22_977.9, 2_382.1, 128.9, 1_056.4, 26_795.8, 1_075.8]
-DEC_VALUES = [2_937.7, 4_646.8, 339.3, 5_624.3, 3_019.3, 3_735.5]
+# Values are operations/second derived from the latest measured 1024-bit
+# latencies (M4 Pro Pilot run).
+ENC_VALUES = [32_030.8, 2_880.2, 166.3, 1_278.3, 36_859.6, 1_268.4]
+DEC_VALUES = [4_056.8, 5_668.9, 464.3, 7_812.5, 3_962.0, 4_623.2]
 SCALE_LABELS = [100, 400, 1_600, 6_400, 16_000, 40_000]
 
 

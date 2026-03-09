@@ -10,13 +10,13 @@ from pathlib import Path
 OUTPUT = Path(__file__).with_name("ec-signature-radar.svg")
 
 SERIES = [
-    ("ECDSA (P-256)", "#0f766e", [485.7, 448.8, 236.9]),
-    ("Ed25519", "#1d4ed8", [478.2, 881.1, 289.9]),
+    ("ECDSA (P-256)", "#0f766e", [578.4, 536.5, 282.3]),
+    ("Ed25519", "#1d4ed8", [584.1, 1150.2, 351.6]),
 ]
 LABELS = ["Keygen", "Sign", "Verify"]
-SCALE_LABELS = [100, 200, 400, 800, 1_000]
+SCALE_LABELS = [100, 200, 400, 800, 1_600]
 MIN_VALUE = 100.0
-MAX_VALUE = 1_000.0
+MAX_VALUE = 2_000.0
 
 BG_COLOR = "#fbf8f1"
 GRID_COLOR = "#c9c2b7"
@@ -119,7 +119,7 @@ def generate_svg() -> str:
         [
             "",
             '  <text class="label" x="20" y="526">EC Signature Throughput (log scale)</text>',
-            '  <text class="small" x="20" y="544">Radial scale is operations/second, spanning 100 to 1,000</text>',
+            '  <text class="small" x="20" y="544">Radial scale is operations/second, spanning 100 to 2,000</text>',
             "</svg>",
         ]
     )

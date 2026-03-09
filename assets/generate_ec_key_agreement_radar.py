@@ -10,8 +10,8 @@ from pathlib import Path
 OUTPUT = Path(__file__).with_name("ec-key-agreement-radar.svg")
 
 SERIES = [
-    ("ECDH (P-256)", "#0f766e", [488.5, 473.9, 11_132_138.5]),
-    ("Edwards DH", "#1d4ed8", [478.5, 962.5, 15_092_061.6]),
+    ("ECDH (P-256)", "#0f766e", [575.4, 559.0, 13_623_978.2]),
+    ("Edwards DH", "#1d4ed8", [583.8, 1_164.0, 18_047_283.9]),
 ]
 LABELS = ["Keygen", "Agree", "Serialize"]
 SCALE_LABELS = [100, 1_000, 10_000, 1_000_000, 100_000_000]
