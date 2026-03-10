@@ -433,9 +433,9 @@ Exploratory results below that bar (not promoted):
 - `compare_chacha20`: `1.53x`
 - `compare_shake` (ML-KEM+ML-DSA-like): `1.07x`
 
-Apple go-fast speedup Kiviat diagram (radar chart, log scale):
+Apple go-fast throughput Kiviat diagram (radar chart, two curves; per-axis normalized):
 
-![Apple go-fast speedup Kiviat diagram (radar chart)](assets/apple-go-fast-radar.svg)
+![Apple go-fast throughput Kiviat diagram (radar chart)](assets/apple-go-fast-radar.svg)
 
 ## References
 
