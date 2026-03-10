@@ -15,8 +15,13 @@
 use crate::ct::zeroize_slice;
 use crate::BlockCipher;
 
+// Twofish key-schedule stride constant from the submission.
 const RHO: u32 = 0x0101_0101;
-const GF_POLY: u16 = 0x0169;
+// Twofish uses two GF(2^8) reduction polynomials:
+// - MDS matrix multiply: v(x) = x^8 + x^6 + x^5 + x^3 + 1 (0x169)
+// - RS key compressor:  w(x) = x^8 + x^6 + x^3 + x^2 + 1 (0x14d)
+const MDS_GF_POLY: u16 = 0x0169;
+const RS_GF_POLY: u16 = 0x014d;
 
 const Q0_T0: [u8; 16] = [8, 1, 7, 13, 6, 15, 3, 2, 0, 11, 5, 9, 14, 12, 10, 4];
 const Q0_T1: [u8; 16] = [14, 12, 11, 8, 1, 2, 3, 5, 15, 4, 10, 6, 7, 0, 9, 13];
@@ -28,6 +33,7 @@ const Q1_T1: [u8; 16] = [1, 14, 2, 11, 4, 12, 3, 7, 6, 13, 10, 5, 15, 9, 0, 8];
 const Q1_T2: [u8; 16] = [4, 12, 7, 5, 1, 6, 9, 10, 0, 14, 13, 8, 2, 11, 3, 15];
 const Q1_T3: [u8; 16] = [11, 9, 5, 1, 12, 3, 13, 14, 6, 4, 7, 15, 2, 0, 8, 10];
 
+// Reed-Solomon matrix used to compress each 64-bit key chunk into S-box key words.
 const RS: [[u8; 8]; 4] = [
     [0x01, 0xA4, 0x55, 0x87, 0x5A, 0x58, 0xDB, 0x9E],
     [0xA4, 0x56, 0x82, 0xF3, 0x1E, 0xC6, 0x68, 0xE5],
@@ -35,6 +41,7 @@ const RS: [[u8; 8]; 4] = [
     [0xA4, 0x55, 0x87, 0x5A, 0x58, 0xDB, 0x9E, 0x03],
 ];
 
+// Maximum-distance-separable matrix for the `h()` output diffusion layer.
 const MDS: [[u8; 4]; 4] = [
     [0x01, 0xEF, 0x5B, 0x5B],
     [0x5B, 0xEF, 0xEF, 0x01],
@@ -124,14 +131,14 @@ fn q_perm(x: u8, which: usize, use_ct: bool) -> u8 {
 }
 
 #[inline]
-fn gf_mul(mut a: u8, mut b: u8) -> u8 {
+fn gf_mul(mut a: u8, mut b: u8, poly: u16) -> u8 {
     let mut out = 0u8;
     for _ in 0..8 {
         let mask = 0u8.wrapping_sub(b & 1);
         out ^= a & mask;
         let hi = a & 0x80;
         a <<= 1;
-        a ^= ((GF_POLY & 0xff) as u8) & 0u8.wrapping_sub((hi >> 7) & 1);
+        a ^= ((poly & 0xff) as u8) & 0u8.wrapping_sub((hi >> 7) & 1);
         b >>= 1;
     }
     out
@@ -145,7 +152,7 @@ fn rs_mds_encode(bytes: [u8; 8]) -> u32 {
         let mut acc = 0u8;
         let mut col = 0usize;
         while col < 8 {
-            acc ^= gf_mul(RS[row][col], bytes[col]);
+            acc ^= gf_mul(RS[row][col], bytes[col], RS_GF_POLY);
             col += 1;
         }
         out[row] = acc;
@@ -167,7 +174,7 @@ fn mds_multiply(y: [u8; 4]) -> u32 {
         let mut acc = 0u8;
         let mut col = 0usize;
         while col < 4 {
-            acc ^= gf_mul(MDS[row][col], y[col]);
+            acc ^= gf_mul(MDS[row][col], y[col], MDS_GF_POLY);
             col += 1;
         }
         out[row] = acc;
@@ -552,6 +559,20 @@ mod tests {
     }
 
     #[test]
+    fn twofish128_nonzero_kat() {
+        // Twofish paper ("ecb_tbl.txt", Full Encryptions, KEYSIZE=128, I=4).
+        let key = decode_hex::<16>("D491DB16E7B1C39E86CB086B789F5419");
+        let pt = decode_hex::<16>("019F9809DE1711858FAAC3A3BA20FBC3");
+        let ct = decode_hex::<16>("6363977DE839486297E661C6C9D668EB");
+        let fast = Twofish128::new(&key);
+        let slow = Twofish128Ct::new(&key);
+        assert_eq!(fast.encrypt_block(&pt), ct);
+        assert_eq!(slow.encrypt_block(&pt), ct);
+        assert_eq!(fast.decrypt_block(&ct), pt);
+        assert_eq!(slow.decrypt_block(&ct), pt);
+    }
+
+    #[test]
     fn twofish192_zero_kat() {
         let key = [0u8; 24];
         let pt = [0u8; 16];
@@ -565,10 +586,39 @@ mod tests {
     }
 
     #[test]
+    fn twofish192_nonzero_kat() {
+        // Twofish paper ("ecb_tbl.txt", Full Encryptions, KEYSIZE=192, I=4).
+        let key = decode_hex::<24>("88B2B2706B105E36B446BB6D731A1E88EFA71F788965BD44");
+        let pt = decode_hex::<16>("39DA69D6BA4997D585B6DC073CA341B2");
+        let ct = decode_hex::<16>("182B02D81497EA45F9DAACDC29193A65");
+        let fast = Twofish192::new(&key);
+        let slow = Twofish192Ct::new(&key);
+        assert_eq!(fast.encrypt_block(&pt), ct);
+        assert_eq!(slow.encrypt_block(&pt), ct);
+        assert_eq!(fast.decrypt_block(&ct), pt);
+        assert_eq!(slow.decrypt_block(&ct), pt);
+    }
+
+    #[test]
     fn twofish256_zero_kat() {
         let key = [0u8; 32];
         let pt = [0u8; 16];
         let ct = decode_hex::<16>("57FF739D4DC92C1BD7FC01700CC8216F");
+        let fast = Twofish256::new(&key);
+        let slow = Twofish256Ct::new(&key);
+        assert_eq!(fast.encrypt_block(&pt), ct);
+        assert_eq!(slow.encrypt_block(&pt), ct);
+        assert_eq!(fast.decrypt_block(&ct), pt);
+        assert_eq!(slow.decrypt_block(&ct), pt);
+    }
+
+    #[test]
+    fn twofish256_nonzero_kat() {
+        // Twofish paper ("ecb_tbl.txt", Full Encryptions, KEYSIZE=256, I=4).
+        let key =
+            decode_hex::<32>("D43BB7556EA32E46F2A282B7D45B4E0D57FF739D4DC92C1BD7FC01700CC8216F");
+        let pt = decode_hex::<16>("90AFE91BB288544F2C32DC239B2635E6");
+        let ct = decode_hex::<16>("6CB4561C40BF0A9705931CB6D408E7FA");
         let fast = Twofish256::new(&key);
         let slow = Twofish256Ct::new(&key);
         assert_eq!(fast.encrypt_block(&pt), ct);
