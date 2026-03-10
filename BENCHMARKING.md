@@ -80,6 +80,11 @@ For Apple Silicon optimization loops (no assembly, in-repo code only), use:
 - `bash fast/Apple-Silicon/scripts/run_hotspots_pk.sh`
 - `bash fast/Apple-Silicon/scripts/profile_ct_anf.sh`
 
+For x86 optimization loops (no assembly, in-repo code only), use:
+
+- [fast/x86/README.md](fast/x86/README.md)
+- `bash fast/x86/scripts/run_alt_suite.sh`
+
 Promotion gate for published go-fast kernels is `>=5x` over baseline/reference.
 Lower-speedup comparator results are tracked as exploratory only.
 

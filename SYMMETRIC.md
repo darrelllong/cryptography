@@ -437,6 +437,26 @@ Apple go-fast throughput Kiviat diagram (radar chart, two curves; per-axis norma
 
 ![Apple go-fast throughput Kiviat diagram (radar chart)](assets/apple-go-fast-radar.svg)
 
+### x86 Go-Fast Alternative (`fast/x86`, moore.soe.ucsc.edu)
+
+These numbers come from the isolated x86 alternative kernels in
+`fast/x86/x86-alt`, measured on `moore.soe.ucsc.edu` (AMD EPYC 7452) after
+correctness checks against baseline/reference outputs.
+Source run log:
+[fast/x86/results/alt_suite_20260310_061035.md](fast/x86/results/alt_suite_20260310_061035.md)
+
+| Primitive | Comparator | Unit | Go-fast Throughput | Baseline/Reference Throughput | Speedup |
+|---|---|---|---:|---:|---:|
+| AES-128 encrypt | `compare_aes128` | MiB/s | 2557.36 | 248.95 | 10.27x |
+| AES-256 encrypt | `compare_aes256` | MiB/s | 2043.97 | 185.42 | 11.02x |
+| GHASH multiply | `compare_ghash` | Mops/s | 42.39 | 2.54 (`ct_ref`) | 16.71x |
+
+All published x86 go-fast kernels currently clear the `>=5x` promotion gate.
+
+x86 go-fast throughput Kiviat diagram (radar chart, two curves; per-axis normalized):
+
+![x86 go-fast throughput Kiviat diagram (radar chart)](assets/x86-go-fast-radar.svg)
+
 ## References
 
 The primary standards and papers are stored in `pubs/`. The BibTeX index is in
