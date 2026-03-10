@@ -413,6 +413,25 @@ already table-free bitwise/ARX, so there is no software `Ct` variant to compare.
 
 ![Fast vs Ct throughput Kiviat diagram (radar chart)](assets/fast-vs-ct-radar.svg)
 
+### Apple-Silicon Go-Fast Alternative (`fast/Apple-Silicon`)
+
+These numbers come from the isolated Apple-Silicon alternative kernels in
+`fast/Apple-Silicon/aarch64-alt`, using the local comparator binaries after
+correctness checks against baseline/reference outputs. Unlike the Pilot tables
+above, this section is a focused single-host microbenchmark snapshot on M4 Pro.
+
+| Primitive | Comparator | Unit | Go-fast Throughput | Baseline/Reference Throughput | Speedup |
+|---|---|---|---:|---:|---:|
+| AES-128 encrypt | `compare_aes128` | MiB/s | 7033.98 | 421.95 | 16.67x |
+| AES-256 encrypt | `compare_aes256` | MiB/s | 6966.60 | 347.10 | 20.07x |
+| SHA-256 digest | `compare_sha256` | MiB/s | 2461.32 | 370.32 | 6.65x |
+| ChaCha20 keystream | `compare_chacha20` | MiB/s | 1249.47 | 837.89 | 1.49x |
+| GHASH multiply | `compare_ghash` | Mops/s | 154.84 | 9.07 (`ct_ref`) | 17.07x |
+
+Apple go-fast speedup Kiviat diagram (radar chart, log scale):
+
+![Apple go-fast speedup Kiviat diagram (radar chart)](assets/apple-go-fast-radar.svg)
+
 ## References
 
 The primary standards and papers are stored in `pubs/`. The BibTeX index is in
