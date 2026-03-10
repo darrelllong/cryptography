@@ -13,20 +13,21 @@
 
   <rect class="bg" x="0" y="0" width="560" height="590" rx="16" />
 
-  <polygon class="grid" points="280.0,215.0 308.5,235.7 297.6,269.3 262.4,269.3 251.5,235.7" />
-  <polygon class="grid" points="280.0,185.0 337.1,226.5 315.3,293.5 244.7,293.5 222.9,226.5" />
-  <polygon class="grid" points="280.0,155.0 365.6,217.2 332.9,317.8 227.1,317.8 194.4,217.2" />
-  <polygon class="grid" points="280.0,125.0 394.1,207.9 350.5,342.1 209.5,342.1 165.9,207.9" />
-  <polygon class="grid" points="280.0,95.0 422.7,198.6 368.2,366.4 191.8,366.4 137.3,198.6" />
-  <polygon class="grid" points="280.0,65.0 451.2,189.4 385.8,390.6 174.2,390.6 108.8,189.4" />
+  <polygon class="grid" points="280.0,215.0 306.0,230.0 306.0,260.0 280.0,275.0 254.0,260.0 254.0,230.0" />
+  <polygon class="grid" points="280.0,185.0 332.0,215.0 332.0,275.0 280.0,305.0 228.0,275.0 228.0,215.0" />
+  <polygon class="grid" points="280.0,155.0 357.9,200.0 357.9,290.0 280.0,335.0 202.1,290.0 202.1,200.0" />
+  <polygon class="grid" points="280.0,125.0 383.9,185.0 383.9,305.0 280.0,365.0 176.1,305.0 176.1,185.0" />
+  <polygon class="grid" points="280.0,95.0 409.9,170.0 409.9,320.0 280.0,395.0 150.1,320.0 150.1,170.0" />
+  <polygon class="grid" points="280.0,65.0 435.9,155.0 435.9,335.0 280.0,425.0 124.1,335.0 124.1,155.0" />
 
   <line class="axis" x1="280" y1="245" x2="280.0" y2="65.0" />
-  <line class="axis" x1="280" y1="245" x2="451.2" y2="189.4" />
-  <line class="axis" x1="280" y1="245" x2="385.8" y2="390.6" />
-  <line class="axis" x1="280" y1="245" x2="174.2" y2="390.6" />
-  <line class="axis" x1="280" y1="245" x2="108.8" y2="189.4" />
+  <line class="axis" x1="280" y1="245" x2="435.9" y2="155.0" />
+  <line class="axis" x1="280" y1="245" x2="435.9" y2="335.0" />
+  <line class="axis" x1="280" y1="245" x2="280.0" y2="425.0" />
+  <line class="axis" x1="280" y1="245" x2="124.1" y2="335.0" />
+  <line class="axis" x1="280" y1="245" x2="124.1" y2="155.0" />
 
-  <polygon class="speedup-fill" points="280.0,98.9 428.1,196.9 337.8,324.6 193.4,364.2 260.3,238.6" />
+  <polygon class="speedup-fill" points="280.0,90.7 420.7,163.8 365.1,294.1 280.0,377.2 260.9,256.0 278.7,244.2" />
 
   <text class="small" x="316" y="216">1x</text>
   <text class="small" x="316" y="186">2x</text>
@@ -36,10 +37,11 @@
   <text class="small" x="316" y="66">32x</text>
 
   <text class="label" x="280.0" y="41.0" text-anchor="middle">AES-128</text>
-  <text class="label" x="474.0" y="186.0" text-anchor="start">AES-256</text>
-  <text class="label" x="399.9" y="422.0" text-anchor="start">SHA-256</text>
-  <text class="label" x="160.1" y="422.0" text-anchor="end">GHASH</text>
-  <text class="label" x="86.0" y="186.0" text-anchor="end">ChaCha20</text>
+  <text class="label" x="456.7" y="147.0" text-anchor="start">AES-256</text>
+  <text class="label" x="456.7" y="351.0" text-anchor="start">SHA-256</text>
+  <text class="label" x="280.0" y="461.0" text-anchor="middle">GHASH</text>
+  <text class="label" x="103.3" y="351.0" text-anchor="end">ChaCha20</text>
+  <text class="label" x="103.3" y="147.0" text-anchor="end">SHAKE</text>
 
   <text class="label" x="20" y="538">Apple-Silicon Go-Fast Speedup (log scale)</text>
   <text class="small" x="20" y="556">Speedup over baseline/reference; GHASH uses Ct software reference</text>

@@ -9,6 +9,9 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
       tree (`aarch64-alt` AES-128/AES-256 FEAT_AES paths + parity harnesses).
 - [x] Add first non-AES acceleration paths in `aarch64-alt`:
       SHA-256, GHASH, and ChaCha20 (NEON) all implemented with parity harnesses.
+- [~] Add Keccak/SHAKE acceleration path for PQ workloads:
+      SHAKE128/SHAKE256 one-shot kernels are implemented; ML-KEM/ML-DSA
+      integration path remains pending.
 - [ ] Profile `src/ct.rs` ANF evaluators (`subset_mask8`, `eval_byte_sbox`,
       `parity128`) on M-series and quantify cycle share by cipher.
 - [ ] Reduce repeated ANF evaluation overhead in high-gap Ct ciphers:
@@ -33,7 +36,8 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 - [x] Create split local hotspot runners for Apple Silicon:
       [run_hotspots_symmetric.sh](scripts/run_hotspots_symmetric.sh),
       [run_hotspots_pk.sh](scripts/run_hotspots_pk.sh)
-- [ ] Store each optimization round as dated results under
-      `fast/Apple-Silicon/results/`.
-- [ ] After each accepted optimization, propagate numbers to
+- [x] Store each optimization round as dated results under
+      `fast/Apple-Silicon/results/` (see `run_alt_suite.sh` and generated
+      `alt_suite_*.md` snapshots).
+- [~] After each accepted optimization, propagate numbers to
       `SYMMETRIC.md` / `ASYMMETRIC.md` tables and associated Kiviat diagrams.

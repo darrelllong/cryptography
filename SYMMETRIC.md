@@ -422,11 +422,12 @@ above, this section is a focused single-host microbenchmark snapshot on M4 Pro.
 
 | Primitive | Comparator | Unit | Go-fast Throughput | Baseline/Reference Throughput | Speedup |
 |---|---|---|---:|---:|---:|
-| AES-128 encrypt | `compare_aes128` | MiB/s | 7033.98 | 421.95 | 16.67x |
-| AES-256 encrypt | `compare_aes256` | MiB/s | 6966.60 | 347.10 | 20.07x |
-| SHA-256 digest | `compare_sha256` | MiB/s | 2461.32 | 370.32 | 6.65x |
-| ChaCha20 keystream | `compare_chacha20` | MiB/s | 1249.47 | 837.89 | 1.49x |
-| GHASH multiply | `compare_ghash` | Mops/s | 154.84 | 9.07 (`ct_ref`) | 17.07x |
+| AES-128 encrypt | `compare_aes128` | MiB/s | 9803.92 | 502.88 | 19.50x |
+| AES-256 encrypt | `compare_aes256` | MiB/s | 6040.76 | 264.80 | 22.81x |
+| SHA-256 digest | `compare_sha256` | MiB/s | 2417.54 | 364.57 | 6.63x |
+| SHAKE (ML-KEM-like workload) | `compare_shake` | MiB/s | 306.23 | 297.88 | 1.03x |
+| ChaCha20 keystream | `compare_chacha20` | MiB/s | 1255.77 | 819.58 | 1.53x |
+| GHASH multiply | `compare_ghash` | Mops/s | 117.79 | 9.23 (`ct_ref`) | 12.75x |
 
 Apple go-fast speedup Kiviat diagram (radar chart, log scale):
 
