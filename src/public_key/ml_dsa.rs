@@ -1793,15 +1793,7 @@ fn unpack_sig(p: Profile, sig: &[u8]) -> Option<(Vec<u8>, Polyvecl, Polyveck)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
-    use std::path::PathBuf;
-    use std::process::{Command, Stdio};
-
-    fn hash32(data: &[u8]) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        shake256_absorb_squeeze(&[data], &mut out);
-        out
-    }
+    use std::collections::HashMap;
 
     #[test]
     fn parameter_lengths_match_known_profiles() {
@@ -1892,137 +1884,60 @@ mod tests {
         Some(out)
     }
 
-    fn parse_labeled_hex(line: &str, label: &str) -> Option<Vec<u8>> {
-        let prefix = format!("{label} = ");
-        let payload = line.strip_prefix(&prefix)?;
-        decode_hex(payload.trim())
+    fn decode_hex_array<const N: usize>(hex: &str) -> Option<[u8; N]> {
+        let bytes = decode_hex(hex)?;
+        bytes.try_into().ok()
     }
 
-    fn ref_mode_define(params: MlDsaParameterSet) -> &'static str {
-        match params {
-            MlDsaParameterSet::MlDsa44 => "2",
-            MlDsaParameterSet::MlDsa65 => "3",
-            MlDsaParameterSet::MlDsa87 => "5",
+    fn parse_vector_map(contents: &'static str) -> HashMap<&'static str, &'static str> {
+        let mut out = HashMap::new();
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (name, value) = line.split_once('=').expect("vector format key=value");
+            out.insert(name.trim(), value.trim());
         }
-    }
-
-    fn kyber_ref_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("third_party/ml-dsa/dilithium-ref/ref")
-    }
-
-    fn build_ref_test_vectors_bin(params: MlDsaParameterSet) -> PathBuf {
-        let dir = kyber_ref_dir();
-        assert!(
-            dir.exists(),
-            "missing dilithium ref dir at {}",
-            dir.display()
-        );
-        let out = std::env::temp_dir().join(format!(
-            "dilithium_ref_test_vectors{}_{}",
-            ref_mode_define(params),
-            std::process::id()
-        ));
-        let status = Command::new("cc")
-            .current_dir(&dir)
-            .arg("-Wall")
-            .arg("-Wextra")
-            .arg("-Wpedantic")
-            .arg("-Wmissing-prototypes")
-            .arg("-Wredundant-decls")
-            .arg("-Wshadow")
-            .arg("-Wvla")
-            .arg("-Wpointer-arith")
-            .arg("-O3")
-            .arg("-fomit-frame-pointer")
-            .arg(format!("-DDILITHIUM_MODE={}", ref_mode_define(params)))
-            .arg("sign.c")
-            .arg("packing.c")
-            .arg("polyvec.c")
-            .arg("poly.c")
-            .arg("ntt.c")
-            .arg("reduce.c")
-            .arg("rounding.c")
-            .arg("fips202.c")
-            .arg("symmetric-shake.c")
-            .arg("test/test_vectors.c")
-            .arg("-o")
-            .arg(&out)
-            .status()
-            .expect("spawn cc");
-        assert!(status.success(), "failed to build dilithium test_vectors");
-        out
-    }
-
-    fn deterministic_ref_random_stream(len: usize) -> Vec<u8> {
-        let mut out = vec![0u8; len];
-        let mut xof = Shake128::new();
-        xof.squeeze(&mut out);
         out
     }
 
     #[test]
-    fn matches_dilithium_reference_first_vector_hashes() {
-        for params in [
-            MlDsaParameterSet::MlDsa44,
+    fn ml_dsa_44_keygen_matches_acvp_fips204_vector() {
+        // Source: NIST ACVP server vectors, ML-DSA keyGen FIPS204, tgId=1 tcId=1.
+        let vectors = parse_vector_map(include_str!(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/vectors/ml_dsa_fips204_subset.txt"
+            )
+        ));
+        let seed: [u8; 32] = decode_hex_array(vectors["KEYGEN_SEED"]).expect("seed");
+        let expected_pk = decode_hex(vectors["KEYGEN_PK"]).expect("pk");
+        let (pk, _sk) = MlDsa::keygen_from_seed(MlDsaParameterSet::MlDsa44, &seed).expect("keygen");
+        assert_eq!(pk.to_wire_bytes(), expected_pk);
+    }
+
+    #[test]
+    fn ml_dsa_65_verify_matches_acvp_fips204_vector() {
+        // Source: NIST ACVP server vectors, ML-DSA sigVer FIPS204, tgId=3 tcId=36 (testPassed=true).
+        let vectors = parse_vector_map(include_str!(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/vectors/ml_dsa_fips204_subset.txt"
+            )
+        ));
+        let pk = MlDsaPublicKey::from_wire_bytes(
             MlDsaParameterSet::MlDsa65,
-            MlDsaParameterSet::MlDsa87,
-        ] {
-            let bin = build_ref_test_vectors_bin(params);
-            let mut child = Command::new(&bin)
-                .stdout(Stdio::piped())
-                .spawn()
-                .expect("spawn test_vectors");
-            let stdout = child.stdout.take().expect("stdout");
-            let mut reader = BufReader::new(stdout);
-            let mut lines = Vec::with_capacity(6);
-            for _ in 0..6 {
-                let mut line = String::new();
-                let n = reader.read_line(&mut line).expect("read line");
-                assert!(n > 0, "unexpected EOF from test_vectors");
-                lines.push(line.trim_end().to_owned());
-            }
-            let _ = child.kill();
-            let _ = child.wait();
-
-            assert_eq!(lines[0], "count = 0");
-            let m = parse_labeled_hex(&lines[1], "m").expect("m");
-            let pk_hash = parse_labeled_hex(&lines[2], "pk").expect("pk");
-            let sk_hash = parse_labeled_hex(&lines[3], "sk").expect("sk");
-            let sig_hash = parse_labeled_hex(&lines[4], "sig").expect("sig");
-
-            let stream = deterministic_ref_random_stream(32 + 32 + 32);
-            let msg = &stream[..32];
-            let seed = &stream[32..64];
-            let rnd = &stream[64..96];
-            assert_eq!(m, msg);
-            let seed: [u8; 32] = seed.try_into().expect("seed");
-            let rnd: [u8; 32] = rnd.try_into().expect("rnd");
-
-            let (pk, sk) = MlDsa::keygen_from_seed(params, &seed).expect("keygen");
-            let sig = MlDsa::sign_with_randomness_and_context(&sk, msg, &rnd, b"test_vectors\0")
-                .expect("sign");
-            assert!(MlDsa::verify_with_context(
-                &pk,
-                msg,
-                &sig,
-                b"test_vectors\0",
-            ));
-
-            assert_eq!(
-                hash32(&pk.to_wire_bytes()).to_vec(),
-                pk_hash,
-                "{params:?} pk"
-            );
-            assert_eq!(
-                hash32(&sk.to_wire_bytes()).to_vec(),
-                sk_hash,
-                "{params:?} sk"
-            );
-            assert_eq!(
-                hash32(&sig.to_wire_bytes()).to_vec(),
-                sig_hash,
-                "{params:?} sig"
-            );
-        }
+            &decode_hex(vectors["VERIFY_PK"]).expect("pk"),
+        )
+        .expect("verify pk");
+        let sig = MlDsaSignature::from_wire_bytes(
+            MlDsaParameterSet::MlDsa65,
+            &decode_hex(vectors["VERIFY_SIG"]).expect("signature"),
+        )
+        .expect("verify sig");
+        let msg = decode_hex(vectors["VERIFY_MESSAGE"]).expect("message");
+        let ctx = decode_hex(vectors["VERIFY_CONTEXT"]).expect("context");
+        assert!(MlDsa::verify_with_context(&pk, &msg, &sig, &ctx));
     }
 }

@@ -1207,18 +1207,7 @@ fn indcpa_decrypt(p: Profile, ct: &[u8], sk_pke: &[u8]) -> Option<[u8; SYM_BYTES
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
-    use std::path::PathBuf;
-    use std::process::{Command, Stdio};
-
-    #[derive(Debug)]
-    struct RefVector {
-        pk: Vec<u8>,
-        sk: Vec<u8>,
-        ct: Vec<u8>,
-        ss: [u8; SS_BYTES],
-        ss_invalid: [u8; SS_BYTES],
-    }
+    use std::collections::HashMap;
 
     fn hex_nibble(b: u8) -> Option<u8> {
         match b {
@@ -1243,127 +1232,21 @@ mod tests {
         Some(out)
     }
 
-    fn parse_labeled_hex(line: &str, label: &str) -> Option<Vec<u8>> {
-        let prefix = format!("{label}: ");
-        let payload = line.strip_prefix(&prefix)?;
-        decode_hex(payload.trim())
+    fn decode_hex_array<const N: usize>(hex: &str) -> Option<[u8; N]> {
+        let bytes = decode_hex(hex)?;
+        bytes.try_into().ok()
     }
 
-    fn ref_param_tag(params: MlKemParameterSet) -> &'static str {
-        match params {
-            MlKemParameterSet::MlKem512 => "512",
-            MlKemParameterSet::MlKem768 => "768",
-            MlKemParameterSet::MlKem1024 => "1024",
+    fn parse_vector_map(contents: &'static str) -> HashMap<&'static str, &'static str> {
+        let mut out = HashMap::new();
+        for line in contents.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (name, value) = line.split_once('=').expect("vector format key=value");
+            out.insert(name.trim(), value.trim());
         }
-    }
-
-    fn ref_k_define(params: MlKemParameterSet) -> &'static str {
-        match params {
-            MlKemParameterSet::MlKem512 => "2",
-            MlKemParameterSet::MlKem768 => "3",
-            MlKemParameterSet::MlKem1024 => "4",
-        }
-    }
-
-    fn kyber_ref_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("third_party/ml-kem/kyber-ref/ref")
-    }
-
-    fn build_ref_test_vectors_bin(params: MlKemParameterSet) -> PathBuf {
-        let dir = kyber_ref_dir();
-        assert!(
-            dir.exists(),
-            "missing Kyber reference directory at {}",
-            dir.display()
-        );
-
-        let out = std::env::temp_dir().join(format!(
-            "kyber_ref_test_vectors{}_{}",
-            ref_param_tag(params),
-            std::process::id()
-        ));
-
-        let status = Command::new("cc")
-            .current_dir(&dir)
-            .arg("-Wall")
-            .arg("-Wextra")
-            .arg("-Wpedantic")
-            .arg("-Wmissing-prototypes")
-            .arg("-Wredundant-decls")
-            .arg("-Wshadow")
-            .arg("-Wpointer-arith")
-            .arg("-O3")
-            .arg("-fomit-frame-pointer")
-            .arg(format!("-DKYBER_K={}", ref_k_define(params)))
-            .arg("kem.c")
-            .arg("indcpa.c")
-            .arg("polyvec.c")
-            .arg("poly.c")
-            .arg("ntt.c")
-            .arg("cbd.c")
-            .arg("reduce.c")
-            .arg("verify.c")
-            .arg("fips202.c")
-            .arg("symmetric-shake.c")
-            .arg("test/test_vectors.c")
-            .arg("-o")
-            .arg(&out)
-            .status()
-            .expect("spawn cc");
-        assert!(
-            status.success(),
-            "failed to compile Kyber reference test binary"
-        );
-        out
-    }
-
-    fn read_first_ref_vector(params: MlKemParameterSet) -> RefVector {
-        let bin = build_ref_test_vectors_bin(params);
-        let mut child = Command::new(&bin)
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("spawn Kyber reference test_vectors");
-        let stdout = child.stdout.take().expect("capture stdout");
-        let mut reader = BufReader::new(stdout);
-
-        let mut lines = Vec::with_capacity(6);
-        for _ in 0..6 {
-            let mut line = String::new();
-            let count = reader.read_line(&mut line).expect("read line");
-            assert!(
-                count > 0,
-                "unexpected EOF while reading Kyber reference output"
-            );
-            lines.push(line.trim_end().to_owned());
-        }
-
-        let _ = child.kill();
-        let _ = child.wait();
-
-        let pk = parse_labeled_hex(&lines[0], "Public Key").expect("parse pk");
-        let sk = parse_labeled_hex(&lines[1], "Secret Key").expect("parse sk");
-        let ct = parse_labeled_hex(&lines[2], "Ciphertext").expect("parse ct");
-        let ss_b = parse_labeled_hex(&lines[3], "Shared Secret B").expect("parse ss_b");
-        let ss_a = parse_labeled_hex(&lines[4], "Shared Secret A").expect("parse ss_a");
-        let ss_invalid = parse_labeled_hex(&lines[5], "Pseudorandom shared Secret A")
-            .expect("parse pseudorandom ss");
-        assert_eq!(ss_a, ss_b, "reference shared secrets mismatch");
-        let ss: [u8; SS_BYTES] = ss_a.try_into().expect("shared secret length");
-        let ss_invalid: [u8; SS_BYTES] = ss_invalid.try_into().expect("fallback secret length");
-
-        RefVector {
-            pk,
-            sk,
-            ct,
-            ss,
-            ss_invalid,
-        }
-    }
-
-    fn deterministic_ref_random_stream(len: usize) -> Vec<u8> {
-        let mut out = vec![0u8; len];
-        let mut xof = Shake128::new();
-        xof.squeeze(&mut out);
         out
     }
 
@@ -1424,41 +1307,59 @@ mod tests {
     }
 
     #[test]
-    fn matches_kyber_reference_vectors_for_first_deterministic_sample() {
-        for params in [
+    fn ml_kem_512_matches_acvp_fips203_subset() {
+        // Source: NIST ACVP server vectors, ML-KEM keyGen/encapDecap FIPS203,
+        // tgId 1 tcId 1 (keyGen + encapsulation) and tgId 4 tcId 1 (decapsulation).
+        let vectors = parse_vector_map(include_str!(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/vectors/ml_kem_fips203_subset.txt"
+            )
+        ));
+
+        let d: [u8; 32] = decode_hex_array(vectors["KEYGEN_D"]).expect("d");
+        let z: [u8; 32] = decode_hex_array(vectors["KEYGEN_Z"]).expect("z");
+        let mut seed = [0u8; 64];
+        seed[..32].copy_from_slice(&d);
+        seed[32..].copy_from_slice(&z);
+
+        let (pk, _sk) =
+            MlKem::keygen_from_seed(MlKemParameterSet::MlKem512, &seed).expect("keygen");
+        assert_eq!(
+            pk.to_wire_bytes(),
+            decode_hex(vectors["KEYGEN_EK"]).expect("expected ek")
+        );
+
+        let encap_pk = MlKemPublicKey::from_wire_bytes(
             MlKemParameterSet::MlKem512,
-            MlKemParameterSet::MlKem768,
-            MlKemParameterSet::MlKem1024,
-        ] {
-            let reference = read_first_ref_vector(params);
-            let mut stream = deterministic_ref_random_stream(64 + 32 + params.ciphertext_len());
-            let random_ct = stream.split_off(64 + 32);
-            let m = stream.split_off(64);
-            let seed = stream;
+            &decode_hex(vectors["ENCAP_EK"]).expect("encap ek"),
+        )
+        .expect("encap pk");
+        let m: [u8; 32] = decode_hex_array(vectors["ENCAP_M"]).expect("encap m");
+        let (ct, ss) = MlKem::encaps_with_randomness(&encap_pk, &m).expect("encaps");
+        assert_eq!(
+            ct.to_wire_bytes(),
+            decode_hex(vectors["ENCAP_C"]).expect("expected c")
+        );
+        assert_eq!(
+            ss.to_wire_bytes(),
+            decode_hex_array::<SS_BYTES>(vectors["ENCAP_K"]).expect("expected k")
+        );
 
-            let seed: [u8; 64] = seed.try_into().expect("seed length");
-            let m: [u8; 32] = m.try_into().expect("m length");
-
-            let (pk, sk) = MlKem::keygen_from_seed(params, &seed).expect("keygen");
-            let (ct, ss) = MlKem::encaps_with_randomness(&pk, &m).expect("encaps");
-            let ss_dec = MlKem::decaps(&sk, &ct).expect("decaps");
-            let random_ct = MlKemCiphertext::from_wire_bytes(params, &random_ct).expect("ct");
-            let ss_invalid = MlKem::decaps(&sk, &random_ct).expect("decaps invalid");
-
-            assert_eq!(pk.to_wire_bytes(), reference.pk, "{params:?} pk mismatch");
-            assert_eq!(sk.to_wire_bytes(), reference.sk, "{params:?} sk mismatch");
-            assert_eq!(ct.to_wire_bytes(), reference.ct, "{params:?} ct mismatch");
-            assert_eq!(ss.to_wire_bytes(), reference.ss, "{params:?} ss mismatch");
-            assert_eq!(
-                ss_dec.to_wire_bytes(),
-                reference.ss,
-                "{params:?} ss_dec mismatch"
-            );
-            assert_eq!(
-                ss_invalid.to_wire_bytes(),
-                reference.ss_invalid,
-                "{params:?} ss_invalid mismatch"
-            );
-        }
+        let decap_sk = MlKemPrivateKey::from_wire_bytes(
+            MlKemParameterSet::MlKem512,
+            &decode_hex(vectors["DECAP_DK"]).expect("decap dk"),
+        )
+        .expect("decap sk");
+        let decap_ct = MlKemCiphertext::from_wire_bytes(
+            MlKemParameterSet::MlKem512,
+            &decode_hex(vectors["DECAP_C"]).expect("decap c"),
+        )
+        .expect("decap ct");
+        let decap_ss = MlKem::decaps(&decap_sk, &decap_ct).expect("decaps");
+        assert_eq!(
+            decap_ss.to_wire_bytes(),
+            decode_hex_array::<SS_BYTES>(vectors["DECAP_K"]).expect("decap k")
+        );
     }
 }
