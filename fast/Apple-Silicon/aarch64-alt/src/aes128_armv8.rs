@@ -15,6 +15,7 @@ pub enum Aes128Armv8Error {
 }
 
 pub struct Aes128Armv8 {
+    // Keep both forward and inverse schedules so encrypt/decrypt stay branch-free.
     round_keys: [[u8; 16]; 11],
     inv_round_keys: [[u8; 16]; 11],
 }
@@ -37,6 +38,7 @@ impl Aes128Armv8 {
             return Err(Aes128Armv8Error::MissingAesFeature);
         }
         let round_keys = expand_key_128(key);
+        // Precompute inverse round keys once to avoid per-block AESIMC overhead.
         #[cfg(target_arch = "aarch64")]
         let inv_round_keys = unsafe { build_inverse_round_keys(&round_keys) };
         #[cfg(not(target_arch = "aarch64"))]
@@ -51,6 +53,7 @@ impl Aes128Armv8 {
         if !Self::is_supported() {
             return Err(Aes128Armv8Error::MissingAesFeature);
         }
+        // Feature check stays at API boundary; the inner kernel is straight-line.
         #[cfg(target_arch = "aarch64")]
         unsafe {
             encrypt_block_hw(block, &self.round_keys);
@@ -62,6 +65,7 @@ impl Aes128Armv8 {
         if !Self::is_supported() {
             return Err(Aes128Armv8Error::MissingAesFeature);
         }
+        // Same policy as encrypt_block: no dynamic branching in the hot loop.
         #[cfg(target_arch = "aarch64")]
         unsafe {
             decrypt_block_hw(block, &self.inv_round_keys);
@@ -123,6 +127,7 @@ pub(crate) fn expand_key_128(key: &[u8; 16]) -> [[u8; 16]; 11] {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "aes")]
 unsafe fn build_inverse_round_keys(forward: &[[u8; 16]; 11]) -> [[u8; 16]; 11] {
+    // AESD expects decryption subkeys transformed by AESIMC.
     let mut inv = [[0u8; 16]; 11];
     inv[0] = forward[10];
     inv[10] = forward[0];
@@ -143,6 +148,7 @@ unsafe fn load(ptr: *const u8) -> uint8x16_t {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "aes")]
 unsafe fn encrypt_block_hw(block: &mut [u8; 16], round_keys: &[[u8; 16]; 11]) {
+    // ARM maps one AES round to AESE + AESMC. Final round omits MixColumns.
     let mut state = load(block.as_ptr());
     for rk in round_keys.iter().take(9) {
         let k = load(rk.as_ptr());
@@ -157,6 +163,7 @@ unsafe fn encrypt_block_hw(block: &mut [u8; 16], round_keys: &[[u8; 16]; 11]) {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "aes")]
 unsafe fn decrypt_block_hw(block: &mut [u8; 16], inv_round_keys: &[[u8; 16]; 11]) {
+    // Decryption mirrors encryption with AESD + AESIMC.
     let mut state = load(block.as_ptr());
     for rk in inv_round_keys.iter().take(9) {
         let k = load(rk.as_ptr());

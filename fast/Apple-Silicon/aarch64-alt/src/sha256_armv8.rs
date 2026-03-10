@@ -35,6 +35,7 @@ impl Sha256Armv8 {
             return Err(Sha256Armv8Error::MissingSha2Feature);
         }
 
+        // Standard SHA-256 IV.
         let mut state = [
             0x6a09_e667,
             0xbb67_ae85,
@@ -48,11 +49,13 @@ impl Sha256Armv8 {
 
         let full = data.len() & !63;
         for chunk in data[..full].chunks_exact(64) {
+            // Keep compression input as fixed-size blocks for the hw kernel.
             let mut block = [0u8; 64];
             block.copy_from_slice(chunk);
             compress(&mut state, &block);
         }
 
+        // SHA-256 padding and 64-bit big-endian bit length.
         let bit_len = (data.len() as u64).wrapping_mul(8);
         let mut tail = [0u8; 128];
         let rem = data.len() - full;
@@ -113,6 +116,7 @@ fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 unsafe fn load_be(ptr: *const u8) -> uint32x4_t {
+    // SHA-256 words are big-endian; NEON loads native-endian lanes.
     let bytes = vld1q_u8(ptr);
     let swapped = vrev32q_u8(bytes);
     vreinterpretq_u32_u8(swapped)
@@ -121,6 +125,7 @@ unsafe fn load_be(ptr: *const u8) -> uint32x4_t {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "sha2")]
 unsafe fn compress_block_hw(state: &mut [u32; 8], block: &[u8; 64]) {
+    // abcd/efgh hold the eight state words in two vectors.
     let mut abcd = vld1q_u32(state.as_ptr());
     let mut efgh = vld1q_u32(state.as_ptr().add(4));
     let abcd0 = abcd;
@@ -131,6 +136,8 @@ unsafe fn compress_block_hw(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut w2 = load_be(block.as_ptr().add(32));
     let mut w3 = load_be(block.as_ptr().add(48));
 
+    // SHA2 instructions process four rounds at a time. The macro keeps the
+    // state update pattern explicit while minimizing call overhead.
     macro_rules! round4 {
         ($w:expr, $kidx:expr) => {{
             let wk = vaddq_u32($w, vld1q_u32(K32X4[$kidx].as_ptr()));
@@ -145,6 +152,7 @@ unsafe fn compress_block_hw(state: &mut [u32; 8], block: &[u8; 64]) {
     round4!(w2, 2);
     round4!(w3, 3);
 
+    // Message schedule expansion is pipelined with round execution.
     w0 = vsha256su0q_u32(w0, w1);
     w0 = vsha256su1q_u32(w0, w2, w3);
     round4!(w0, 4);

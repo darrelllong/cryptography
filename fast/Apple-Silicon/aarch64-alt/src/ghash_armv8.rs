@@ -31,6 +31,7 @@ impl GhashArmv8 {
         if !Self::is_supported() {
             return Err(GhashArmv8Error::MissingAesFeature);
         }
+        // Feature check stays at API boundary; kernel below is branch-free math.
         #[cfg(target_arch = "aarch64")]
         unsafe {
             return Ok(mul_hw(x, y));
@@ -69,6 +70,7 @@ fn ghash_mul_ct_ref(x: u128, y: u128) -> u128 {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "aes")]
 unsafe fn clmul64_hw(a: u64, b: u64) -> u128 {
+    // vmull_p64 computes carry-less 64x64 -> 128 polynomial products.
     vmull_p64(a, b)
 }
 
@@ -76,7 +78,8 @@ unsafe fn clmul64_hw(a: u64, b: u64) -> u128 {
 #[inline]
 fn reduce_mod_gcm(hi: u128, lo: u128) -> u128 {
     // Reduce modulo x^128 + x^7 + x^2 + x + 1.
-    // First fold the 128 high bits, then fold the small carry tail.
+    // First fold the 128 high bits, then fold the small carry tail that
+    // appears when the top term crosses x^128.
     let x = hi;
     let mut z = lo ^ x ^ (x << 1) ^ (x << 2) ^ (x << 7);
     let x_hi = (x >> 127) ^ (x >> 126) ^ (x >> 121);
@@ -96,6 +99,7 @@ unsafe fn mul_hw(x: u128, y: u128) -> u128 {
     let b0 = u64::try_from(b & u128::from(u64::MAX)).expect("masked low limb fits");
     let b1 = u64::try_from(b >> 64).expect("high limb fits");
 
+    // Schoolbook over GF(2): four 64x64 carry-less products + cross-term combine.
     let p00 = clmul64_hw(a0, b0);
     let p01 = clmul64_hw(a0, b1);
     let p10 = clmul64_hw(a1, b0);

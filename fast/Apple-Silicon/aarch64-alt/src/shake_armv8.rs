@@ -3,6 +3,10 @@
 //! This module keeps the SHAKE API surface intentionally small and one-shot:
 //! absorb input bytes, then squeeze caller-requested output bytes.
 //! It is designed for high-throughput KEM-style usage patterns.
+//!
+//! Note: this path is architecture-gated for layout/workflow symmetry with the
+//! rest of `aarch64-alt`, but the core Keccak permutation here is portable
+//! scalar code (no dedicated SHA-3 ISA dependency).
 
 const RHO: [u32; 25] = [
     0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
@@ -110,6 +114,7 @@ impl ShakeArmv8 {
         if !Self::is_supported() {
             return Err(ShakeArmv8Error::MissingAarch64);
         }
+        // Build one contiguous transcript so absorb order is explicit and stable.
         let total_len = parts.iter().map(|p| p.len()).sum();
         let mut msg = Vec::with_capacity(total_len);
         for part in parts {
@@ -121,6 +126,7 @@ impl ShakeArmv8 {
 
 #[inline]
 fn keccak_f1600(state: &mut [u64; 25]) {
+    // Canonical Keccak-f[1600] round: theta -> rho/pi -> chi -> iota.
     for &rc in &RC {
         let mut c = [0u64; 5];
         for x in 0..5 {
@@ -162,6 +168,7 @@ fn absorb_rate_bytes<const RATE: usize>(state: &mut [u64; 25], data: &[u8]) {
         lane.copy_from_slice(&data[i * 8..i * 8 + 8]);
         state[i] ^= u64::from_le_bytes(lane);
     }
+    // SHAKE is a sponge: absorb one full-rate block then permute.
     keccak_f1600(state);
 }
 
@@ -170,6 +177,7 @@ fn squeeze<const RATE: usize>(state: &mut [u64; 25], out: &mut [u8]) {
     let lanes = RATE / 8;
     let mut produced = 0usize;
 
+    // Fast path: emit whole-rate chunks directly from state lanes.
     while produced + RATE <= out.len() {
         let chunk = &mut out[produced..produced + RATE];
         for i in 0..lanes {
@@ -182,6 +190,7 @@ fn squeeze<const RATE: usize>(state: &mut [u64; 25], out: &mut [u8]) {
     }
 
     if produced < out.len() {
+        // Tail path handles non-rate-aligned output without temporary buffers.
         let mut lane_idx = 0usize;
         let mut lane = [0u8; 8];
         let mut lane_off = 8usize;
@@ -209,11 +218,13 @@ fn squeeze<const RATE: usize>(state: &mut [u64; 25], out: &mut [u8]) {
 fn shake<const RATE: usize>(data: &[u8], out: &mut [u8]) {
     let mut state = [0u64; 25];
 
+    // Absorb complete rate blocks.
     let mut chunks = data.chunks_exact(RATE);
     for chunk in &mut chunks {
         absorb_rate_bytes::<RATE>(&mut state, chunk);
     }
 
+    // Domain separation + final bit as required by SHAKE padding.
     let mut block = [0u8; RATE];
     let rem = chunks.remainder();
     block[..rem.len()].copy_from_slice(rem);

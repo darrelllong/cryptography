@@ -19,6 +19,7 @@ pub enum ChaCha20Armv8Error {
 
 pub struct ChaCha20Armv8 {
     state: [u32; 16],
+    // Four-block cache amortizes the cost of the vectorized core.
     block: [u8; 256],
     offset: usize,
 }
@@ -73,6 +74,7 @@ impl ChaCha20Armv8 {
     fn refill(&mut self) {
         #[cfg(target_arch = "aarch64")]
         unsafe {
+            // Compute four independent ChaCha blocks in parallel (SIMD lanes).
             let words4 = chacha20_block4_words(self.state);
             for block_idx in 0..4 {
                 let base = block_idx * 64;
@@ -92,6 +94,7 @@ impl ChaCha20Armv8 {
             return Err(ChaCha20Armv8Error::MissingNeonFeature);
         }
 
+        // Stream API stays generic; refill handles vectorization granularity.
         let mut done = 0usize;
         while done < buf.len() {
             if self.offset == 256 {
@@ -179,11 +182,13 @@ unsafe fn quarter_round_vec(x: &mut [uint32x4_t; 16], a: usize, b: usize, c: usi
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 unsafe fn chacha20_block4_words(state: [u32; 16]) -> [[u32; 16]; 4] {
+    // Layout: each vector lane is one independent ChaCha block.
     let mut x = [vdupq_n_u32(0); 16];
     let mut orig = [vdupq_n_u32(0); 16];
 
     for i in 0..16 {
         let v = if i == 12 {
+            // Counter lane is incremented across lanes: ctr, ctr+1, ctr+2, ctr+3.
             let mut t = vdupq_n_u32(state[12]);
             t = vsetq_lane_u32(state[12].wrapping_add(1), t, 1);
             t = vsetq_lane_u32(state[12].wrapping_add(2), t, 2);
@@ -196,6 +201,7 @@ unsafe fn chacha20_block4_words(state: [u32; 16]) -> [[u32; 16]; 4] {
     }
 
     for _ in 0..10 {
+        // 20 rounds = 10 column/diagonal double-rounds.
         quarter_round_vec(&mut x, 0, 4, 8, 12);
         quarter_round_vec(&mut x, 1, 5, 9, 13);
         quarter_round_vec(&mut x, 2, 6, 10, 14);
@@ -212,6 +218,7 @@ unsafe fn chacha20_block4_words(state: [u32; 16]) -> [[u32; 16]; 4] {
     }
 
     let mut out = [[0u32; 16]; 4];
+    // Transpose from lane-major vectors back to block-major scalar words.
     for word_idx in 0..16 {
         let mut lanes = [0u32; 4];
         vst1q_u32(lanes.as_mut_ptr(), x[word_idx]);
