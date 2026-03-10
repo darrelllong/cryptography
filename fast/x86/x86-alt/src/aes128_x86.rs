@@ -56,6 +56,8 @@ impl Aes128X86 {
     }
 
     pub fn encrypt_block(&self, block: &mut [u8; 16]) -> Result<(), Aes128X86Error> {
+        // Hot path: avoid per-block feature detection. Construction already
+        // enforces AES-NI availability.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             encrypt_block_hw(block, &self.round_keys);
@@ -69,6 +71,7 @@ impl Aes128X86 {
     }
 
     pub fn decrypt_block(&self, block: &mut [u8; 16]) -> Result<(), Aes128X86Error> {
+        // Same policy as encrypt_block: keep the inner path branch-free.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             decrypt_block_hw(block, &self.inv_round_keys);
@@ -85,6 +88,7 @@ impl Aes128X86 {
         if !buffer.len().is_multiple_of(16) {
             return Err(Aes128X86Error::InvalidLength);
         }
+        // Batch mode is where AES-NI wins most: one call, one bounds check.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             encrypt_buffer_hw(buffer, &self.round_keys);
@@ -151,6 +155,7 @@ pub(crate) fn expand_key_128(key: &[u8; 16]) -> [[u8; 16]; 11] {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "aes")]
 unsafe fn build_inverse_round_keys(forward: &[[u8; 16]; 11]) -> [[u8; 16]; 11] {
+    // AESDEC expects decryption round keys transformed through AESIMC.
     let mut inv = [[0u8; 16]; 11];
     inv[0] = forward[10];
     inv[10] = forward[0];
@@ -199,11 +204,13 @@ unsafe fn decrypt_block_hw(block: &mut [u8; 16], inv_round_keys: &[[u8; 16]; 11]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "aes")]
 unsafe fn encrypt_buffer_hw(buffer: &mut [u8], round_keys: &[[u8; 16]; 11]) {
+    // Load round keys once per buffer instead of once per block.
     let mut rk: [__m128i; 11] = core::mem::zeroed();
     for (i, key) in round_keys.iter().enumerate() {
         rk[i] = _mm_loadu_si128(key.as_ptr() as *const __m128i);
     }
 
+    // Pointer-walk avoids repeated slice/index bounds checks in the hot loop.
     let mut ptr = buffer.as_mut_ptr();
     let end = ptr.add(buffer.len());
     while ptr < end {

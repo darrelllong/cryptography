@@ -30,6 +30,7 @@ impl GhashX86 {
     }
 
     pub fn mul(x: u128, y: u128) -> Result<u128, GhashX86Error> {
+        // Hot path avoids per-call CPUID checks; callers gate with is_supported().
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             return Ok(mul_hw(x, y));
@@ -68,6 +69,7 @@ fn ghash_mul_ct_ref(x: u128, y: u128) -> u128 {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "pclmulqdq")]
 unsafe fn clmul64_hw(a: u64, b: u64) -> u128 {
+    // `_mm_clmulepi64_si128` computes carry-less 64x64 -> 128 polynomial products.
     let va = _mm_set_epi64x(0, a as i64);
     let vb = _mm_set_epi64x(0, b as i64);
     let prod = _mm_clmulepi64_si128(va, vb, 0x00);
@@ -100,6 +102,7 @@ unsafe fn mul_hw(x: u128, y: u128) -> u128 {
     let b0 = u64::try_from(b & u128::from(u64::MAX)).expect("masked low limb fits");
     let b1 = u64::try_from(b >> 64).expect("high limb fits");
 
+    // Schoolbook over GF(2): four 64x64 carry-less products + cross-term combine.
     let p00 = clmul64_hw(a0, b0);
     let p01 = clmul64_hw(a0, b1);
     let p10 = clmul64_hw(a1, b0);
