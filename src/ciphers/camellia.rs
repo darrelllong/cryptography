@@ -841,6 +841,23 @@ impl Drop for Camellia256Ct {
 mod tests {
     use super::*;
 
+    fn xorshift64(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn fill_bytes(state: &mut u64, out: &mut [u8]) {
+        for chunk in out.chunks_mut(8) {
+            let bytes = xorshift64(state).to_le_bytes();
+            let n = chunk.len();
+            chunk.copy_from_slice(&bytes[..n]);
+        }
+    }
+
     fn h16(s: &str) -> [u8; 16] {
         let b: Vec<u8> = (0..s.len())
             .step_by(2)
@@ -869,6 +886,42 @@ mod tests {
     fn ct_sbox_matches_table() {
         for x in 0u8..=255 {
             assert_eq!(sbox1_ct(x), sbox1(x));
+        }
+    }
+
+    #[test]
+    fn camellia_fast_and_ct_match_random_vectors() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        for _ in 0..128 {
+            let mut block = [0u8; 16];
+            fill_bytes(&mut seed, &mut block);
+
+            let mut k128 = [0u8; 16];
+            fill_bytes(&mut seed, &mut k128);
+            let fast128 = Camellia128::new(&k128);
+            let ct128 = Camellia128Ct::new(&k128);
+            let c128 = fast128.encrypt_block(&block);
+            assert_eq!(c128, ct128.encrypt_block(&block));
+            assert_eq!(block, fast128.decrypt_block(&c128));
+            assert_eq!(block, ct128.decrypt_block(&c128));
+
+            let mut k192 = [0u8; 24];
+            fill_bytes(&mut seed, &mut k192);
+            let fast192 = Camellia192::new(&k192);
+            let ct192 = Camellia192Ct::new(&k192);
+            let c192 = fast192.encrypt_block(&block);
+            assert_eq!(c192, ct192.encrypt_block(&block));
+            assert_eq!(block, fast192.decrypt_block(&c192));
+            assert_eq!(block, ct192.decrypt_block(&c192));
+
+            let mut k256 = [0u8; 32];
+            fill_bytes(&mut seed, &mut k256);
+            let fast256 = Camellia256::new(&k256);
+            let ct256 = Camellia256Ct::new(&k256);
+            let c256 = fast256.encrypt_block(&block);
+            assert_eq!(c256, ct256.encrypt_block(&block));
+            assert_eq!(block, fast256.decrypt_block(&c256));
+            assert_eq!(block, ct256.decrypt_block(&c256));
         }
     }
 

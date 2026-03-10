@@ -12,10 +12,135 @@ use core::hint::black_box;
 use core::ptr;
 use core::sync::atomic::{compiler_fence, Ordering};
 
+#[cfg(feature = "ct_profile")]
+use std::time::Instant;
+
 #[cfg(test)]
 use std::io::Write;
 #[cfg(test)]
 use std::process::{Command, Stdio};
+
+#[cfg(feature = "ct_profile")]
+mod profile {
+    use core::sync::atomic::{AtomicU64, Ordering};
+
+    static SUBSET_MASK8_CALLS: AtomicU64 = AtomicU64::new(0);
+    static PARITY128_CALLS: AtomicU64 = AtomicU64::new(0);
+    static EVAL_BYTE_SBOX_CALLS: AtomicU64 = AtomicU64::new(0);
+
+    #[inline(always)]
+    pub(super) fn bump_subset_mask8() {
+        SUBSET_MASK8_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline(always)]
+    pub(super) fn bump_parity128() {
+        PARITY128_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline(always)]
+    pub(super) fn bump_eval_byte_sbox() {
+        EVAL_BYTE_SBOX_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn reset() {
+        SUBSET_MASK8_CALLS.store(0, Ordering::Relaxed);
+        PARITY128_CALLS.store(0, Ordering::Relaxed);
+        EVAL_BYTE_SBOX_CALLS.store(0, Ordering::Relaxed);
+    }
+
+    pub(super) fn snapshot() -> super::CtAnfProfile {
+        super::CtAnfProfile {
+            subset_mask8_calls: SUBSET_MASK8_CALLS.load(Ordering::Relaxed),
+            parity128_calls: PARITY128_CALLS.load(Ordering::Relaxed),
+            eval_byte_sbox_calls: EVAL_BYTE_SBOX_CALLS.load(Ordering::Relaxed),
+        }
+    }
+}
+
+#[cfg(not(feature = "ct_profile"))]
+mod profile {
+    #[inline(always)]
+    pub(super) fn bump_subset_mask8() {}
+
+    #[inline(always)]
+    pub(super) fn bump_parity128() {}
+
+    #[inline(always)]
+    pub(super) fn bump_eval_byte_sbox() {}
+}
+
+#[cfg(feature = "ct_profile")]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CtAnfProfile {
+    pub subset_mask8_calls: u64,
+    pub parity128_calls: u64,
+    pub eval_byte_sbox_calls: u64,
+}
+
+#[cfg(feature = "ct_profile")]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CtAnfHelperCostsNs {
+    pub subset_mask8_ns: f64,
+    pub parity128_ns: f64,
+    pub eval_byte_sbox_ns: f64,
+}
+
+#[cfg(feature = "ct_profile")]
+pub fn ct_profile_reset() {
+    profile::reset();
+}
+
+#[cfg(feature = "ct_profile")]
+#[must_use]
+pub fn ct_profile_snapshot() -> CtAnfProfile {
+    profile::snapshot()
+}
+
+#[cfg(feature = "ct_profile")]
+#[must_use]
+pub fn ct_profile_measure_helper_costs(iterations: u64) -> CtAnfHelperCostsNs {
+    let mut input = 0u8;
+    let mut acc = 0u64;
+
+    let t_subset = Instant::now();
+    for _ in 0..iterations {
+        let (lo, hi) = subset_mask8(input);
+        acc ^= (lo as u64) ^ ((hi >> 64) as u64);
+        input = input.wrapping_add(1);
+    }
+    let subset_ns = t_subset.elapsed().as_secs_f64() * 1e9 / iterations as f64;
+
+    let t_parity = Instant::now();
+    let mut x = 0x0123_4567_89ab_cdef_0011_2233_4455_6677u128;
+    for _ in 0..iterations {
+        acc ^= u64::from(parity128(x));
+        x = x.rotate_left(13) ^ 0x9e37_79b9_7f4a_7c15_6a09_e667_f3bc_c909u128;
+    }
+    let parity_ns = t_parity.elapsed().as_secs_f64() * 1e9 / iterations as f64;
+
+    let mut table = [0u8; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        table[i] = i as u8;
+        i += 1;
+    }
+    let coeffs = build_byte_sbox_anf(&table);
+    let t_eval = Instant::now();
+    let mut y = 0u8;
+    for _ in 0..iterations {
+        y = y.wrapping_add(17);
+        acc ^= u64::from(eval_byte_sbox(&coeffs, y));
+    }
+    let eval_ns = t_eval.elapsed().as_secs_f64() * 1e9 / iterations as f64;
+
+    black_box(acc);
+    CtAnfHelperCostsNs {
+        subset_mask8_ns: subset_ns,
+        parity128_ns: parity_ns,
+        eval_byte_sbox_ns: eval_ns,
+    }
+}
 
 #[inline]
 fn eq_mask_u32(a: u8, b: u8) -> u32 {
@@ -191,48 +316,50 @@ pub(crate) const fn build_nibble_sbox_anf(table: &[u8; 16]) -> [u16; 4] {
 }
 
 #[inline]
-pub(crate) const fn shl_256<const SHIFT: u32>(lo: u128, hi: u128) -> (u128, u128) {
-    debug_assert!(SHIFT >= 1 && SHIFT <= 127);
-    (lo << SHIFT, (hi << SHIFT) | (lo >> (128 - SHIFT)))
-}
-
-#[inline]
 pub(crate) fn subset_mask8(x: u8) -> (u128, u128) {
+    profile::bump_subset_mask8();
     let mut lo = 1u128;
     let mut hi = 0u128;
 
     let mask0 = 0u128.wrapping_sub(u128::from(x & 1));
-    let (add_lo, add_hi) = shl_256::<1>(lo, hi);
+    let add_lo = lo << 1;
+    let add_hi = (hi << 1) | (lo >> 127);
     lo |= add_lo & mask0;
     hi |= add_hi & mask0;
 
     let mask1 = 0u128.wrapping_sub(u128::from((x >> 1) & 1));
-    let (add_lo, add_hi) = shl_256::<2>(lo, hi);
+    let add_lo = lo << 2;
+    let add_hi = (hi << 2) | (lo >> 126);
     lo |= add_lo & mask1;
     hi |= add_hi & mask1;
 
     let mask2 = 0u128.wrapping_sub(u128::from((x >> 2) & 1));
-    let (add_lo, add_hi) = shl_256::<4>(lo, hi);
+    let add_lo = lo << 4;
+    let add_hi = (hi << 4) | (lo >> 124);
     lo |= add_lo & mask2;
     hi |= add_hi & mask2;
 
     let mask3 = 0u128.wrapping_sub(u128::from((x >> 3) & 1));
-    let (add_lo, add_hi) = shl_256::<8>(lo, hi);
+    let add_lo = lo << 8;
+    let add_hi = (hi << 8) | (lo >> 120);
     lo |= add_lo & mask3;
     hi |= add_hi & mask3;
 
     let mask4 = 0u128.wrapping_sub(u128::from((x >> 4) & 1));
-    let (add_lo, add_hi) = shl_256::<16>(lo, hi);
+    let add_lo = lo << 16;
+    let add_hi = (hi << 16) | (lo >> 112);
     lo |= add_lo & mask4;
     hi |= add_hi & mask4;
 
     let mask5 = 0u128.wrapping_sub(u128::from((x >> 5) & 1));
-    let (add_lo, add_hi) = shl_256::<32>(lo, hi);
+    let add_lo = lo << 32;
+    let add_hi = (hi << 32) | (lo >> 96);
     lo |= add_lo & mask5;
     hi |= add_hi & mask5;
 
     let mask6 = 0u128.wrapping_sub(u128::from((x >> 6) & 1));
-    let (add_lo, add_hi) = shl_256::<64>(lo, hi);
+    let add_lo = lo << 64;
+    let add_hi = (hi << 64) | (lo >> 64);
     lo |= add_lo & mask6;
     hi |= add_hi & mask6;
 
@@ -243,26 +370,24 @@ pub(crate) fn subset_mask8(x: u8) -> (u128, u128) {
 }
 
 #[inline]
-pub(crate) fn parity128(mut x: u128) -> u8 {
-    x ^= x >> 64;
-    x ^= x >> 32;
-    x ^= x >> 16;
-    x ^= x >> 8;
-    x ^= x >> 4;
-    x &= 0x0f;
-    let nibble = x as u16;
-    ((0x6996u16 >> nibble) & 1) as u8
+pub(crate) fn parity128(x: u128) -> u8 {
+    profile::bump_parity128();
+    let lo = x as u64;
+    let hi = (x >> 64) as u64;
+    ((lo.count_ones() ^ hi.count_ones()) & 1) as u8
 }
 
 #[inline]
 pub(crate) fn eval_byte_sbox(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
+    profile::bump_eval_byte_sbox();
     let (active_lo, active_hi) = subset_mask8(input);
     let mut out = 0u8;
     let mut bit_idx = 0usize;
     while bit_idx < 8 {
         let coeff_lo = coeffs[bit_idx][0];
         let coeff_hi = coeffs[bit_idx][1];
-        let bit = parity128(active_lo & coeff_lo) ^ parity128(active_hi & coeff_hi);
+        // Parity is linear: parity(a) ^ parity(b) == parity(a ^ b).
+        let bit = parity128((active_lo & coeff_lo) ^ (active_hi & coeff_hi));
         out |= bit << bit_idx;
         bit_idx += 1;
     }

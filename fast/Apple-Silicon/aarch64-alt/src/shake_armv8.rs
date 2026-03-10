@@ -67,6 +67,56 @@ impl ShakeArmv8 {
         shake::<136>(data, out);
         Ok(())
     }
+
+    /// ML-KEM polynomial-uniform sampler seed path (`rho || nonce`).
+    ///
+    /// FIPS 203 `poly_uniform` absorbs 34 bytes and initially squeezes 5 SHAKE128
+    /// rate blocks (5 * 168 = 840 bytes) before rejection loops.
+    pub fn mlkem_poly_uniform(seed_and_nonce: &[u8; 34], out: &mut [u8; 840]) -> Result<(), ShakeArmv8Error> {
+        Self::shake128(seed_and_nonce, out)
+    }
+
+    /// ML-KEM eta-noise sampler seed path (`sigma || nonce`).
+    ///
+    /// The common path squeezes one 192-byte SHAKE256 chunk for CBD input.
+    pub fn mlkem_poly_eta(seed_and_nonce: &[u8; 33], out: &mut [u8; 192]) -> Result<(), ShakeArmv8Error> {
+        Self::shake256(seed_and_nonce, out)
+    }
+
+    /// ML-DSA polynomial-uniform sampler seed path (`rho || nonce`).
+    ///
+    /// FIPS 204 `poly_uniform` absorbs 34 bytes and starts from 840 bytes.
+    pub fn mldsa_poly_uniform(seed_and_nonce: &[u8; 34], out: &mut [u8; 840]) -> Result<(), ShakeArmv8Error> {
+        Self::shake128(seed_and_nonce, out)
+    }
+
+    /// ML-DSA eta sampler (`rhoprime || nonce`) for eta=2.
+    pub fn mldsa_poly_eta2(seed_and_nonce: &[u8; 66], out: &mut [u8; 136]) -> Result<(), ShakeArmv8Error> {
+        Self::shake256(seed_and_nonce, out)
+    }
+
+    /// ML-DSA eta sampler (`rhoprime || nonce`) for eta=4.
+    pub fn mldsa_poly_eta4(seed_and_nonce: &[u8; 66], out: &mut [u8; 272]) -> Result<(), ShakeArmv8Error> {
+        Self::shake256(seed_and_nonce, out)
+    }
+
+    /// ML-DSA gamma1 sampler (`rhoprime || nonce`) initial squeeze.
+    pub fn mldsa_poly_gamma1(seed_and_nonce: &[u8; 66], out: &mut [u8; 680]) -> Result<(), ShakeArmv8Error> {
+        Self::shake256(seed_and_nonce, out)
+    }
+
+    /// ML-DSA transcript helper: absorb all parts, then squeeze SHAKE256 output.
+    pub fn mldsa_absorb_squeeze(parts: &[&[u8]], out: &mut [u8]) -> Result<(), ShakeArmv8Error> {
+        if !Self::is_supported() {
+            return Err(ShakeArmv8Error::MissingAarch64);
+        }
+        let total_len = parts.iter().map(|p| p.len()).sum();
+        let mut msg = Vec::with_capacity(total_len);
+        for part in parts {
+            msg.extend_from_slice(part);
+        }
+        Self::shake256(&msg, out)
+    }
 }
 
 #[inline]

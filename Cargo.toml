@@ -8,6 +8,10 @@ autobenches = false
 name = "cryptography"
 path = "src/lib.rs"
 
+[features]
+default = []
+ct_profile = []
+
 # Benchmark targets live in the separate `benchmarks/` crate so ordinary
 # `cargo test` on this package does not need to resolve benchmark-only crates.
 

@@ -78,6 +78,7 @@ For Apple Silicon optimization loops (no assembly, in-repo code only), use:
 - [fast/Apple-Silicon/README.md](fast/Apple-Silicon/README.md)
 - `bash fast/Apple-Silicon/scripts/run_hotspots_symmetric.sh`
 - `bash fast/Apple-Silicon/scripts/run_hotspots_pk.sh`
+- `bash fast/Apple-Silicon/scripts/profile_ct_anf.sh`
 
 Use the split scripts so unchanged PK or symmetric areas are not re-run.
 The baseline `src/` tree remains the pure safe Rust reference; Apple-Silicon

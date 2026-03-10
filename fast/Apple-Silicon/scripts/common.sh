@@ -31,7 +31,7 @@ build_bins() {
             ;;
     esac
 
-    if [[ "$needs_cipher" == "1" && ("${REBUILD:-0}" == "1" || ! -x "$CIPHER_BIN") ]]; then
+    if [[ "$needs_cipher" == "1" ]]; then
         if [[ "${FAST_NATIVE:-0}" == "1" ]]; then
             (
                 cd "$ROOT_DIR"
@@ -46,7 +46,7 @@ build_bins() {
         fi
     fi
 
-    if [[ "$needs_pk" == "1" && ("${REBUILD:-0}" == "1" || ! -x "$PK_BIN") ]]; then
+    if [[ "$needs_pk" == "1" ]]; then
         if [[ "${FAST_NATIVE:-0}" == "1" ]]; then
             (
                 cd "$ROOT_DIR"

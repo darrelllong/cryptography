@@ -318,6 +318,23 @@ impl Drop for SeedCt {
 mod tests {
     use super::*;
 
+    fn xorshift64(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn fill_bytes(state: &mut u64, out: &mut [u8]) {
+        for chunk in out.chunks_mut(8) {
+            let bytes = xorshift64(state).to_le_bytes();
+            let n = chunk.len();
+            chunk.copy_from_slice(&bytes[..n]);
+        }
+    }
+
     fn h16(s: &str) -> [u8; 16] {
         let b: Vec<u8> = (0..s.len())
             .step_by(2)
@@ -404,6 +421,25 @@ mod tests {
             let cipher = SeedCt::new(&key);
             assert_eq!(cipher.encrypt_block(&pt), ct);
             assert_eq!(cipher.decrypt_block(&ct), pt);
+        }
+    }
+
+    #[test]
+    fn seed_and_seedct_match_random_vectors() {
+        let mut seed_rng = 0x1234_5678_9abc_def0u64;
+        for _ in 0..256 {
+            let mut key = [0u8; 16];
+            let mut block = [0u8; 16];
+            fill_bytes(&mut seed_rng, &mut key);
+            fill_bytes(&mut seed_rng, &mut block);
+
+            let fast = Seed::new(&key);
+            let ct = SeedCt::new(&key);
+            let fast_ct = fast.encrypt_block(&block);
+            let ct_ct = ct.encrypt_block(&block);
+            assert_eq!(fast_ct, ct_ct);
+            assert_eq!(block, fast.decrypt_block(&fast_ct));
+            assert_eq!(block, ct.decrypt_block(&ct_ct));
         }
     }
 

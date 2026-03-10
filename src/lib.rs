@@ -13,6 +13,12 @@
 
 mod ct;
 
+#[cfg(feature = "ct_profile")]
+pub use ct::{
+    ct_profile_measure_helper_costs, ct_profile_reset, ct_profile_snapshot, CtAnfHelperCostsNs,
+    CtAnfProfile,
+};
+
 pub mod ciphers;
 pub mod cprng;
 pub mod hash;

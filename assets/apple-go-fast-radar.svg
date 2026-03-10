@@ -27,7 +27,7 @@
   <line class="axis" x1="280" y1="245" x2="124.1" y2="335.0" />
   <line class="axis" x1="280" y1="245" x2="124.1" y2="155.0" />
 
-  <polygon class="speedup-fill" points="280.0,90.7 420.7,163.8 365.1,294.1 280.0,377.2 260.9,256.0 278.7,244.2" />
+  <polygon class="speedup-fill" points="280.0,90.7 420.7,163.8 365.1,294.1 280.0,377.2 260.9,256.0 277.0,243.2" />
 
   <text class="small" x="316" y="216">1x</text>
   <text class="small" x="316" y="186">2x</text>

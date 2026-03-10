@@ -38,6 +38,14 @@ fn baseline_shake256(data: &[u8], out: &mut [u8]) {
     xof.squeeze(out);
 }
 
+fn baseline_shake256_parts(parts: &[&[u8]], out: &mut [u8]) {
+    let mut xof = Shake256::new();
+    for part in parts {
+        xof.update(part);
+    }
+    xof.squeeze(out);
+}
+
 fn run_correctness(vectors: usize) -> Result<(), String> {
     if !ShakeArmv8::is_supported() {
         return Err("aarch64 path is not available on this machine".to_string());
@@ -75,50 +83,103 @@ fn run_microbench() -> Result<(), String> {
         return Err("aarch64 path is not available on this machine".to_string());
     }
 
-    // ML-KEM-like sampling workload:
-    // - SHAKE128(seed||x||y) with ~672 bytes output for rejection sampling
-    // - SHAKE256(seed||nonce) with ~192 bytes output for CBD sampling
+    // ML-KEM + ML-DSA-like sampling/transcript workloads.
     const ITERS: usize = 80_000;
 
-    let mut in128 = [0u8; 34];
-    let mut in256 = [0u8; 33];
+    let mut kem_uniform_in = [0u8; 34];
+    let mut kem_eta_in = [0u8; 33];
+    let mut dsa_uniform_in = [0u8; 34];
+    let mut dsa_noise_in = [0u8; 66];
+    let mut dsa_part_a = [0u8; 64];
+    let mut dsa_part_b = [0u8; 48];
+    let mut dsa_part_c = [0u8; 96];
     let mut seed = 0x1234_5678_9abc_def0u64;
-    fill_bytes(&mut seed, &mut in128);
-    fill_bytes(&mut seed, &mut in256);
+    fill_bytes(&mut seed, &mut kem_uniform_in);
+    fill_bytes(&mut seed, &mut kem_eta_in);
+    fill_bytes(&mut seed, &mut dsa_uniform_in);
+    fill_bytes(&mut seed, &mut dsa_noise_in);
+    fill_bytes(&mut seed, &mut dsa_part_a);
+    fill_bytes(&mut seed, &mut dsa_part_b);
+    fill_bytes(&mut seed, &mut dsa_part_c);
 
-    let mut out128_alt = [0u8; 672];
-    let mut out256_alt = [0u8; 192];
-    let mut out128_base = [0u8; 672];
-    let mut out256_base = [0u8; 192];
+    let mut kem_uniform_alt = [0u8; 840];
+    let mut kem_eta_alt = [0u8; 192];
+    let mut dsa_uniform_alt = [0u8; 840];
+    let mut dsa_eta2_alt = [0u8; 136];
+    let mut dsa_gamma1_alt = [0u8; 680];
+    let mut dsa_tr_alt = [0u8; 64];
+
+    let mut kem_uniform_base = [0u8; 840];
+    let mut kem_eta_base = [0u8; 192];
+    let mut dsa_uniform_base = [0u8; 840];
+    let mut dsa_eta2_base = [0u8; 136];
+    let mut dsa_gamma1_base = [0u8; 680];
+    let mut dsa_tr_base = [0u8; 64];
 
     let t0 = Instant::now();
     for _ in 0..ITERS {
-        ShakeArmv8::shake128(&in128, &mut out128_alt)
-            .map_err(|_| "alt shake128 failed".to_string())?;
-        ShakeArmv8::shake256(&in256, &mut out256_alt)
-            .map_err(|_| "alt shake256 failed".to_string())?;
-        in128[0] = in128[0].wrapping_add(1);
-        in256[0] = in256[0].wrapping_add(1);
+        ShakeArmv8::mlkem_poly_uniform(&kem_uniform_in, &mut kem_uniform_alt)
+            .map_err(|_| "alt mlkem_poly_uniform failed".to_string())?;
+        ShakeArmv8::mlkem_poly_eta(&kem_eta_in, &mut kem_eta_alt)
+            .map_err(|_| "alt mlkem_poly_eta failed".to_string())?;
+        ShakeArmv8::mldsa_poly_uniform(&dsa_uniform_in, &mut dsa_uniform_alt)
+            .map_err(|_| "alt mldsa_poly_uniform failed".to_string())?;
+        ShakeArmv8::mldsa_poly_eta2(&dsa_noise_in, &mut dsa_eta2_alt)
+            .map_err(|_| "alt mldsa_poly_eta2 failed".to_string())?;
+        ShakeArmv8::mldsa_poly_gamma1(&dsa_noise_in, &mut dsa_gamma1_alt)
+            .map_err(|_| "alt mldsa_poly_gamma1 failed".to_string())?;
+        ShakeArmv8::mldsa_absorb_squeeze(&[&dsa_part_a, &dsa_part_b, &dsa_part_c], &mut dsa_tr_alt)
+            .map_err(|_| "alt mldsa_absorb_squeeze failed".to_string())?;
+        kem_uniform_in[0] = kem_uniform_in[0].wrapping_add(1);
+        kem_eta_in[0] = kem_eta_in[0].wrapping_add(1);
+        dsa_uniform_in[0] = dsa_uniform_in[0].wrapping_add(1);
+        dsa_noise_in[0] = dsa_noise_in[0].wrapping_add(1);
+        dsa_part_a[0] = dsa_part_a[0].wrapping_add(1);
     }
     let alt_elapsed = t0.elapsed().as_secs_f64();
 
     let t1 = Instant::now();
     for _ in 0..ITERS {
-        baseline_shake128(&in128, &mut out128_base);
-        baseline_shake256(&in256, &mut out256_base);
-        in128[1] = in128[1].wrapping_add(1);
-        in256[1] = in256[1].wrapping_add(1);
+        baseline_shake128(&kem_uniform_in, &mut kem_uniform_base);
+        baseline_shake256(&kem_eta_in, &mut kem_eta_base);
+        baseline_shake128(&dsa_uniform_in, &mut dsa_uniform_base);
+        baseline_shake256(&dsa_noise_in, &mut dsa_eta2_base);
+        baseline_shake256(&dsa_noise_in, &mut dsa_gamma1_base);
+        baseline_shake256_parts(&[&dsa_part_a, &dsa_part_b, &dsa_part_c], &mut dsa_tr_base);
+        kem_uniform_in[1] = kem_uniform_in[1].wrapping_add(1);
+        kem_eta_in[1] = kem_eta_in[1].wrapping_add(1);
+        dsa_uniform_in[1] = dsa_uniform_in[1].wrapping_add(1);
+        dsa_noise_in[1] = dsa_noise_in[1].wrapping_add(1);
+        dsa_part_b[0] = dsa_part_b[0].wrapping_add(1);
     }
     let base_elapsed = t1.elapsed().as_secs_f64();
 
-    black_box((&out128_alt, &out256_alt, &out128_base, &out256_base));
+    black_box((
+        &kem_uniform_alt,
+        &kem_eta_alt,
+        &dsa_uniform_alt,
+        &dsa_eta2_alt,
+        &dsa_gamma1_alt,
+        &dsa_tr_alt,
+        &kem_uniform_base,
+        &kem_eta_base,
+        &dsa_uniform_base,
+        &dsa_eta2_base,
+        &dsa_gamma1_base,
+        &dsa_tr_base,
+    ));
 
-    let bytes_per_iter = (out128_alt.len() + out256_alt.len()) as f64;
+    let bytes_per_iter = (kem_uniform_alt.len()
+        + kem_eta_alt.len()
+        + dsa_uniform_alt.len()
+        + dsa_eta2_alt.len()
+        + dsa_gamma1_alt.len()
+        + dsa_tr_alt.len()) as f64;
     let alt_mibs = (ITERS as f64 * bytes_per_iter) / (1024.0 * 1024.0) / alt_elapsed;
     let base_mibs = (ITERS as f64 * bytes_per_iter) / (1024.0 * 1024.0) / base_elapsed;
 
     println!(
-        "microbench SHAKE (ML-KEM-like): arm_alt={:.2} MiB/s baseline={:.2} MiB/s speedup={:.2}x",
+        "microbench SHAKE (ML-KEM+ML-DSA-like): arm_alt={:.2} MiB/s baseline={:.2} MiB/s speedup={:.2}x",
         alt_mibs,
         base_mibs,
         if base_mibs == 0.0 {

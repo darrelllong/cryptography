@@ -323,6 +323,23 @@ impl Drop for Zuc128Ct {
 mod tests {
     use super::*;
 
+    fn xorshift64(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn fill_bytes(state: &mut u64, out: &mut [u8]) {
+        for chunk in out.chunks_mut(8) {
+            let bytes = xorshift64(state).to_le_bytes();
+            let n = chunk.len();
+            chunk.copy_from_slice(&bytes[..n]);
+        }
+    }
+
     // ── Official test vectors (ZUC spec §3 / ETSI SAGE ZUC v1.6 Appendix) ─
 
     // Test Set 1: key = 0x00*16, iv = 0x00*16.
@@ -452,6 +469,27 @@ mod tests {
         let mut slow = Zuc128Ct::new(&key, &iv);
         for _ in 0..4 {
             assert_eq!(fast.next_word(), slow.next_word());
+        }
+    }
+
+    #[test]
+    fn zuc128_and_ct_match_random_streams() {
+        let mut seed = 0x1234_5678_dead_beefu64;
+        for _ in 0..128 {
+            let mut key = [0u8; 16];
+            let mut iv = [0u8; 16];
+            fill_bytes(&mut seed, &mut key);
+            fill_bytes(&mut seed, &mut iv);
+            let len = (xorshift64(&mut seed) as usize % 2048) + 1;
+
+            let mut fast_buf = vec![0u8; len];
+            let mut ct_buf = vec![0u8; len];
+            fill_bytes(&mut seed, &mut fast_buf);
+            ct_buf.copy_from_slice(&fast_buf);
+
+            Zuc128::new(&key, &iv).fill(&mut fast_buf);
+            Zuc128Ct::new(&key, &iv).fill(&mut ct_buf);
+            assert_eq!(fast_buf, ct_buf);
         }
     }
 }

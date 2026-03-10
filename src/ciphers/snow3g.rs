@@ -49,6 +49,8 @@ const SQ_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SQ);
 
 const MUL_ALPHA: [u32; 256] = build_alpha_table([23, 245, 48, 239]);
 const DIV_ALPHA: [u32; 256] = build_alpha_table([16, 39, 6, 64]);
+const MUL_ALPHA_FACTORS: [u8; 4] = alpha_factors([23, 245, 48, 239]);
+const DIV_ALPHA_FACTORS: [u8; 4] = alpha_factors([16, 39, 6, 64]);
 
 #[inline]
 fn load_be_u32(bytes: &[u8]) -> u32 {
@@ -96,6 +98,39 @@ const fn build_alpha_table(pows: [u8; 4]) -> [u32; 256] {
         i += 1;
     }
     table
+}
+
+const fn alpha_factors(pows: [u8; 4]) -> [u8; 4] {
+    [
+        mulx_pow(1, pows[0], 0xA9),
+        mulx_pow(1, pows[1], 0xA9),
+        mulx_pow(1, pows[2], 0xA9),
+        mulx_pow(1, pows[3], 0xA9),
+    ]
+}
+
+#[inline]
+fn gf_mul_const_ct(mut value: u8, mut factor: u8, poly: u8) -> u8 {
+    let mut out = 0u8;
+    let mut i = 0u8;
+    while i < 8 {
+        let bit_mask = 0u8.wrapping_sub(factor & 1);
+        out ^= value & bit_mask;
+        value = mulx_ct(value, poly);
+        factor >>= 1;
+        i = i.wrapping_add(1);
+    }
+    out
+}
+
+#[inline]
+fn alpha_word_ct(input: u8, factors: [u8; 4]) -> u32 {
+    u32::from_be_bytes([
+        gf_mul_const_ct(input, factors[0], 0xA9),
+        gf_mul_const_ct(input, factors[1], 0xA9),
+        gf_mul_const_ct(input, factors[2], 0xA9),
+        gf_mul_const_ct(input, factors[3], 0xA9),
+    ])
 }
 
 #[inline]
@@ -173,12 +208,12 @@ fn clock_fsm<const CT: bool>(core: &mut Snow3gCore) -> u32 {
 #[inline]
 fn lfsr_feedback<const CT: bool>(core: &Snow3gCore) -> u32 {
     let mul_alpha = if CT {
-        crate::ct::ct_lookup_u32(&MUL_ALPHA, (core.s[0] >> 24) as u8)
+        alpha_word_ct((core.s[0] >> 24) as u8, MUL_ALPHA_FACTORS)
     } else {
         MUL_ALPHA[(core.s[0] >> 24) as usize]
     };
     let div_alpha = if CT {
-        crate::ct::ct_lookup_u32(&DIV_ALPHA, (core.s[11] & 0xFF) as u8)
+        alpha_word_ct((core.s[11] & 0xFF) as u8, DIV_ALPHA_FACTORS)
     } else {
         DIV_ALPHA[(core.s[11] & 0xFF) as usize]
     };
@@ -362,6 +397,23 @@ impl Drop for Snow3gCt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn xorshift64(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn fill_bytes(state: &mut u64, out: &mut [u8]) {
+        for chunk in out.chunks_mut(8) {
+            let bytes = xorshift64(state).to_le_bytes();
+            let n = chunk.len();
+            chunk.copy_from_slice(&bytes[..n]);
+        }
+    }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct TraceRow {
@@ -633,12 +685,12 @@ mod tests {
             assert_eq!(sbox_eval(&SR_ANF, b), SR[x as usize], "SR {x:02x}");
             assert_eq!(sbox_eval(&SQ_ANF, b), SQ[x as usize], "SQ {x:02x}");
             assert_eq!(
-                crate::ct::ct_lookup_u32(&MUL_ALPHA, b),
+                alpha_word_ct(b, MUL_ALPHA_FACTORS),
                 MUL_ALPHA[x as usize],
                 "MUL {x:02x}"
             );
             assert_eq!(
-                crate::ct::ct_lookup_u32(&DIV_ALPHA, b),
+                alpha_word_ct(b, DIV_ALPHA_FACTORS),
                 DIV_ALPHA[x as usize],
                 "DIV {x:02x}"
             );
@@ -653,6 +705,27 @@ mod tests {
         let mut slow = Snow3gCt::new(&key, &iv);
         for _ in 0..4 {
             assert_eq!(fast.next_word(), slow.next_word());
+        }
+    }
+
+    #[test]
+    fn snow3g_and_ct_match_random_streams() {
+        let mut seed = 0xfeed_face_cafe_beefu64;
+        for _ in 0..128 {
+            let mut key = [0u8; 16];
+            let mut iv = [0u8; 16];
+            fill_bytes(&mut seed, &mut key);
+            fill_bytes(&mut seed, &mut iv);
+            let len = (xorshift64(&mut seed) as usize % 2048) + 1;
+
+            let mut fast_buf = vec![0u8; len];
+            let mut ct_buf = vec![0u8; len];
+            fill_bytes(&mut seed, &mut fast_buf);
+            ct_buf.copy_from_slice(&fast_buf);
+
+            Snow3g::new(&key, &iv).fill(&mut fast_buf);
+            Snow3gCt::new(&key, &iv).fill(&mut ct_buf);
+            assert_eq!(fast_buf, ct_buf);
         }
     }
 
