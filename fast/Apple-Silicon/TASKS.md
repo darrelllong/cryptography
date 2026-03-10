@@ -4,6 +4,8 @@ Status legend: `[ ]` pending, `[~]` in progress, `[x]` done.
 
 ## Track A: Constant-Time Symmetric Paths
 
+- [x] Promotion policy: keep only `>=5x` speedup kernels in published go-fast
+      sets; sub-5x results remain exploratory.
 - [x] Remove panic-checked integer conversions from `src/ct.rs` tight loops.
 - [x] Build first isolated Apple-Silicon alternative kernels outside baseline
       tree (`aarch64-alt` AES-128/AES-256 FEAT_AES paths + parity harnesses).

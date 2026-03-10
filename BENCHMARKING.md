@@ -80,6 +80,9 @@ For Apple Silicon optimization loops (no assembly, in-repo code only), use:
 - `bash fast/Apple-Silicon/scripts/run_hotspots_pk.sh`
 - `bash fast/Apple-Silicon/scripts/profile_ct_anf.sh`
 
+Promotion gate for published go-fast kernels is `>=5x` over baseline/reference.
+Lower-speedup comparator results are tracked as exploratory only.
+
 Use the split scripts so unchanged PK or symmetric areas are not re-run.
 The baseline `src/` tree remains the pure safe Rust reference; Apple-Silicon
 acceleration work is maintained as an explicit alternative path.

@@ -425,9 +425,13 @@ above, this section is a focused single-host microbenchmark snapshot on M4 Pro.
 | AES-128 encrypt | `compare_aes128` | MiB/s | 9803.92 | 502.88 | 19.50x |
 | AES-256 encrypt | `compare_aes256` | MiB/s | 6040.76 | 264.80 | 22.81x |
 | SHA-256 digest | `compare_sha256` | MiB/s | 2417.54 | 364.57 | 6.63x |
-| SHAKE (ML-KEM+ML-DSA-like workload) | `compare_shake` | MiB/s | 303.24 | 284.49 | 1.07x |
-| ChaCha20 keystream | `compare_chacha20` | MiB/s | 1255.77 | 819.58 | 1.53x |
 | GHASH multiply | `compare_ghash` | Mops/s | 117.79 | 9.23 (`ct_ref`) | 12.75x |
+
+Promotion gate for the published go-fast set is `>=5x` speedup.
+Exploratory results below that bar (not promoted):
+
+- `compare_chacha20`: `1.53x`
+- `compare_shake` (ML-KEM+ML-DSA-like): `1.07x`
 
 Apple go-fast speedup Kiviat diagram (radar chart, log scale):
 

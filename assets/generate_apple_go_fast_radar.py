@@ -29,11 +29,9 @@ LABELS = [
     "AES-256",
     "SHA-256",
     "GHASH",
-    "ChaCha20",
-    "SHAKE",
 ]
 
-SPEEDUPS = [19.50, 22.81, 6.63, 12.75, 1.53, 1.07]
+SPEEDUPS = [19.50, 22.81, 6.63, 12.75]
 SCALE_LABELS = [1, 2, 4, 8, 16, 32]
 
 
@@ -129,7 +127,7 @@ def generate_svg() -> str:
         [
             "",
             '  <text class="label" x="20" y="538">Apple-Silicon Go-Fast Speedup (log scale)</text>',
-            '  <text class="small" x="20" y="556">Speedup over baseline/reference; GHASH uses Ct software reference</text>',
+            '  <text class="small" x="20" y="556">Published set uses a >=5x promotion gate; GHASH baseline is Ct software reference</text>',
             '  <rect x="372" y="539" width="14" height="14" fill="#0f766e" rx="2" />',
             '  <text class="small" x="392" y="550">Go-fast / baseline</text>',
             "</svg>",
