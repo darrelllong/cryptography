@@ -952,7 +952,7 @@ $e = 65{,}537$.
 
 ### Finite-field public key (1024-bit)
 
-| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | rsa_keygen_1024 | 14.66 | $\pm$0.0793 | 90 | 25.72 | $\pm$0.06282 | 38 |
 | rsa_encrypt_1024 | 0.03122 | $\pm$0.0002236 | 30 | 0.05377 | $\pm$0.0002585 | 41 |
@@ -982,7 +982,7 @@ $e = 65{,}537$.
 
 ### RSA (2048-bit)
 
-| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | rsa_keygen_2048 | 163.6 | $\pm$1.27 | 138 | 276.5 | $\pm$0.6028 | 36 |
 | rsa_encrypt_2048 | 0.1031 | $\pm$0.002526 | 30 | 0.1817 | $\pm$0.0006752 | 30 |
@@ -992,7 +992,7 @@ $e = 65{,}537$.
 
 ### ECDSA / ECDH (P-256)
 
-| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | ecdsa_keygen | 1.729 | $\pm$0.01064 | 126 | 2.488 | $\pm$0.007344 | 30 |
 | ecdsa_sign | 1.864 | $\pm$0.01145 | 90 | 2.769 | $\pm$0.02059 | 30 |
@@ -1003,7 +1003,7 @@ $e = 65{,}537$.
 
 ### ECIES / EC ElGamal (P-256)
 
-| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | ecies_keygen | 1.743 | $\pm$0.01122 | 30 | 2.485 | $\pm$0.004821 | 119 |
 | ecies_encrypt | 3.467 | $\pm$0.03362 | 60 | 4.939 | $\pm$0.01199 | 30 |
@@ -1014,7 +1014,7 @@ $e = 65{,}537$.
 
 ### Ed25519 / Edwards DH / Edwards ElGamal
 
-| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | ed25519_keygen | 1.712 | $\pm$0.008143 | 60 | 2.489 | $\pm$0.01036 | 38 |
 | ed25519_sign | 0.8694 | $\pm$0.007153 | 30 | 1.255 | $\pm$0.005077 | 74 |
@@ -1028,7 +1028,7 @@ $e = 65{,}537$.
 
 ### ML-KEM (Kyber)
 
-| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mlkem512_keygen | 0.01718 | $\pm$0.000234 | 30 | 0.02535 | $\pm$0.000181 | 30 |
 | mlkem512_encaps | 0.01672 | $\pm$0.001943 | 64 | 0.02645 | $\pm$0.0001389 | 30 |
@@ -1042,7 +1042,7 @@ $e = 65{,}537$.
 
 ### ML-DSA (Dilithium)
 
-| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mldsa44_keygen | 0.06451 | $\pm$0.0004568 | 63 | 0.09407 | $\pm$0.0003329 | 53 |
 | mldsa44_sign | 0.1119 | $\pm$0.00051 | 30 | 0.3144 | $\pm$0.001112 | 32 |

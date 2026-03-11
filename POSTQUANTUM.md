@@ -166,7 +166,7 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 
 ### ML-KEM (Kyber)
 
-| Operation | M1 Max ms/op | M1 Max $\pm$CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E $\pm$CI | Xeon 6740E Runs |
+| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ± CI | Xeon 6740E Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mlkem512_keygen | 0.01947 | $\pm$2.831e-05 | 90 | 0.02968 | $\pm$9.867e-05 | 31 |
 | mlkem512_encaps | 0.01937 | $\pm$0.0001085 | 61 | 0.03102 | $\pm$0.0001033 | 60 |
@@ -180,7 +180,7 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 
 ### ML-DSA (Dilithium)
 
-| Operation | M1 Max ms/op | M1 Max $\pm$CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E $\pm$CI | Xeon 6740E Runs |
+| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ± CI | Xeon 6740E Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mldsa44_keygen | 0.07784 | $\pm$0.002088 | 60 | 0.1142 | $\pm$0.0002587 | 60 |
 | mldsa44_sign | 0.2071 | $\pm$0.0006633 | 350 | 0.4592 | $\pm$0.0006615 | 41 |

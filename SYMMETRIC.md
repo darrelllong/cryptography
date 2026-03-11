@@ -261,7 +261,7 @@ Measured with [pilot-bench](https://github.com/ascar-io/pilot-bench) driving
 `pilot_cipher`, a dedicated Rust binary that encrypts 1 MiB per round and
 prints MB/s to stdout.  Pilot repeats the round until a 20 % confidence
 interval is achieved, correcting for autocorrelation and startup transients.
-Columns: **Block** and **Key** in bits; **MB/s** mean; **$\pm$CI** half-width at
+Columns: **Block** and **Key** in bits; **MB/s** mean; **± CI** half-width at
 95 %; **Runs** rounds required to reach CI. The tables below are parallel runs
 on:
 
@@ -270,7 +270,7 @@ on:
 
 ### AES
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | aes128 | 128 | 128 | 460.2 | $\pm$6.923 | 30 | 230.6 | $\pm$7.088 | 30 |
 | aes128ct | 128 | 128 | 61.2 | $\pm$0.4115 | 121 | 33.75 | $\pm$0.1116 | 67 |
@@ -281,7 +281,7 @@ on:
 
 ### Camellia
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | camellia128 | 128 | 128 | 139.4 | $\pm$1.527 | 30 | 85.6 | $\pm$0.3457 | 117 |
 | camellia128ct | 128 | 128 | 13.38 | $\pm$0.07387 | 92 | 2.004 | $\pm$0.003011 | 30 |
@@ -292,14 +292,14 @@ on:
 
 ### CAST-128
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | cast128 | 64 | 128 | 310.1 | $\pm$2.876 | 36 | 103.7 | $\pm$0.5374 | 58 |
 | cast128ct | 64 | 128 | 3.965 | $\pm$0.0415 | 30 | 1.825 | $\pm$0.01507 | 30 |
 
 ### DES / 3DES
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | des | 64 | 56 | 78.2 | $\pm$0.3919 | 30 | 54.64 | $\pm$0.7965 | 30 |
 | desct | 64 | 56 | 7.743 | $\pm$0.02073 | 30 | 3.448 | $\pm$0.008777 | 30 |
@@ -307,21 +307,21 @@ on:
 
 ### Grasshopper (GOST R 34.12-2015)
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | grasshopper | 128 | 256 | 25.62 | $\pm$0.09658 | 95 | 12.74 | $\pm$0.05128 | 60 |
 | grasshopperct | 128 | 256 | 4.059 | $\pm$0.05462 | 30 | 1.577 | $\pm$0.002743 | 30 |
 
 ### Magma (GOST R 34.12-2015)
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | magma | 64 | 256 | 60.38 | $\pm$0.3278 | 90 | 41.29 | $\pm$0.112 | 57 |
 | magmact | 64 | 256 | 14.09 | $\pm$0.1227 | 42 | 6.367 | $\pm$0.01607 | 30 |
 
 ### PRESENT
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | present80 | 64 | 80 | 12.07 | $\pm$0.1417 | 60 | 2.735 | $\pm$0.003738 | 37 |
 | present80ct | 64 | 80 | 3.896 | $\pm$0.02912 | 155 | 1.308 | $\pm$0.003027 | 30 |
@@ -330,14 +330,14 @@ on:
 
 ### SEED
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | seed | 128 | 128 | 71.39 | $\pm$0.2284 | 60 | 46.13 | $\pm$0.1755 | 30 |
 | seedct | 128 | 128 | 9.504 | $\pm$0.01974 | 30 | 1.491 | $\pm$0.002914 | 45 |
 
 ### Serpent
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | serpent128 | 128 | 128 | 10.83 | $\pm$0.04038 | 30 | 4.751 | $\pm$0.01487 | 30 |
 | serpent128ct | 128 | 128 | 7.03 | $\pm$0.02025 | 32 | 1.851 | $\pm$0.003566 | 88 |
@@ -348,14 +348,14 @@ on:
 
 ### SM4
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | sm4 | 128 | 128 | 185.6 | $\pm$1.638 | 150 | 128.2 | $\pm$0.9843 | 30 |
 | sm4ct | 128 | 128 | 13.53 | $\pm$0.04346 | 127 | 2.24 | $\pm$0.005738 | 30 |
 
 ### Twofish
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | twofish128 | 128 | 128 | 14.55 | $\pm$0.09168 | 31 | 9.156 | $\pm$0.171 | 30 |
 | twofish128ct | 128 | 128 | 2.702 | $\pm$0.005262 | 30 | 1.12 | $\pm$0.00286 | 60 |
@@ -366,7 +366,7 @@ on:
 
 ### Simon
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | simon32_64 | 32 | 64 | 82.52 | $\pm$0.3267 | 32 | 51.64 | $\pm$0.1995 | 32 |
 | simon48_72 | 48 | 72 | 105.3 | $\pm$0.5297 | 60 | 68.16 | $\pm$0.2938 | 31 |
@@ -381,7 +381,7 @@ on:
 
 ### Speck
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | speck32_64 | 32 | 64 | 202.6 | $\pm$1.301 | 66 | 102.4 | $\pm$0.4766 | 47 |
 | speck48_72 | 48 | 72 | 296.7 | $\pm$1.755 | 30 | 150.6 | $\pm$1.134 | 30 |
@@ -396,7 +396,7 @@ on:
 
 ### Stream ciphers
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
+| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | chacha20 | stream | 256 | 775.9 | $\pm$8.859 | 39 | 414.6 | $\pm$7.206 | 31 |
 | xchacha20 | stream | 256 | 778.9 | $\pm$11.46 | 30 | 417.9 | $\pm$5.124 | 38 |

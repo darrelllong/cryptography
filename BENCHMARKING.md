@@ -80,7 +80,7 @@ bash scripts/bench_all_pk_full.sh  # full PK suite (finite-field + EC + Edwards 
 ```
 
 Each script emits Markdown tables ready to paste into the docs.
-The `$\pm$CI` column is the 95% confidence-interval half-width reported by
+The `± CI` column is the 95% confidence-interval half-width reported by
 pilot-bench.
 
 ---
