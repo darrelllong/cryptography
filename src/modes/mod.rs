@@ -1005,25 +1005,19 @@ impl<C> Cmac<C> {
     }
 }
 
-/// Counter with CBC-MAC (CCM) with configurable detached tag length.
+/// Counter with CBC-MAC (CCM) with compile-time detached tag length.
 ///
-/// Tags are returned as `Vec<u8>` because CCM allows multiple standardized tag
-/// lengths (4, 6, 8, 10, 12, 14, 16 bytes) per RFC 3610.
-pub struct Ccm<C> {
+/// `TAG_LEN` must be one of RFC 3610's valid lengths:
+/// `{4, 6, 8, 10, 12, 14, 16}`.
+pub struct Ccm<C, const TAG_LEN: usize = 16> {
     cipher: C,
-    tag_len: usize,
 }
 
-impl<C> Ccm<C> {
-    /// Wrap a 128-bit block cipher in SP 800-38C CCM mode with a 16-byte tag.
+impl<C, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
+    /// Wrap a 128-bit block cipher in SP 800-38C CCM mode.
     pub fn new(cipher: C) -> Self {
-        Self::new_with_tag_len(cipher, 16)
-    }
-
-    /// Wrap a 128-bit block cipher in SP 800-38C CCM mode with custom tag length.
-    pub fn new_with_tag_len(cipher: C, tag_len: usize) -> Self {
-        assert_ccm_tag_len(tag_len);
-        Self { cipher, tag_len }
+        assert_ccm_tag_len(TAG_LEN);
+        Self { cipher }
     }
 
     /// Borrow the wrapped block cipher.
@@ -1033,18 +1027,18 @@ impl<C> Ccm<C> {
 
     /// Return the detached authentication tag length in bytes.
     pub fn tag_len(&self) -> usize {
-        self.tag_len
+        TAG_LEN
     }
 }
 
-impl<C: BlockCipher> Ccm<C> {
+impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     /// Compute a detached CCM tag over `plaintext` and associated data.
     #[must_use]
-    pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
-        let t = ccm_cbc_mac(&self.cipher, nonce, aad, plaintext, self.tag_len);
+    pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> [u8; TAG_LEN] {
+        let t = ccm_cbc_mac(&self.cipher, nonce, aad, plaintext, TAG_LEN);
         let s0 = counter_keystream(&self.cipher, &ccm_counter_block(nonce, 0));
-        let mut tag = vec![0u8; self.tag_len];
-        for i in 0..self.tag_len {
+        let mut tag = [0u8; TAG_LEN];
+        for i in 0..TAG_LEN {
             tag[i] = t[i] ^ s0[i];
         }
         tag
@@ -1052,7 +1046,7 @@ impl<C: BlockCipher> Ccm<C> {
 
     /// Encrypt `data` in place and return the detached CCM authentication tag.
     #[must_use]
-    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Vec<u8> {
+    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; TAG_LEN] {
         assert_block_128::<C>();
         let tag = self.compute_tag(nonce, aad, data);
         ccm_apply_ctr(&self.cipher, nonce, data);
@@ -1062,11 +1056,8 @@ impl<C: BlockCipher> Ccm<C> {
     /// Verify `tag` and decrypt in place on success.
     ///
     /// Returns `false` and leaves `data` unchanged when verification fails.
-    pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
+    pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8; TAG_LEN]) -> bool {
         assert_block_128::<C>();
-        if tag.len() != self.tag_len {
-            return false;
-        }
 
         // In CCM, authentication is over plaintext, so decrypt to a temporary
         // buffer first and only commit if tag verification succeeds.
@@ -2117,10 +2108,10 @@ mod tests {
         let expected_ct = parse::<23>("588c979a61c663d2f066d0c2c0f989806d5f6b61dac384");
         let expected_tag = parse::<8>("17e8d12cfdf926e0");
 
-        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 8);
+        let mode = Ccm::<_, 8>::new(Aes128::new(&key));
         let tag = mode.encrypt(&nonce, &aad, &mut msg);
         assert_eq!(msg, expected_ct);
-        assert_eq!(tag, expected_tag.to_vec());
+        assert_eq!(tag, expected_tag);
 
         assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
         assert_eq!(
@@ -2139,10 +2130,10 @@ mod tests {
         let expected_ct = parse::<24>("72c91a36e135f8cf291ca894085c87e3cc15c439c9e43a3b");
         let expected_tag = parse::<8>("a091d56e10400916");
 
-        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 8);
+        let mode = Ccm::<_, 8>::new(Aes128::new(&key));
         let tag = mode.encrypt(&nonce, &aad, &mut msg);
         assert_eq!(msg, expected_ct);
-        assert_eq!(tag, expected_tag.to_vec());
+        assert_eq!(tag, expected_tag);
 
         assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
         assert_eq!(
@@ -2156,12 +2147,12 @@ mod tests {
         let key = [0x11u8; 16];
         let nonce = [0x22u8; 13];
         let aad = b"header";
-        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 12);
+        let mode = Ccm::<_, 12>::new(Aes128::new(&key));
         let mut data = *b"ccm plaintext data";
         let tag = mode.encrypt(&nonce, aad, &mut data);
         let ciphertext = data;
 
-        let mut bad_tag = tag.clone();
+        let mut bad_tag = tag;
         bad_tag[0] ^= 0x80;
         assert!(!mode.decrypt(&nonce, aad, &mut data, &bad_tag));
         assert_eq!(data, ciphertext);
@@ -2180,10 +2171,10 @@ mod tests {
         let expected_ct = parse::<24>("cc69ed76985e0ed4c8365a72775e5a19bfccc71aeb116c85");
         let expected_tag = parse::<4>("a8c74677");
 
-        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 4);
+        let mode = Ccm::<_, 4>::new(Aes128::new(&key));
         let tag = mode.encrypt(&nonce, &aad, &mut msg);
         assert_eq!(msg, expected_ct);
-        assert_eq!(tag, expected_tag.to_vec());
+        assert_eq!(tag, expected_tag);
         assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
         assert_eq!(
             msg,
@@ -2201,10 +2192,10 @@ mod tests {
         let expected_ct = parse::<24>("26c56961c035a7e452cce61bc6ee220d77b3f94d18fd10b6");
         let expected_tag = parse::<16>("d80e8bf80f4a46cab06d4313f0db9be9");
 
-        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 16);
+        let mode = Ccm::<_, 16>::new(Aes128::new(&key));
         let tag = mode.encrypt(&nonce, &aad, &mut msg);
         assert_eq!(msg, expected_ct);
-        assert_eq!(tag, expected_tag.to_vec());
+        assert_eq!(tag, expected_tag);
         assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
         assert_eq!(
             msg,

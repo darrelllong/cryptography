@@ -224,10 +224,8 @@ impl<C: BlockCipher> Aead for GcmVt<C> {
     }
 }
 
-impl<C: BlockCipher> Aead for Ccm<C> {
-    // CCM supports variable RFC 3610 tag lengths, so this AEAD impl uses a
-    // heap-backed tag instead of the fixed `[u8; 16]` used by GCM/EAX/etc.
-    type Tag = Vec<u8>;
+impl<C: BlockCipher, const TAG_LEN: usize> Aead for Ccm<C, TAG_LEN> {
+    type Tag = [u8; TAG_LEN];
 
     fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
         self.encrypt(nonce, aad, data)
