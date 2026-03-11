@@ -1919,7 +1919,7 @@ mod tests {
         let original = *b"generic DES mode path!";
         let mut data = original;
 
-        let mode = Ctr::new(crate::Des::new(&key));
+        let mode = Ctr::new(crate::Des::new(&key).expect("non-weak DES test key"));
         mode.apply_keystream(&counter, &mut data);
         assert_ne!(data, original);
         mode.apply_keystream(&counter, &mut data);

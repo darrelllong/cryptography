@@ -132,11 +132,40 @@ fn bench_aes(c: &mut Criterion) {
 fn bench_des(c: &mut Criterion) {
     let src = vec![0u8; MB];
     let mut g = c.benchmark_group("DES");
+    let des_key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
+    let tdes_2key = [
+        0x01, 0x33, 0x45, 0x77, 0x99, 0xBB, 0xCD, 0xFF, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+        0x66, 0x77,
+    ];
+    let tdes_3key = [
+        0x01, 0x33, 0x45, 0x77, 0x99, 0xBB, 0xCD, 0xFF, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+        0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+    ];
 
-    bench_one(&mut g, "DES", Des::new(&[0u8; 8]), &src);
-    bench_one(&mut g, "DES-ct", DesCt::new(&[0u8; 8]), &src);
-    bench_one(&mut g, "3DES-2key", TripleDes::new_2key(&[0u8; 16]), &src);
-    bench_one(&mut g, "3DES-3key", TripleDes::new_3key(&[0u8; 24]), &src);
+    bench_one(
+        &mut g,
+        "DES",
+        Des::new(&des_key).expect("non-weak DES benchmark key"),
+        &src,
+    );
+    bench_one(
+        &mut g,
+        "DES-ct",
+        DesCt::new(&des_key).expect("non-weak DES benchmark key"),
+        &src,
+    );
+    bench_one(
+        &mut g,
+        "3DES-2key",
+        TripleDes::new_2key(&tdes_2key).expect("non-weak TDES benchmark key"),
+        &src,
+    );
+    bench_one(
+        &mut g,
+        "3DES-3key",
+        TripleDes::new_3key(&tdes_3key).expect("non-weak TDES benchmark key"),
+        &src,
+    );
 
     g.finish();
 }

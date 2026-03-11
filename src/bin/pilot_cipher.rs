@@ -84,13 +84,16 @@ fn main() {
     });
 
     // Fixed test keys — all zeros of sufficient length for any cipher.
-    let k8: &[u8; 8] = &[0x01; 8];
+    let k8: &[u8; 8] = &[0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
     let k9: &[u8; 9] = &[0x01; 9];
     let k10: &[u8; 10] = &[0x01; 10];
     let k12: &[u8; 12] = &[0x01; 12];
     let k16: &[u8; 16] = &[0x01; 16];
     let k18: &[u8; 18] = &[0x01; 18];
-    let k24: &[u8; 24] = &[0x01; 24];
+    let k24: &[u8; 24] = &[
+        0x01, 0x33, 0x45, 0x77, 0x99, 0xBB, 0xCD, 0xFF, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+        0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+    ];
     let k32: &[u8; 32] = &[0x01; 32];
     let bytes = workload_bytes();
 
@@ -113,9 +116,12 @@ fn main() {
         "cast128" | "cast5" => bench_block(Cast128::new(k16), bytes),
         "cast128ct" | "cast5ct" => bench_block(Cast128Ct::new(k16), bytes),
         // ── DES ───────────────────────────────────────────────────────────────
-        "des" => bench_block(Des::new(k8), bytes),
-        "desct" => bench_block(DesCt::new(k8), bytes),
-        "3des" => bench_block(TripleDes::new_3key(k24), bytes),
+        "des" => bench_block(Des::new(k8).expect("non-weak DES benchmark key"), bytes),
+        "desct" => bench_block(DesCt::new(k8).expect("non-weak DES benchmark key"), bytes),
+        "3des" => bench_block(
+            TripleDes::new_3key(k24).expect("non-weak TDES benchmark key"),
+            bytes,
+        ),
         // ── Grasshopper (Кузнечик) ────────────────────────────────────────────
         "grasshopper" => bench_block(Grasshopper::new(k32), bytes),
         "grasshopperct" => bench_block(GrasshopperCt::new(k32), bytes),

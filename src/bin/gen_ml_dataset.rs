@@ -188,16 +188,24 @@ fn gen_aes256(rng: &mut SplitMix64, out: &mut [u8]) {
 
 fn gen_des(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 8];
-    rng.fill(&mut key);
-    let cipher = Des::new(&key);
-    fill_block_samples(&cipher, rng, out);
+    loop {
+        rng.fill(&mut key);
+        if let Ok(cipher) = Des::new(&key) {
+            fill_block_samples(&cipher, rng, out);
+            break;
+        }
+    }
 }
 
 fn gen_tdes3(rng: &mut SplitMix64, out: &mut [u8]) {
     let mut key = [0u8; 24];
-    rng.fill(&mut key);
-    let cipher = TripleDes::new_3key(&key);
-    fill_block_samples(&cipher, rng, out);
+    loop {
+        rng.fill(&mut key);
+        if let Ok(cipher) = TripleDes::new_3key(&key) {
+            fill_block_samples(&cipher, rng, out);
+            break;
+        }
+    }
 }
 
 fn gen_simon128_128(rng: &mut SplitMix64, out: &mut [u8]) {

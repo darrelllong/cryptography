@@ -546,13 +546,87 @@ pub struct DesCt {
     dec_schedule: KeySchedule,
 }
 
+/// Error returned when a DES/TDEA constructor rejects key material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesKeyError {
+    /// The provided DES key is weak or semi-weak (FIPS 74 / SP 800-67).
+    WeakOrSemiWeakKey,
+}
+
+/// Canonical weak DES keys from FIPS 74 / NIST literature.
+const WEAK_KEYS: [[u8; 8]; 4] = [
+    [0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
+    [0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE],
+    [0xE0, 0xE0, 0xE0, 0xE0, 0xF1, 0xF1, 0xF1, 0xF1],
+    [0x1F, 0x1F, 0x1F, 0x1F, 0x0E, 0x0E, 0x0E, 0x0E],
+];
+
+/// Canonical semi-weak DES key pairs from FIPS 74 / NIST literature.
+const SEMI_WEAK_KEY_PAIRS: [([u8; 8], [u8; 8]); 6] = [
+    (
+        [0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE],
+        [0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01],
+    ),
+    (
+        [0x1F, 0xE0, 0x1F, 0xE0, 0x0E, 0xF1, 0x0E, 0xF1],
+        [0xE0, 0x1F, 0xE0, 0x1F, 0xF1, 0x0E, 0xF1, 0x0E],
+    ),
+    (
+        [0x01, 0xE0, 0x01, 0xE0, 0x01, 0xF1, 0x01, 0xF1],
+        [0xE0, 0x01, 0xE0, 0x01, 0xF1, 0x01, 0xF1, 0x01],
+    ),
+    (
+        [0x1F, 0xFE, 0x1F, 0xFE, 0x0E, 0xFE, 0x0E, 0xFE],
+        [0xFE, 0x1F, 0xFE, 0x1F, 0xFE, 0x0E, 0xFE, 0x0E],
+    ),
+    (
+        [0x01, 0x1F, 0x01, 0x1F, 0x01, 0x0E, 0x01, 0x0E],
+        [0x1F, 0x01, 0x1F, 0x01, 0x0E, 0x01, 0x0E, 0x01],
+    ),
+    (
+        [0xE0, 0xFE, 0xE0, 0xFE, 0xF1, 0xFE, 0xF1, 0xFE],
+        [0xFE, 0xE0, 0xFE, 0xE0, 0xFE, 0xF1, 0xFE, 0xF1],
+    ),
+];
+
+#[inline]
+fn strip_parity_bits(key: &[u8; 8]) -> [u8; 8] {
+    let mut out = [0u8; 8];
+    for i in 0..8 {
+        out[i] = key[i] & 0xFE;
+    }
+    out
+}
+
+/// Return `true` when `key` is weak or semi-weak under DES.
+#[must_use]
+pub fn is_weak_or_semi_weak_key(key: &[u8; 8]) -> bool {
+    let normalized = strip_parity_bits(key);
+    WEAK_KEYS
+        .iter()
+        .any(|wk| strip_parity_bits(wk) == normalized)
+        || SEMI_WEAK_KEY_PAIRS.iter().any(|(a, b)| {
+            let a_norm = strip_parity_bits(a);
+            let b_norm = strip_parity_bits(b);
+            normalized == a_norm || normalized == b_norm
+        })
+}
+
 impl Des {
     /// Create a new DES instance from an 8-byte key.
+    pub fn new(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+        if is_weak_or_semi_weak_key(key) {
+            return Err(DesKeyError::WeakOrSemiWeakKey);
+        }
+        Ok(Self::new_unchecked(key))
+    }
+
+    /// Create DES from an 8-byte key without weak-key screening.
     ///
-    /// This constructor accepts the key verbatim and does not reject known
-    /// weak or semi-weak DES keys.
+    /// This is intended for known-answer tests that intentionally exercise weak
+    /// key behavior from FIPS 74 style vector sets.
     #[must_use]
-    pub fn new(key: &[u8; 8]) -> Self {
+    pub fn new_unchecked(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
         let enc_schedule = key_schedule(k);
         let mut dec_schedule = enc_schedule;
@@ -564,7 +638,7 @@ impl Des {
     }
 
     /// Create a new DES instance and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 8]) -> Self {
+    pub fn new_wiping(key: &mut [u8; 8]) -> Result<Self, DesKeyError> {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -587,10 +661,16 @@ impl Des {
 
 impl DesCt {
     /// Create a new constant-time DES instance from an 8-byte key.
-    ///
-    /// Like [`Des::new`], this does not screen out weak or semi-weak DES keys.
+    pub fn new(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+        if is_weak_or_semi_weak_key(key) {
+            return Err(DesKeyError::WeakOrSemiWeakKey);
+        }
+        Ok(Self::new_unchecked(key))
+    }
+
+    /// Create constant-time DES from an 8-byte key without weak-key screening.
     #[must_use]
-    pub fn new(key: &[u8; 8]) -> Self {
+    pub fn new_unchecked(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
         let enc_schedule = key_schedule(k);
         let mut dec_schedule = enc_schedule;
@@ -602,7 +682,7 @@ impl DesCt {
     }
 
     /// Create a new constant-time DES instance and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 8]) -> Self {
+    pub fn new_wiping(key: &mut [u8; 8]) -> Result<Self, DesKeyError> {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -669,17 +749,25 @@ impl TripleDes {
     ///
     /// Panics if the internal fixed-size key splits fail, which would only
     /// happen if this constructor were changed inconsistently with its type.
-    #[must_use]
-    pub fn new_3key(key: &[u8; 24]) -> Self {
-        Self::from_keys(
-            u64::from_be_bytes(key[0..8].try_into().unwrap()),
-            u64::from_be_bytes(key[8..16].try_into().unwrap()),
-            u64::from_be_bytes(key[16..24].try_into().unwrap()),
-        )
+    pub fn new_3key(key: &[u8; 24]) -> Result<Self, DesKeyError> {
+        let k1: &[u8; 8] = key[0..8].try_into().expect("first DES key split");
+        let k2: &[u8; 8] = key[8..16].try_into().expect("second DES key split");
+        let k3: &[u8; 8] = key[16..24].try_into().expect("third DES key split");
+        if is_weak_or_semi_weak_key(k1)
+            || is_weak_or_semi_weak_key(k2)
+            || is_weak_or_semi_weak_key(k3)
+        {
+            return Err(DesKeyError::WeakOrSemiWeakKey);
+        }
+        Ok(Self::from_keys(
+            u64::from_be_bytes(*k1),
+            u64::from_be_bytes(*k2),
+            u64::from_be_bytes(*k3),
+        ))
     }
 
     /// Construct a 3TDEA instance and wipe the provided key buffer.
-    pub fn new_3key_wiping(key: &mut [u8; 24]) -> Self {
+    pub fn new_3key_wiping(key: &mut [u8; 24]) -> Result<Self, DesKeyError> {
         let out = Self::new_3key(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -691,15 +779,21 @@ impl TripleDes {
     ///
     /// Panics if the internal fixed-size key splits fail, which would only
     /// happen if this constructor were changed inconsistently with its type.
-    #[must_use]
-    pub fn new_2key(key: &[u8; 16]) -> Self {
-        let k1 = u64::from_be_bytes(key[0..8].try_into().unwrap());
-        let k2 = u64::from_be_bytes(key[8..16].try_into().unwrap());
-        Self::from_keys(k1, k2, k1)
+    pub fn new_2key(key: &[u8; 16]) -> Result<Self, DesKeyError> {
+        let k1: &[u8; 8] = key[0..8].try_into().expect("first DES key split");
+        let k2: &[u8; 8] = key[8..16].try_into().expect("second DES key split");
+        if is_weak_or_semi_weak_key(k1) || is_weak_or_semi_weak_key(k2) {
+            return Err(DesKeyError::WeakOrSemiWeakKey);
+        }
+        Ok(Self::from_keys(
+            u64::from_be_bytes(*k1),
+            u64::from_be_bytes(*k2),
+            u64::from_be_bytes(*k1),
+        ))
     }
 
     /// Construct a 2TDEA instance and wipe the provided key buffer.
-    pub fn new_2key_wiping(key: &mut [u8; 16]) -> Self {
+    pub fn new_2key_wiping(key: &mut [u8; 16]) -> Result<Self, DesKeyError> {
         let out = Self::new_2key(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -707,14 +801,22 @@ impl TripleDes {
 
     /// Construct from three 8-byte keys.  K1=K2=K3 is valid (degenerates to
     /// single DES) and is used by the NIST CAVP "KEYs" tests.
+    pub fn new_single_key(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+        if is_weak_or_semi_weak_key(key) {
+            return Err(DesKeyError::WeakOrSemiWeakKey);
+        }
+        Ok(Self::new_single_key_unchecked(key))
+    }
+
+    /// Construct from one DES key used as K1 = K2 = K3 without weak-key checks.
     #[must_use]
-    pub fn new_single_key(key: &[u8; 8]) -> Self {
+    pub fn new_single_key_unchecked(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
         Self::from_keys(k, k, k)
     }
 
     /// Construct from one DES key used as K1 = K2 = K3 and wipe the buffer.
-    pub fn new_single_key_wiping(key: &mut [u8; 8]) -> Self {
+    pub fn new_single_key_wiping(key: &mut [u8; 8]) -> Result<Self, DesKeyError> {
         let out = Self::new_single_key(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -862,7 +964,7 @@ mod tests {
         let key = hex_to_bytes8(key_hex);
         let pt = hex_to_bytes8(pt_hex);
         let ct = hex_to_bytes8(ct_hex);
-        let cipher = TripleDes::new_single_key(&key);
+        let cipher = TripleDes::new_single_key_unchecked(&key);
         assert_eq!(
             cipher.encrypt_block(&pt),
             ct,
@@ -880,7 +982,7 @@ mod tests {
         let key = hex_to_bytes8(key_hex);
         let pt = hex_to_bytes8(pt_hex);
         let ct = hex_to_bytes8(ct_hex);
-        let cipher = Des::new(&key);
+        let cipher = Des::new_unchecked(&key);
         assert_eq!(
             cipher.encrypt_block(&pt),
             ct,
@@ -897,8 +999,8 @@ mod tests {
         let key = hex_to_bytes8(key_hex);
         let pt = hex_to_bytes8(pt_hex);
         let ct = hex_to_bytes8(ct_hex);
-        let fast = Des::new(&key);
-        let slow = DesCt::new(&key);
+        let fast = Des::new_unchecked(&key);
+        let slow = DesCt::new_unchecked(&key);
         assert_eq!(
             slow.encrypt_block(&pt),
             ct,
@@ -1196,7 +1298,7 @@ mod tests {
             0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
         ];
         let pt: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
-        let cipher = TripleDes::new_3key(&key);
+        let cipher = TripleDes::new_3key(&key).expect("non-weak TDES keys");
         let ct = cipher.encrypt_block(&pt);
         assert_eq!(cipher.decrypt_block(&ct), pt);
     }
@@ -1210,7 +1312,7 @@ mod tests {
             0x66, 0x77,
         ];
         let pt: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE];
-        let cipher = TripleDes::new_2key(&key);
+        let cipher = TripleDes::new_2key(&key).expect("non-weak TDES keys");
         let ct = cipher.encrypt_block(&pt);
         assert_eq!(cipher.decrypt_block(&ct), pt);
     }
@@ -1221,8 +1323,8 @@ mod tests {
     fn tdes_single_key_equals_des() {
         let key: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
         let pt: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
-        let des = Des::new(&key);
-        let tdes = TripleDes::new_single_key(&key);
+        let des = Des::new(&key).expect("non-weak DES key");
+        let tdes = TripleDes::new_single_key(&key).expect("non-weak DES key");
         assert_eq!(
             des.encrypt_block(&pt),
             tdes.encrypt_block(&pt),
@@ -1240,7 +1342,7 @@ mod tests {
             return;
         };
 
-        let cipher = Des::new(&hex_to_bytes8(key_hex));
+        let cipher = Des::new(&hex_to_bytes8(key_hex)).expect("non-weak DES key");
         assert_eq!(
             cipher.encrypt_block(&hex_to_bytes8(pt_hex)).as_slice(),
             expected.as_slice()
@@ -1257,7 +1359,7 @@ mod tests {
             return;
         };
 
-        let cipher = TripleDes::new_3key(&hex_to_bytes24(key_hex));
+        let cipher = TripleDes::new_3key(&hex_to_bytes24(key_hex)).expect("non-weak TDES keys");
         assert_eq!(
             cipher.encrypt_block(&hex_to_bytes8(pt_hex)).as_slice(),
             expected.as_slice()
@@ -1265,26 +1367,33 @@ mod tests {
     }
 
     #[test]
-    fn des_weak_keys_are_accepted_and_are_self_inverse() {
-        // FIPS 74 / NIST weak-key set: these keys generate identical round keys,
-        // so E_k(E_k(x)) = x for every block x.
+    fn des_weak_keys_are_rejected_by_checked_constructor() {
+        // FIPS 74 / NIST weak-key set: checked constructors must reject these.
         let weak_keys: [[u8; 8]; 4] = [
             hex_to_bytes8("0101010101010101"),
             hex_to_bytes8("FEFEFEFEFEFEFEFE"),
             hex_to_bytes8("E0E0E0E0F1F1F1F1"),
             hex_to_bytes8("1F1F1F1F0E0E0E0E"),
         ];
-        let pt = hex_to_bytes8("0123456789ABCDEF");
         for key in weak_keys {
-            let des = Des::new(&key);
-            let ct = des.encrypt_block(&pt);
-            assert_eq!(des.encrypt_block(&ct), pt, "weak key must be self-inverse");
+            assert!(matches!(
+                Des::new(&key),
+                Err(DesKeyError::WeakOrSemiWeakKey)
+            ));
+            assert!(matches!(
+                DesCt::new(&key),
+                Err(DesKeyError::WeakOrSemiWeakKey)
+            ));
+            assert!(matches!(
+                TripleDes::new_single_key(&key),
+                Err(DesKeyError::WeakOrSemiWeakKey)
+            ));
         }
     }
 
     #[test]
-    fn des_semi_weak_key_pairs_are_accepted() {
-        // Semi-weak pairs: encryption under one key equals decryption under its pair.
+    fn des_semi_weak_keys_are_rejected_by_checked_constructor() {
+        // Semi-weak pairs are disallowed in checked constructors.
         let pairs: [([u8; 8], [u8; 8]); 6] = [
             (
                 hex_to_bytes8("01FE01FE01FE01FE"),
@@ -1311,12 +1420,32 @@ mod tests {
                 hex_to_bytes8("FEE0FEE0FEF1FEF1"),
             ),
         ];
-        let pt = hex_to_bytes8("0123456789ABCDEF");
         for (k1, k2) in pairs {
-            let des1 = Des::new(&k1);
-            let des2 = Des::new(&k2);
-            assert_eq!(des2.encrypt_block(&des1.encrypt_block(&pt)), pt);
-            assert_eq!(des1.encrypt_block(&des2.encrypt_block(&pt)), pt);
+            assert!(matches!(
+                Des::new(&k1),
+                Err(DesKeyError::WeakOrSemiWeakKey)
+            ));
+            assert!(matches!(
+                Des::new(&k2),
+                Err(DesKeyError::WeakOrSemiWeakKey)
+            ));
+            assert!(matches!(
+                DesCt::new(&k1),
+                Err(DesKeyError::WeakOrSemiWeakKey)
+            ));
+            assert!(matches!(
+                DesCt::new(&k2),
+                Err(DesKeyError::WeakOrSemiWeakKey)
+            ));
         }
+    }
+
+    #[test]
+    fn weak_key_math_still_holds_in_unchecked_path() {
+        let key = hex_to_bytes8("0101010101010101");
+        let pt = hex_to_bytes8("0123456789ABCDEF");
+        let des = Des::new_unchecked(&key);
+        let ct = des.encrypt_block(&pt);
+        assert_eq!(des.encrypt_block(&ct), pt);
     }
 }
