@@ -38,9 +38,6 @@ bash fast/Apple-Silicon/scripts/compare_aes256_alt.sh 5000
 bash fast/Apple-Silicon/scripts/compare_sha256_alt.sh 5000
 bash fast/Apple-Silicon/scripts/compare_ghash_alt.sh 5000
 bash fast/Apple-Silicon/scripts/run_alt_suite.sh
-# exploratory-only (not promoted unless >=5x):
-bash fast/Apple-Silicon/scripts/compare_chacha20_alt.sh 5000
-bash fast/Apple-Silicon/scripts/compare_shake_alt.sh 5000
 ```
 
 ## Scope
@@ -74,7 +71,7 @@ Each split script only builds and benchmarks its own domain.
 5. Only keep changes that improve median performance without widening CI in a
    suspicious way.
 6. Promotion gate: only keep kernels in the go-fast published set if speedup is
-   >=5x over baseline/reference. Sub-5x kernels remain exploratory only.
+   >=5x over baseline/reference.
 
 ## Build Modes
 

@@ -17,11 +17,11 @@ fn build_poly1305_input(aad: &[u8], ciphertext: &[u8]) -> Vec<u8> {
             + 16,
     );
     data.extend_from_slice(aad);
-    if aad.len() % 16 != 0 {
+    if !aad.len().is_multiple_of(16) {
         data.resize(data.len() + (16 - (aad.len() % 16)), 0);
     }
     data.extend_from_slice(ciphertext);
-    if ciphertext.len() % 16 != 0 {
+    if !ciphertext.len().is_multiple_of(16) {
         data.resize(data.len() + (16 - (ciphertext.len() % 16)), 0);
     }
     data.extend_from_slice(&(aad.len() as u64).to_le_bytes());
@@ -30,6 +30,24 @@ fn build_poly1305_input(aad: &[u8], ciphertext: &[u8]) -> Vec<u8> {
 }
 
 /// ChaCha20-Poly1305 AEAD (RFC 8439).
+///
+/// # Examples
+///
+/// ```rust
+/// use cryptography::ChaCha20Poly1305;
+///
+/// let key = [0x42u8; 32];
+/// let nonce = [0x24u8; 12];
+/// let aad = b"header";
+/// let plaintext = b"message";
+///
+/// let aead = ChaCha20Poly1305::new(&key);
+/// let (ciphertext, tag) = aead.encrypt(&nonce, aad, plaintext);
+/// let recovered = aead
+///     .decrypt(&nonce, aad, &ciphertext, &tag)
+///     .expect("valid tag");
+/// assert_eq!(recovered, plaintext);
+/// ```
 pub struct ChaCha20Poly1305 {
     key: [u8; 32],
 }

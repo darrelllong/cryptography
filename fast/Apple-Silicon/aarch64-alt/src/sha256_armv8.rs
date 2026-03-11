@@ -1,8 +1,7 @@
-//! SHA-256 alternative path for Apple Silicon (ARM FEAT_SHA2 intrinsics).
+//! SHA-256 backend for Apple Silicon (`aarch64` + FEAT_SHA2).
 //!
-//! This module is intentionally isolated from the baseline crate implementation.
-//! It is an opt-in acceleration path, and callers should validate output parity
-//! with the baseline implementation.
+//! Uses the ARM SHA2 round and schedule intrinsics (`vsha256*`) while keeping
+//! digest semantics exactly aligned with the baseline `cryptography::Sha256`.
 
 #[cfg(target_arch = "aarch64")]
 use core::arch::aarch64::{
@@ -86,6 +85,7 @@ impl Sha256Armv8 {
 }
 
 #[cfg(target_arch = "aarch64")]
+// FIPS 180-4 round constants K[0..63], grouped as 16 vectors of 4 words.
 const K32X4: [[u32; 4]; 16] = [
     [0x428a_2f98, 0x7137_4491, 0xb5c0_fbcf, 0xe9b5_dba5],
     [0x3956_c25b, 0x59f1_11f1, 0x923f_82a4, 0xab1c_5ed5],

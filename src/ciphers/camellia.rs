@@ -48,7 +48,7 @@ const fn build_sbox2() -> [u8; 256] {
     let mut i = 0usize;
     while i < 256 {
         let v = SBOX1[i];
-        out[i] = (v << 1) | (v >> 7); // rotate_left(1)
+        out[i] = v.rotate_left(1);
         i += 1;
     }
     out
@@ -59,7 +59,7 @@ const fn build_sbox3() -> [u8; 256] {
     let mut i = 0usize;
     while i < 256 {
         let v = SBOX1[i];
-        out[i] = (v << 7) | (v >> 1); // rotate_left(7)
+        out[i] = v.rotate_left(7);
         i += 1;
     }
     out
@@ -71,7 +71,7 @@ const fn build_sbox4() -> [u8; 256] {
     while i < 256 {
         // sbox4(x) = sbox1(x.rotate_left(1)) = sbox1((x<<1)|(x>>7))
         let x = i as u8;
-        let rotated = (x << 1) | (x >> 7);
+        let rotated = x.rotate_left(1);
         out[i] = SBOX1[rotated as usize];
         i += 1;
     }
@@ -232,6 +232,7 @@ fn rot_pair(x: u128, bits: u32) -> (u64, u64) {
 }
 
 fn derive_ka(kl: u128, kr: u128, use_ct: bool) -> u128 {
+    // RFC 3713 §2.2 key schedule "KA" derivation.
     let x = kl ^ kr;
     let (mut d1, mut d2) = halves(x);
     let (kl_l, kl_r) = halves(kl);
@@ -249,6 +250,7 @@ fn derive_ka(kl: u128, kr: u128, use_ct: bool) -> u128 {
 }
 
 fn derive_kb(ka: u128, kr: u128, use_ct: bool) -> u128 {
+    // RFC 3713 §2.2 key schedule "KB" derivation (192/256-bit keys only).
     let (kr_l, kr_r) = halves(kr);
     let (mut d1, mut d2) = halves(ka);
 
@@ -266,6 +268,7 @@ fn expand_128(key: &[u8; 16], use_ct: bool) -> Subkeys18 {
     let kl = u128::from_be_bytes(*key);
     let ka = derive_ka(kl, 0, use_ct);
 
+    // RFC 3713 §2.4 rotation schedule for 128-bit keys (KL and KA branches).
     let left_key_rotations = [
         rot_pair(kl, 0),
         rot_pair(kl, 15),
@@ -326,6 +329,8 @@ fn expand_192_256(kl: u128, kr: u128, use_ct: bool) -> Subkeys24 {
     let ka = derive_ka(kl, kr, use_ct);
     let kb = derive_kb(ka, kr, use_ct);
 
+    // RFC 3713 §2.4 rotation schedule for 192/256-bit keys.
+    // KL, KR, KA, and KB each contribute specific rotated 64-bit halves.
     let left_key_rotations = [
         rot_pair(kl, 0),
         rot_pair(kl, 45),

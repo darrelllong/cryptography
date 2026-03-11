@@ -71,10 +71,10 @@ fn offset_from_stretch(stretch: &[u8; 24], bottom: u8) -> [u8; 16] {
         return out;
     }
 
-    for i in 0..16 {
+    for (i, out_byte) in out.iter_mut().enumerate() {
         let b0 = stretch.get(byte_off + i).copied().unwrap_or(0);
         let b1 = stretch.get(byte_off + i + 1).copied().unwrap_or(0);
-        out[i] = (b0 << bit_off) | (b1 >> (8 - bit_off));
+        *out_byte = (b0 << bit_off) | (b1 >> (8 - bit_off));
     }
     out
 }
@@ -91,6 +91,7 @@ fn hash_associated_data<C: BlockCipher>(
 
     let (full, partial) = split_blocks(aad);
     for (idx, block) in full.chunks_exact(16).enumerate() {
+        // RFC 7253 uses L_{ntz(i)} to advance offsets for full associated-data blocks.
         let i = idx + 1;
         let tz = ntz(i);
         while l_table.len() <= tz {
@@ -107,6 +108,7 @@ fn hash_associated_data<C: BlockCipher>(
     }
 
     if !partial.is_empty() {
+        // Final partial AD block uses Offset xor L_* and 10* padding.
         offset = xor_block(&offset, &l_star);
         let mut cipher_input = [0u8; 16];
         cipher_input[..partial.len()].copy_from_slice(partial);
@@ -139,6 +141,7 @@ impl<C> Ocb<C> {
 impl<C: BlockCipher> Ocb<C> {
     fn compute_offsets(&self, nonce: &[u8]) -> ([u8; 16], [u8; 16], [u8; 16], Vec<[u8; 16]>) {
         assert_eq!(C::BLOCK_LEN, 16, "OCB requires a 128-bit block cipher");
+        // L_* = E_K(0^128), L_$ = dbl(L_*), L_0 = dbl(L_$) per RFC 7253.
         let mut l_star = [0u8; 16];
         self.cipher.encrypt(&mut l_star);
         let l_dollar = dbl_block(l_star);
@@ -149,6 +152,8 @@ impl<C: BlockCipher> Ocb<C> {
         let mut ktop_input = nonce_block;
         ktop_input[15] &= 0xC0;
         self.cipher.encrypt(&mut ktop_input);
+        // Nonce-dependent Offset_0 is derived from Ktop||Stretch and the
+        // bottom six nonce bits (RFC 7253 §4.2).
         let stretch = stretch_from_ktop(ktop_input);
         let offset0 = offset_from_stretch(&stretch, bottom);
 
@@ -164,6 +169,7 @@ impl<C: BlockCipher> Ocb<C> {
         let mut checksum = [0u8; 16];
 
         for (idx, block) in data[..full_len].chunks_exact_mut(16).enumerate() {
+            // RFC 7253 §4.2: Offset_i = Offset_{i-1} xor L_{ntz(i)}.
             let i = idx + 1;
             let tz = ntz(i);
             while l_table.len() <= tz {
@@ -183,6 +189,7 @@ impl<C: BlockCipher> Ocb<C> {
         }
 
         if partial_len != 0 {
+            // RFC 7253 §4.2 final partial block: Offset_* = Offset_m xor L_*.
             offset = xor_block(&offset, &l_star);
             let mut pad = offset;
             self.cipher.encrypt(&mut pad);
@@ -214,6 +221,7 @@ impl<C: BlockCipher> Ocb<C> {
 
         let mut plaintext = data.to_vec();
         for (idx, block) in plaintext[..full_len].chunks_exact_mut(16).enumerate() {
+            // RFC 7253 §4.2: Offset_i = Offset_{i-1} xor L_{ntz(i)}.
             let i = idx + 1;
             let tz = ntz(i);
             while l_table.len() <= tz {
@@ -232,6 +240,7 @@ impl<C: BlockCipher> Ocb<C> {
         }
 
         if partial_len != 0 {
+            // RFC 7253 §4.2 final partial block: Offset_* = Offset_m xor L_*.
             offset = xor_block(&offset, &l_star);
             let mut pad = offset;
             self.cipher.encrypt(&mut pad);

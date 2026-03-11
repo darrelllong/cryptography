@@ -350,7 +350,24 @@ mod tests {
     use super::{RsaOaep, RsaPss};
     use crate::public_key::bigint::BigUint;
     use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
-    use crate::{CtrDrbgAes256, Sha1};
+    use crate::{CtrDrbgAes256, Sha1, Sha512};
+
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        let cleaned: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(
+            cleaned.len() % 2,
+            0,
+            "hex input must have an even number of nybbles"
+        );
+        (0..cleaned.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex byte"))
+            .collect()
+    }
+
+    fn from_hex(hex: &str) -> BigUint {
+        BigUint::from_be_bytes(&decode_hex(hex))
+    }
 
     fn large_reference_key() -> (RsaPublicKey, RsaPrivateKey) {
         let p = BigUint::from_be_bytes(&[
@@ -424,5 +441,94 @@ mod tests {
         let mut drbg = CtrDrbgAes256::new(&[0x22; 48]);
         let signature = RsaPss::<Sha1>::sign_rng(&private, b"abc", &mut drbg).expect("PSS");
         assert!(RsaPss::<Sha1>::verify(&public, b"abc", &signature));
+    }
+
+    #[test]
+    fn nist_cavp_pss_sigver_sha1_vector_passes() {
+        // NIST CAVP, SigVerPSS_186-3.rsp:
+        //   [mod = 1024], SHAAlg = SHA1, Result = P
+        let n = from_hex(
+            "ec996bc93e81094436fd5fc2eef511782eb40fe60cc6f27f24bc8728d686537f\
+             1caa82cfcfa5c323604b6918d7cd0318d98395c855c7c7ada6fc447f192283cdc\
+             81e7291e232336019d4dac12356b93a349883cd2c0a7d2eae9715f1cc6dd657ce\
+             a5cb2c46ce6468794b326b33f1bff61a00fa72931345ca6768365e1eb906dd",
+        );
+        let e = from_hex("90c6d3");
+        let msg = decode_hex(
+            "a4daf4621676917e28493a585d9baffca3755e77e1f18e3ccfb3dec60ab8ee7e\
+             684f5cde8864f2d7ae041d70ce1ea1b1e7878cbf93416848dbfdb5214fde972e\
+             5780cb83c439dfc8aa9fa3e2724adbd02bdb36d2213c84d1b12a23fb5bf1baae\
+             19772a97ef7cc21bc420b3f570a6c321167745f9b46a489ff8420f9a5679c1c4",
+        );
+        let signature = decode_hex(
+            "319c62984acd52423e59a17d27d4eca7722703b054a71a1ee5f7a218b6f4a274\
+             632eaf8ef2a577a7e8a7f654b8deb1ec9b1e529cf93459cc8af4c6df6fffabc3\
+             edded0c421604ea2aae35836b05fd9de7abd78540d45fd6d0ea714733a3427b0\
+             0d9d6404db8ede4a27932b47d88243eefcbffe1e55841823def30c57de7562cf",
+        );
+
+        let public = RsaPublicKey::from_components(e, n);
+        assert!(RsaPss::<Sha1>::verify(&public, &msg, &signature));
+    }
+
+    #[test]
+    fn nist_acvp_kts_oaep_sha512_decrypt_vector_matches_plaintext() {
+        // NIST ACVP sample vectors:
+        //   KTS-IFC (SP800-56Br2), scheme KTS-OAEP-Party_V-confirmation,
+        //   noKdfKc, tgId=1, tcId=1.
+        //
+        // In this profile, ktsParameter is empty and kasMode=noKdfKc, so
+        // decrypted OAEP plaintext equals iutK directly (126 bytes).
+        let p = from_hex(
+            "FFC4F61CF26222F2174A525AE0ED01A1E075215D4111F1AF0153EFC595FE4DD1\
+             0CB795A2CEB5C84AC44D62CA50BD170503924B27ED4EB09467C4D1BBADE73F79\
+             14A318F7F304342C9D0FACF1A55974D20E9DACD578627425AE88A702E2655A71\
+             3E0823C59025A3AF67C48962745E1C0FC7B32007597E813868A91C96B49BF127",
+        );
+        let q = from_hex(
+            "EB385875212FF27BF89C38ACC52B86DA0AF8EA779DA30D153F40A375BE116791\
+             4DCA207C241653B030671FF700C0714A6CCFDDC0C25F430CB47C8C74DF22E318\
+             93396C3676F3A9E7B9ACD6E0AFC292CBB48298A22AFBCABA01966FCDFE0C5D06\
+             48CFB9938C26CD047107BC8C1945A2244A8B813C292CE74CCCF95D43F71BEF75",
+        );
+        let e = from_hex("03DA3A5B37");
+        let expected_n = from_hex(
+            "EB021963239BD53F5A6F292232E0A91F342350CC3266C9DECB773E2D5CF27E82\
+             6A95DB350FC2EA88CCA3326E5723DCDA9460C5E2A16F7DF3BB12DBB4C2479D4F\
+             7FEBA15B48AC09510E0838F08AD7C37235B10A0DE1A405E578E6213B00341E26\
+             F7FE13D4164AACC5FD14DFAA805C7D49FCC39CFBC8F1D2C37EB172B14EE50E5E\
+             213E2DF280C4FB5816E84956F4E14DE26EFAF29338CA7DCD532FC85CDF460D30\
+             79099EC42D0E71175A2FCDC0CCF084492D6D39A0D99CFDD11FD509BB656A9A6C\
+             E142FC09768C109CA67241208217B25CFEE41A8A7BCBDDD6F0EF325B073DDE20\
+             E508F680170EA9D4F3F2DBE1424510ECD3488842D023E063B17C8DD231859FD3",
+        );
+        let ciphertext = decode_hex(
+            "D735FC3D4D1C557AE8F0454CF14474F3CD9A54EA8F746DBA6EFAE490B47674F7\
+             D4EFBFC9E0EEA80A14F6DD584AFC2AAE28BAA625AAFDBC29D79802BC6838E953\
+             FBC1B70DEBAF654B6B65E8157A666DF83DEC0638AD48101416EFD919065357FA\
+             CE7B59D543D60B1FB814D532045729D6E10EC3B3277C9F351224EAA565D870B1\
+             73428929F38D2A33CEA0439BB7204409E5808EB7E6261FF6B6D1260CEB402848\
+             C2015D326F492322D21DF114776AC2802A2B552A9A714FB4C96A1CEDAF0CE033\
+             73CCFC45ABA877A83CD16AED12CC0B52D1201FD95866B4781DAB9603A1E08993\
+             DC2CD3A5DFA37F3EEB1468FBDB104555805C0BE35F03F20C6559C2C8571E7A60",
+        );
+        let expected_plaintext = decode_hex(
+            "AB7243906E58D5322155945B9AB764941648FCF37F355FD78FB8636768FE6A1A\
+             C020DFE4C041C98BE155087347D56F94F2C3C07E685E328A5604D237E4B78729\
+             C8DB31094B5758D7C66452B2C0B6DC61EF471EF02833F6F12A2B3B18198FEF34\
+             07C92923375FDB10B3E8B15E505CB6921CEBC7D3EB8FF3F2FE686827680B",
+        );
+
+        let (public, private) =
+            Rsa::from_primes_with_exponent(&p, &q, &e).expect("vector RSA key must be valid");
+        assert_eq!(
+            public.modulus(),
+            &expected_n,
+            "vector transcription mismatch"
+        );
+
+        let plaintext =
+            RsaOaep::<Sha512>::decrypt(&private, b"", &ciphertext).expect("valid OAEP vector");
+        assert_eq!(plaintext, expected_plaintext);
     }
 }

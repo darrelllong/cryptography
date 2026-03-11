@@ -32,7 +32,8 @@ pub fn poly1305_mac(msg: &[u8], key: &[u8; 32]) -> [u8; 16] {
     let mut r = [0u8; 16];
     r.copy_from_slice(&key[..16]);
 
-    // RFC 8439 clamping.
+    // RFC 8439 §2.5.1 clamp for r: clear the high nibble of bytes
+    // 3/7/11/15 and the low two bits of bytes 4/8/12.
     r[3] &= 15;
     r[7] &= 15;
     r[11] &= 15;

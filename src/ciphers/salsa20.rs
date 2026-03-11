@@ -8,6 +8,7 @@
 //! ChaCha-like form so the state words remain easy to compare directly against
 //! the published eSTREAM-family vectors.
 
+// Salsa20 specification constants for 256-bit (`sigma`) and 128-bit (`tau`) keys.
 const SIGMA: [u8; 16] = *b"expand 32-byte k";
 const TAU: [u8; 16] = *b"expand 16-byte k";
 
@@ -20,6 +21,8 @@ fn load_u32_le(bytes: &[u8]) -> u32 {
 
 #[inline]
 fn quarter_round(y0: &mut u32, y1: &mut u32, y2: &mut u32, y3: &mut u32) {
+    // Salsa20 quarter-round rotation constants from Bernstein's original design.
+    // ChaCha deliberately changed these to 16/12/8/7; we keep Salsa's 7/9/13/18.
     *y1 ^= y0.wrapping_add(*y3).rotate_left(7);
     *y2 ^= y1.wrapping_add(*y0).rotate_left(9);
     *y3 ^= y2.wrapping_add(*y1).rotate_left(13);

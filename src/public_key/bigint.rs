@@ -12,7 +12,11 @@
 
 use core::cmp::Ordering;
 
+// Heuristic crossover where the recursive split starts beating schoolbook in
+// this pure-Rust implementation on our benchmark hardware.
 const KARATSUBA_THRESHOLD_LIMBS: usize = 32;
+// Limit highly lopsided splits; beyond this ratio the extra recursion/temporary
+// cost usually outweighs Karatsuba's multiplication count reduction.
 const KARATSUBA_MAX_IMBALANCE: usize = 2;
 
 /// Sign of a [`BigInt`].
@@ -48,13 +52,26 @@ pub struct BigInt {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MontgomeryCtx {
     modulus: BigUint,
+    // n0_inv = -n^{-1} mod 2^64 (Montgomery reduction coefficient).
     n0_inv: u64,
+    // R^2 mod n with R = 2^(64 * limbs(n)): conversion factor into Montgomery form.
     r2_mod: BigUint,
+    // 1 encoded in Montgomery form, i.e. R mod n.
     one_mont: BigUint,
 }
 
 impl Ord for BigUint {
     fn cmp(&self, other: &Self) -> Ordering {
+        // Ordering assumes normalized limb vectors (no most-significant zero
+        // limbs). All constructors/arithmetic paths call `normalize()`.
+        debug_assert!(
+            self.limbs.last().copied() != Some(0),
+            "BigUint invariant: no leading zero limbs",
+        );
+        debug_assert!(
+            other.limbs.last().copied() != Some(0),
+            "BigUint invariant: no leading zero limbs",
+        );
         match self.limbs.len().cmp(&other.limbs.len()) {
             Ordering::Equal => {}
             ord => return ord,
@@ -679,6 +696,9 @@ impl BigUint {
     }
 
     fn normalize(&mut self) {
+        // Canonical representation invariant:
+        // - zero has `limbs.is_empty()`
+        // - non-zero values have a non-zero top limb
         while self.limbs.last().copied() == Some(0) {
             self.limbs.pop();
         }

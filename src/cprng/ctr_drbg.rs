@@ -129,6 +129,10 @@ impl CtrDrbgAes256 {
     }
 
     fn update(&mut self, provided_data: Option<&[u8; SEED_LEN]>) {
+        // SP 800-90A Rev.1 CTR_DRBG Update:
+        // 1. temp = Block_Encrypt(Key, V+1) || ... until `seedlen` bytes
+        // 2. temp ^= provided_data (if any)
+        // 3. Key = leftmost keylen bits, V = rightmost outlen bits
         let cipher = Aes256::new(&self.key);
         let mut temp = [0u8; SEED_LEN];
         let mut offset = 0usize;

@@ -2,17 +2,19 @@
 # Run the publication-facing EC / Edwards public-key operations through
 # pilot-bench and emit a Markdown table.
 # Columns: operation, ms/op mean, ±CI (95%), runs-to-CI
-# Heavy integer-arithmetic families stay on the legacy bench_public_key path.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
 PK="${PILOT_PK_BIN:-$ROOT_DIR/target/release/pilot_pk}"
+PILOT_PRESET="${PILOT_PRESET:-quick}"
+PILOT_PK_ITERS_PERCENT="${PILOT_PK_ITERS_PERCENT:-25}"
+export PILOT_PK_ITERS_PERCENT
 
 measure() {
     local name=$1
     local out mean ci rounds
-    out=$("$BENCH" run_program --preset quick \
+    out=$("$BENCH" run_program --preset "$PILOT_PRESET" \
           --pi "${name},ms/op,0,1,1" \
           -- "$PK" "$name" 2>&1)
     mean=$(echo  "$out" | awk '/Reading mean/{print $5}')

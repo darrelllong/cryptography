@@ -1091,6 +1091,24 @@ impl<C: BlockCipher> Ccm<C> {
 ///
 /// Callers must still ensure nonce uniqueness per key; this API is stateless and
 /// cannot enforce global `(key, nonce)` uniqueness.
+///
+/// # Examples
+///
+/// ```rust
+/// use cryptography::{Aes256, Gcm};
+///
+/// let key = [0x11u8; 32];
+/// let nonce = [0x22u8; 12];
+/// let aad = b"hdr";
+/// let mut ciphertext = *b"payload";
+///
+/// let aead = Gcm::new(Aes256::new(&key));
+/// let tag = aead.encrypt(&nonce, aad, &mut ciphertext);
+///
+/// let mut recovered = ciphertext;
+/// assert!(aead.decrypt(&nonce, aad, &mut recovered, &tag));
+/// assert_eq!(recovered, *b"payload");
+/// ```
 pub struct Gcm<C> {
     cipher: C,
 }
@@ -1437,6 +1455,40 @@ mod tests {
     }
 
     #[test]
+    fn ecb_aes256_sp800_38a() {
+        // NIST SP 800-38A, F.1.5 ECB-AES256.
+        let key = parse::<32>("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let mut data = [
+            parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+            parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+            parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+            parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+        ]
+        .concat();
+        let expected = [
+            parse::<16>("f3eed1bdb5d2a03c064b5a7e3db181f8"),
+            parse::<16>("591ccb10d410ed26dc5ba74a31362870"),
+            parse::<16>("b6ed21b99ca6f4f9f153e7b1beafed1d"),
+            parse::<16>("23304b7a39f9f3ff067d8d8f9e24ecc7"),
+        ]
+        .concat();
+
+        Ecb::new(Aes256::new(&key)).encrypt_nopad(&mut data);
+        assert_eq!(data, expected);
+        Ecb::new(Aes256::new(&key)).decrypt_nopad(&mut data);
+        assert_eq!(
+            data,
+            [
+                parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+                parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+                parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+                parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
     fn cbc_aes128_sp800_38a() {
         let key = parse::<16>("2b7e151628aed2a6abf7158809cf4f3c");
         let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
@@ -1472,6 +1524,42 @@ mod tests {
     }
 
     #[test]
+    fn cbc_aes256_sp800_38a() {
+        // NIST SP 800-38A, F.2.5 CBC-AES256.
+        let key = parse::<32>("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
+        let mut data = [
+            parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+            parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+            parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+            parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+        ]
+        .concat();
+        let expected = [
+            parse::<16>("f58c4c04d6e5f1ba779eabfb5f7bfbd6"),
+            parse::<16>("9cfc4e967edb808d679f777bc6702c7d"),
+            parse::<16>("39f23369a9d9bacfa530e26304231461"),
+            parse::<16>("b2eb05e2c39be9fcda6c19078c6a9d1b"),
+        ]
+        .concat();
+
+        let mode = Cbc::new(Aes256::new(&key));
+        mode.encrypt_nopad(&iv, &mut data);
+        assert_eq!(data, expected);
+        mode.decrypt_nopad(&iv, &mut data);
+        assert_eq!(
+            data,
+            [
+                parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+                parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+                parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+                parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
     fn cfb_aes128_sp800_38a() {
         let key = parse::<16>("2b7e151628aed2a6abf7158809cf4f3c");
         let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
@@ -1491,6 +1579,42 @@ mod tests {
         .concat();
 
         let mode = Cfb::new(Aes128::new(&key));
+        mode.encrypt_nopad(&iv, &mut data);
+        assert_eq!(data, expected);
+        mode.decrypt_nopad(&iv, &mut data);
+        assert_eq!(
+            data,
+            [
+                parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+                parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+                parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+                parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
+    fn cfb_aes256_sp800_38a() {
+        // NIST SP 800-38A, F.3.15 CFB128-AES256.
+        let key = parse::<32>("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
+        let mut data = [
+            parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+            parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+            parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+            parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+        ]
+        .concat();
+        let expected = [
+            parse::<16>("dc7e84bfda79164b7ecd8486985d3860"),
+            parse::<16>("39ffed143b28b1c832113c6331e5407b"),
+            parse::<16>("df10132415e54b92a13ed0a8267ae2f9"),
+            parse::<16>("75a385741ab9cef82031623d55b1e471"),
+        ]
+        .concat();
+
+        let mode = Cfb::new(Aes256::new(&key));
         mode.encrypt_nopad(&iv, &mut data);
         assert_eq!(data, expected);
         mode.decrypt_nopad(&iv, &mut data);
@@ -1571,6 +1695,42 @@ mod tests {
     }
 
     #[test]
+    fn ofb_aes256_sp800_38a() {
+        // NIST SP 800-38A, F.4.5 OFB-AES256.
+        let key = parse::<32>("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let iv = parse::<16>("000102030405060708090a0b0c0d0e0f");
+        let mut data = [
+            parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+            parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+            parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+            parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+        ]
+        .concat();
+        let expected = [
+            parse::<16>("dc7e84bfda79164b7ecd8486985d3860"),
+            parse::<16>("4febdc6740d20b3ac88f6ad82a4fb08d"),
+            parse::<16>("71ab47a086e86eedf39d1c5bba97c408"),
+            parse::<16>("0126141d67f37be8538f5a8be740e484"),
+        ]
+        .concat();
+
+        let mode = Ofb::new(Aes256::new(&key));
+        mode.apply_keystream(&iv, &mut data);
+        assert_eq!(data, expected);
+        mode.apply_keystream(&iv, &mut data);
+        assert_eq!(
+            data,
+            [
+                parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+                parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+                parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+                parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
     fn ctr_aes128_sp800_38a() {
         let key = parse::<16>("2b7e151628aed2a6abf7158809cf4f3c");
         let ctr = parse::<16>("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
@@ -1590,6 +1750,42 @@ mod tests {
         .concat();
 
         let mode = Ctr::new(Aes128::new(&key));
+        mode.apply_keystream(&ctr, &mut data);
+        assert_eq!(data, expected);
+        mode.apply_keystream(&ctr, &mut data);
+        assert_eq!(
+            data,
+            [
+                parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+                parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+                parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+                parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+            ]
+            .concat()
+        );
+    }
+
+    #[test]
+    fn ctr_aes256_sp800_38a() {
+        // NIST SP 800-38A, F.5.5 CTR-AES256.
+        let key = parse::<32>("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4");
+        let ctr = parse::<16>("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+        let mut data = [
+            parse::<16>("6bc1bee22e409f96e93d7e117393172a"),
+            parse::<16>("ae2d8a571e03ac9c9eb76fac45af8e51"),
+            parse::<16>("30c81c46a35ce411e5fbc1191a0a52ef"),
+            parse::<16>("f69f2445df4f9b17ad2b417be66c3710"),
+        ]
+        .concat();
+        let expected = [
+            parse::<16>("601ec313775789a5b7a7f504bbf3d228"),
+            parse::<16>("f443e3ca4d62b59aca84e990cacaf5c5"),
+            parse::<16>("2b0930daa23de94ce87017ba2d84988d"),
+            parse::<16>("dfc9c58db67aada613c2dd08457941a6"),
+        ]
+        .concat();
+
+        let mode = Ctr::new(Aes256::new(&key));
         mode.apply_keystream(&ctr, &mut data);
         assert_eq!(data, expected);
         mode.apply_keystream(&ctr, &mut data);
@@ -1700,6 +1896,23 @@ mod tests {
     }
 
     #[test]
+    fn xts_aes128_nist_cavp_vector() {
+        // NIST CAVP XTSGenAES128.rsp, "format tweak value input - 128 hex str",
+        // ENCRYPT, COUNT = 1.
+        let key1 = parse::<16>("a1b90cba3f06ac353b2c343876081762");
+        let key2 = parse::<16>("090923026e91771815f29dab01932f2f");
+        let tweak = parse::<16>("4faef7117cda59c66e4b92013e768ad5");
+        let mut data = parse::<16>("ebabce95b14d3c8d6fb350390790311c");
+        let expected = parse::<16>("778ae8b43cb98d5a825081d5be471c63");
+
+        let mode = Xts::new(Aes128::new(&key1), Aes128::new(&key2));
+        mode.encrypt_sector(&tweak, &mut data);
+        assert_eq!(data, expected);
+        mode.decrypt_sector(&tweak, &mut data);
+        assert_eq!(data, parse::<16>("ebabce95b14d3c8d6fb350390790311c"));
+    }
+
+    #[test]
     fn ctr_des_roundtrip_generic() {
         let key = parse::<8>("133457799bbcdff1");
         let counter = parse::<8>("0123456789abcdef");
@@ -1775,6 +1988,40 @@ mod tests {
                  b16aedf5aa0de657ba637b391aafd255",
             )
         );
+    }
+
+    #[test]
+    fn gcm_aes256_single_block_cavp() {
+        // NIST CAVP gcmEncryptExtIV256.rsp
+        // [Keylen=256, IVlen=96, PTlen=128, AADlen=0, Taglen=128], Count=0.
+        let key = parse::<32>("31bdadd96698c204aa9ce1448ea94ae1fb4a9a0b3c9d773b51bb1822666b8f22");
+        let iv = parse::<12>("0d18e06c7c725ac9e362e1ce");
+        let mut data = parse::<16>("2db5168e932556f8089a0622981d017d");
+        let expected_ct = parse::<16>("fa4362189661d163fcd6a56d8bf0405a");
+        let expected_tag = parse::<16>("d636ac1bbedd5cc3ee727dc2ab4a9489");
+
+        let mode = Gcm::new(Aes256::new(&key));
+        let tag = mode.encrypt(&iv, &[], &mut data);
+        assert_eq!(data, expected_ct);
+        assert_eq!(tag, expected_tag);
+        assert!(mode.decrypt(&iv, &[], &mut data, &tag));
+        assert_eq!(data, parse::<16>("2db5168e932556f8089a0622981d017d"));
+    }
+
+    #[test]
+    fn gcm_aes256_non_96bit_iv_auth_only_cavp() {
+        // NIST CAVP gcmEncryptExtIV256.rsp
+        // [Keylen=256, IVlen=8, PTlen=0, AADlen=128, Taglen=128], Count=0.
+        let key = parse::<32>("c639f716597a86afd12319199e21a62b1fc0277a70e3ca120bd3ff745be88604");
+        let iv = parse::<1>("29");
+        let aad = parse::<16>("20fda1db6911d160121dc3c48e5f19b2");
+        let mut data: [u8; 0] = [];
+        let expected_tag = parse::<16>("221a3398f20d0d9fe913f33a6cd413d3");
+
+        let mode = Gcm::new(Aes256::new(&key));
+        let tag = mode.encrypt(&iv, &aad, &mut data);
+        assert_eq!(tag, expected_tag);
+        assert!(mode.decrypt(&iv, &aad, &mut data, &tag));
     }
 
     #[test]
@@ -1921,6 +2168,48 @@ mod tests {
 
         assert!(mode.decrypt(&nonce, aad, &mut data, &tag));
         assert_eq!(data, *b"ccm plaintext data");
+    }
+
+    #[test]
+    fn ccm_aes128_cavp_tlen_4_vector() {
+        // NIST CAVP VTT128.rsp, [Tlen = 4], Count = 0.
+        let key = parse::<16>("43b1a6bc8d0d22d6d1ca95c18593cca5");
+        let nonce = parse::<13>("9882578e750b9682c6ca7f8f86");
+        let aad = parse::<32>("2084f3861c9ad0ccee7c63a7e05aece5db8b34bd8724cc06b4ca99a7f9c4914f");
+        let mut msg = parse::<24>("a2b381c7d1545c408fe29817a21dc435a154c87256346b05");
+        let expected_ct = parse::<24>("cc69ed76985e0ed4c8365a72775e5a19bfccc71aeb116c85");
+        let expected_tag = parse::<4>("a8c74677");
+
+        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 4);
+        let tag = mode.encrypt(&nonce, &aad, &mut msg);
+        assert_eq!(msg, expected_ct);
+        assert_eq!(tag, expected_tag.to_vec());
+        assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
+        assert_eq!(
+            msg,
+            parse::<24>("a2b381c7d1545c408fe29817a21dc435a154c87256346b05")
+        );
+    }
+
+    #[test]
+    fn ccm_aes128_cavp_tlen_16_vector() {
+        // NIST CAVP VTT128.rsp, [Tlen = 16], Count = 0.
+        let key = parse::<16>("4189351b5caea375a0299e81c621bf43");
+        let nonce = parse::<13>("48c0906930561e0ab0ef4cd972");
+        let aad = parse::<32>("40a27c1d1e23ea3dbe8056b2774861a4a201cce49f19997d19206d8c8a343951");
+        let mut msg = parse::<24>("4535d12b4377928a7c0a61c9f825a48671ea05910748c8ef");
+        let expected_ct = parse::<24>("26c56961c035a7e452cce61bc6ee220d77b3f94d18fd10b6");
+        let expected_tag = parse::<16>("d80e8bf80f4a46cab06d4313f0db9be9");
+
+        let mode = Ccm::new_with_tag_len(Aes128::new(&key), 16);
+        let tag = mode.encrypt(&nonce, &aad, &mut msg);
+        assert_eq!(msg, expected_ct);
+        assert_eq!(tag, expected_tag.to_vec());
+        assert!(mode.decrypt(&nonce, &aad, &mut msg, &tag));
+        assert_eq!(
+            msg,
+            parse::<24>("4535d12b4377928a7c0a61c9f825a48671ea05910748c8ef")
+        );
     }
 
     #[test]

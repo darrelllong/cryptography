@@ -18,6 +18,7 @@ fn xorshift64(state: &mut u64) -> u64 {
 }
 
 fn ghash_mul_vt_ref(x: u128, y: u128) -> u128 {
+    // SP 800-38D field polynomial x^128 + x^7 + x^2 + x + 1.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
     let mut z = 0u128;
@@ -36,11 +37,13 @@ fn ghash_mul_vt_ref(x: u128, y: u128) -> u128 {
 }
 
 fn ghash_mul_ct_ref(x: u128, y: u128) -> u128 {
+    // Same field polynomial as `ghash_mul_vt_ref`.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
+        // Branch-free conditional xor via all-ones/all-zero mask.
         let bit = (x >> (127 - i)) & 1;
         let bit_mask = 0u128.wrapping_sub(bit);
         z ^= v & bit_mask;

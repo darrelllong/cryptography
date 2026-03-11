@@ -1,8 +1,7 @@
-//! AES-128 alternative path for x86/x86_64 (AES-NI intrinsics).
+//! AES-128 backend for x86/x86_64 (AES-NI).
 //!
-//! This module is intentionally isolated from the baseline crate implementation.
-//! It is an opt-in acceleration path, and callers should validate output parity
-//! with the baseline implementation.
+//! Provides block and buffer encryption paths backed by AESENC/AESENCLAST and
+//! companion decrypt paths via AESDEC/AESDECLAST with precomputed inverse keys.
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::{
@@ -21,7 +20,6 @@ pub enum Aes128X86Error {
     InvalidLength,
 }
 
-#[cfg_attr(not(any(target_arch = "x86", target_arch = "x86_64")), allow(dead_code))]
 pub struct Aes128X86 {
     round_keys: [[u8; 16]; 11],
     inv_round_keys: [[u8; 16]; 11],
@@ -65,6 +63,7 @@ impl Aes128X86 {
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
         {
+            let _ = (&self.round_keys, &self.inv_round_keys);
             let _ = block;
             Err(Aes128X86Error::MissingAesFeature)
         }
@@ -79,6 +78,7 @@ impl Aes128X86 {
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
         {
+            let _ = (&self.round_keys, &self.inv_round_keys);
             let _ = block;
             Err(Aes128X86Error::MissingAesFeature)
         }
@@ -96,6 +96,7 @@ impl Aes128X86 {
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
         {
+            let _ = (&self.round_keys, &self.inv_round_keys);
             let _ = buffer;
             Err(Aes128X86Error::MissingAesFeature)
         }
@@ -131,6 +132,8 @@ pub(crate) fn expand_key_128(key: &[u8; 16]) -> [[u8; 16]; 11] {
     for i in 4..44 {
         let mut temp = words[i - 1];
         if i % 4 == 0 {
+            // FIPS 197 key schedule core:
+            // RotWord -> SubWord -> xor Rcon.
             temp = [temp[1], temp[2], temp[3], temp[0]];
             for b in &mut temp {
                 *b = SBOX[*b as usize];

@@ -6,6 +6,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+from radar_label_layout import default_offset_y, spread_label_positions
+
 
 OUTPUT = Path(__file__).with_name("public-key-platform-radar.svg")
 
@@ -94,14 +96,6 @@ def label_anchor(x: float) -> str:
     return "middle"
 
 
-def label_y(base_y: float) -> float:
-    if base_y < CY - RADIUS + 30:
-        return base_y
-    if base_y > CY + RADIUS - 30:
-        return base_y + 12
-    return base_y + 4
-
-
 def generate_svg() -> str:
     n = len(LABELS)
     angles = [(-math.pi / 2) + (2 * math.pi * i / n) for i in range(n)]
@@ -154,9 +148,30 @@ def generate_svg() -> str:
         lines.append(f'  <text class="small" x="366" y="{y + 1:.0f}">{label}</text>')
 
     lines.append("")
+    label_entries: list[dict[str, float | str]] = []
     for label, angle in zip(LABELS, angles):
         x, y = polar(RADIUS + 26, angle)
-        lines.append(f'  <text class="label" x="{x:.1f}" y="{label_y(y):.1f}" text-anchor="{label_anchor(x)}">{label}</text>')
+        label_entries.append(
+            {
+                "label": label,
+                "x": x,
+                "y": default_offset_y(y, CY, RADIUS),
+                "anchor": label_anchor(x),
+            }
+        )
+
+    spread_label_positions(
+        label_entries,
+        min_gap=14.0,
+        min_y=CY - RADIUS - 16.0,
+        max_y=CY + RADIUS + 30.0,
+    )
+
+    for entry in label_entries:
+        lines.append(
+            f'  <text class="label" x="{float(entry["x"]):.1f}" y="{float(entry["y"]):.1f}" '
+            f'text-anchor="{entry["anchor"]}">{entry["label"]}</text>'
+        )
 
     lines.extend(
         [

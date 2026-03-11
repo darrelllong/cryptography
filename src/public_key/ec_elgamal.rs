@@ -380,6 +380,7 @@ impl EcElGamalPublicKey {
 // ─── EcElGamalPrivateKey ──────────────────────────────────────────────────────
 
 impl EcElGamalPrivateKey {
+    /// The curve parameters for this key.
     #[must_use]
     pub fn curve(&self) -> &CurveParams {
         &self.curve

@@ -1,10 +1,12 @@
 //! SHA-1 from FIPS 180-4.
 //!
 //! SHA-1 is retained here for compatibility and HMAC support. It is no longer
-//! recommended for collision-sensitive applications.
+//! recommended for collision-sensitive applications due to practical chosen-prefix
+//! collision attacks.
 
 use super::Digest;
 
+// FIPS 180-4 §5.3.1 initial hash value H(0) for SHA-1.
 const IV: [u32; 5] = [
     0x6745_2301,
     0xEFCD_AB89,
@@ -34,6 +36,13 @@ fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
     let mut e_reg = state[4];
 
     for (round_idx, &schedule_word) in schedule.iter().enumerate() {
+        // FIPS 180-4 round partition:
+        // 0..19: Ch, 0x5A827999
+        // 20..39: Parity, 0x6ED9EBA1
+        // 40..59: Maj, 0x8F1BBCDC
+        // 60..79: Parity, 0xCA62C1D6
+        //
+        // These constants are floor(sqrt(n) * 2^30) for n=2,3,5,10.
         let (round_mix, round_const) = match round_idx {
             0..=19 => ((b_reg & c_reg) | ((!b_reg) & d_reg), 0x5A82_7999),
             20..=39 => (b_reg ^ c_reg ^ d_reg, 0x6ED9_EBA1),

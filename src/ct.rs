@@ -144,6 +144,10 @@ pub fn ct_profile_measure_helper_costs(iterations: u64) -> CtAnfHelperCostsNs {
 
 #[inline]
 fn eq_mask_u32(a: u8, b: u8) -> u32 {
+    // Branch-free equality mask:
+    // - x == 0  => (x - 1) has top byte 0xff, so ((x - 1) >> 8) & 1 == 1
+    // - x != 0  => top byte is 0x00, so the bit is 0
+    // Then expand 0/1 to 0x0000_0000/0xffff_ffff with two's-complement wrap.
     let x = u16::from(a ^ b);
     let is_zero = u32::from((x.wrapping_sub(1) >> 8) & 1);
     0u32.wrapping_sub(is_zero)
@@ -151,6 +155,7 @@ fn eq_mask_u32(a: u8, b: u8) -> u32 {
 
 #[inline]
 fn eq_mask_u8(a: u8, b: u8) -> u8 {
+    // Same arithmetic trick as `eq_mask_u32`, reduced to an 8-bit all-ones/all-zero mask.
     let x = u16::from(a ^ b);
     let is_zero = ((x.wrapping_sub(1) >> 8) & 1) as u8;
     0u8.wrapping_sub(is_zero)
@@ -197,6 +202,8 @@ pub(crate) fn constant_time_eq_mask(a: &[u8], b: &[u8]) -> u8 {
     for (x, y) in a.iter().zip(b.iter()) {
         diff |= *x ^ *y;
     }
+    // Keep `diff` live until the end of the loop body and prevent late-stage
+    // cleverness from reintroducing control-flow shortcuts.
     let diff = black_box(diff);
     compiler_fence(Ordering::SeqCst);
     eq_mask_u8(diff, 0)
@@ -246,6 +253,8 @@ pub(crate) const fn build_byte_sbox_anf(table: &[u8; 256]) -> [[u128; 2]; 8] {
             x += 1;
         }
 
+        // In-place Möbius transform over F2: convert truth table values into
+        // ANF coefficients indexed by monomial bitmasks.
         let mut var = 0usize;
         while var < 8 {
             let stride = 1usize << var;
@@ -318,6 +327,14 @@ pub(crate) const fn build_nibble_sbox_anf(table: &[u8; 16]) -> [u16; 4] {
 #[inline]
 pub(crate) fn subset_mask8(x: u8) -> (u128, u128) {
     profile::bump_subset_mask8();
+    // Build the "active monomial" mask for ANF evaluation.
+    //
+    // Index i (0..255) represents monomial `prod_j x_j^{i_j}` where i_j is bit j
+    // of i. The monomial is active iff every selected variable bit in i is 1 in
+    // the input x, i.e., iff (i & x) == i.
+    //
+    // We start from monomial 1 (index 0) and conditionally OR shifted copies for
+    // each input bit using all-ones/all-zero masks instead of branches.
     let mut lo = 1u128;
     let mut hi = 0u128;
 
@@ -415,6 +432,8 @@ pub(crate) fn subset_mask4(x: u8) -> u16 {
 
 #[inline]
 pub(crate) fn parity16(mut x: u16) -> u8 {
+    // Fold to one nibble, then use the classic parity lookup constant:
+    // 0x6996 = binary 0110_1001_1001_0110 where bit n is parity(n).
     x ^= x >> 8;
     x ^= x >> 4;
     x &= 0x0f;

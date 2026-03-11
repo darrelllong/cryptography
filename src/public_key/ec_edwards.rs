@@ -395,7 +395,7 @@ fn scalar_mul_with_table(
     }
 
     let mut result = ExtendedPoint::neutral();
-    let windows = (k.bits() + window_bits - 1) / window_bits;
+    let windows = k.bits().div_ceil(window_bits);
     for window_index in (0..windows).rev() {
         for _ in 0..window_bits {
             result = point_double_extended(curve, &result);
@@ -476,10 +476,10 @@ impl TwistedEdwardsCurve {
     ) -> Option<Self> {
         let field = MontgomeryCtx::new(&p)?;
         let scalar = MontgomeryCtx::new(&n)?;
-        let coord_len = (p.bits() + 7) / 8;
+        let coord_len = p.bits().div_ceil(8);
         let d2 = {
             let v = d.add_ref(&d);
-            if &v >= &p {
+            if v.cmp(&p).is_ge() {
                 v.sub_ref(&p)
             } else {
                 v
@@ -822,7 +822,10 @@ fn pad_to(bytes: Vec<u8>, len: usize) -> Vec<u8> {
 /// Parse a compact hexadecimal string (spaces ignored) into a `BigUint`.
 fn from_hex(hex: &str) -> BigUint {
     let cleaned: String = hex.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-    assert!(cleaned.len() % 2 == 0, "hex string must have even length");
+    assert!(
+        cleaned.len().is_multiple_of(2),
+        "hex string must have even length"
+    );
     let bytes: Vec<u8> = (0..cleaned.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex digit"))

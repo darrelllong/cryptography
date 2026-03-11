@@ -71,6 +71,14 @@ const ZETAS: [i32; N] = [
 ];
 
 type Poly = [i32; N];
+type UnpackedSecretKey = (
+    [u8; SEED_BYTES],
+    [u8; TR_BYTES],
+    [u8; SEED_BYTES],
+    Polyveck,
+    Polyvecl,
+    Polyveck,
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Profile {
@@ -993,7 +1001,7 @@ fn poly_make_hint(p: Profile, a0: &Poly, a1: &Poly) -> (Poly, usize) {
 fn poly_use_hint(p: Profile, a: &Poly, h: &Poly) -> Poly {
     let mut out = [0i32; N];
     for i in 0..N {
-        out[i] = use_hint(p, a[i], h[i] as i32);
+        out[i] = use_hint(p, a[i], h[i]);
     }
     out
 }
@@ -1031,7 +1039,7 @@ fn rej_uniform(dst: &mut [i32], len: usize, buf: &[u8]) -> usize {
 }
 
 fn poly_uniform(seed: &[u8; SEED_BYTES], nonce: u16) -> Poly {
-    const POLY_UNIFORM_NBLOCKS: usize = (768 + SHAKE128_RATE - 1) / SHAKE128_RATE;
+    const POLY_UNIFORM_NBLOCKS: usize = 768_usize.div_ceil(SHAKE128_RATE);
     let mut xof = Shake128::new();
     xof.update(seed);
     xof.update(&nonce.to_le_bytes());
@@ -1088,8 +1096,8 @@ fn rej_eta(dst: &mut [i32], len: usize, buf: &[u8], eta: i32) -> usize {
 }
 
 fn poly_uniform_eta(p: Profile, seed: &[u8; CRH_BYTES], nonce: u16) -> Poly {
-    let req = if p.eta == 2 { 136 } else { 227 };
-    let nblocks = (req + SHAKE256_RATE - 1) / SHAKE256_RATE;
+    let req: usize = if p.eta == 2 { 136 } else { 227 };
+    let nblocks = req.div_ceil(SHAKE256_RATE);
     let mut xof = Shake256::new();
     xof.update(seed);
     xof.update(&nonce.to_le_bytes());
@@ -1108,7 +1116,7 @@ fn poly_uniform_eta(p: Profile, seed: &[u8; CRH_BYTES], nonce: u16) -> Poly {
 }
 
 fn poly_uniform_gamma1(p: Profile, seed: &[u8; CRH_BYTES], nonce: u16) -> Poly {
-    let nblocks = (p.polyz_packed_bytes + SHAKE256_RATE - 1) / SHAKE256_RATE;
+    let nblocks = p.polyz_packed_bytes.div_ceil(SHAKE256_RATE);
     let mut xof = Shake256::new();
     xof.update(seed);
     xof.update(&nonce.to_le_bytes());
@@ -1179,7 +1187,7 @@ fn polyeta_unpack(p: Profile, input: &[u8]) -> Option<Poly> {
     let mut out = [0i32; N];
     if p.eta == 2 {
         for i in 0..(N / 8) {
-            out[8 * i] = i32::from((input[3 * i] >> 0) & 7);
+            out[8 * i] = i32::from(input[3 * i] & 7);
             out[8 * i + 1] = i32::from((input[3 * i] >> 3) & 7);
             out[8 * i + 2] = i32::from(((input[3 * i] >> 6) | (input[3 * i + 1] << 2)) & 7);
             out[8 * i + 3] = i32::from((input[3 * i + 1] >> 1) & 7);
@@ -1204,7 +1212,7 @@ fn polyeta_unpack(p: Profile, input: &[u8]) -> Option<Poly> {
 
 fn polyt1_pack(poly: &Poly, out: &mut [u8]) {
     for i in 0..(N / 4) {
-        out[5 * i] = (poly[4 * i] >> 0) as u8;
+        out[5 * i] = poly[4 * i] as u8;
         out[5 * i + 1] = ((poly[4 * i] >> 8) | (poly[4 * i + 1] << 2)) as u8;
         out[5 * i + 2] = ((poly[4 * i + 1] >> 6) | (poly[4 * i + 2] << 4)) as u8;
         out[5 * i + 3] = ((poly[4 * i + 2] >> 4) | (poly[4 * i + 3] << 6)) as u8;
@@ -1218,9 +1226,8 @@ fn polyt1_unpack(input: &[u8]) -> Option<Poly> {
     }
     let mut out = [0i32; N];
     for i in 0..(N / 4) {
-        out[4 * i] = (((u32::from(input[5 * i])) >> 0) | ((u32::from(input[5 * i + 1])) << 8))
-            as i32
-            & 0x3FF;
+        out[4 * i] =
+            ((u32::from(input[5 * i]) | (u32::from(input[5 * i + 1]) << 8)) as i32) & 0x3FF;
         out[4 * i + 1] = (((u32::from(input[5 * i + 1])) >> 2)
             | ((u32::from(input[5 * i + 2])) << 6)) as i32
             & 0x3FF;
@@ -1440,13 +1447,13 @@ fn polyvecl_pointwise_acc_montgomery(p: Profile, u: &Polyvecl, v: &Polyvecl) -> 
     debug_assert_eq!(u.l, p.l);
     debug_assert_eq!(v.l, p.l);
     let mut w = [0i32; N];
-    for j in 0..N {
-        w[j] = montgomery_reduce((u.vec[0][j] as i64) * (v.vec[0][j] as i64));
+    for (j, wj) in w.iter_mut().enumerate() {
+        *wj = montgomery_reduce((u.vec[0][j] as i64) * (v.vec[0][j] as i64));
     }
     for i in 1..p.l {
-        for j in 0..N {
+        for (j, wj) in w.iter_mut().enumerate() {
             let t = montgomery_reduce((u.vec[i][j] as i64) * (v.vec[i][j] as i64));
-            w[j] = w[j].wrapping_add(t);
+            *wj = wj.wrapping_add(t);
         }
     }
     w
@@ -1672,17 +1679,7 @@ fn pack_sk(
     out
 }
 
-fn unpack_sk(
-    p: Profile,
-    sk: &[u8],
-) -> Option<(
-    [u8; SEED_BYTES],
-    [u8; TR_BYTES],
-    [u8; SEED_BYTES],
-    Polyveck,
-    Polyvecl,
-    Polyveck,
-)> {
+fn unpack_sk(p: Profile, sk: &[u8]) -> Option<UnpackedSecretKey> {
     if sk.len() != p.private_key_len() {
         return None;
     }
@@ -1872,7 +1869,7 @@ mod tests {
 
     fn decode_hex(hex: &str) -> Option<Vec<u8>> {
         let bytes = hex.as_bytes();
-        if bytes.len() % 2 != 0 {
+        if !bytes.len().is_multiple_of(2) {
             return None;
         }
         let mut out = Vec::with_capacity(bytes.len() / 2);
@@ -1905,12 +1902,10 @@ mod tests {
     #[test]
     fn ml_dsa_44_keygen_matches_acvp_fips204_vector() {
         // Source: NIST ACVP server vectors, ML-DSA keyGen FIPS204, tgId=1 tcId=1.
-        let vectors = parse_vector_map(include_str!(
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/vectors/ml_dsa_fips204_subset.txt"
-            )
-        ));
+        let vectors = parse_vector_map(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/vectors/ml_dsa_fips204_subset.txt"
+        )));
         let seed: [u8; 32] = decode_hex_array(vectors["KEYGEN_SEED"]).expect("seed");
         let expected_pk = decode_hex(vectors["KEYGEN_PK"]).expect("pk");
         let (pk, _sk) = MlDsa::keygen_from_seed(MlDsaParameterSet::MlDsa44, &seed).expect("keygen");
@@ -1920,12 +1915,10 @@ mod tests {
     #[test]
     fn ml_dsa_65_verify_matches_acvp_fips204_vector() {
         // Source: NIST ACVP server vectors, ML-DSA sigVer FIPS204, tgId=3 tcId=36 (testPassed=true).
-        let vectors = parse_vector_map(include_str!(
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/vectors/ml_dsa_fips204_subset.txt"
-            )
-        ));
+        let vectors = parse_vector_map(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/vectors/ml_dsa_fips204_subset.txt"
+        )));
         let pk = MlDsaPublicKey::from_wire_bytes(
             MlDsaParameterSet::MlDsa65,
             &decode_hex(vectors["VERIFY_PK"]).expect("pk"),

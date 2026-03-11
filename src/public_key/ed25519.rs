@@ -52,6 +52,19 @@ pub struct Ed25519Signature {
 }
 
 /// Namespace wrapper for the fixed-curve Ed25519 construction.
+///
+/// # Examples
+///
+/// ```rust
+/// use cryptography::{vt::Ed25519, CtrDrbgAes256};
+///
+/// let mut rng = CtrDrbgAes256::new(&[0x7bu8; 48]);
+/// let (public, private) = Ed25519::generate(&mut rng);
+///
+/// let msg = b"ed25519 example";
+/// let sig = private.sign_message(msg);
+/// assert!(public.verify_message(msg, &sig));
+/// ```
 pub struct Ed25519;
 
 impl Ed25519PublicKey {

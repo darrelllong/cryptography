@@ -6,6 +6,7 @@
 
 use super::Digest;
 
+// Initial chaining value from the RIPEMD-160 specification.
 const IV: [u32; 5] = [
     0x6745_2301,
     0xefcd_ab89,
@@ -14,24 +15,28 @@ const IV: [u32; 5] = [
     0xc3d2_e1f0,
 ];
 
+// Left-line message word order (r_j) for rounds 0..79.
 const RL: [usize; 80] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5,
     2, 14, 11, 8, 3, 10, 14, 4, 9, 15, 8, 1, 2, 7, 0, 6, 13, 11, 5, 12, 1, 9, 11, 10, 0, 8, 12, 4,
     13, 3, 7, 15, 14, 5, 6, 2, 4, 0, 5, 9, 7, 12, 2, 10, 14, 1, 3, 8, 11, 6, 15, 13,
 ];
 
+// Right-line message word order (r'_j) for rounds 0..79.
 const RR: [usize; 80] = [
     5, 14, 7, 0, 9, 2, 11, 4, 13, 6, 15, 8, 1, 10, 3, 12, 6, 11, 3, 7, 0, 13, 5, 10, 14, 15, 8, 12,
     4, 9, 1, 2, 15, 5, 1, 3, 7, 14, 6, 9, 11, 8, 12, 2, 10, 0, 4, 13, 8, 6, 4, 1, 3, 11, 15, 0, 5,
     12, 2, 13, 9, 7, 10, 14, 12, 15, 10, 4, 1, 5, 8, 7, 6, 2, 13, 14, 0, 3, 9, 11,
 ];
 
+// Left-line rotation counts (s_j) for rounds 0..79.
 const SL: [u32; 80] = [
     11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8, 7, 6, 8, 13, 11, 9, 7, 15, 7, 12, 15,
     9, 11, 7, 13, 12, 11, 13, 6, 7, 14, 9, 13, 15, 14, 8, 13, 6, 5, 12, 7, 5, 11, 12, 14, 15, 14,
     15, 9, 8, 9, 14, 5, 6, 8, 6, 5, 12, 9, 15, 5, 11, 6, 8, 13, 12, 5, 12, 13, 14, 11, 8, 5, 6,
 ];
 
+// Right-line rotation counts (s'_j) for rounds 0..79.
 const SR: [u32; 80] = [
     8, 9, 9, 11, 13, 15, 15, 5, 7, 7, 8, 11, 14, 14, 12, 6, 9, 13, 15, 7, 12, 8, 9, 11, 7, 7, 12,
     7, 6, 15, 13, 11, 9, 7, 15, 11, 8, 6, 6, 14, 12, 13, 5, 14, 13, 13, 7, 5, 15, 5, 8, 11, 14, 14,
@@ -40,6 +45,7 @@ const SR: [u32; 80] = [
 
 #[inline]
 fn f(j: usize, x: u32, y: u32, z: u32) -> u32 {
+    // Five Boolean functions used over 16-round phases.
     match j {
         0..=15 => x ^ y ^ z,
         16..=31 => (x & y) | (!x & z),
@@ -51,6 +57,7 @@ fn f(j: usize, x: u32, y: u32, z: u32) -> u32 {
 
 #[inline]
 fn k_left(j: usize) -> u32 {
+    // Left-line additive constants K_j (spec Table 2).
     match j {
         0..=15 => 0x0000_0000,
         16..=31 => 0x5a82_7999,
@@ -62,6 +69,7 @@ fn k_left(j: usize) -> u32 {
 
 #[inline]
 fn k_right(j: usize) -> u32 {
+    // Right-line additive constants K'_j (spec Table 2).
     match j {
         0..=15 => 0x50a2_8be6,
         16..=31 => 0x5c4d_d124,
@@ -78,6 +86,8 @@ fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
         words[i] = u32::from_le_bytes(chunk.try_into().expect("4-byte chunk"));
     }
 
+    // RIPEMD-160 runs two parallel 80-round lines (left and right) over the
+    // same message block with different schedules/constants, then mixes them.
     let mut al = state[0];
     let mut bl = state[1];
     let mut cl = state[2];
@@ -116,6 +126,8 @@ fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
         br = tr;
     }
 
+    // Feed-forward merge step from the specification: cross-couple both lines
+    // back into the 5-word chaining state.
     let t = state[1].wrapping_add(cl).wrapping_add(dr);
     state[1] = state[2].wrapping_add(dl).wrapping_add(er);
     state[2] = state[3].wrapping_add(el).wrapping_add(ar);

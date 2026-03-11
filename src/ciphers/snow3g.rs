@@ -47,6 +47,9 @@ const SQ: [u8; 256] = [
 const SR_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SR);
 const SQ_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SQ);
 
+// ETSI/SAGE Doc 2 defines multiplication/division by alpha in GF(2^8)
+// (reduction polynomial x^8 + x^7 + x^5 + x^3 + 1, encoded as 0xA9 here).
+// These are the four-byte packed coefficients used in the LFSR feedback.
 const MUL_ALPHA: [u32; 256] = build_alpha_table([23, 245, 48, 239]);
 const DIV_ALPHA: [u32; 256] = build_alpha_table([16, 39, 6, 64]);
 const MUL_ALPHA_FACTORS: [u8; 4] = alpha_factors([23, 245, 48, 239]);
@@ -473,7 +476,8 @@ mod tests {
         ]
     }
 
-    fn assert_official_trace<const CT: bool>(
+    #[derive(Clone, Copy)]
+    struct OfficialTraceCase {
         key: [u8; 16],
         iv: [u8; 16],
         initial_lfsr: [u32; 16],
@@ -482,46 +486,51 @@ mod tests {
         final_fsm: [u32; 3],
         keystream_rows: [TraceRow; 3],
         outputs: [u32; 2],
-    ) {
-        assert_eq!(initial_lfsr_from_key_iv(&key, &iv), initial_lfsr);
+    }
+
+    fn assert_official_trace<const CT: bool>(case: &OfficialTraceCase) {
+        assert_eq!(
+            initial_lfsr_from_key_iv(&case.key, &case.iv),
+            case.initial_lfsr
+        );
 
         let mut core = Snow3gCore {
-            s: initial_lfsr,
+            s: case.initial_lfsr,
             r1: 0,
             r2: 0,
             r3: 0,
         };
 
-        assert_eq!(trace_row(&core), init_rows[0], "initial row");
-        for (i, expected) in init_rows.iter().enumerate().skip(1) {
+        assert_eq!(trace_row(&core), case.init_rows[0], "initial row");
+        for (i, expected) in case.init_rows.iter().enumerate().skip(1) {
             let f = clock_fsm::<CT>(&mut core);
             clock_lfsr::<CT>(&mut core, Some(f));
             assert_eq!(trace_row(&core), *expected, "init row {i}");
         }
 
-        for _ in (init_rows.len() - 1)..32 {
+        for _ in (case.init_rows.len() - 1)..32 {
             let f = clock_fsm::<CT>(&mut core);
             clock_lfsr::<CT>(&mut core, Some(f));
         }
 
-        assert_eq!(core.s, final_lfsr, "final LFSR after init");
+        assert_eq!(core.s, case.final_lfsr, "final LFSR after init");
         assert_eq!(
             [core.r1, core.r2, core.r3],
-            final_fsm,
+            case.final_fsm,
             "final FSM after init"
         );
 
         let _ = clock_fsm::<CT>(&mut core);
         clock_lfsr::<CT>(&mut core, None);
-        assert_eq!(trace_row(&core), keystream_rows[0], "keystream row 0");
+        assert_eq!(trace_row(&core), case.keystream_rows[0], "keystream row 0");
 
         let z1 = next_word_core::<CT>(&mut core);
-        assert_eq!(z1, outputs[0], "z1");
-        assert_eq!(trace_row(&core), keystream_rows[1], "keystream row 1");
+        assert_eq!(z1, case.outputs[0], "z1");
+        assert_eq!(trace_row(&core), case.keystream_rows[1], "keystream row 1");
 
         let z2 = next_word_core::<CT>(&mut core);
-        assert_eq!(z2, outputs[1], "z2");
-        assert_eq!(trace_row(&core), keystream_rows[2], "keystream row 2");
+        assert_eq!(z2, case.outputs[1], "z2");
+        assert_eq!(trace_row(&core), case.keystream_rows[2], "keystream row 2");
     }
 
     fn assert_iterated_test_set_4<const CT: bool>() {
@@ -892,7 +901,7 @@ mod tests {
         ];
         let outputs = [0xABEE_9704, 0x7AC3_1373];
 
-        assert_official_trace::<false>(
+        let case = OfficialTraceCase {
             key,
             iv,
             initial_lfsr,
@@ -901,17 +910,9 @@ mod tests {
             final_fsm,
             keystream_rows,
             outputs,
-        );
-        assert_official_trace::<true>(
-            key,
-            iv,
-            initial_lfsr,
-            init_rows,
-            final_lfsr,
-            final_fsm,
-            keystream_rows,
-            outputs,
-        );
+        };
+        assert_official_trace::<false>(&case);
+        assert_official_trace::<true>(&case);
     }
 
     #[test]
@@ -1077,7 +1078,7 @@ mod tests {
         ];
         let outputs = [0xEFF8_A342, 0xF751_480F];
 
-        assert_official_trace::<false>(
+        let case = OfficialTraceCase {
             key,
             iv,
             initial_lfsr,
@@ -1086,17 +1087,9 @@ mod tests {
             final_fsm,
             keystream_rows,
             outputs,
-        );
-        assert_official_trace::<true>(
-            key,
-            iv,
-            initial_lfsr,
-            init_rows,
-            final_lfsr,
-            final_fsm,
-            keystream_rows,
-            outputs,
-        );
+        };
+        assert_official_trace::<false>(&case);
+        assert_official_trace::<true>(&case);
     }
 
     #[test]
@@ -1262,7 +1255,7 @@ mod tests {
         ];
         let outputs = [0xA8C8_74A9, 0x7AE7_C4F8];
 
-        assert_official_trace::<false>(
+        let case = OfficialTraceCase {
             key,
             iv,
             initial_lfsr,
@@ -1271,17 +1264,9 @@ mod tests {
             final_fsm,
             keystream_rows,
             outputs,
-        );
-        assert_official_trace::<true>(
-            key,
-            iv,
-            initial_lfsr,
-            init_rows,
-            final_lfsr,
-            final_fsm,
-            keystream_rows,
-            outputs,
-        );
+        };
+        assert_official_trace::<false>(&case);
+        assert_official_trace::<true>(&case);
     }
 
     #[test]

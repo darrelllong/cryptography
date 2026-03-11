@@ -1,8 +1,7 @@
-//! AES-256 alternative path for x86/x86_64 (AES-NI intrinsics).
+//! AES-256 backend for x86/x86_64 (AES-NI).
 //!
-//! This module is intentionally isolated from the baseline crate implementation.
-//! It is an opt-in acceleration path, and callers should validate output parity
-//! with the baseline implementation.
+//! Mirrors the baseline AES-256 schedule/round semantics while mapping rounds
+//! to AES-NI intrinsics and offering both single-block and buffer encryption.
 
 #[cfg(target_arch = "x86")]
 use core::arch::x86::{
@@ -23,7 +22,6 @@ pub enum Aes256X86Error {
     InvalidLength,
 }
 
-#[cfg_attr(not(any(target_arch = "x86", target_arch = "x86_64")), allow(dead_code))]
 pub struct Aes256X86 {
     round_keys: [[u8; 16]; 15],
     inv_round_keys: [[u8; 16]; 15],
@@ -67,6 +65,7 @@ impl Aes256X86 {
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
         {
+            let _ = (&self.round_keys, &self.inv_round_keys);
             let _ = block;
             Err(Aes256X86Error::MissingAesFeature)
         }
@@ -81,6 +80,7 @@ impl Aes256X86 {
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
         {
+            let _ = (&self.round_keys, &self.inv_round_keys);
             let _ = block;
             Err(Aes256X86Error::MissingAesFeature)
         }
@@ -98,6 +98,7 @@ impl Aes256X86 {
         }
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
         {
+            let _ = (&self.round_keys, &self.inv_round_keys);
             let _ = buffer;
             Err(Aes256X86Error::MissingAesFeature)
         }
@@ -112,12 +113,15 @@ fn expand_key_256(key: &[u8; 32]) -> [[u8; 16]; 15] {
     for i in 8..60 {
         let mut temp = words[i - 1];
         if i % 8 == 0 {
+            // FIPS 197 AES-256 schedule core:
+            // RotWord -> SubWord -> xor Rcon every 8th word.
             temp = [temp[1], temp[2], temp[3], temp[0]];
             for b in &mut temp {
                 *b = SBOX[*b as usize];
             }
             temp[0] ^= RCON[(i / 8) - 1];
         } else if i % 8 == 4 {
+            // AES-256 extra SubWord step on word positions 4 mod 8.
             for b in &mut temp {
                 *b = SBOX[*b as usize];
             }

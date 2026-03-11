@@ -2,8 +2,10 @@
 ///
 /// Usage: pilot_cipher <name>
 ///
-/// Encrypts 1 MiB with the named cipher and prints MB/s to stdout.
+/// Encrypts a fixed workload with the named cipher and prints MB/s to stdout.
 /// Pilot-bench calls this repeatedly until statistical confidence is reached.
+///
+/// Workload size is controlled by `PILOT_CIPHER_BYTES` (default: 262_144 bytes).
 ///
 /// Block cipher names (add "ct" suffix for constant-time variant):
 ///   aes128, aes192, aes256
@@ -41,9 +43,21 @@ use cryptography::{
 use cryptography::{Snow3g, Snow3gCt};
 
 const MIB: usize = 1024 * 1024;
+const DEFAULT_WORKLOAD_BYTES: usize = 256 * 1024;
 
-fn bench_block<C: BlockCipher>(cipher: C) -> f64 {
-    let buf_len = MIB - (MIB % C::BLOCK_LEN);
+fn workload_bytes() -> usize {
+    std::env::var("PILOT_CIPHER_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_WORKLOAD_BYTES)
+}
+
+fn bench_block<C: BlockCipher>(cipher: C, bytes: usize) -> f64 {
+    let mut buf_len = bytes - (bytes % C::BLOCK_LEN);
+    if buf_len == 0 {
+        buf_len = C::BLOCK_LEN;
+    }
     let mut buf = vec![0u8; buf_len];
     let t0 = Instant::now();
     for chunk in buf.chunks_exact_mut(C::BLOCK_LEN) {
@@ -54,13 +68,13 @@ fn bench_block<C: BlockCipher>(cipher: C) -> f64 {
     buf_len as f64 / elapsed.as_secs_f64() / (MIB as f64)
 }
 
-fn bench_stream<F: FnMut(&mut [u8])>(mut fill: F) -> f64 {
-    let mut buf = vec![0u8; MIB];
+fn bench_stream<F: FnMut(&mut [u8])>(mut fill: F, bytes: usize) -> f64 {
+    let mut buf = vec![0u8; bytes.max(1)];
     let t0 = Instant::now();
     fill(&mut buf);
     let elapsed = t0.elapsed();
     black_box(&buf);
-    MIB as f64 / elapsed.as_secs_f64() / (MIB as f64)
+    buf.len() as f64 / elapsed.as_secs_f64() / (MIB as f64)
 }
 
 fn main() {
@@ -78,130 +92,155 @@ fn main() {
     let k18: &[u8; 18] = &[0x01; 18];
     let k24: &[u8; 24] = &[0x01; 24];
     let k32: &[u8; 32] = &[0x01; 32];
+    let bytes = workload_bytes();
 
     let mb_per_sec: f64 = match name.to_ascii_lowercase().as_str() {
         // ── AES ───────────────────────────────────────────────────────────────
-        "aes128" => bench_block(Aes128::new(k16)),
-        "aes128ct" => bench_block(Aes128Ct::new(k16)),
-        "aes192" => bench_block(Aes192::new(k24)),
-        "aes192ct" => bench_block(Aes192Ct::new(k24)),
-        "aes256" => bench_block(Aes256::new(k32)),
-        "aes256ct" => bench_block(Aes256Ct::new(k32)),
+        "aes128" => bench_block(Aes128::new(k16), bytes),
+        "aes128ct" => bench_block(Aes128Ct::new(k16), bytes),
+        "aes192" => bench_block(Aes192::new(k24), bytes),
+        "aes192ct" => bench_block(Aes192Ct::new(k24), bytes),
+        "aes256" => bench_block(Aes256::new(k32), bytes),
+        "aes256ct" => bench_block(Aes256Ct::new(k32), bytes),
         // ── Camellia ──────────────────────────────────────────────────────────
-        "camellia128" => bench_block(Camellia128::new(k16)),
-        "camellia128ct" => bench_block(Camellia128Ct::new(k16)),
-        "camellia192" => bench_block(Camellia192::new(k24)),
-        "camellia192ct" => bench_block(Camellia192Ct::new(k24)),
-        "camellia256" => bench_block(Camellia256::new(k32)),
-        "camellia256ct" => bench_block(Camellia256Ct::new(k32)),
+        "camellia128" => bench_block(Camellia128::new(k16), bytes),
+        "camellia128ct" => bench_block(Camellia128Ct::new(k16), bytes),
+        "camellia192" => bench_block(Camellia192::new(k24), bytes),
+        "camellia192ct" => bench_block(Camellia192Ct::new(k24), bytes),
+        "camellia256" => bench_block(Camellia256::new(k32), bytes),
+        "camellia256ct" => bench_block(Camellia256Ct::new(k32), bytes),
         // ── CAST-128 ──────────────────────────────────────────────────────────
-        "cast128" | "cast5" => bench_block(Cast128::new(k16)),
-        "cast128ct" | "cast5ct" => bench_block(Cast128Ct::new(k16)),
+        "cast128" | "cast5" => bench_block(Cast128::new(k16), bytes),
+        "cast128ct" | "cast5ct" => bench_block(Cast128Ct::new(k16), bytes),
         // ── DES ───────────────────────────────────────────────────────────────
-        "des" => bench_block(Des::new(k8)),
-        "desct" => bench_block(DesCt::new(k8)),
-        "3des" => bench_block(TripleDes::new_3key(k24)),
+        "des" => bench_block(Des::new(k8), bytes),
+        "desct" => bench_block(DesCt::new(k8), bytes),
+        "3des" => bench_block(TripleDes::new_3key(k24), bytes),
         // ── Grasshopper (Кузнечик) ────────────────────────────────────────────
-        "grasshopper" => bench_block(Grasshopper::new(k32)),
-        "grasshopperct" => bench_block(GrasshopperCt::new(k32)),
+        "grasshopper" => bench_block(Grasshopper::new(k32), bytes),
+        "grasshopperct" => bench_block(GrasshopperCt::new(k32), bytes),
         // ── Magma ─────────────────────────────────────────────────────────────
-        "magma" => bench_block(Magma::new(k32)),
-        "magmact" => bench_block(MagmaCt::new(k32)),
+        "magma" => bench_block(Magma::new(k32), bytes),
+        "magmact" => bench_block(MagmaCt::new(k32), bytes),
         // ── PRESENT ───────────────────────────────────────────────────────────
-        "present80" => bench_block(Present80::new(k10)),
-        "present80ct" => bench_block(Present80Ct::new(k10)),
-        "present128" => bench_block(Present128::new(k16)),
-        "present128ct" => bench_block(Present128Ct::new(k16)),
+        "present80" => bench_block(Present80::new(k10), bytes),
+        "present80ct" => bench_block(Present80Ct::new(k10), bytes),
+        "present128" => bench_block(Present128::new(k16), bytes),
+        "present128ct" => bench_block(Present128Ct::new(k16), bytes),
         // ── SEED ──────────────────────────────────────────────────────────────
-        "seed" => bench_block(Seed::new(k16)),
-        "seedct" => bench_block(SeedCt::new(k16)),
+        "seed" => bench_block(Seed::new(k16), bytes),
+        "seedct" => bench_block(SeedCt::new(k16), bytes),
         // ── Serpent ───────────────────────────────────────────────────────────
-        "serpent128" => bench_block(Serpent128::new(k16)),
-        "serpent128ct" => bench_block(Serpent128Ct::new(k16)),
-        "serpent192" => bench_block(Serpent192::new(k24)),
-        "serpent192ct" => bench_block(Serpent192Ct::new(k24)),
-        "serpent256" => bench_block(Serpent256::new(k32)),
-        "serpent256ct" => bench_block(Serpent256Ct::new(k32)),
+        "serpent128" => bench_block(Serpent128::new(k16), bytes),
+        "serpent128ct" => bench_block(Serpent128Ct::new(k16), bytes),
+        "serpent192" => bench_block(Serpent192::new(k24), bytes),
+        "serpent192ct" => bench_block(Serpent192Ct::new(k24), bytes),
+        "serpent256" => bench_block(Serpent256::new(k32), bytes),
+        "serpent256ct" => bench_block(Serpent256Ct::new(k32), bytes),
         // ── SM4 ───────────────────────────────────────────────────────────────
-        "sm4" => bench_block(Sm4::new(k16)),
-        "sm4ct" => bench_block(Sm4Ct::new(k16)),
+        "sm4" => bench_block(Sm4::new(k16), bytes),
+        "sm4ct" => bench_block(Sm4Ct::new(k16), bytes),
         // ── Twofish ───────────────────────────────────────────────────────────
-        "twofish128" => bench_block(Twofish128::new(k16)),
-        "twofish128ct" => bench_block(Twofish128Ct::new(k16)),
-        "twofish192" => bench_block(Twofish192::new(k24)),
-        "twofish192ct" => bench_block(Twofish192Ct::new(k24)),
-        "twofish256" => bench_block(Twofish256::new(k32)),
-        "twofish256ct" => bench_block(Twofish256Ct::new(k32)),
+        "twofish128" => bench_block(Twofish128::new(k16), bytes),
+        "twofish128ct" => bench_block(Twofish128Ct::new(k16), bytes),
+        "twofish192" => bench_block(Twofish192::new(k24), bytes),
+        "twofish192ct" => bench_block(Twofish192Ct::new(k24), bytes),
+        "twofish256" => bench_block(Twofish256::new(k32), bytes),
+        "twofish256ct" => bench_block(Twofish256Ct::new(k32), bytes),
         // ── Simon ─────────────────────────────────────────────────────────────
-        "simon32_64" => bench_block(Simon32_64::new(k8)),
-        "simon48_72" => bench_block(Simon48_72::new(k9)),
-        "simon48_96" => bench_block(Simon48_96::new(k12)),
-        "simon64_96" => bench_block(Simon64_96::new(k12)),
-        "simon64_128" => bench_block(Simon64_128::new(k16)),
-        "simon96_96" => bench_block(Simon96_96::new(k12)),
-        "simon96_144" => bench_block(Simon96_144::new(k18)),
-        "simon128_128" => bench_block(Simon128_128::new(k16)),
-        "simon128_192" => bench_block(Simon128_192::new(k24)),
-        "simon128_256" => bench_block(Simon128_256::new(k32)),
+        "simon32_64" => bench_block(Simon32_64::new(k8), bytes),
+        "simon48_72" => bench_block(Simon48_72::new(k9), bytes),
+        "simon48_96" => bench_block(Simon48_96::new(k12), bytes),
+        "simon64_96" => bench_block(Simon64_96::new(k12), bytes),
+        "simon64_128" => bench_block(Simon64_128::new(k16), bytes),
+        "simon96_96" => bench_block(Simon96_96::new(k12), bytes),
+        "simon96_144" => bench_block(Simon96_144::new(k18), bytes),
+        "simon128_128" => bench_block(Simon128_128::new(k16), bytes),
+        "simon128_192" => bench_block(Simon128_192::new(k24), bytes),
+        "simon128_256" => bench_block(Simon128_256::new(k32), bytes),
         // ── Speck ─────────────────────────────────────────────────────────────
-        "speck32_64" => bench_block(Speck32_64::new(k8)),
-        "speck48_72" => bench_block(Speck48_72::new(k9)),
-        "speck48_96" => bench_block(Speck48_96::new(k12)),
-        "speck64_96" => bench_block(Speck64_96::new(k12)),
-        "speck64_128" => bench_block(Speck64_128::new(k16)),
-        "speck96_96" => bench_block(Speck96_96::new(k12)),
-        "speck96_144" => bench_block(Speck96_144::new(k18)),
-        "speck128_128" => bench_block(Speck128_128::new(k16)),
-        "speck128_192" => bench_block(Speck128_192::new(k24)),
-        "speck128_256" => bench_block(Speck128_256::new(k32)),
+        "speck32_64" => bench_block(Speck32_64::new(k8), bytes),
+        "speck48_72" => bench_block(Speck48_72::new(k9), bytes),
+        "speck48_96" => bench_block(Speck48_96::new(k12), bytes),
+        "speck64_96" => bench_block(Speck64_96::new(k12), bytes),
+        "speck64_128" => bench_block(Speck64_128::new(k16), bytes),
+        "speck96_96" => bench_block(Speck96_96::new(k12), bytes),
+        "speck96_144" => bench_block(Speck96_144::new(k18), bytes),
+        "speck128_128" => bench_block(Speck128_128::new(k16), bytes),
+        "speck128_192" => bench_block(Speck128_192::new(k24), bytes),
+        "speck128_256" => bench_block(Speck128_256::new(k32), bytes),
         // ── Stream ciphers ────────────────────────────────────────────────────
         "chacha20" => {
             let nonce = &[0u8; 12];
-            bench_stream(|buf| {
-                ChaCha20::new(k32, nonce).apply_keystream(buf);
-            })
+            bench_stream(
+                |buf| {
+                    ChaCha20::new(k32, nonce).apply_keystream(buf);
+                },
+                bytes,
+            )
         }
         "xchacha20" => {
             let nonce = &[0u8; 24];
-            bench_stream(|buf| {
-                XChaCha20::new(k32, nonce).apply_keystream(buf);
-            })
+            bench_stream(
+                |buf| {
+                    XChaCha20::new(k32, nonce).apply_keystream(buf);
+                },
+                bytes,
+            )
         }
         "salsa20" => {
             let nonce = &[0u8; 8];
-            bench_stream(|buf| {
-                Salsa20::new(k32, nonce).apply_keystream(buf);
-            })
+            bench_stream(
+                |buf| {
+                    Salsa20::new(k32, nonce).apply_keystream(buf);
+                },
+                bytes,
+            )
         }
         "rabbit" => {
             let iv = &[0u8; 8];
-            bench_stream(|buf| {
-                Rabbit::new(k16, iv).apply_keystream(buf);
-            })
+            bench_stream(
+                |buf| {
+                    Rabbit::new(k16, iv).apply_keystream(buf);
+                },
+                bytes,
+            )
         }
         "zuc128" => {
             let iv = &[0u8; 16];
-            bench_stream(|buf| {
-                Zuc128::new(k16, iv).fill(buf);
-            })
+            bench_stream(
+                |buf| {
+                    Zuc128::new(k16, iv).fill(buf);
+                },
+                bytes,
+            )
         }
         "zuc128ct" => {
             let iv = &[0u8; 16];
-            bench_stream(|buf| {
-                Zuc128Ct::new(k16, iv).fill(buf);
-            })
+            bench_stream(
+                |buf| {
+                    Zuc128Ct::new(k16, iv).fill(buf);
+                },
+                bytes,
+            )
         }
         "snow3g" => {
             let iv = &[0u8; 16];
-            bench_stream(|buf| {
-                Snow3g::new(k16, iv).fill(buf);
-            })
+            bench_stream(
+                |buf| {
+                    Snow3g::new(k16, iv).fill(buf);
+                },
+                bytes,
+            )
         }
         "snow3gct" => {
             let iv = &[0u8; 16];
-            bench_stream(|buf| {
-                Snow3gCt::new(k16, iv).fill(buf);
-            })
+            bench_stream(
+                |buf| {
+                    Snow3gCt::new(k16, iv).fill(buf);
+                },
+                bytes,
+            )
         }
         _ => {
             eprintln!("unknown cipher: {}", name);

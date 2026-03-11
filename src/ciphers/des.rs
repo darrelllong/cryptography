@@ -548,6 +548,9 @@ pub struct DesCt {
 
 impl Des {
     /// Create a new DES instance from an 8-byte key.
+    ///
+    /// This constructor accepts the key verbatim and does not reject known
+    /// weak or semi-weak DES keys.
     #[must_use]
     pub fn new(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
@@ -584,6 +587,8 @@ impl Des {
 
 impl DesCt {
     /// Create a new constant-time DES instance from an 8-byte key.
+    ///
+    /// Like [`Des::new`], this does not screen out weak or semi-weak DES keys.
     #[must_use]
     pub fn new(key: &[u8; 8]) -> Self {
         let k = u64::from_be_bytes(*key);
@@ -1257,5 +1262,61 @@ mod tests {
             cipher.encrypt_block(&hex_to_bytes8(pt_hex)).as_slice(),
             expected.as_slice()
         );
+    }
+
+    #[test]
+    fn des_weak_keys_are_accepted_and_are_self_inverse() {
+        // FIPS 74 / NIST weak-key set: these keys generate identical round keys,
+        // so E_k(E_k(x)) = x for every block x.
+        let weak_keys: [[u8; 8]; 4] = [
+            hex_to_bytes8("0101010101010101"),
+            hex_to_bytes8("FEFEFEFEFEFEFEFE"),
+            hex_to_bytes8("E0E0E0E0F1F1F1F1"),
+            hex_to_bytes8("1F1F1F1F0E0E0E0E"),
+        ];
+        let pt = hex_to_bytes8("0123456789ABCDEF");
+        for key in weak_keys {
+            let des = Des::new(&key);
+            let ct = des.encrypt_block(&pt);
+            assert_eq!(des.encrypt_block(&ct), pt, "weak key must be self-inverse");
+        }
+    }
+
+    #[test]
+    fn des_semi_weak_key_pairs_are_accepted() {
+        // Semi-weak pairs: encryption under one key equals decryption under its pair.
+        let pairs: [([u8; 8], [u8; 8]); 6] = [
+            (
+                hex_to_bytes8("01FE01FE01FE01FE"),
+                hex_to_bytes8("FE01FE01FE01FE01"),
+            ),
+            (
+                hex_to_bytes8("1FE01FE00EF10EF1"),
+                hex_to_bytes8("E01FE01FF10EF10E"),
+            ),
+            (
+                hex_to_bytes8("01E001E001F101F1"),
+                hex_to_bytes8("E001E001F101F101"),
+            ),
+            (
+                hex_to_bytes8("1FFE1FFE0EFE0EFE"),
+                hex_to_bytes8("FE1FFE1FFE0EFE0E"),
+            ),
+            (
+                hex_to_bytes8("011F011F010E010E"),
+                hex_to_bytes8("1F011F010E010E01"),
+            ),
+            (
+                hex_to_bytes8("E0FEE0FEF1FEF1FE"),
+                hex_to_bytes8("FEE0FEE0FEF1FEF1"),
+            ),
+        ];
+        let pt = hex_to_bytes8("0123456789ABCDEF");
+        for (k1, k2) in pairs {
+            let des1 = Des::new(&k1);
+            let des2 = Des::new(&k2);
+            assert_eq!(des2.encrypt_block(&des1.encrypt_block(&pt)), pt);
+            assert_eq!(des1.encrypt_block(&des2.encrypt_block(&pt)), pt);
+        }
     }
 }

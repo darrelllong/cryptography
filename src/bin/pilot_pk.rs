@@ -5,7 +5,7 @@
 /// Performs the named operation N times and prints ms/op to stdout.
 /// Pilot-bench calls this repeatedly until statistical confidence is reached.
 ///
-/// EC / Edwards (fast; N = 500–1000):
+/// EC / Edwards (base N = 500–1000 before scaling):
 ///   ecdsa_keygen, ecdsa_sign, ecdsa_verify
 ///   ecdh_keygen, ecdh_agree, ecdh_serialize
 ///   ecies_keygen, ecies_encrypt, ecies_decrypt
@@ -14,7 +14,7 @@
 ///   edwards_dh_keygen, edwards_dh_agree, edwards_dh_serialize
 ///   edwards_elgamal_keygen, edwards_elgamal_encrypt, edwards_elgamal_decrypt
 ///
-/// Integer-arithmetic (slow; N = 3–5000):
+/// Integer-arithmetic (base N = 3–5000 before scaling):
 ///   dsa_keygen_1024, dsa_sign_1024, dsa_verify_1024
 ///   elgamal_keygen_1024, elgamal_encrypt_1024, elgamal_decrypt_1024
 ///   paillier_keygen_1024, paillier_encrypt_1024, paillier_decrypt_1024
@@ -33,7 +33,10 @@
 ///   mldsa44_keygen, mldsa44_sign, mldsa44_verify
 ///   mldsa65_keygen, mldsa65_sign, mldsa65_verify
 ///   mldsa87_keygen, mldsa87_sign, mldsa87_verify
+///
+/// Iteration scaling: set `PILOT_PK_ITERS_PERCENT` (1..=100). Default: 25.
 use std::hint::black_box;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
@@ -54,6 +57,18 @@ fn ms_per_op(elapsed: std::time::Duration, n: usize) -> f64 {
     elapsed.as_secs_f64() * 1000.0 / n as f64
 }
 
+fn pk_iters(base: usize) -> usize {
+    static SCALE_PERCENT: OnceLock<usize> = OnceLock::new();
+    let scale = *SCALE_PERCENT.get_or_init(|| {
+        std::env::var("PILOT_PK_ITERS_PERCENT")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|v| v.clamp(1, 100))
+            .unwrap_or(25)
+    });
+    base.saturating_mul(scale).div_ceil(100).max(1)
+}
+
 fn main() {
     let op = std::env::args().nth(1).unwrap_or_else(|| {
         eprintln!("usage: pilot_pk <operation>");
@@ -65,7 +80,7 @@ fn main() {
     let ms: f64 = match op.to_ascii_lowercase().as_str() {
         // ── ECDSA (P-256) ─────────────────────────────────────────────────────
         "ecdsa_keygen" => {
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Ecdsa::generate(p256(), &mut rng));
@@ -74,7 +89,7 @@ fn main() {
         }
         "ecdsa_sign" => {
             let (_, priv_key) = Ecdsa::generate(p256(), &mut rng);
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap());
@@ -84,7 +99,7 @@ fn main() {
         "ecdsa_verify" => {
             let (pub_key, priv_key) = Ecdsa::generate(p256(), &mut rng);
             let sig = priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap();
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.verify_message_bytes::<Sha256>(&MSG, &sig));
@@ -93,7 +108,7 @@ fn main() {
         }
         // ── ECDH (P-256) ──────────────────────────────────────────────────────
         "ecdh_keygen" => {
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Ecdh::generate(p256(), &mut rng));
@@ -103,7 +118,7 @@ fn main() {
         "ecdh_agree" => {
             let (pub_a, _) = Ecdh::generate(p256(), &mut rng);
             let (_, priv_b) = Ecdh::generate(p256(), &mut rng);
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_b.agree_x_coordinate(&pub_a).unwrap());
@@ -112,7 +127,7 @@ fn main() {
         }
         "ecdh_serialize" => {
             let (pub_key, _) = Ecdh::generate(p256(), &mut rng);
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.to_wire_bytes());
@@ -121,7 +136,7 @@ fn main() {
         }
         // ── ECIES (P-256) ─────────────────────────────────────────────────────
         "ecies_keygen" => {
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Ecies::generate(p256(), &mut rng));
@@ -130,7 +145,7 @@ fn main() {
         }
         "ecies_encrypt" => {
             let (pub_key, _) = Ecies::generate(p256(), &mut rng);
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt(&MSG, &mut rng));
@@ -140,7 +155,7 @@ fn main() {
         "ecies_decrypt" => {
             let (pub_key, priv_key) = Ecies::generate(p256(), &mut rng);
             let ct = pub_key.encrypt(&MSG, &mut rng);
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt(&ct).unwrap());
@@ -149,7 +164,7 @@ fn main() {
         }
         // ── EC ElGamal (P-256) ────────────────────────────────────────────────
         "ec_elgamal_keygen" => {
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(EcElGamal::generate(p256(), &mut rng));
@@ -158,7 +173,7 @@ fn main() {
         }
         "ec_elgamal_encrypt" => {
             let (pub_key, _) = EcElGamal::generate(p256(), &mut rng);
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt(&EC_MSG, &mut rng).unwrap());
@@ -168,7 +183,7 @@ fn main() {
         "ec_elgamal_decrypt" => {
             let (pub_key, priv_key) = EcElGamal::generate(p256(), &mut rng);
             let ct = pub_key.encrypt(&EC_MSG, &mut rng).unwrap();
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt(&ct));
@@ -177,7 +192,7 @@ fn main() {
         }
         // ── Ed25519 ───────────────────────────────────────────────────────────
         "ed25519_keygen" => {
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Ed25519::generate(&mut rng));
@@ -186,7 +201,7 @@ fn main() {
         }
         "ed25519_sign" => {
             let (_, priv_key) = Ed25519::generate(&mut rng);
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.sign_message_bytes(&MSG));
@@ -196,7 +211,7 @@ fn main() {
         "ed25519_verify" => {
             let (pub_key, priv_key) = Ed25519::generate(&mut rng);
             let sig = priv_key.sign_message_bytes(&MSG);
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.verify_message_bytes(&MSG, &sig));
@@ -207,7 +222,7 @@ fn main() {
         "edwards_dh_agree" => {
             let (pub_a, _) = EdwardsDh::generate(ed25519_curve(), &mut rng);
             let (_, priv_b) = EdwardsDh::generate(ed25519_curve(), &mut rng);
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_b.agree_compressed_point(&pub_a).unwrap());
@@ -215,7 +230,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "edwards_dh_keygen" => {
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(EdwardsDh::generate(ed25519_curve(), &mut rng));
@@ -224,7 +239,7 @@ fn main() {
         }
         "edwards_dh_serialize" => {
             let (pub_key, _) = EdwardsDh::generate(ed25519_curve(), &mut rng);
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.to_wire_bytes());
@@ -233,7 +248,7 @@ fn main() {
         }
         // ── Edwards ElGamal (Ed25519 curve) ───────────────────────────────────
         "edwards_elgamal_keygen" => {
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(EdwardsElGamal::generate(ed25519_curve(), &mut rng));
@@ -242,7 +257,7 @@ fn main() {
         }
         "edwards_elgamal_encrypt" => {
             let (pub_key, _) = EdwardsElGamal::generate(ed25519_curve(), &mut rng);
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt_int(7, &mut rng));
@@ -252,7 +267,7 @@ fn main() {
         "edwards_elgamal_decrypt" => {
             let (pub_key, priv_key) = EdwardsElGamal::generate(ed25519_curve(), &mut rng);
             let ct = pub_key.encrypt_int(7, &mut rng);
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt_int(&ct, 32).unwrap());
@@ -261,7 +276,7 @@ fn main() {
         }
         // ── DSA (1024-bit) ────────────────────────────────────────────────────
         "dsa_keygen_1024" => {
-            let n = 10;
+            let n = pk_iters(10);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Dsa::generate(&mut rng, 1024).unwrap());
@@ -270,7 +285,7 @@ fn main() {
         }
         "dsa_sign_1024" => {
             let (_, priv_key) = Dsa::generate(&mut rng, 1024).unwrap();
-            let n = 100;
+            let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap());
@@ -280,7 +295,7 @@ fn main() {
         "dsa_verify_1024" => {
             let (pub_key, priv_key) = Dsa::generate(&mut rng, 1024).unwrap();
             let sig = priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap();
-            let n = 100;
+            let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.verify_message_bytes::<Sha256>(&MSG, &sig));
@@ -289,7 +304,7 @@ fn main() {
         }
         // ── ElGamal (1024-bit) ────────────────────────────────────────────────
         "elgamal_keygen_1024" => {
-            let n = 5;
+            let n = pk_iters(5);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(ElGamal::generate(&mut rng, 1024).unwrap());
@@ -298,7 +313,7 @@ fn main() {
         }
         "elgamal_encrypt_1024" => {
             let (pub_key, _) = ElGamal::generate(&mut rng, 1024).unwrap();
-            let n = 100;
+            let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt(&MSG, &mut rng).unwrap());
@@ -308,7 +323,7 @@ fn main() {
         "elgamal_decrypt_1024" => {
             let (pub_key, priv_key) = ElGamal::generate(&mut rng, 1024).unwrap();
             let ct = pub_key.encrypt(&MSG, &mut rng).unwrap();
-            let n = 100;
+            let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt(&ct));
@@ -317,7 +332,7 @@ fn main() {
         }
         // ── Paillier (1024-bit) ───────────────────────────────────────────────
         "paillier_keygen_1024" => {
-            let n = 20;
+            let n = pk_iters(20);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Paillier::generate(&mut rng, 1024).unwrap());
@@ -326,7 +341,7 @@ fn main() {
         }
         "paillier_encrypt_1024" => {
             let (pub_key, _) = Paillier::generate(&mut rng, 1024).unwrap();
-            let n = 30;
+            let n = pk_iters(30);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt(&MSG, &mut rng).unwrap());
@@ -336,7 +351,7 @@ fn main() {
         "paillier_decrypt_1024" => {
             let (pub_key, priv_key) = Paillier::generate(&mut rng, 1024).unwrap();
             let ct = pub_key.encrypt(&MSG, &mut rng).unwrap();
-            let n = 30;
+            let n = pk_iters(30);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt(&ct));
@@ -346,7 +361,7 @@ fn main() {
         "paillier_rerandomize_1024" => {
             let (pub_key, _) = Paillier::generate(&mut rng, 1024).unwrap();
             let ct = pub_key.encrypt(&MSG, &mut rng).unwrap();
-            let n = 50;
+            let n = pk_iters(50);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.rerandomize(&ct, &mut rng).unwrap());
@@ -357,7 +372,7 @@ fn main() {
             let (pub_key, priv_key) = Paillier::generate(&mut rng, 1024).unwrap();
             let ct_a = pub_key.encrypt(&MSG, &mut rng).unwrap();
             let ct_b = pub_key.encrypt(&[0x01], &mut rng).unwrap();
-            let n = 2000;
+            let n = pk_iters(2000);
             let mut combined = pub_key.add_ciphertexts(&ct_a, &ct_b).unwrap();
             let t0 = Instant::now();
             for _ in 0..n {
@@ -370,7 +385,7 @@ fn main() {
         }
         // ── Cocks (1024-bit) ──────────────────────────────────────────────────
         "cocks_keygen_1024" => {
-            let n = 20;
+            let n = pk_iters(20);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Cocks::generate(&mut rng, 1024).unwrap());
@@ -379,7 +394,7 @@ fn main() {
         }
         "cocks_encrypt_1024" => {
             let (pub_key, _) = Cocks::generate(&mut rng, 1024).unwrap();
-            let n = 300;
+            let n = pk_iters(300);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt(&MSG).unwrap());
@@ -389,7 +404,7 @@ fn main() {
         "cocks_decrypt_1024" => {
             let (pub_key, priv_key) = Cocks::generate(&mut rng, 1024).unwrap();
             let ct = pub_key.encrypt(&MSG).unwrap();
-            let n = 1500;
+            let n = pk_iters(1500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt(&ct));
@@ -398,7 +413,7 @@ fn main() {
         }
         // ── Rabin (1024-bit) ──────────────────────────────────────────────────
         "rabin_keygen_1024" => {
-            let n = 20;
+            let n = pk_iters(20);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Rabin::generate(&mut rng, 1024).unwrap());
@@ -407,7 +422,7 @@ fn main() {
         }
         "rabin_encrypt_1024" => {
             let (pub_key, _) = Rabin::generate(&mut rng, 1024).unwrap();
-            let n = 5000;
+            let n = pk_iters(5000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt(&MSG).unwrap());
@@ -417,7 +432,7 @@ fn main() {
         "rabin_decrypt_1024" => {
             let (pub_key, priv_key) = Rabin::generate(&mut rng, 1024).unwrap();
             let ct = pub_key.encrypt(&MSG).unwrap();
-            let n = 200;
+            let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt(&ct).unwrap());
@@ -426,7 +441,7 @@ fn main() {
         }
         // ── Schmidt-Samoa (1024-bit) ──────────────────────────────────────────
         "schmidt_samoa_keygen_1024" => {
-            let n = 20;
+            let n = pk_iters(20);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(SchmidtSamoa::generate(&mut rng, 1024).unwrap());
@@ -435,7 +450,7 @@ fn main() {
         }
         "schmidt_samoa_encrypt_1024" => {
             let (pub_key, _) = SchmidtSamoa::generate(&mut rng, 1024).unwrap();
-            let n = 300;
+            let n = pk_iters(300);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(pub_key.encrypt(&MSG).unwrap());
@@ -445,7 +460,7 @@ fn main() {
         "schmidt_samoa_decrypt_1024" => {
             let (pub_key, priv_key) = SchmidtSamoa::generate(&mut rng, 1024).unwrap();
             let ct = pub_key.encrypt(&MSG).unwrap();
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(priv_key.decrypt(&ct));
@@ -454,7 +469,7 @@ fn main() {
         }
         // ── RSA (1024-bit) ────────────────────────────────────────────────────
         "rsa_keygen_1024" => {
-            let n = 10;
+            let n = pk_iters(10);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Rsa::generate(&mut rng, 1024).unwrap());
@@ -463,7 +478,7 @@ fn main() {
         }
         "rsa_encrypt_1024" => {
             let (pub_key, _) = Rsa::generate(&mut rng, 1024).unwrap();
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(
@@ -475,7 +490,7 @@ fn main() {
         "rsa_decrypt_1024" => {
             let (pub_key, priv_key) = Rsa::generate(&mut rng, 1024).unwrap();
             let ct = RsaOaep::<Sha256>::encrypt(&pub_key, OAEP_LABEL, &MSG, &OAEP_SEED).unwrap();
-            let n = 100;
+            let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(RsaOaep::<Sha256>::decrypt(&priv_key, OAEP_LABEL, &ct).unwrap());
@@ -484,7 +499,7 @@ fn main() {
         }
         "rsa_sign_1024" => {
             let (_, priv_key) = Rsa::generate(&mut rng, 1024).unwrap();
-            let n = 100;
+            let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(RsaPss::<Sha256>::sign(&priv_key, &MSG, &PSS_SALT).unwrap());
@@ -494,7 +509,7 @@ fn main() {
         "rsa_verify_1024" => {
             let (pub_key, priv_key) = Rsa::generate(&mut rng, 1024).unwrap();
             let sig = RsaPss::<Sha256>::sign(&priv_key, &MSG, &PSS_SALT).unwrap();
-            let n = 1000;
+            let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(RsaPss::<Sha256>::verify(&pub_key, &MSG, &sig));
@@ -503,7 +518,7 @@ fn main() {
         }
         // ── RSA (2048-bit) ────────────────────────────────────────────────────
         "rsa_keygen_2048" => {
-            let n = 3;
+            let n = pk_iters(3);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(Rsa::generate(&mut rng, 2048).unwrap());
@@ -512,7 +527,7 @@ fn main() {
         }
         "rsa_encrypt_2048" => {
             let (pub_key, _) = Rsa::generate(&mut rng, 2048).unwrap();
-            let n = 500;
+            let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(
@@ -524,7 +539,7 @@ fn main() {
         "rsa_decrypt_2048" => {
             let (pub_key, priv_key) = Rsa::generate(&mut rng, 2048).unwrap();
             let ct = RsaOaep::<Sha256>::encrypt(&pub_key, OAEP_LABEL, &MSG, &OAEP_SEED).unwrap();
-            let n = 20;
+            let n = pk_iters(20);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(RsaOaep::<Sha256>::decrypt(&priv_key, OAEP_LABEL, &ct).unwrap());
@@ -533,7 +548,7 @@ fn main() {
         }
         "rsa_sign_2048" => {
             let (_, priv_key) = Rsa::generate(&mut rng, 2048).unwrap();
-            let n = 20;
+            let n = pk_iters(20);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(RsaPss::<Sha256>::sign(&priv_key, &MSG, &PSS_SALT).unwrap());
@@ -543,7 +558,7 @@ fn main() {
         "rsa_verify_2048" => {
             let (pub_key, priv_key) = Rsa::generate(&mut rng, 2048).unwrap();
             let sig = RsaPss::<Sha256>::sign(&priv_key, &MSG, &PSS_SALT).unwrap();
-            let n = 200;
+            let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(RsaPss::<Sha256>::verify(&pub_key, &MSG, &sig));
@@ -552,7 +567,7 @@ fn main() {
         }
         // ── ML-KEM (Kyber) ───────────────────────────────────────────────────
         "mlkem512_keygen" => {
-            let n = 200;
+            let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::keygen(MlKemParameterSet::MlKem512, &mut rng).unwrap());
@@ -561,7 +576,7 @@ fn main() {
         }
         "mlkem512_encaps" => {
             let (pk, _) = MlKem::keygen(MlKemParameterSet::MlKem512, &mut rng).unwrap();
-            let n = 200;
+            let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::encaps(&pk, &mut rng).unwrap());
@@ -571,7 +586,7 @@ fn main() {
         "mlkem512_decaps" => {
             let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem512, &mut rng).unwrap();
             let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
-            let n = 200;
+            let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::decaps(&sk, &ct).unwrap());
@@ -579,7 +594,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "mlkem768_keygen" => {
-            let n = 120;
+            let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).unwrap());
@@ -588,7 +603,7 @@ fn main() {
         }
         "mlkem768_encaps" => {
             let (pk, _) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).unwrap();
-            let n = 120;
+            let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::encaps(&pk, &mut rng).unwrap());
@@ -598,7 +613,7 @@ fn main() {
         "mlkem768_decaps" => {
             let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).unwrap();
             let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
-            let n = 120;
+            let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::decaps(&sk, &ct).unwrap());
@@ -606,7 +621,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "mlkem1024_keygen" => {
-            let n = 80;
+            let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::keygen(MlKemParameterSet::MlKem1024, &mut rng).unwrap());
@@ -615,7 +630,7 @@ fn main() {
         }
         "mlkem1024_encaps" => {
             let (pk, _) = MlKem::keygen(MlKemParameterSet::MlKem1024, &mut rng).unwrap();
-            let n = 80;
+            let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::encaps(&pk, &mut rng).unwrap());
@@ -625,7 +640,7 @@ fn main() {
         "mlkem1024_decaps" => {
             let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem1024, &mut rng).unwrap();
             let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
-            let n = 80;
+            let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlKem::decaps(&sk, &ct).unwrap());
@@ -634,7 +649,7 @@ fn main() {
         }
         // ── ML-DSA (Dilithium) ───────────────────────────────────────────────
         "mldsa44_keygen" => {
-            let n = 120;
+            let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap());
@@ -643,7 +658,7 @@ fn main() {
         }
         "mldsa44_sign" => {
             let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap();
-            let n = 120;
+            let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
@@ -653,7 +668,7 @@ fn main() {
         "mldsa44_verify" => {
             let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap();
             let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
-            let n = 120;
+            let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::verify(&pk, &MSG, &sig));
@@ -661,7 +676,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa65_keygen" => {
-            let n = 80;
+            let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap());
@@ -670,7 +685,7 @@ fn main() {
         }
         "mldsa65_sign" => {
             let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap();
-            let n = 80;
+            let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
@@ -680,7 +695,7 @@ fn main() {
         "mldsa65_verify" => {
             let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap();
             let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
-            let n = 80;
+            let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::verify(&pk, &MSG, &sig));
@@ -688,7 +703,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa87_keygen" => {
-            let n = 60;
+            let n = pk_iters(60);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap());
@@ -697,7 +712,7 @@ fn main() {
         }
         "mldsa87_sign" => {
             let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap();
-            let n = 60;
+            let n = pk_iters(60);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
@@ -707,7 +722,7 @@ fn main() {
         "mldsa87_verify" => {
             let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap();
             let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
-            let n = 60;
+            let n = pk_iters(60);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::verify(&pk, &MSG, &sig));

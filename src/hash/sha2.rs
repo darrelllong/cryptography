@@ -12,6 +12,8 @@
 
 use super::Digest;
 
+// FIPS 180-4 §4.2.2: first 32 bits of the fractional parts of the cube roots
+// of the first 64 primes (2..311).
 const K32: [u32; 64] = [
     0x428a_2f98,
     0x7137_4491,
@@ -79,6 +81,8 @@ const K32: [u32; 64] = [
     0xc671_78f2,
 ];
 
+// FIPS 180-4 §4.2.3: first 64 bits of the fractional parts of the cube roots
+// of the first 80 primes (2..409).
 const K64: [u64; 80] = [
     0x428a_2f98_d728_ae22,
     0x7137_4491_23ef_65cd,
@@ -606,6 +610,7 @@ macro_rules! define_sha2_64 {
     };
 }
 
+// FIPS 180-4 §5.3.2 initial hash value H(0) for SHA-224.
 define_sha2_32!(
     Sha224,
     28,
@@ -621,6 +626,7 @@ define_sha2_32!(
     ]
 );
 
+// FIPS 180-4 §5.3.3 initial hash value H(0) for SHA-256.
 define_sha2_32!(
     Sha256,
     32,
@@ -636,6 +642,7 @@ define_sha2_32!(
     ]
 );
 
+// FIPS 180-4 §5.3.4 initial hash value H(0) for SHA-384.
 define_sha2_64!(
     Sha384,
     48,
@@ -651,6 +658,7 @@ define_sha2_64!(
     ]
 );
 
+// FIPS 180-4 §5.3.5 initial hash value H(0) for SHA-512.
 define_sha2_64!(
     Sha512,
     64,
@@ -666,6 +674,7 @@ define_sha2_64!(
     ]
 );
 
+// FIPS 180-4 §5.3.6 initial hash value H(0) for SHA-512/224.
 define_sha2_64!(
     Sha512_224,
     28,
@@ -681,6 +690,7 @@ define_sha2_64!(
     ]
 );
 
+// FIPS 180-4 §5.3.7 initial hash value H(0) for SHA-512/256.
 define_sha2_64!(
     Sha512_256,
     32,

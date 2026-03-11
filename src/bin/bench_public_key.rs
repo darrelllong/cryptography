@@ -1,3 +1,19 @@
+//! Latency benchmark for variable-time public-key primitives in `cryptography::vt`.
+//!
+//! This binary reports one-shot operation latency in milliseconds (`ms/op`) for:
+//! key generation, encryption/decryption, signing/verification, and agreement.
+//! It is intentionally simple so it can be wrapped by Pilot or shell scripts.
+//!
+//! Usage:
+//! - `cargo run --release --bin bench_public_key -- 1024`
+//! - `cargo run --release --bin bench_public_key -- 2048 --skip-dsa`
+//! - `cargo run --release --bin bench_public_key -- 2048 --skip-elgamal`
+//!
+//! Notes:
+//! - The positional integer argument is finite-field key size in bits.
+//! - EC/Edwards operations are benchmarked on fixed curves (`p256`, `ed25519`).
+//! - Output values are wall-clock durations per operation, not throughput.
+
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
@@ -12,6 +28,7 @@ use cryptography::{CtrDrbgAes256, Sha256};
 const MESSAGE: [u8; 32] = [0x42; 32];
 const EC_MESSAGE: [u8; 16] = [0x24; 16];
 const OAEP_LABEL: &[u8] = b"cryptography-rsa-oaep";
+// Fixed OAEP/PSS randomness keeps benchmark input deterministic across runs.
 const OAEP_SEED: [u8; 32] = [0x11; 32];
 const PSS_SALT: [u8; 32] = [0x22; 32];
 

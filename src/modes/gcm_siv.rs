@@ -59,7 +59,7 @@ fn polyval(h: [u8; 16], input: &[u8]) -> [u8; 16] {
 #[inline]
 fn pad16(input: &[u8], out: &mut Vec<u8>) {
     out.extend_from_slice(input);
-    if input.len() % 16 != 0 {
+    if !input.len().is_multiple_of(16) {
         out.resize(out.len() + (16 - (input.len() % 16)), 0);
     }
 }

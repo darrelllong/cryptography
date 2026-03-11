@@ -70,21 +70,23 @@ Level 1 remains the right place for arithmetic tests and direct cross-checks.
 Level 2 is the normal typed interface. Level 3 is the byte-oriented convenience
 layer for schemes that naturally have one.
 
-## Migration Notes (Breaking Sweep)
+## Naming Conventions
 
-API cleanup now enforces explicit naming and side-channel intent:
+Naming follows explicit intent throughout:
 
-- `to_binary` / `from_binary` -> `to_key_blob` / `from_key_blob`
-- `to_bytes` / `from_bytes` -> `to_wire_bytes` / `from_wire_bytes`
-- `sign_with_k` -> `sign_digest_with_nonce`
-- `verify_raw` -> `verify_digest_scalar`
-- DH agreement methods are now explicit by returned form:
+- Serialization distinguishes compact from self-describing formats:
+  `to_key_blob` / `from_key_blob` for the crate-defined binary blob,
+  `to_wire_bytes` / `from_wire_bytes` for compact standard encodings.
+- Deterministic or caller-supplied randomness entry points use
+  `sign_digest_with_nonce` rather than generic `sign_with_k`.
+- Verification of precomputed digests uses `verify_digest_scalar`.
+- DH agreement methods name the returned form explicitly:
   - finite-field DH: `agree_element`
   - short-Weierstrass ECDH: `agree_x_coordinate`
   - Edwards DH: `agree_compressed_point`
 
-Public-key exports are now intentionally grouped under `cryptography::vt` to
-make variable-time behavior explicit at import sites.
+Public-key exports are grouped under `cryptography::vt` to make variable-time
+behavior explicit at import sites.
 
 ## Public-Key Surface
 
@@ -240,10 +242,10 @@ RSA uses PKCS#1, PKCS#8, and SPKI-compatible encodings, so it interoperates
 with external tooling instead of relying on the crate-defined integer-sequence
 format used elsewhere.
 
-One practical caveat matters for the benchmark tables: private operations now
-use CRT recombination (`dP`, `dQ`, `qInv`), which substantially reduces
-`decrypt`/`sign` latency, but the public side still remains much faster because
-it uses the standard sparse `e = 65,537`.
+One practical caveat matters for the benchmark tables: private operations use
+CRT recombination ($d_P$, $d_Q$, $q_{\text{Inv}}$), which substantially reduces
+`decrypt`/`sign` latency, but the public side remains much faster because
+it uses the standard sparse $e = 65{,}537$.
 
 #### ElGamal
 
@@ -257,9 +259,9 @@ Core arithmetic:
 ```
 
 The key-generation path uses a prime-order subgroup construction instead of the
-older safe-prime search. A safe prime is a modulus of the form `p = 2q + 1`
+older safe-prime search. A safe prime is a modulus of the form $p = 2q + 1$
 with `q` prime; it gives simple subgroup structure, but searching for those
-moduli is much slower than generating `p = kq + 1` directly. The
+moduli is much slower than generating $p = kq + 1$ directly. The
 implementation keeps the subgroup structure explicit while avoiding that
 pathological key-generation cost.
 
@@ -313,7 +315,7 @@ and acceptance when:
 The implementation reuses the same prime-order subgroup generation shape as
 `ElGamal`: generated keys store `(p, q, g)` explicitly, and signatures sample
 their per-message nonce from `[1, q)`. The digest representative is reduced to
-the leftmost `N = \mathrm{bits}(q)` bits before signing and verification,
+the leftmost $N = \mathrm{bits}(q)$ bits before signing and verification,
 matching the Digital Signature Standard's treatment of hash outputs that are
 wider than the subgroup order.
 
@@ -323,7 +325,7 @@ For generated keys, the implementation uses:
 N = \mathrm{clamp}(\lfloor L / 4 \rfloor, 16, 256)
 ```
 
-for a modulus size `L = bits(p)`. That is not the exact FIPS menu of `(L, N)`
+for a modulus size $L = \mathrm{bits}(p)$. That is not the exact FIPS menu of $(L, N)$
 pairs (`(1024, 160)`, `(2048, 224)`, `(2048, 256)`, `(3072, 256)`), but it
 keeps the subgroup order conservative for the representative benchmark sizes
 used here while staying within the same finite-field `DSA` structure.
@@ -373,9 +375,9 @@ The private exponent is:
 \pi \equiv p^{-1} \pmod{q - 1}
 ```
 
-and the key observation is the CRT reduction modulo `q`: when
-`c = m^{pq} \bmod n`, raising `c` to `\pi` modulo `q` reduces the exponent
-from `pq\pi` to `q`, so Fermat brings the result back to `m`.
+and the key observation is the CRT reduction modulo $q$: when
+$c = m^{pq} \bmod n$, raising $c$ to $\pi$ modulo $q$ reduces the exponent
+from $pq\pi$ to $q$, so Fermat brings the result back to $m$.
 
 From an API perspective, `Cocks` stays intentionally narrow:
 
@@ -422,8 +424,8 @@ algorithm during decryption.
 
 Rabin is historically important because it is one of the earliest public-key
 trapdoor constructions with a tight reduction story: in the plain setting,
-inverting the squaring map modulo `n = pq` is essentially equivalent to
-factoring `n`. The fixed disambiguation tag used here is what lets the code
+inverting the squaring map modulo $n = pq$ is essentially equivalent to
+factoring $n$. The fixed disambiguation tag used here is what lets the code
 identify the intended root among the four CRT roots and turn the raw squaring
 trapdoor into a deterministic decryptor.
 
@@ -459,7 +461,7 @@ m = L(c^\lambda \bmod n^2)\,\mu \bmod n,\qquad L(u) = \frac{u - 1}{n}
 operations:
 
 - ciphertext rerandomization
-- ciphertext multiplication modulo `n^2`, corresponding to plaintext addition
+- ciphertext multiplication modulo $n^2$, corresponding to plaintext addition
 
 That homomorphic surface is a real part of the scheme, not an extra trick, so
 it is intentionally part of the usable API.
@@ -483,7 +485,7 @@ stay linkable across ciphertext refreshes.
 
 That is the intended way to read the API surface:
 
-- the raw ciphertext type is still just the integer modulo `n^2`
+- the raw ciphertext type is still just the integer modulo $n^2$
 - the byte helpers serialize that integer into a crate-defined framing
 - the homomorphic operations are first-class because they are part of the
   reason to choose the scheme at all
@@ -514,9 +516,10 @@ and decryption:
 m = c^d \bmod \gamma
 ```
 
-The unusual choice `n = p^2 q` is the point of the construction: it gives the
-scheme enough structure to choose `d = n^{-1} mod lcm(p-1, q-1)` and recover
-the plaintext modulo `\gamma = pq`, rather than modulo the full public
+The unusual choice $n = p^2 q$ is the point of the construction: it gives the
+scheme enough structure to choose
+$d \equiv n^{-1} \pmod{\mathrm{lcm}(p-1, q-1)}$ and recover the plaintext
+modulo $\gamma = pq$, rather than modulo the full public
 modulus.
 
 Like Cocks, Schmidt-Samoa uses the modulus itself as the public exponent. It
@@ -627,9 +630,9 @@ single scalar multiplication by the receiver.
 
 **Encryption:**
 
-1. Generate an ephemeral key pair `(k, R)` where `R = k · G`.
-2. Compute the shared point `S = k · Q`.
-3. Derive symmetric key and nonce from `S_x`:
+1. Generate an ephemeral key pair $(k, R)$ where $R = k \cdot G$.
+2. Compute the shared point $S = k \cdot Q$.
+3. Derive symmetric key and nonce from $S_x$:
 
 ```math
 \text{key}   = \mathrm{SHA\text{-}256}(\mathtt{0x01} \mathbin\| S_x)
@@ -637,7 +640,7 @@ single scalar multiplication by the receiver.
 \text{nonce} = \mathrm{SHA\text{-}256}(\mathtt{0x02} \mathbin\| S_x)_{[0..12]}
 ```
 
-4. Encrypt the message with AES-256-GCM, using `R_{\text{bytes}}` as the
+4. Encrypt the message with AES-256-GCM, using $R_{\text{bytes}}$ as the
    additional authenticated data (AAD). The AAD binding prevents `R` from being
    silently swapped without triggering a tag failure.
 
@@ -652,8 +655,8 @@ tag  (16 bytes, GCM authentication tag)
 **Decryption:**
 
 1. Parse `R_bytes` from the front of the ciphertext.
-2. Compute `S = d · R`.
-3. Re-derive key and nonce from `S_x`.
+2. Compute $S = d \cdot R$.
+3. Re-derive key and nonce from $S_x$.
 4. AES-256-GCM decrypt; return `None` if the tag fails.
 
 The GCM tag simultaneously authenticates the ciphertext and the ephemeral
@@ -695,9 +698,9 @@ M = C_2 - d \cdot C_1
 bytes are padded and placed into an x-coordinate candidate; `decode_point` is
 called with the `0x02` compressed prefix until a valid curve point is found.
 The last byte of the padded x-coordinate is an iteration counter
-`j ∈ [0, 255]`; the first byte of the decoded x-coordinate is stripped during
-recovery, leaving the original message bytes. This approach works on every
-named curve in this crate because all have `p ≡ 3 (mod 4)`, which means the
+$j \in [0, 255]$; the first byte of the decoded x-coordinate is stripped
+during recovery, leaving the original message bytes. This approach works on
+every named curve in this crate because all have $p \equiv 3 \pmod{4}$, which means the
 compressed-point square root exists and the iteration succeeds quickly in
 practice.
 
@@ -715,8 +718,8 @@ Homomorphic addition of two ciphertexts:
 (C_1 + C_1',\; C_2 + C_2') \;\xrightarrow{\text{decrypt}}\; (m_1 + m_2) \cdot G
 ```
 
-The integer `m` is recovered from `m \cdot G` via baby-step giant-step (BSGS)
-with `O(\sqrt{\text{max\_m}})` precomputation.
+The integer $m$ is recovered from $m \cdot G$ via baby-step giant-step
+(BSGS) with $O\!\left(\sqrt{\text{max\_m}}\right)$ precomputation.
 
 So `EC-ElGamal` is intentionally the arithmetic-rich counterpart to `ECIES`:
 
@@ -935,10 +938,9 @@ driving `pilot_pk` through:
 bash scripts/bench_all_pk_full.sh
 ```
 
-The legacy `bench_public_key` binary remains useful as a fixed-iteration
-fallback, but the publication-facing numbers below come from Pilot and report
-milliseconds per operation, 95% confidence-interval half-width, and rounds
-required to hit the stop rule. The tables below are parallel runs on:
+The publication-facing numbers below come from Pilot and report milliseconds
+per operation, 95% confidence-interval half-width, and rounds required to hit
+the stop rule. The tables below are parallel runs on:
 
 - Apple M4 Pro (`Dyson.local`)
 - AMD EPYC 7452 (`moore.soe.ucsc.edu`, single-core slice)
@@ -946,111 +948,111 @@ required to hit the stop rule. The tables below are parallel runs on:
 For RSA specifically, the timing gap between `encrypt`/`verify` and
 `decrypt`/`sign` is still expected: the private side now uses CRT, but the
 public side continues to benefit from the sparse default exponent
-`e = 65,537`.
+$e = 65{,}537$.
 
 ### Finite-field public key (1024-bit)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| rsa_keygen_1024 | 14.66 | ±0.0793 | 90 | 25.72 | ±0.06282 | 38 |
-| rsa_encrypt_1024 | 0.03122 | ±0.0002236 | 30 | 0.05377 | ±0.0002585 | 41 |
-| rsa_decrypt_1024 | 0.2465 | ±0.00371 | 44 | 0.4189 | ±0.002157 | 35 |
-| rsa_sign_1024 | 0.2431 | ±0.002273 | 38 | 0.4182 | ±0.002251 | 30 |
-| rsa_verify_1024 | 0.03202 | ±0.0009226 | 30 | 0.05419 | ±0.000315 | 40 |
-| elgamal_keygen_1024 | 48.6 | ±0.9629 | 90 | 82.22 | ±0.3403 | 32 |
-| elgamal_encrypt_1024 | 0.3472 | ±0.01123 | 31 | 0.5924 | ±0.002446 | 30 |
-| elgamal_decrypt_1024 | 0.1764 | ±0.005602 | 31 | 0.3044 | ±0.001789 | 30 |
-| dsa_keygen_1024 | 52.23 | ±0.328 | 30 | 91.79 | ±0.3258 | 32 |
-| dsa_sign_1024 | 0.2662 | ±0.002421 | 30 | 0.5371 | ±0.003304 | 60 |
-| dsa_verify_1024 | 0.409 | ±0.001662 | 49 | 0.789 | ±0.00439 | 30 |
-| paillier_keygen_1024 | 16.02 | ±0.2481 | 92 | 27.24 | ±0.05102 | 61 |
-| paillier_encrypt_1024 | 6.014 | ±0.02396 | 153 | 11.26 | ±0.04603 | 33 |
-| paillier_decrypt_1024 | 2.154 | ±0.01687 | 30 | 4.069 | ±0.0118 | 30 |
-| paillier_rerandomize_1024 | 3.875 | ±0.05316 | 30 | 7.193 | ±0.02091 | 31 |
-| paillier_add_1024 | 0.006705 | ±3.593e-05 | 120 | 0.01299 | ±0.0001632 | 30 |
-| cocks_keygen_1024 | 12.1 | ±0.1091 | 30 | 21.26 | ±0.08089 | 30 |
-| cocks_encrypt_1024 | 0.7823 | ±0.06647 | 41 | 1.34 | ±0.01414 | 30 |
-| cocks_decrypt_1024 | 0.128 | ±0.001349 | 60 | 0.2143 | ±0.001473 | 30 |
-| rabin_keygen_1024 | 20.7 | ±0.2649 | 32 | 34.33 | ±0.08489 | 30 |
-| rabin_encrypt_1024 | 0.02713 | ±0.0004221 | 30 | 0.04801 | ±0.0002185 | 34 |
-| rabin_decrypt_1024 | 0.2524 | ±0.003722 | 32 | 0.4088 | ±0.002009 | 30 |
-| schmidt_samoa_keygen_1024 | 5.243 | ±0.06046 | 35 | 9.114 | ±0.02107 | 45 |
-| schmidt_samoa_encrypt_1024 | 0.7884 | ±0.01059 | 36 | 1.33 | ±0.003566 | 52 |
-| schmidt_samoa_decrypt_1024 | 0.2163 | ±0.02033 | 30 | 0.384 | ±0.004574 | 30 |
+| rsa_keygen_1024 | 14.66 | $\pm$0.0793 | 90 | 25.72 | $\pm$0.06282 | 38 |
+| rsa_encrypt_1024 | 0.03122 | $\pm$0.0002236 | 30 | 0.05377 | $\pm$0.0002585 | 41 |
+| rsa_decrypt_1024 | 0.2465 | $\pm$0.00371 | 44 | 0.4189 | $\pm$0.002157 | 35 |
+| rsa_sign_1024 | 0.2431 | $\pm$0.002273 | 38 | 0.4182 | $\pm$0.002251 | 30 |
+| rsa_verify_1024 | 0.03202 | $\pm$0.0009226 | 30 | 0.05419 | $\pm$0.000315 | 40 |
+| elgamal_keygen_1024 | 48.6 | $\pm$0.9629 | 90 | 82.22 | $\pm$0.3403 | 32 |
+| elgamal_encrypt_1024 | 0.3472 | $\pm$0.01123 | 31 | 0.5924 | $\pm$0.002446 | 30 |
+| elgamal_decrypt_1024 | 0.1764 | $\pm$0.005602 | 31 | 0.3044 | $\pm$0.001789 | 30 |
+| dsa_keygen_1024 | 52.23 | $\pm$0.328 | 30 | 91.79 | $\pm$0.3258 | 32 |
+| dsa_sign_1024 | 0.2662 | $\pm$0.002421 | 30 | 0.5371 | $\pm$0.003304 | 60 |
+| dsa_verify_1024 | 0.409 | $\pm$0.001662 | 49 | 0.789 | $\pm$0.00439 | 30 |
+| paillier_keygen_1024 | 16.02 | $\pm$0.2481 | 92 | 27.24 | $\pm$0.05102 | 61 |
+| paillier_encrypt_1024 | 6.014 | $\pm$0.02396 | 153 | 11.26 | $\pm$0.04603 | 33 |
+| paillier_decrypt_1024 | 2.154 | $\pm$0.01687 | 30 | 4.069 | $\pm$0.0118 | 30 |
+| paillier_rerandomize_1024 | 3.875 | $\pm$0.05316 | 30 | 7.193 | $\pm$0.02091 | 31 |
+| paillier_add_1024 | 0.006705 | $\pm$3.593e-05 | 120 | 0.01299 | $\pm$0.0001632 | 30 |
+| cocks_keygen_1024 | 12.1 | $\pm$0.1091 | 30 | 21.26 | $\pm$0.08089 | 30 |
+| cocks_encrypt_1024 | 0.7823 | $\pm$0.06647 | 41 | 1.34 | $\pm$0.01414 | 30 |
+| cocks_decrypt_1024 | 0.128 | $\pm$0.001349 | 60 | 0.2143 | $\pm$0.001473 | 30 |
+| rabin_keygen_1024 | 20.7 | $\pm$0.2649 | 32 | 34.33 | $\pm$0.08489 | 30 |
+| rabin_encrypt_1024 | 0.02713 | $\pm$0.0004221 | 30 | 0.04801 | $\pm$0.0002185 | 34 |
+| rabin_decrypt_1024 | 0.2524 | $\pm$0.003722 | 32 | 0.4088 | $\pm$0.002009 | 30 |
+| schmidt_samoa_keygen_1024 | 5.243 | $\pm$0.06046 | 35 | 9.114 | $\pm$0.02107 | 45 |
+| schmidt_samoa_encrypt_1024 | 0.7884 | $\pm$0.01059 | 36 | 1.33 | $\pm$0.003566 | 52 |
+| schmidt_samoa_decrypt_1024 | 0.2163 | $\pm$0.02033 | 30 | 0.384 | $\pm$0.004574 | 30 |
 
 ### RSA (2048-bit)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| rsa_keygen_2048 | 163.6 | ±1.27 | 138 | 276.5 | ±0.6028 | 36 |
-| rsa_encrypt_2048 | 0.1031 | ±0.002526 | 30 | 0.1817 | ±0.0006752 | 30 |
-| rsa_decrypt_2048 | 1.53 | ±0.02579 | 30 | 2.564 | ±0.01125 | 30 |
-| rsa_sign_2048 | 1.53 | ±0.02604 | 31 | 2.557 | ±0.04079 | 33 |
-| rsa_verify_2048 | 0.1049 | ±0.002369 | 90 | 0.182 | ±0.003274 | 112 |
+| rsa_keygen_2048 | 163.6 | $\pm$1.27 | 138 | 276.5 | $\pm$0.6028 | 36 |
+| rsa_encrypt_2048 | 0.1031 | $\pm$0.002526 | 30 | 0.1817 | $\pm$0.0006752 | 30 |
+| rsa_decrypt_2048 | 1.53 | $\pm$0.02579 | 30 | 2.564 | $\pm$0.01125 | 30 |
+| rsa_sign_2048 | 1.53 | $\pm$0.02604 | 31 | 2.557 | $\pm$0.04079 | 33 |
+| rsa_verify_2048 | 0.1049 | $\pm$0.002369 | 90 | 0.182 | $\pm$0.003274 | 112 |
 
 ### ECDSA / ECDH (P-256)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| ecdsa_keygen | 1.729 | ±0.01064 | 126 | 2.488 | ±0.007344 | 30 |
-| ecdsa_sign | 1.864 | ±0.01145 | 90 | 2.769 | ±0.02059 | 30 |
-| ecdsa_verify | 3.543 | ±0.018 | 30 | 5.165 | ±0.01012 | 48 |
-| ecdh_keygen | 1.738 | ±0.008593 | 30 | 2.487 | ±0.007875 | 31 |
-| ecdh_agree | 1.789 | ±0.007137 | 33 | 2.561 | ±0.01425 | 32 |
-| ecdh_serialize | 7.34e-05 | ±2.622e-06 | 47 | 7.248e-05 | ±2.586e-06 | 60 |
+| ecdsa_keygen | 1.729 | $\pm$0.01064 | 126 | 2.488 | $\pm$0.007344 | 30 |
+| ecdsa_sign | 1.864 | $\pm$0.01145 | 90 | 2.769 | $\pm$0.02059 | 30 |
+| ecdsa_verify | 3.543 | $\pm$0.018 | 30 | 5.165 | $\pm$0.01012 | 48 |
+| ecdh_keygen | 1.738 | $\pm$0.008593 | 30 | 2.487 | $\pm$0.007875 | 31 |
+| ecdh_agree | 1.789 | $\pm$0.007137 | 33 | 2.561 | $\pm$0.01425 | 32 |
+| ecdh_serialize | 7.34e-05 | $\pm$2.622e-06 | 47 | 7.248e-05 | $\pm$2.586e-06 | 60 |
 
 ### ECIES / EC ElGamal (P-256)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| ecies_keygen | 1.743 | ±0.01122 | 30 | 2.485 | ±0.004821 | 119 |
-| ecies_encrypt | 3.467 | ±0.03362 | 60 | 4.939 | ±0.01199 | 30 |
-| ecies_decrypt | 1.703 | ±0.007077 | 90 | 2.451 | ±0.009648 | 30 |
-| ec_elgamal_keygen | 1.737 | ±0.006457 | 132 | 2.485 | ±0.01201 | 36 |
-| ec_elgamal_encrypt | 3.554 | ±0.01666 | 60 | 5.071 | ±0.01498 | 32 |
-| ec_elgamal_decrypt | 1.834 | ±0.02305 | 90 | 2.492 | ±0.006394 | 38 |
+| ecies_keygen | 1.743 | $\pm$0.01122 | 30 | 2.485 | $\pm$0.004821 | 119 |
+| ecies_encrypt | 3.467 | $\pm$0.03362 | 60 | 4.939 | $\pm$0.01199 | 30 |
+| ecies_decrypt | 1.703 | $\pm$0.007077 | 90 | 2.451 | $\pm$0.009648 | 30 |
+| ec_elgamal_keygen | 1.737 | $\pm$0.006457 | 132 | 2.485 | $\pm$0.01201 | 36 |
+| ec_elgamal_encrypt | 3.554 | $\pm$0.01666 | 60 | 5.071 | $\pm$0.01498 | 32 |
+| ec_elgamal_decrypt | 1.834 | $\pm$0.02305 | 90 | 2.492 | $\pm$0.006394 | 38 |
 
 ### Ed25519 / Edwards DH / Edwards ElGamal
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| ed25519_keygen | 1.712 | ±0.008143 | 60 | 2.489 | ±0.01036 | 38 |
-| ed25519_sign | 0.8694 | ±0.007153 | 30 | 1.255 | ±0.005077 | 74 |
-| ed25519_verify | 2.844 | ±0.0204 | 30 | 4.107 | ±0.01058 | 30 |
-| edwards_dh_keygen | 1.713 | ±0.0115 | 30 | 2.463 | ±0.00685 | 60 |
-| edwards_dh_agree | 0.8591 | ±0.0119 | 30 | 1.235 | ±0.00418 | 30 |
-| edwards_dh_serialize | 5.541e-05 | ±1.764e-06 | 167 | 5.213e-05 | ±1.673e-06 | 60 |
-| edwards_elgamal_keygen | 1.718 | ±0.01146 | 30 | 2.464 | ±0.008973 | 63 |
-| edwards_elgamal_encrypt | 1.793 | ±0.01397 | 60 | 2.577 | ±0.007879 | 30 |
-| edwards_elgamal_decrypt | 1.332 | ±0.009984 | 102 | 1.94 | ±0.008723 | 30 |
+| ed25519_keygen | 1.712 | $\pm$0.008143 | 60 | 2.489 | $\pm$0.01036 | 38 |
+| ed25519_sign | 0.8694 | $\pm$0.007153 | 30 | 1.255 | $\pm$0.005077 | 74 |
+| ed25519_verify | 2.844 | $\pm$0.0204 | 30 | 4.107 | $\pm$0.01058 | 30 |
+| edwards_dh_keygen | 1.713 | $\pm$0.0115 | 30 | 2.463 | $\pm$0.00685 | 60 |
+| edwards_dh_agree | 0.8591 | $\pm$0.0119 | 30 | 1.235 | $\pm$0.00418 | 30 |
+| edwards_dh_serialize | 5.541e-05 | $\pm$1.764e-06 | 167 | 5.213e-05 | $\pm$1.673e-06 | 60 |
+| edwards_elgamal_keygen | 1.718 | $\pm$0.01146 | 30 | 2.464 | $\pm$0.008973 | 63 |
+| edwards_elgamal_encrypt | 1.793 | $\pm$0.01397 | 60 | 2.577 | $\pm$0.007879 | 30 |
+| edwards_elgamal_decrypt | 1.332 | $\pm$0.009984 | 102 | 1.94 | $\pm$0.008723 | 30 |
 
 ### ML-KEM (Kyber)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| mlkem512_keygen | 0.01718 | ±0.000234 | 30 | 0.02535 | ±0.000181 | 30 |
-| mlkem512_encaps | 0.01672 | ±0.001943 | 64 | 0.02645 | ±0.0001389 | 30 |
-| mlkem512_decaps | 0.01643 | ±0.0001751 | 68 | 0.02986 | ±0.0001348 | 99 |
-| mlkem768_keygen | 0.02793 | ±0.0002995 | 103 | 0.04219 | ±0.0002948 | 30 |
-| mlkem768_encaps | 0.02669 | ±0.0003204 | 192 | 0.04235 | ±0.0002188 | 30 |
-| mlkem768_decaps | 0.02721 | ±0.0003639 | 30 | 0.0472 | ±0.0002714 | 30 |
-| mlkem1024_keygen | 0.0444 | ±0.0006144 | 30 | 0.06597 | ±0.0003494 | 30 |
-| mlkem1024_encaps | 0.04177 | ±0.000618 | 120 | 0.06426 | ±0.0003829 | 60 |
-| mlkem1024_decaps | 0.04266 | ±0.0006011 | 60 | 0.07125 | ±0.000454 | 30 |
+| mlkem512_keygen | 0.01718 | $\pm$0.000234 | 30 | 0.02535 | $\pm$0.000181 | 30 |
+| mlkem512_encaps | 0.01672 | $\pm$0.001943 | 64 | 0.02645 | $\pm$0.0001389 | 30 |
+| mlkem512_decaps | 0.01643 | $\pm$0.0001751 | 68 | 0.02986 | $\pm$0.0001348 | 99 |
+| mlkem768_keygen | 0.02793 | $\pm$0.0002995 | 103 | 0.04219 | $\pm$0.0002948 | 30 |
+| mlkem768_encaps | 0.02669 | $\pm$0.0003204 | 192 | 0.04235 | $\pm$0.0002188 | 30 |
+| mlkem768_decaps | 0.02721 | $\pm$0.0003639 | 30 | 0.0472 | $\pm$0.0002714 | 30 |
+| mlkem1024_keygen | 0.0444 | $\pm$0.0006144 | 30 | 0.06597 | $\pm$0.0003494 | 30 |
+| mlkem1024_encaps | 0.04177 | $\pm$0.000618 | 120 | 0.06426 | $\pm$0.0003829 | 60 |
+| mlkem1024_decaps | 0.04266 | $\pm$0.0006011 | 60 | 0.07125 | $\pm$0.000454 | 30 |
 
 ### ML-DSA (Dilithium)
 
-| Operation | M4 Pro ms/op | M4 Pro ±CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ±CI | AMD EPYC 7452 Runs |
+| Operation | M4 Pro ms/op | M4 Pro $\pm$CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 $\pm$CI | AMD EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
-| mldsa44_keygen | 0.06451 | ±0.0004568 | 63 | 0.09407 | ±0.0003329 | 53 |
-| mldsa44_sign | 0.1119 | ±0.00051 | 30 | 0.3144 | ±0.001112 | 32 |
-| mldsa44_verify | 0.01292 | ±0.0001693 | 44 | 0.03809 | ±0.0002823 | 30 |
-| mldsa65_keygen | 0.1205 | ±0.0007272 | 95 | 0.1688 | ±0.001594 | 42 |
-| mldsa65_sign | 0.1706 | ±0.0008673 | 30 | 0.5102 | ±0.001827 | 30 |
-| mldsa65_verify | 0.01695 | ±0.0003647 | 60 | 0.05305 | ±0.0004285 | 30 |
-| mldsa87_keygen | 0.1814 | ±0.0009118 | 33 | 0.2437 | ±0.00125 | 30 |
-| mldsa87_sign | 0.2232 | ±0.01663 | 36 | 0.6558 | ±0.002738 | 33 |
-| mldsa87_verify | 0.02451 | ±0.0004441 | 30 | 0.07612 | ±0.000488 | 30 |
+| mldsa44_keygen | 0.06451 | $\pm$0.0004568 | 63 | 0.09407 | $\pm$0.0003329 | 53 |
+| mldsa44_sign | 0.1119 | $\pm$0.00051 | 30 | 0.3144 | $\pm$0.001112 | 32 |
+| mldsa44_verify | 0.01292 | $\pm$0.0001693 | 44 | 0.03809 | $\pm$0.0002823 | 30 |
+| mldsa65_keygen | 0.1205 | $\pm$0.0007272 | 95 | 0.1688 | $\pm$0.001594 | 42 |
+| mldsa65_sign | 0.1706 | $\pm$0.0008673 | 30 | 0.5102 | $\pm$0.001827 | 30 |
+| mldsa65_verify | 0.01695 | $\pm$0.0003647 | 60 | 0.05305 | $\pm$0.0004285 | 30 |
+| mldsa87_keygen | 0.1814 | $\pm$0.0009118 | 33 | 0.2437 | $\pm$0.00125 | 30 |
+| mldsa87_sign | 0.2232 | $\pm$0.01663 | 36 | 0.6558 | $\pm$0.002738 | 33 |
+| mldsa87_verify | 0.02451 | $\pm$0.0004441 | 30 | 0.07612 | $\pm$0.000488 | 30 |
 Cross-platform summary Kiviat diagram (radar chart):
 
 ![Public-key platform Kiviat diagram (radar chart)](assets/public-key-platform-radar.svg)

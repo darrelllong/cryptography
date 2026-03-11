@@ -16,14 +16,19 @@
 
 use super::{Digest, Xof};
 
+// Keccak-f[1600] rho-step rotation offsets for lanes A[x,y] (FIPS 202,
+// Keccak-p permutation definition).
 const RHO: [u32; 25] = [
     0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
 ];
 
+// Keccak-f[1600] pi-step lane permutation, flattened as index x + 5*y where
+// (x, y) -> (y, (2x + 3y) mod 5).
 const PI: [usize; 25] = [
     0, 10, 20, 5, 15, 16, 1, 11, 21, 6, 7, 17, 2, 12, 22, 23, 8, 18, 3, 13, 14, 24, 9, 19, 4,
 ];
 
+// Keccak-f[1600] iota-step round constants for rounds 0..23.
 const RC: [u64; 24] = [
     0x0000_0000_0000_0001,
     0x0000_0000_0000_8082,
@@ -53,28 +58,34 @@ const RC: [u64; 24] = [
 
 #[inline]
 fn keccak_f1600(state: &mut [u64; 25]) {
+    // 24 rounds, each applying theta -> rho -> pi -> chi -> iota.
     for &rc in &RC {
+        // theta: parity of each column.
         let mut c = [0u64; 5];
         for x in 0..5 {
             c[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
         }
 
+        // theta: mix neighboring column parities.
         let mut d = [0u64; 5];
         for x in 0..5 {
             d[x] = c[(x + 4) % 5] ^ c[(x + 1) % 5].rotate_left(1);
         }
 
+        // theta: xor D[x] into each lane of column x.
         for y in 0..5 {
             for x in 0..5 {
                 state[x + 5 * y] ^= d[x];
             }
         }
 
+        // rho + pi: per-lane rotate, then permute lane positions.
         let mut b = [0u64; 25];
         for i in 0..25 {
             b[PI[i]] = state[i].rotate_left(RHO[i]);
         }
 
+        // chi: nonlinear row step.
         for y in 0..5 {
             let row = 5 * y;
             for x in 0..5 {
@@ -82,6 +93,7 @@ fn keccak_f1600(state: &mut [u64; 25]) {
             }
         }
 
+        // iota: inject round constant.
         state[0] ^= rc;
     }
 }

@@ -40,10 +40,10 @@
   <text class="small" x="314" y="96">16000</text>
   <text class="small" x="314" y="66">40000</text>
 
-  <text class="label" x="280.0" y="41.0" text-anchor="middle">RSA</text>
+  <text class="label" x="280.0" y="35.0" text-anchor="middle">RSA</text>
   <text class="label" x="456.7" y="147.0" text-anchor="start">ElGamal</text>
   <text class="label" x="456.7" y="351.0" text-anchor="start">Paillier</text>
-  <text class="label" x="280.0" y="461.0" text-anchor="middle">Cocks</text>
+  <text class="label" x="280.0" y="455.0" text-anchor="middle">Cocks</text>
   <text class="label" x="103.3" y="351.0" text-anchor="end">Rabin</text>
   <text class="label" x="103.3" y="147.0" text-anchor="end">Schmidt-Samoa</text>
 

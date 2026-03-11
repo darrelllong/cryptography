@@ -1,8 +1,11 @@
-//! AES-128 alternative path for Apple Silicon (ARM FEAT_AES intrinsics).
+//! AES-128 backend for Apple Silicon (`aarch64` + FEAT_AES).
 //!
-//! This module is intentionally isolated from the baseline crate implementation.
-//! It is an opt-in acceleration path, and callers should validate output parity
-//! with the baseline implementation.
+//! Exposes single-block encrypt/decrypt using AESE/AESMC and caches both
+//! forward and inverse round keys so the hot path is straight-line code.
+//! Semantics are kept bit-identical with the baseline `cryptography::Aes128`.
+//! Unlike the x86 backend, this module does not expose a separate
+//! `encrypt_buffer` API: ARM AESE/AESMC already processes one block per round
+//! without a comparable round-key preload win for batch calls.
 
 #[cfg(target_arch = "aarch64")]
 use core::arch::aarch64::{
@@ -103,6 +106,8 @@ pub(crate) fn expand_key_128(key: &[u8; 16]) -> [[u8; 16]; 11] {
     for i in 4..44 {
         let mut temp = words[i - 1];
         if i % 4 == 0 {
+            // FIPS 197 key schedule core:
+            // RotWord -> SubWord -> xor Rcon.
             temp = [temp[1], temp[2], temp[3], temp[0]];
             for b in &mut temp {
                 *b = SBOX[*b as usize];

@@ -1,11 +1,11 @@
-//! Apple-Silicon alternative implementations.
+//! Apple-Silicon acceleration crate.
 //!
-//! This crate is an opt-in acceleration path for macOS/aarch64 users.
-//! It must stay behavior-compatible with the baseline `cryptography` crate.
+//! This crate contains architecture-specific alternatives for selected
+//! primitives (AES, GHASH, SHA-256) on `aarch64`.
+//! It is strictly opt-in and must remain bit-compatible with the baseline
+//! pure-Rust implementations in the main `cryptography` crate.
 
 pub mod aes128_armv8;
 pub mod aes256_armv8;
-pub mod chacha20_armv8;
 pub mod ghash_armv8;
 pub mod sha256_armv8;
-pub mod shake_armv8;

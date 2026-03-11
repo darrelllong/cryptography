@@ -35,11 +35,6 @@ mkdir -p "$RESULT_DIR"
     run_case "AES-256" "bash fast/Apple-Silicon/scripts/compare_aes256_alt.sh 2000"
     run_case "SHA-256" "bash fast/Apple-Silicon/scripts/compare_sha256_alt.sh 2000"
     run_case "GHASH" "bash fast/Apple-Silicon/scripts/compare_ghash_alt.sh 5000"
-
-    if [[ "${INCLUDE_EXPLORATORY:-0}" == "1" ]]; then
-        run_case "ChaCha20 (exploratory)" "bash fast/Apple-Silicon/scripts/compare_chacha20_alt.sh 2000"
-        run_case "SHAKE128/SHAKE256 (ML-KEM+ML-DSA-like, exploratory)" "bash fast/Apple-Silicon/scripts/compare_shake_alt.sh 2000"
-    fi
 } | tee "$OUT_FILE"
 
 echo

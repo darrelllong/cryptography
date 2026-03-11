@@ -1,53 +1,12 @@
 # Benchmarking
 
-Two paths are available: a quick Rust-only path using Criterion, and a
-statistically rigorous path using [pilot-bench](https://github.com/darrelllong/pilot-bench).
+All publication-facing benchmarks are Pilot-driven via
+[pilot-bench](https://github.com/darrelllong/pilot-bench).  
+There is no separate Criterion path in this workflow.
 
 ---
 
-## Quick path — Criterion
-
-No external tools required.
-
-### Symmetric ciphers
-
-```bash
-cargo bench --manifest-path benchmarks/Cargo.toml
-```
-
-This runs `cipher_bench` (all block and stream ciphers) and `aes_bench`
-(focused AES comparisons) under Criterion and opens an HTML report in
-`benchmarks/target/criterion/`.
-
-### Public-key latency (ad hoc)
-
-```bash
-cargo run --release --bin bench_public_key -- 1024
-cargo run --release --bin bench_public_key -- 2048
-```
-
-Prints a table of keygen / encrypt / sign / verify latencies for every
-implemented scheme at the chosen key size.
-
-### Bigint kernel latency (ad hoc)
-
-```bash
-cargo run --release --bin bench_bigint
-cargo run --release --bin bench_bigint -- 256 512 1024 2048 4096
-cargo run --release --bin bench_bigint -- 4096 --repeat 20
-```
-
-Prints per-size kernel timings for:
-
-- `mul_ref`
-- `mod_mul` under an odd modulus
-- Montgomery exponentiation (`e = 65537` and random 256-bit exponent)
-- `div_rem`
-- `modulo`
-
----
-
-## Rigorous path — pilot-bench
+## Pilot Path
 
 [pilot-bench](https://github.com/darrelllong/pilot-bench) drives the
 benchmark binary repeatedly until a target confidence interval is reached,
@@ -56,7 +15,7 @@ preferred path for numbers that go into the documentation.
 
 ### Step 1 — build pilot-bench (one-time)
 
-Prerequisites: `cmake` ≥ 3.14, `boost` ≥ 1.74, a C++14-capable compiler.
+Prerequisites: `cmake` $\ge$ 3.14, `boost` $\ge$ 1.74, a C++14-capable compiler.
 
 ```bash
 git clone https://github.com/darrelllong/pilot-bench.git ~/pilot-bench
@@ -73,6 +32,12 @@ Override paths without editing scripts via:
 - `PILOT_CIPHER_BIN` for `pilot_cipher`
 - `PILOT_PK_BIN` for `pilot_pk`
 
+Tune run behavior without editing scripts via:
+
+- `PILOT_PRESET` (`quick`, `normal`, `strict`; default `quick`)
+- `PILOT_CIPHER_BYTES` (bytes per `pilot_cipher` invocation; default `262144`)
+- `PILOT_PK_ITERS_PERCENT` (scales per-invocation loop counts in `pilot_pk`; default `25`)
+
 For Apple Silicon optimization loops (no assembly, in-repo code only), use:
 
 - [fast/Apple-Silicon/README.md](fast/Apple-Silicon/README.md)
@@ -85,7 +50,7 @@ For x86 optimization loops (no assembly, in-repo code only), use:
 - [fast/x86/README.md](fast/x86/README.md)
 - `bash fast/x86/scripts/run_alt_suite.sh`
 
-Promotion gate for published go-fast kernels is `>=5x` over baseline/reference.
+Promotion gate for published go-fast kernels is $\ge 5\times$ over baseline/reference.
 Lower-speedup comparator results are tracked as exploratory only.
 
 Use the split scripts so unchanged PK or symmetric areas are not re-run.
@@ -98,20 +63,24 @@ acceleration work is maintained as an explicit alternative path.
 cargo build --release --bin pilot_cipher --bin pilot_pk
 ```
 
-`pilot_cipher <name>` encrypts 1 MiB with the named cipher and prints
-MB/s.  `pilot_pk <operation>` runs the named public-key operation N times
+`pilot_cipher <name>` encrypts a fixed workload and prints MB/s.
+`pilot_pk <operation>` runs the named public-key operation N times
 and prints ms/op.  Both binaries accept a single argument so pilot-bench
 can drive them with `run_program`.
+
+By default, `pilot_cipher` processes `262144` bytes per invocation.
+Override with `PILOT_CIPHER_BYTES=<bytes>` to tune per-round runtime for a host.
 
 ### Step 3 — run the suites
 
 ```bash
 bash scripts/bench_all.sh        # all symmetric ciphers — throughput (MB/s)
-bash scripts/bench_all_pk.sh     # EC / Edwards operations — latency (ms/op)
+bash scripts/bench_all_pk.sh     # PK subset (EC/Edwards/PQ) — latency (ms/op)
+bash scripts/bench_all_pk_full.sh  # full PK suite (finite-field + EC + Edwards + PQ)
 ```
 
 Each script emits Markdown tables ready to paste into the docs.
-The `±CI` column is the 95% confidence-interval half-width reported by
+The `$\pm$CI` column is the 95% confidence-interval half-width reported by
 pilot-bench.
 
 ---
@@ -173,15 +142,13 @@ pilot-bench.
 `--preset quick` targets 20 % CI.  Use `--preset normal` for 10 % or
 `--preset strict` for tighter bounds.
 
-For a portable wall-clock baseline from the vendored Kyber reference C code,
-run:
+For Pilot-driven reference-C baselines from the vendored Kyber code, run:
 
 ```bash
 bash scripts/bench_mlkem_ref.sh
 ```
 
-For a portable wall-clock baseline from the vendored Dilithium reference C
-code, run:
+For Pilot-driven reference-C baselines from the vendored Dilithium code, run:
 
 ```bash
 bash scripts/bench_mldsa_ref.sh

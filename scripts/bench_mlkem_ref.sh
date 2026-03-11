@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Portable wall-clock benchmark for vendored Kyber reference code.
+# Pilot-driven benchmark for vendored Kyber reference code.
 # Uses deterministic *_derand APIs so no RNG backend is required.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
+PILOT_PRESET="${PILOT_PRESET:-quick}"
 REF_DIR="${REF_DIR:-$ROOT_DIR/third_party/ml-kem/kyber-ref/ref}"
 CC_BIN="${CC:-cc}"
 
@@ -107,14 +109,19 @@ build_ref_wall_bench() {
 }
 
 measure() {
-  local bin="$1"
-  local op="$2"
-  local rounds="$3"
-  "$bin" "$op" "$rounds"
+  local bin="$1" op="$2" rounds="$3" set_name="$4" op_name="$5"
+  local out mean ci reps
+  out=$("$BENCH" run_program --preset "$PILOT_PRESET" \
+        --pi "${set_name}_${op_name},ms/op,0,1,1" \
+        -- "$bin" "$op" "$rounds" 2>&1)
+  mean=$(echo "$out" | awk '/Reading mean/{print $5}')
+  ci=$(echo "$out" | awk '/Reading CI/{print $5}')
+  reps=$(echo "$out" | awk '/^Rounds:/{print $2}')
+  printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "$set_name" "${op_name}_ref" "$mean" "±$ci" "$reps"
 }
 
-printf "| %-16s | %-14s | %12s |\n" "Parameter Set" "Operation" "ms/op"
-printf "|------------------|----------------|-------------|\n"
+printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "Parameter Set" "Operation" "ms/op" "±CI (95%)" "Runs"
+printf "|------------------|----------------|-------------:|------------:|------:|\n"
 
 for k in 2 3 4; do
   if ! bin="$(build_ref_wall_bench "$k")"; then
@@ -128,7 +135,7 @@ for k in 2 3 4; do
     *) echo "unexpected k=$k" >&2; exit 1 ;;
   esac
 
-  printf "| %-16s | %-14s | %12s |\n" "$p" "keygen_ref" "$(measure "$bin" keygen "$rounds")"
-  printf "| %-16s | %-14s | %12s |\n" "$p" "encaps_ref" "$(measure "$bin" encaps "$rounds")"
-  printf "| %-16s | %-14s | %12s |\n" "$p" "decaps_ref" "$(measure "$bin" decaps "$rounds")"
+  measure "$bin" keygen "$rounds" "$p" "keygen"
+  measure "$bin" encaps "$rounds" "$p" "encaps"
+  measure "$bin" decaps "$rounds" "$p" "decaps"
 done

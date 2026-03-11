@@ -7,6 +7,7 @@
 //! ANF form so the round function and key schedule avoid secret-indexed table
 //! reads.
 
+// Byte masks from the SEED G-function linear map (RFC 4009 Appendix A).
 const M0: u8 = 0xfc;
 const M1: u8 = 0xf3;
 const M2: u8 = 0xcf;
@@ -52,6 +53,7 @@ const S1: [u8; 256] = [
     0x37, 0xE7, 0x24, 0xA4, 0xCB, 0x53, 0x0A, 0x87, 0xD9, 0x4C, 0x83, 0x8F, 0xCE, 0x3B, 0x4A, 0xB7,
 ];
 
+// Round constants KC[0..15] from RFC 4009 Appendix A.
 const KC: [u32; 16] = [
     0x9e37_79b9,
     0x3c6e_f373,

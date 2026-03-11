@@ -88,6 +88,9 @@ fn inv_sbox_layer_ct(state: u64) -> u64 {
 
 #[inline]
 fn p_layer(state: u64) -> u64 {
+    // PRESENT bit permutation:
+    // P(i) = 16*i mod 63 for i in [0, 62], and P(63) = 63.
+    // (Bogdanov et al., CHES 2007; ISO/IEC 29192-2.)
     let mut out = 0u64;
     let mut bit = 0usize;
     while bit < 63 {

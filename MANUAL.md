@@ -342,6 +342,9 @@ Representative methods:
 variants.
 `Aead` is the shared detached-tag trait implemented by `Gcm`, `GcmVt`,
 `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`, and `ChaCha20Poly1305`.
+`Gcm` and `GcmVt` enforce the SP 800-38D per-call payload bound of
+$(2^{32}-2)$ counter blocks (`68_719_476_704` bytes); oversized inputs panic
+to prevent counter wrap.
 
 Example: AES-256-GCM
 

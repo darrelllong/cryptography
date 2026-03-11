@@ -62,6 +62,10 @@ impl RsaPublicKey {
     /// no padding or randomness, so equal messages produce equal ciphertexts;
     /// that lack of semantic security is exactly why OAEP exists on top of the
     /// raw arithmetic.
+    ///
+    /// In this crate's generated keys, `e` is chosen near `65_537` (`0x10001`),
+    /// a sparse exponent with two set bits. That is why this operation is often
+    /// much faster than private-key `decrypt_raw`.
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         mod_pow(message, &self.e, &self.n)
@@ -118,6 +122,11 @@ impl RsaPrivateKey {
     }
 
     /// Apply the raw private operation with CRT recombination.
+    ///
+    /// This path is intentionally heavier than `encrypt_raw`: it uses large
+    /// private exponents (`dP`, `dQ`) and two CRT exponentiations to recover
+    /// throughput. Even with CRT, public encrypt is usually faster because the
+    /// public exponent is sparse.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         // RSA-CRT:

@@ -1,3 +1,14 @@
+//! Generate labeled cipher-output datasets for ML distinguisher experiments.
+//!
+//! For each split (`train`, `val`, `test`) this tool writes:
+//! - `<split>_samples.bin`: concatenated fixed-length samples (`sample_len` bytes each)
+//! - `<split>_labels.bin`: one byte per sample (class index into `classes`)
+//! - `manifest.json`: class names, split sizes, sample length, and seed
+//!
+//! `SplitMix64` is used as a fast reproducible sampler/shuffler for dataset
+//! construction. It is not a cryptographic RNG and is not used for key material
+//! outside this controlled offline corpus generator.
+
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -10,13 +21,16 @@ use cryptography::{
 
 const DEFAULT_SAMPLE_LEN: usize = 32;
 
+/// Fill one sample row with bytes for one dataset class.
 type SampleFn = fn(&mut SplitMix64, &mut [u8]);
 
+/// One output class in the generated dataset.
 struct CipherSpec {
     name: &'static str,
     generate: SampleFn,
 }
 
+/// Class catalog emitted to `manifest.json` and encoded in labels.
 const CIPHERS: &[CipherSpec] = &[
     CipherSpec {
         name: "aes128",

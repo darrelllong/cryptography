@@ -15,9 +15,13 @@ use crate::Csprng;
 /// Fixed Miller-Rabin witness set used by the bigint probable-prime test.
 ///
 /// These twelve small prime bases give a deterministic, repeatable witness
-/// schedule. They are the classic "small prime" Miller-Rabin bases through
-/// `37`: deterministic for the small values used in the tests here, and a
-/// conservative fixed set for the larger cryptographic candidates used here.
+/// schedule. They are the classic "small prime" bases through `37`.
+///
+/// Notes on determinism:
+/// - For all odd `n < 2^64`, published smaller witness sets are already
+///   deterministic; this superset is therefore deterministic in that range.
+/// - For larger `BigUint` candidates this remains a strong fixed-basis
+///   probable-prime test, but not a proof of primality.
 const MR_BASES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
 
 /// Trial-division sieve primes checked before the Miller-Rabin stage.

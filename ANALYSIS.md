@@ -45,9 +45,8 @@ Important entry points:
 
 - `cargo test`
 - `cargo test public_key::`
-- `cargo run --release --bin bench_public_key -- 1024`
-- `cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench`
-- `cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench`
+- `bash scripts/bench_all.sh`
+- `bash scripts/bench_all_pk_full.sh`
 
 ## Machine-Learning Experiments
 
@@ -68,3 +67,4 @@ For model families, commands, and result summaries, see:
   or DRBGs.
 - Read [ASYMMETRIC.md](ASYMMETRIC.md) when working with key generation,
   serialization, encryption/signature wrappers, or the bigint backend.
+- Read [POSTQUANTUM.md](POSTQUANTUM.md) when working with ML-KEM or ML-DSA.

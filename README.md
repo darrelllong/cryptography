@@ -212,6 +212,9 @@ The mode layer implements:
 - SP 800-38E: XTS (for 128-bit block ciphers)
 - RFC 8439: ChaCha20-Poly1305
 
+`Gcm` enforces the SP 800-38D per-call payload bound of
+`68_719_476_704` bytes (`2^32 - 2` counter blocks) to prevent counter wrap.
+
 RFC 8452's AES-GCM-SIV is a nonce-misuse-resistant AEAD built around AES and
 `POLYVAL`, so it belongs in a later authenticated-encryption layer rather than
 in the basic mode adapters.
@@ -362,42 +365,37 @@ cargo test modes::tests
 
 ## How To Benchmark
 
-The benchmark targets live in the separate `benchmarks/` crate so the root
-package can run `cargo test` without pulling in benchmark-only dependencies.
+All publication-facing benchmarks use [pilot-bench](https://github.com/darrelllong/pilot-bench).
 
-Run the full suite throughput benchmark:
-
-```text
-cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench
-```
-
-Run the shorter host-comparison pass used in `ANALYSIS.md`:
+Build the Pilot workload binaries:
 
 ```text
-cargo bench --manifest-path benchmarks/Cargo.toml --bench cipher_bench -- \
-  --sample-size 10 --measurement-time 0.2 --warm-up-time 0.1
+cargo build --release --bin pilot_cipher --bin pilot_pk
 ```
 
-Run the AES-focused comparison benchmark:
+Run symmetric throughput:
 
 ```text
-cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
+bash scripts/bench_all.sh
 ```
 
-Run the public-key latency probe:
+Run public-key latency:
 
 ```text
-cargo run --release --bin bench_public_key -- 1024
+bash scripts/bench_all_pk_full.sh
 ```
 
-Unlike the symmetric-cipher Criterion benches, `bench_public_key` reports
-latency for key generation and single encrypt/decrypt/sign/verify operations.
+Optional tuning knobs:
 
-`aes_bench` compares the crate's AES implementations against libsodium
-`secretbox`. This is a calibration benchmark, not a strict apples-to-apples
-comparison: the crate's rows are raw AES block-cipher throughput, while the
-libsodium row is a complete XSalsa20-Poly1305 authenticated-encryption
-construction.
+```text
+PILOT_PRESET=quick|normal|strict
+PILOT_CIPHER_BYTES=262144   # bytes per pilot_cipher invocation
+PILOT_PK_ITERS_PERCENT=25   # scales per-invocation loop counts in pilot_pk
+```
+
+Pilot controls repetition and stop criteria from observed variance, so slow
+operations (for example `sm4` / `sm4ct`) no longer rely on hand-picked loop
+counts.
 
 ## Public-Key How To
 
@@ -584,22 +582,13 @@ crate-defined wrappers and serialization, which is documented in
 published signature standards directly rather than adding a second padding
 layer on top.
 
-There is also a simple latency tool for the public-key layer:
+To run one public-key operation directly under Pilot:
 
 ```text
-cargo run --release --bin bench_public_key -- 1024
+~/pilot-bench/build/cli/bench run_program --preset quick \
+  --pi "rsa_sign_2048,ms/op,0,1,1" \
+  -- ./target/release/pilot_pk rsa_sign_2048
 ```
-
-Add `--skip-elgamal` if you only want RSA and Paillier timings and do not want
-to wait for ElGamal parameter generation on larger inputs.
-
-Add `--skip-dsa` if you want to exclude the DSA keygen/sign/verify timings from
-the same run.
-
-Pass a larger bit length (for example `2048`) to probe the in-tree bigint
-backend at practical sizes. This is the quickest way to decide whether the
-in-tree bigint backend is still acceptable or whether it is time to swap to
-`num-bigint`.
 
 Production note:
 - The standards-backed RSA wrappers (`OAEP`, `PSS`, and standard key

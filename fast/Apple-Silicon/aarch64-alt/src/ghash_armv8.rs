@@ -1,8 +1,7 @@
-//! GHASH alternative path for Apple Silicon (ARM carry-less multiply intrinsics).
+//! GHASH backend for Apple Silicon (`aarch64` PMULL via `vmull_p64`).
 //!
-//! This module is intentionally isolated from the baseline crate implementation.
-//! It is an opt-in acceleration path, and callers should validate output parity
-//! with the baseline implementation.
+//! Includes both a hardware polynomial-multiply kernel and a constant-time
+//! scalar reference path for parity testing against the baseline GHASH logic.
 
 #[cfg(target_arch = "aarch64")]
 use core::arch::aarch64::vmull_p64;
@@ -51,11 +50,14 @@ impl GhashArmv8 {
 
 #[inline]
 fn ghash_mul_ct_ref(x: u128, y: u128) -> u128 {
+    // SP 800-38D field polynomial p(x)=x^128+x^7+x^2+x+1. GHASH's reflected
+    // bit ordering encodes (x^7+x^2+x+1) as 0xe1 in the most-significant byte.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
+        // Branch-free conditional xor via all-ones/all-zero mask.
         let bit = (x >> (127 - i)) & 1;
         let bit_mask = 0u128.wrapping_sub(bit);
         z ^= v & bit_mask;
@@ -77,9 +79,11 @@ unsafe fn clmul64_hw(a: u64, b: u64) -> u128 {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 fn reduce_mod_gcm(hi: u128, lo: u128) -> u128 {
-    // Reduce modulo x^128 + x^7 + x^2 + x + 1.
-    // First fold the 128 high bits, then fold the small carry tail that
-    // appears when the top term crosses x^128.
+    // Reduce modulo p(x) = x^128 + x^7 + x^2 + x + 1.
+    //
+    // Any high term x^(128+k) is congruent to x^(k+7) + x^(k+2) + x^(k+1) + x^k.
+    // Folding `hi` into `lo` with shifts {0,1,2,7} applies that relation to all
+    // upper terms at once; the small second fold handles overflow from bit 127.
     let x = hi;
     let mut z = lo ^ x ^ (x << 1) ^ (x << 2) ^ (x << 7);
     let x_hi = (x >> 127) ^ (x >> 126) ^ (x >> 121);
@@ -90,7 +94,9 @@ fn reduce_mod_gcm(hi: u128, lo: u128) -> u128 {
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "aes")]
 unsafe fn mul_hw(x: u128, y: u128) -> u128 {
-    // Map GHASH's bit-reflected representation to canonical polynomial bits.
+    // GHASH defines bit 0 as the coefficient of x^127 inside each byte string.
+    // Reversing bits maps that representation to the natural CLMUL polynomial
+    // layout; reverse again after reduction to return GHASH byte order.
     let a = x.reverse_bits();
     let b = y.reverse_bits();
 

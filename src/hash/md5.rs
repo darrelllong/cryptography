@@ -1,18 +1,23 @@
 //! MD5 from RFC 1321.
 //!
 //! MD5 is retained for legacy compatibility. It is broken for collision
-//! resistance and should not be used for new integrity designs.
+//! resistance and should not be used for new integrity designs. It also keeps
+//! the Merkle-Damgaard length-extension property, so plain `MD5(key || msg)` is
+//! not a secure MAC construction.
 
 use super::Digest;
 
+// RFC 1321 §3.3 initial state words (A, B, C, D).
 const IV: [u32; 4] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476];
 
+// RFC 1321 §3.4 per-step left-rotation schedule.
 const S: [u32; 64] = [
     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9,
     14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15,
     21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
 ];
 
+// RFC 1321 table T[i] = floor(2^32 * abs(sin(i+1))) for i=0..63.
 const K: [u32; 64] = [
     0xd76a_a478,
     0xe8c7_b756,

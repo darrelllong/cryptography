@@ -357,6 +357,7 @@ impl EcdsaPublicKey {
 // ─── EcdsaPrivateKey ──────────────────────────────────────────────────────────
 
 impl EcdsaPrivateKey {
+    /// The curve parameters for this key.
     #[must_use]
     pub fn curve(&self) -> &CurveParams {
         &self.curve
@@ -386,6 +387,9 @@ impl EcdsaPrivateKey {
     /// Reusing the same `k` for two different messages with the same key
     /// immediately reveals the private scalar. Outside of fixed vectors,
     /// prefer [`Self::sign_digest`] or [`Self::sign_message`].
+    ///
+    /// Returned signatures are canonicalized to low-`s` form (`s <= n/2`) to
+    /// maximize interoperability with protocols that reject high-`s` ECDSA.
     #[must_use]
     pub fn sign_digest_with_nonce(&self, digest: &[u8], nonce: &BigUint) -> Option<EcdsaSignature> {
         let n = &self.curve.n;
@@ -409,10 +413,11 @@ impl EcdsaPrivateKey {
         let k_inv = mod_inverse(nonce, n)?;
         let rd = BigUint::mod_mul(&r, &self.d, n);
         let z_plus_rd = z.add_ref(&rd).modulo(n);
-        let s = BigUint::mod_mul(&k_inv, &z_plus_rd, n);
+        let mut s = BigUint::mod_mul(&k_inv, &z_plus_rd, n);
         if s.is_zero() {
             return None;
         }
+        canonicalize_low_s(n, &mut s);
 
         Some(EcdsaSignature { r, s })
     }
@@ -780,6 +785,14 @@ fn digest_to_scalar(digest: &[u8], modulus: &BigUint) -> BigUint {
     value
 }
 
+fn canonicalize_low_s(order: &BigUint, s: &mut BigUint) {
+    let mut half = order.clone();
+    half.shr1();
+    if (*s).cmp(&half).is_gt() {
+        *s = order.sub_ref(s);
+    }
+}
+
 fn int_to_octets(value: &BigUint, len: usize) -> Vec<u8> {
     let bytes = value.to_be_bytes();
     if bytes.len() >= len {
@@ -868,6 +881,23 @@ mod tests {
 
     fn rng() -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[0xab; 48])
+    }
+
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        let cleaned: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(
+            cleaned.len() % 2,
+            0,
+            "hex input must have an even number of nybbles"
+        );
+        (0..cleaned.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex byte"))
+            .collect()
+    }
+
+    fn from_hex(hex: &str) -> BigUint {
+        BigUint::from_be_bytes(&decode_hex(hex))
     }
 
     // ── Sign-and-verify round trips ──────────────────────────────────────────
@@ -967,6 +997,25 @@ mod tests {
         let (_, private) = Ecdsa::generate(curve, &mut rng);
         let digest = [0x01u8; 32];
         assert!(private.sign_digest_with_nonce(&digest, &n).is_none());
+    }
+
+    #[test]
+    fn sign_digest_with_nonce_returns_low_s() {
+        let curve = p256();
+        let secret = BigUint::from_u64(0x1234_5678_9abc_def0);
+        let (_, private) = Ecdsa::from_secret_scalar(curve.clone(), &secret).expect("from secret");
+        let digest = Sha256::digest(b"low-s canonicalization");
+        let nonce = BigUint::from_u64(0xdead_beef_cafe_babe);
+
+        let sig = private
+            .sign_digest_with_nonce(&digest, &nonce)
+            .expect("sign with nonce");
+        let mut half = curve.n.clone();
+        half.shr1();
+        assert!(
+            sig.s.cmp(&half).is_le(),
+            "signature must be canonical low-s"
+        );
     }
 
     // ── Rejection tests ───────────────────────────────────────────────────────
@@ -1167,5 +1216,40 @@ mod tests {
         assert_eq!(s, "EcdsaPrivateKey(<redacted>)");
         // The scalar itself must not appear.
         assert!(!s.contains(&format!("{:?}", private.d)));
+    }
+
+    #[test]
+    fn rfc6979_ecdsa_p256_sha256_sample_vector_with_low_s_canonicalization() {
+        // RFC 6979, Appendix A.2.5 (ECDSA over NIST P-256), SHA-256, "sample".
+        let x = from_hex("C9AFA9D845BA75166B5C215767B1D6934E50C3DB36E89B127B8A622B120F6721");
+        let expected_ux =
+            from_hex("60FED4BA255A9D31C961EB74C6356D68C049B8923B61FA6CE669622E60F29FB6");
+        let expected_uy =
+            from_hex("7903FE1008B8BC99A41AE9E95628BC64F2F1B20C2D7E9F5177A3C294D4462299");
+        let expected_k =
+            from_hex("A6E3C57DD01ABE90086538398355DD4C3B17AA873382B0F24D6129493D8AAD60");
+        let expected_r =
+            from_hex("EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716");
+        let expected_s_rfc =
+            from_hex("F7CB1C942D657C41D436C7A1B6E29F65F3E900DBB9AFF4064DC4AB2F843ACDA8");
+
+        let (public, private) =
+            Ecdsa::from_secret_scalar(p256(), &x).expect("RFC secret scalar must be valid");
+        assert_eq!(public.q.x, expected_ux);
+        assert_eq!(public.q.y, expected_uy);
+
+        let message = b"sample";
+        let digest = Sha256::digest(message);
+        let derived_k = super::rfc6979_nonce::<Sha256>(&private.curve.n, &private.d, &digest)
+            .expect("RFC nonce must derive");
+        assert_eq!(derived_k, expected_k, "RFC 6979 nonce mismatch");
+
+        let signature = private.sign_message::<Sha256>(message).expect("sign");
+        assert_eq!(signature.r, expected_r);
+
+        // This implementation enforces low-s canonicalization.
+        let expected_s_low = private.curve.n.sub_ref(&expected_s_rfc);
+        assert_eq!(signature.s, expected_s_low);
+        assert!(public.verify_message::<Sha256>(message, &signature));
     }
 }

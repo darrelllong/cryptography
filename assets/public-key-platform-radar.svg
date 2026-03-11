@@ -52,13 +52,13 @@
   <text class="small" x="366" y="85">16384</text>
   <text class="small" x="366" y="66">32768</text>
 
-  <text class="label" x="320.0" y="39.0" text-anchor="middle">RSA-1024 Encrypt</text>
+  <text class="label" x="320.0" y="31.0" text-anchor="middle">RSA-1024 Encrypt</text>
   <text class="label" x="428.0" y="67.9" text-anchor="start">RSA-1024 Decrypt</text>
   <text class="label" x="507.1" y="151.0" text-anchor="start">RSA-2048 Sign</text>
   <text class="label" x="536.0" y="259.0" text-anchor="start">ECDSA Sign</text>
   <text class="label" x="507.1" y="367.0" text-anchor="start">ECDSA Verify</text>
   <text class="label" x="428.0" y="454.1" text-anchor="start">ECDH Agree</text>
-  <text class="label" x="320.0" y="483.0" text-anchor="middle">ECIES Encrypt</text>
+  <text class="label" x="320.0" y="475.0" text-anchor="middle">ECIES Encrypt</text>
   <text class="label" x="212.0" y="454.1" text-anchor="end">ECIES Decrypt</text>
   <text class="label" x="132.9" y="367.0" text-anchor="end">Ed25519 Sign</text>
   <text class="label" x="104.0" y="259.0" text-anchor="end">Ed25519 Verify</text>

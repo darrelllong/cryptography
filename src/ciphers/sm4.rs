@@ -47,10 +47,12 @@ const SBOX: [u8; 256] = [
 // The Ct path cannot use these because it must avoid secret-indexed lookups.
 
 const fn l_const(x: u32) -> u32 {
-    let r2 = (x << 2) | (x >> 30);
-    let r10 = (x << 10) | (x >> 22);
-    let r18 = (x << 18) | (x >> 14);
-    let r24 = (x << 24) | (x >> 8);
+    // SM4 linear diffusion L from GB/T 32907-2016:
+    // L(B) = B xor (B<<<2) xor (B<<<10) xor (B<<<18) xor (B<<<24).
+    let r2 = x.rotate_left(2);
+    let r10 = x.rotate_left(10);
+    let r18 = x.rotate_left(18);
+    let r24 = x.rotate_left(24);
     x ^ r2 ^ r10 ^ r18 ^ r24
 }
 
@@ -78,6 +80,7 @@ static T3: [u32; 256] = build_t_table(3);
 /// and then recovers each output bit by parity over the selected terms.
 const SBOX_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SBOX);
 
+// System parameter FK and round constants CK from GB/T 32907-2016.
 const FK: [u32; 4] = [0xa3b1_bac6, 0x56aa_3350, 0x677d_9197, 0xb270_22dc];
 
 const CK: [u32; 32] = [
@@ -426,7 +429,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "slow conformance test"]
     fn example_2_million_encryptions() {
         let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
         let mut block: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
@@ -441,7 +443,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "slow conformance test"]
     fn example_2_million_encryptions_ct() {
         let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
         let mut block: [u8; 16] = parse("0123456789abcdeffedcba9876543210");

@@ -15,6 +15,8 @@
 //! Rabbit is naturally byte-oriented like the other stream ciphers in this
 //! crate: `apply_keystream` `XOR`s the keystream into caller-owned buffers.
 
+// Rabbit counter increments `A[i]` from RFC 4503 §2.5 (derived from the
+// fractional part of sqrt(pi) in the original Rabbit specification).
 const A: [u32; 8] = [
     0x4D34_D34D,
     0xD34D_34D3,
@@ -133,8 +135,8 @@ impl RabbitCore {
         self.carry = carry;
 
         let mut g = [0u32; 8];
-        for i in 0..8 {
-            g[i] = g_func(self.x[i], self.c[i]);
+        for (i, gi) in g.iter_mut().enumerate() {
+            *gi = g_func(self.x[i], self.c[i]);
         }
 
         self.x[0] = g[0]
@@ -276,7 +278,10 @@ mod tests {
     use super::*;
 
     fn decode_hex(s: &str) -> Vec<u8> {
-        assert!(s.len() % 2 == 0, "hex string must have even length");
+        assert!(
+            s.len().is_multiple_of(2),
+            "hex string must have even length"
+        );
         let mut out = Vec::with_capacity(s.len() / 2);
         let bytes = s.as_bytes();
         for i in (0..bytes.len()).step_by(2) {

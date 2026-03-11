@@ -6,6 +6,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+from radar_label_layout import default_offset_y, spread_label_positions
+
 
 OUTPUT = Path(__file__).with_name("symmetric-platform-radar.svg")
 
@@ -18,7 +20,7 @@ TEXT_COLOR = "#342f29"
 SUBTEXT_COLOR = "#6b6257"
 
 WIDTH = 620
-HEIGHT = 620
+HEIGHT = 650
 CX = 310.0
 CY = 250.0
 RADIUS = 185.0
@@ -66,14 +68,6 @@ def label_anchor(x: float) -> str:
     if x > CX + 20:
         return "start"
     return "middle"
-
-
-def label_y(base_y: float) -> float:
-    if base_y < CY - RADIUS + 30:
-        return base_y
-    if base_y > CY + RADIUS - 30:
-        return base_y + 12
-    return base_y + 4
 
 
 def generate_svg() -> str:
@@ -128,19 +122,40 @@ def generate_svg() -> str:
         lines.append(f'  <text class="small" x="350" y="{y + 1:.0f}">{label}</text>')
 
     lines.append("")
+    label_entries: list[dict[str, float | str]] = []
     for label, angle in zip(LABELS, angles):
         x, y = polar(RADIUS + 24, angle)
-        lines.append(f'  <text class="label" x="{x:.1f}" y="{label_y(y):.1f}" text-anchor="{label_anchor(x)}">{label}</text>')
+        label_entries.append(
+            {
+                "label": label,
+                "x": x,
+                "y": default_offset_y(y, CY, RADIUS),
+                "anchor": label_anchor(x),
+            }
+        )
+
+    spread_label_positions(
+        label_entries,
+        min_gap=14.0,
+        min_y=CY - RADIUS - 16.0,
+        max_y=CY + RADIUS + 30.0,
+    )
+
+    for entry in label_entries:
+        lines.append(
+            f'  <text class="label" x="{float(entry["x"]):.1f}" y="{float(entry["y"]):.1f}" '
+            f'text-anchor="{entry["anchor"]}">{entry["label"]}</text>'
+        )
 
     lines.extend(
         [
             "",
             '  <text class="label" x="20" y="560">Symmetric Throughput Comparison (fast path, log scale)</text>',
             '  <text class="small" x="20" y="578">M4 Pro (Dyson.local) vs AMD EPYC 7452 (moore.soe.ucsc.edu), MiB/s</text>',
-            '  <rect x="404" y="548" width="14" height="14" fill="#0f766e" rx="2" />',
-            '  <text class="small" x="424" y="559">M4 Pro</text>',
-            '  <rect x="404" y="570" width="14" height="14" fill="#1d4ed8" rx="2" />',
-            '  <text class="small" x="424" y="581">AMD EPYC 7452</text>',
+            '  <rect x="20" y="600" width="14" height="14" fill="#0f766e" rx="2" />',
+            '  <text class="small" x="40" y="611">M4 Pro</text>',
+            '  <rect x="132" y="600" width="14" height="14" fill="#1d4ed8" rx="2" />',
+            '  <text class="small" x="152" y="611">AMD EPYC 7452</text>',
             "</svg>",
         ]
     )

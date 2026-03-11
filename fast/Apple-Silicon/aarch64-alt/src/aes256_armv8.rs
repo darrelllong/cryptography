@@ -1,8 +1,11 @@
-//! AES-256 alternative path for Apple Silicon (ARM FEAT_AES intrinsics).
+//! AES-256 backend for Apple Silicon (`aarch64` + FEAT_AES).
 //!
-//! This module is intentionally isolated from the baseline crate implementation.
-//! It is an opt-in acceleration path, and callers should validate output parity
-//! with the baseline implementation.
+//! Uses the same round structure as the baseline AES implementation but maps
+//! rounds to AESE/AESMC intrinsics and precomputes inverse round keys for
+//! AESD/AESIMC decryption.
+//! As with the AES-128 ARM path, this exposes block operations only; the
+//! x86-only buffer API exists because AES-NI benefits more from one-time round-key
+//! loading across long buffers.
 
 #[cfg(target_arch = "aarch64")]
 use core::arch::aarch64::{
@@ -84,12 +87,15 @@ fn expand_key_256(key: &[u8; 32]) -> [[u8; 16]; 15] {
     for i in 8..60 {
         let mut temp = words[i - 1];
         if i % 8 == 0 {
+            // FIPS 197 AES-256 schedule core:
+            // RotWord -> SubWord -> xor Rcon every 8th word.
             temp = [temp[1], temp[2], temp[3], temp[0]];
             for b in &mut temp {
                 *b = SBOX[*b as usize];
             }
             temp[0] ^= RCON[(i / 8) - 1];
         } else if i % 8 == 4 {
+            // AES-256 extra SubWord step on word positions 4 mod 8.
             for b in &mut temp {
                 *b = SBOX[*b as usize];
             }

@@ -19,8 +19,10 @@
 use crate::ct::zeroize_slice;
 use crate::BlockCipher;
 
+// Serpent key-schedule constant PHI = floor(2^32 * (sqrt(5)-1)/2).
 const PHI: u32 = 0x9E37_79B9;
 
+// S-boxes from the Serpent AES submission (Anderson/Biham/Knudsen, 1998).
 const SBOXES: [[u8; 16]; 8] = [
     [3, 8, 15, 1, 10, 6, 5, 11, 14, 13, 4, 2, 7, 0, 9, 12],
     [15, 12, 2, 7, 9, 0, 5, 10, 1, 11, 14, 8, 6, 13, 3, 4],
@@ -32,6 +34,7 @@ const SBOXES: [[u8; 16]; 8] = [
     [1, 13, 15, 0, 14, 8, 2, 11, 7, 4, 12, 10, 9, 3, 5, 6],
 ];
 
+// Inverse S-box tables from the same Serpent submission.
 const INV_SBOXES: [[u8; 16]; 8] = [
     [13, 3, 11, 0, 10, 6, 5, 12, 1, 14, 4, 7, 15, 9, 8, 2],
     [5, 8, 2, 14, 15, 6, 12, 3, 11, 4, 7, 9, 1, 13, 10, 0],
@@ -63,6 +66,8 @@ fn sbox_ct_nibble(input: u8, sbox_anf: [u16; 4]) -> u8 {
 
 #[inline]
 fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
+    // Bitslice mapping: bit `i` from each word forms one 4-bit S-box input,
+    // so one call processes 32 parallel 4-bit S-box instances.
     let [x0, x1, x2, x3] = words;
     let mut out = [0u32; 4];
     let mut bit = 0u32;
@@ -83,6 +88,8 @@ fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
 
 #[inline]
 fn apply_sbox_ct(words: [u32; 4], sbox_anf: [u16; 4]) -> [u32; 4] {
+    // Same 32-lane bitslice mapping as `apply_sbox_table`, but each nibble is
+    // evaluated through packed ANF coefficients instead of table lookups.
     let [x0, x1, x2, x3] = words;
     let mut out = [0u32; 4];
     let mut bit = 0u32;

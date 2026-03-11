@@ -804,10 +804,10 @@ fn polyvec_from_bytes(k: usize, bytes: &[u8]) -> Option<PolyVec> {
         return None;
     }
     let mut polys = [[0i16; N]; MAX_K];
-    for i in 0..k {
+    for (i, poly) in polys.iter_mut().enumerate().take(k) {
         let start = i * POLY_BYTES;
         let end = start + POLY_BYTES;
-        polys[i] = poly_from_bytes(&bytes[start..end])?;
+        *poly = poly_from_bytes(&bytes[start..end])?;
     }
     Some(PolyVec { polys, k })
 }
@@ -875,7 +875,7 @@ fn polyvec_decompress(k: usize, bytes: &[u8], d: usize) -> Option<PolyVec> {
             if bytes.len() != k * 320 {
                 return None;
             }
-            for i in 0..k {
+            for (i, poly) in polys.iter_mut().enumerate().take(k) {
                 for j in 0..(N / 4) {
                     let off = i * 320 + 5 * j;
                     let b0 = u16::from(bytes[off]);
@@ -887,10 +887,10 @@ fn polyvec_decompress(k: usize, bytes: &[u8], d: usize) -> Option<PolyVec> {
                     let t1 = ((b1 >> 2) | (b2 << 6)) & 0x03FF;
                     let t2 = ((b2 >> 4) | (b3 << 4)) & 0x03FF;
                     let t3 = ((b3 >> 6) | (b4 << 2)) & 0x03FF;
-                    polys[i][4 * j] = decompress_coeff(t0, 10);
-                    polys[i][4 * j + 1] = decompress_coeff(t1, 10);
-                    polys[i][4 * j + 2] = decompress_coeff(t2, 10);
-                    polys[i][4 * j + 3] = decompress_coeff(t3, 10);
+                    poly[4 * j] = decompress_coeff(t0, 10);
+                    poly[4 * j + 1] = decompress_coeff(t1, 10);
+                    poly[4 * j + 2] = decompress_coeff(t2, 10);
+                    poly[4 * j + 3] = decompress_coeff(t3, 10);
                 }
             }
         }
@@ -898,7 +898,7 @@ fn polyvec_decompress(k: usize, bytes: &[u8], d: usize) -> Option<PolyVec> {
             if bytes.len() != k * 352 {
                 return None;
             }
-            for i in 0..k {
+            for (i, poly) in polys.iter_mut().enumerate().take(k) {
                 for j in 0..(N / 8) {
                     let off = i * 352 + 11 * j;
                     let b0 = u16::from(bytes[off]);
@@ -920,14 +920,14 @@ fn polyvec_decompress(k: usize, bytes: &[u8], d: usize) -> Option<PolyVec> {
                     let t5 = ((b6 >> 7) | (b7 << 1) | (b8 << 9)) & 0x07FF;
                     let t6 = ((b8 >> 2) | (b9 << 6)) & 0x07FF;
                     let t7 = ((b9 >> 5) | (b10 << 3)) & 0x07FF;
-                    polys[i][8 * j] = decompress_coeff(t0, 11);
-                    polys[i][8 * j + 1] = decompress_coeff(t1, 11);
-                    polys[i][8 * j + 2] = decompress_coeff(t2, 11);
-                    polys[i][8 * j + 3] = decompress_coeff(t3, 11);
-                    polys[i][8 * j + 4] = decompress_coeff(t4, 11);
-                    polys[i][8 * j + 5] = decompress_coeff(t5, 11);
-                    polys[i][8 * j + 6] = decompress_coeff(t6, 11);
-                    polys[i][8 * j + 7] = decompress_coeff(t7, 11);
+                    poly[8 * j] = decompress_coeff(t0, 11);
+                    poly[8 * j + 1] = decompress_coeff(t1, 11);
+                    poly[8 * j + 2] = decompress_coeff(t2, 11);
+                    poly[8 * j + 3] = decompress_coeff(t3, 11);
+                    poly[8 * j + 4] = decompress_coeff(t4, 11);
+                    poly[8 * j + 5] = decompress_coeff(t5, 11);
+                    poly[8 * j + 6] = decompress_coeff(t6, 11);
+                    poly[8 * j + 7] = decompress_coeff(t7, 11);
                 }
             }
         }
@@ -1051,8 +1051,8 @@ fn cbd3(buf: &[u8]) -> Poly {
 
 fn gen_matrix(p: Profile, seed: &[u8; SYM_BYTES], transposed: bool) -> [PolyVec; MAX_K] {
     let mut rows = core::array::from_fn(|_| PolyVec::zero(p.k));
-    for i in 0..p.k {
-        let mut row = PolyVec::zero(p.k);
+    for (i, row_slot) in rows.iter_mut().enumerate().take(p.k) {
+        let mut row_value = PolyVec::zero(p.k);
         for j in 0..p.k {
             // WHAT: swap matrix coordinates when `transposed` is requested.
             // WHY: keygen needs A while encapsulation needs A^T; one sampler serves both.
@@ -1061,9 +1061,9 @@ fn gen_matrix(p: Profile, seed: &[u8; SYM_BYTES], transposed: bool) -> [PolyVec;
             } else {
                 (j as u8, i as u8)
             };
-            row.polys[j] = sample_uniform_ntt(seed, x, y);
+            row_value.polys[j] = sample_uniform_ntt(seed, x, y);
         }
-        rows[i] = row;
+        *row_slot = row_value;
     }
     rows
 }
@@ -1220,7 +1220,7 @@ mod tests {
 
     fn decode_hex(hex: &str) -> Option<Vec<u8>> {
         let bytes = hex.as_bytes();
-        if bytes.len() % 2 != 0 {
+        if !bytes.len().is_multiple_of(2) {
             return None;
         }
         let mut out = Vec::with_capacity(bytes.len() / 2);
@@ -1310,12 +1310,10 @@ mod tests {
     fn ml_kem_512_matches_acvp_fips203_subset() {
         // Source: NIST ACVP server vectors, ML-KEM keyGen/encapDecap FIPS203,
         // tgId 1 tcId 1 (keyGen + encapsulation) and tgId 4 tcId 1 (decapsulation).
-        let vectors = parse_vector_map(include_str!(
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/vectors/ml_kem_fips203_subset.txt"
-            )
-        ));
+        let vectors = parse_vector_map(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/vectors/ml_kem_fips203_subset.txt"
+        )));
 
         let d: [u8; 32] = decode_hex_array(vectors["KEYGEN_D"]).expect("d");
         let z: [u8; 32] = decode_hex_array(vectors["KEYGEN_Z"]).expect("z");

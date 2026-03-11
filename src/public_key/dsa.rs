@@ -779,6 +779,23 @@ mod tests {
         Dsa::from_secret_exponent(&p, &q, &g, &x).expect("valid DSA key")
     }
 
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        let cleaned: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(
+            cleaned.len() % 2,
+            0,
+            "hex input must have an even number of nybbles"
+        );
+        (0..cleaned.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex byte"))
+            .collect()
+    }
+
+    fn from_hex(hex: &str) -> BigUint {
+        BigUint::from_be_bytes(&decode_hex(hex))
+    }
+
     #[test]
     fn derive_small_reference_key_components() {
         let (public, private) = derive_small_reference_key();
@@ -984,5 +1001,41 @@ mod tests {
         let digest = Sha384::digest(message);
         let signature = private.sign_digest::<Sha384>(&digest).expect("signature");
         assert!(public.verify_message::<Sha384>(message, &signature));
+    }
+
+    #[test]
+    fn rfc6979_dsa_1024_sha256_sample_vector() {
+        // RFC 6979, Appendix A.2.1 (DSA, 1024 bits), SHA-256, message "sample".
+        let p = from_hex(
+            "86F5CA03DCFEB225063FF830A0C769B9DD9D6153AD91D7CE27F787C43278B447\
+             E6533B86B18BED6E8A48B784A14C252C5BE0DBF60B86D6385BD2F12FB763ED88\
+             73ABFD3F5BA2E0A8C0A59082EAC056935E529DAF7C610467899C77ADEDFC846C\
+             881870B7B19B2B58F9BE0521A17002E3BDD6B86685EE90B3D9A1B02B782B1779",
+        );
+        let q = from_hex("996F967F6C8E388D9E28D01E205FBA957A5698B1");
+        let g = from_hex(
+            "07B0F92546150B62514BB771E2A0C0CE387F03BDA6C56B505209FF25FD3C133D\
+             89BBCD97E904E09114D9A7DEFDEADFC9078EA544D2E401AEECC40BB9FBBF78FD\
+             87995A10A1C27CB7789B594BA7EFB5C4326A9FE59A070E136DB77175464ADCA4\
+             17BE5DCE2F40D10A46A3A3943F26AB7FD9C0398FF8C76EE0A56826A8A88F1DBD",
+        );
+        let x = from_hex("411602CB19A6CCC34494D79D98EF1E7ED5AF25F7");
+
+        let (public, private) =
+            Dsa::from_secret_exponent(&p, &q, &g, &x).expect("RFC key must be valid");
+        let message = b"sample";
+        let digest = Sha256::digest(message);
+
+        let expected_k = from_hex("519BA0546D0C39202A7D34D7DFA5E760B318BCFB");
+        let derived_k =
+            super::rfc6979_nonce::<Sha256>(&q, &x, &digest).expect("RFC nonce must derive");
+        assert_eq!(derived_k, expected_k, "RFC 6979 nonce mismatch");
+
+        let signature = private.sign_message::<Sha256>(message).expect("sign");
+        let expected_r = from_hex("81F2F5850BE5BC123C43F71A3033E9384611C545");
+        let expected_s = from_hex("4CDD914B65EB6C66A8AAAD27299BEE6B035F5E89");
+        assert_eq!(signature.r(), &expected_r);
+        assert_eq!(signature.s(), &expected_s);
+        assert!(public.verify_message::<Sha256>(message, &signature));
     }
 }
