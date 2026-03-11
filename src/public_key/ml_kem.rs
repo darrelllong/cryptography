@@ -1250,6 +1250,14 @@ mod tests {
         out
     }
 
+    fn parse_i16_vector(contents: &str) -> Vec<i16> {
+        contents
+            .split_whitespace()
+            .filter(|tok| !tok.starts_with('#'))
+            .filter_map(|tok| tok.parse::<i16>().ok())
+            .collect()
+    }
+
     #[test]
     fn ml_kem_parameter_lengths_match_profiles() {
         assert_eq!(MlKemParameterSet::MlKem512.public_key_len(), 800);
@@ -1263,6 +1271,17 @@ mod tests {
         assert_eq!(MlKemParameterSet::MlKem1024.public_key_len(), 1568);
         assert_eq!(MlKemParameterSet::MlKem1024.private_key_len(), 3168);
         assert_eq!(MlKemParameterSet::MlKem1024.ciphertext_len(), 1568);
+    }
+
+    #[test]
+    fn ml_kem_zetas_match_reference_ntt_table() {
+        // Reference: pq-crystals/kyber ref/ntt.c zetas table.
+        let expected = parse_i16_vector(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/vectors/ml_kem_ref_zetas.txt"
+        )));
+        let expected: [i16; 128] = expected.try_into().expect("expected 128 ML-KEM zetas");
+        assert_eq!(ZETAS, expected);
     }
 
     #[test]

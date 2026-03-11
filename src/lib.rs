@@ -239,6 +239,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Aead for Ccm<C, TAG_LEN> {
 impl Aead for ChaCha20Poly1305 {
     type Tag = [u8; 16];
 
+    /// Panics if `nonce.len() != 12`.
     fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
         let nonce: &[u8; 12] = nonce
             .try_into()
@@ -246,6 +247,7 @@ impl Aead for ChaCha20Poly1305 {
         self.encrypt_in_place(nonce, aad, data)
     }
 
+    /// Panics if `nonce.len() != 12`.
     fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
         let nonce: &[u8; 12] = nonce
             .try_into()
@@ -295,6 +297,7 @@ impl<C: BlockCipher> Aead for Ocb<C> {
 impl Aead for Aes128GcmSiv {
     type Tag = [u8; 16];
 
+    /// Panics if `nonce.len() != 12`.
     fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
         let nonce: &[u8; 12] = nonce
             .try_into()
@@ -302,6 +305,7 @@ impl Aead for Aes128GcmSiv {
         self.encrypt(nonce, aad, data)
     }
 
+    /// Panics if `nonce.len() != 12`.
     fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
         let nonce: &[u8; 12] = nonce
             .try_into()
@@ -313,6 +317,7 @@ impl Aead for Aes128GcmSiv {
 impl Aead for Aes256GcmSiv {
     type Tag = [u8; 16];
 
+    /// Panics if `nonce.len() != 12`.
     fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
         let nonce: &[u8; 12] = nonce
             .try_into()
@@ -320,6 +325,7 @@ impl Aead for Aes256GcmSiv {
         self.encrypt(nonce, aad, data)
     }
 
+    /// Panics if `nonce.len() != 12`.
     fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
         let nonce: &[u8; 12] = nonce
             .try_into()

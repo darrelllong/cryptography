@@ -1899,6 +1899,14 @@ mod tests {
         out
     }
 
+    fn parse_i32_vector(contents: &str) -> Vec<i32> {
+        contents
+            .split_whitespace()
+            .filter(|tok| !tok.starts_with('#'))
+            .filter_map(|tok| tok.parse::<i32>().ok())
+            .collect()
+    }
+
     #[test]
     fn ml_dsa_44_keygen_matches_acvp_fips204_vector() {
         // Source: NIST ACVP server vectors, ML-DSA keyGen FIPS204, tgId=1 tcId=1.
@@ -1910,6 +1918,17 @@ mod tests {
         let expected_pk = decode_hex(vectors["KEYGEN_PK"]).expect("pk");
         let (pk, _sk) = MlDsa::keygen_from_seed(MlDsaParameterSet::MlDsa44, &seed).expect("keygen");
         assert_eq!(pk.to_wire_bytes(), expected_pk);
+    }
+
+    #[test]
+    fn ml_dsa_zetas_match_reference_ntt_table() {
+        // Reference: pq-crystals/dilithium ref/ntt.c zetas table.
+        let expected = parse_i32_vector(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/vectors/ml_dsa_ref_zetas.txt"
+        )));
+        let expected: [i32; N] = expected.try_into().expect("expected 256 ML-DSA zetas");
+        assert_eq!(ZETAS, expected);
     }
 
     #[test]
