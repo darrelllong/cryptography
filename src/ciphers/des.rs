@@ -1421,14 +1421,8 @@ mod tests {
             ),
         ];
         for (k1, k2) in pairs {
-            assert!(matches!(
-                Des::new(&k1),
-                Err(DesKeyError::WeakOrSemiWeakKey)
-            ));
-            assert!(matches!(
-                Des::new(&k2),
-                Err(DesKeyError::WeakOrSemiWeakKey)
-            ));
+            assert!(matches!(Des::new(&k1), Err(DesKeyError::WeakOrSemiWeakKey)));
+            assert!(matches!(Des::new(&k2), Err(DesKeyError::WeakOrSemiWeakKey)));
             assert!(matches!(
                 DesCt::new(&k1),
                 Err(DesKeyError::WeakOrSemiWeakKey)
