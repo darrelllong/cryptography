@@ -126,9 +126,35 @@ fn increment_be32(counter: &mut [u8; 16]) {
     }
 }
 
+const GCM_MAX_COUNTER_BLOCKS: u64 = (u32::MAX as u64) - 1;
+const GCM_MAX_PAYLOAD_BYTES: u64 = GCM_MAX_COUNTER_BLOCKS * 16;
+
+#[inline]
+fn gcm_payload_len_allowed_u64(len_bytes: u64) -> bool {
+    // SP 800-38D bounds GCTR to at most 2^32 - 2 block invocations per key/nonce.
+    len_bytes.saturating_add(15) / 16 <= GCM_MAX_COUNTER_BLOCKS
+}
+
+#[inline]
+fn gcm_payload_len_allowed(len_bytes: usize) -> bool {
+    gcm_payload_len_allowed_u64(u64::try_from(len_bytes).unwrap_or(u64::MAX))
+}
+
+#[inline]
+fn assert_gcm_payload_len(len_bytes: usize) {
+    assert!(
+        gcm_payload_len_allowed(len_bytes),
+        "GCM payload too large: max {} bytes per key/nonce",
+        GCM_MAX_PAYLOAD_BYTES
+    );
+}
+
 #[inline]
 fn gf_mul_x_xts(tweak: &mut [u8; 16]) {
-    // XTS treats the tweak as a little-endian polynomial element.
+    // SP 800-38E treats tweaks as elements of GF(2^128) encoded little-endian.
+    // Multiplication by x is a one-bit left shift across bytes; when a carry
+    // leaves the top bit, reduce by x^128 + x^7 + x^2 + x + 1, which is `0x87`
+    // in this byte order, so the xor lands in `tweak[0]`.
     let mut carry = 0u8;
     for b in tweak.iter_mut() {
         let next = *b >> 7;
@@ -156,6 +182,9 @@ fn xex_decrypt_block<C: BlockCipher>(cipher: &C, tweak: &[u8; 16], block: &mut [
 
 #[inline]
 fn ghash_mul_vt(x: u128, y: u128) -> u128 {
+    // SP 800-38D Algorithm 1 reduction constant for p(x)=x^128+x^7+x^2+x+1.
+    // GHASH uses a bit-reflected representation, so the low terms
+    // (x^7+x^2+x+1) encode as 0xe1 in the most-significant byte.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
     // Portable reference GHASH multiplication. This is not constant-time; use
@@ -178,11 +207,15 @@ fn ghash_mul_vt(x: u128, y: u128) -> u128 {
 
 #[inline]
 fn ghash_mul_ct(x: u128, y: u128) -> u128 {
+    // Same reflected reduction constant as `ghash_mul_vt`: in GHASH bit order,
+    // x^7 + x^2 + x + 1 maps to 0xe1 in the most-significant byte.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
+        // Turn one bit into an all-ones/all-zero mask and use it to
+        // conditionally xor without data-dependent branches.
         let bit = u8::try_from((x >> (127 - i)) & 1).expect("single bit fits in u8");
         let bit_mask = 0u128.wrapping_sub(u128::from(bit));
         z ^= v & bit_mask;
@@ -212,6 +245,7 @@ fn ghash(h: u128, aad: &[u8], ciphertext: &[u8], mul: GhashMulFn) -> u128 {
     ghash_update(&mut y, h, ciphertext, mul);
 
     let mut len_block = [0u8; 16];
+    // SP 800-38D GHASH appends bit lengths, not byte lengths.
     len_block[..8].copy_from_slice(&((aad.len() as u64) << 3).to_be_bytes());
     len_block[8..].copy_from_slice(&((ciphertext.len() as u64) << 3).to_be_bytes());
     y ^= u128::from_be_bytes(len_block);
@@ -220,17 +254,20 @@ fn ghash(h: u128, aad: &[u8], ciphertext: &[u8], mul: GhashMulFn) -> u128 {
 
 #[inline]
 fn ghash_iv(h: u128, iv: &[u8], mul: GhashMulFn) -> [u8; 16] {
+    // SP 800-38D §7.1 fast path: for 96-bit IVs, J0 = IV || 0^31 || 1.
     if iv.len() == 12 {
         let mut j0 = [0u8; 16];
         j0[..12].copy_from_slice(iv);
         j0[15] = 1;
         return j0;
     }
+    // Non-96-bit IVs are GHASHed with the standard length block.
     ghash(h, &[], iv, mul).to_be_bytes()
 }
 
 #[inline]
 fn gcm_hash_subkey<C: BlockCipher>(cipher: &C) -> u128 {
+    // GCM hash subkey H = E_K(0^128) per SP 800-38D.
     let mut h = [0u8; 16];
     cipher.encrypt(&mut h);
     u128::from_be_bytes(h)
@@ -251,6 +288,7 @@ fn gcm_compute_tag<C: BlockCipher>(
     mul: GhashMulFn,
 ) -> [u8; 16] {
     assert_block_128::<C>();
+    assert_gcm_payload_len(ciphertext.len());
     let h = gcm_hash_subkey(cipher);
     let j0 = ghash_iv(h, nonce, mul);
     let s = ghash(h, aad, ciphertext, mul);
@@ -266,6 +304,7 @@ fn gcm_compute_tag_with_h<C: BlockCipher>(
     ciphertext: &[u8],
     mul: GhashMulFn,
 ) -> [u8; 16] {
+    assert_gcm_payload_len(ciphertext.len());
     let j0 = ghash_iv(h, nonce, mul);
     let s = ghash(h, aad, ciphertext, mul);
     let tag_mask = u128::from_be_bytes(counter_keystream(cipher, &j0));
@@ -967,6 +1006,9 @@ impl<C> Cmac<C> {
 }
 
 /// Counter with CBC-MAC (CCM) with configurable detached tag length.
+///
+/// Tags are returned as `Vec<u8>` because CCM allows multiple standardized tag
+/// lengths (4, 6, 8, 10, 12, 14, 16 bytes) per RFC 3610.
 pub struct Ccm<C> {
     cipher: C,
     tag_len: usize,
@@ -997,6 +1039,7 @@ impl<C> Ccm<C> {
 
 impl<C: BlockCipher> Ccm<C> {
     /// Compute a detached CCM tag over `plaintext` and associated data.
+    #[must_use]
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
         let t = ccm_cbc_mac(&self.cipher, nonce, aad, plaintext, self.tag_len);
         let s0 = counter_keystream(&self.cipher, &ccm_counter_block(nonce, 0));
@@ -1008,6 +1051,7 @@ impl<C: BlockCipher> Ccm<C> {
     }
 
     /// Encrypt `data` in place and return the detached CCM authentication tag.
+    #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Vec<u8> {
         assert_block_128::<C>();
         let tag = self.compute_tag(nonce, aad, data);
@@ -1040,6 +1084,13 @@ impl<C: BlockCipher> Ccm<C> {
 }
 
 /// Galois/Counter Mode (GCM) with a full 128-bit authentication tag.
+///
+/// Per NIST SP 800-38D, this implementation enforces a per-call payload limit
+/// of `(2^32 - 2)` counter blocks (`68_719_476_704` bytes) so the 32-bit
+/// counter field cannot wrap.
+///
+/// Callers must still ensure nonce uniqueness per key; this API is stateless and
+/// cannot enforce global `(key, nonce)` uniqueness.
 pub struct Gcm<C> {
     cipher: C,
 }
@@ -1048,6 +1099,9 @@ pub struct Gcm<C> {
 ///
 /// This keeps the historical GHASH implementation for comparison and legacy
 /// profiling. Use [`Gcm`] for the default constant-time software GHASH path.
+///
+/// It enforces the same SP 800-38D payload bound as [`Gcm`]:
+/// `(2^32 - 2)` counter blocks (`68_719_476_704` bytes) per call.
 pub struct GcmVt<C> {
     cipher: C,
 }
@@ -1078,13 +1132,22 @@ impl<C> GcmVt<C> {
 
 impl<C: BlockCipher> Gcm<C> {
     /// Compute the GCM authentication tag over `aad` and `ciphertext`.
+    ///
+    /// Panics if `ciphertext.len()` exceeds the SP 800-38D per-call bound of
+    /// `68_719_476_704` bytes.
+    #[must_use]
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
         gcm_compute_tag(&self.cipher, nonce, aad, ciphertext, ghash_mul_ct)
     }
 
     /// Encrypt in place and return the 128-bit authentication tag.
+    ///
+    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
+    /// `68_719_476_704` bytes.
+    #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         assert_block_128::<C>();
+        assert_gcm_payload_len(data.len());
         let mut h = [0u8; 16];
         self.cipher.encrypt(&mut h);
         let h = u128::from_be_bytes(h);
@@ -1106,8 +1169,12 @@ impl<C: BlockCipher> Gcm<C> {
     /// Verify the tag and, if valid, decrypt in place.
     ///
     /// Returns `false` and leaves `data` unchanged if tag verification fails.
+    ///
+    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
+    /// `68_719_476_704` bytes.
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
         assert_block_128::<C>();
+        assert_gcm_payload_len(data.len());
         let h = gcm_hash_subkey(&self.cipher);
         let expected = gcm_compute_tag_with_h(&self.cipher, h, nonce, aad, data, ghash_mul_ct);
         if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
@@ -1129,13 +1196,22 @@ impl<C: BlockCipher> Gcm<C> {
 
 impl<C: BlockCipher> GcmVt<C> {
     /// Compute the GCM authentication tag over `aad` and `ciphertext`.
+    ///
+    /// Panics if `ciphertext.len()` exceeds the SP 800-38D per-call bound of
+    /// `68_719_476_704` bytes.
+    #[must_use]
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
         gcm_compute_tag(&self.cipher, nonce, aad, ciphertext, ghash_mul_vt)
     }
 
     /// Encrypt in place and return the 128-bit authentication tag.
+    ///
+    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
+    /// `68_719_476_704` bytes.
+    #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         assert_block_128::<C>();
+        assert_gcm_payload_len(data.len());
         let mut h = [0u8; 16];
         self.cipher.encrypt(&mut h);
         let h = u128::from_be_bytes(h);
@@ -1157,8 +1233,12 @@ impl<C: BlockCipher> GcmVt<C> {
     /// Verify the tag and, if valid, decrypt in place.
     ///
     /// Returns `false` and leaves `data` unchanged if tag verification fails.
+    ///
+    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
+    /// `68_719_476_704` bytes.
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
         assert_block_128::<C>();
+        assert_gcm_payload_len(data.len());
         let h = gcm_hash_subkey(&self.cipher);
         let expected = gcm_compute_tag_with_h(&self.cipher, h, nonce, aad, data, ghash_mul_vt);
         if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
@@ -1217,6 +1297,7 @@ impl<C> GmacVt<C> {
 
 impl<C: BlockCipher> Gmac<C> {
     /// Compute a GMAC tag over associated data only.
+    #[must_use]
     pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; 16] {
         gcm_compute_tag(&self.cipher, nonce, aad, &[], ghash_mul_ct)
     }
@@ -1229,6 +1310,7 @@ impl<C: BlockCipher> Gmac<C> {
 
 impl<C: BlockCipher> GmacVt<C> {
     /// Compute a GMAC tag over associated data only.
+    #[must_use]
     pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; 16] {
         gcm_compute_tag(&self.cipher, nonce, aad, &[], ghash_mul_vt)
     }
@@ -1736,6 +1818,15 @@ mod tests {
         assert!(gcm_vt.decrypt(&iv, &aad, &mut vt_data, &vt_tag));
         assert_eq!(ct_data, plaintext);
         assert_eq!(vt_data, plaintext);
+    }
+
+    #[test]
+    fn gcm_payload_limit_matches_sp800_38d_bound() {
+        assert!(gcm_payload_len_allowed_u64(0));
+        assert!(gcm_payload_len_allowed_u64(1));
+        assert!(gcm_payload_len_allowed_u64(16));
+        assert!(gcm_payload_len_allowed_u64(GCM_MAX_PAYLOAD_BYTES));
+        assert!(!gcm_payload_len_allowed_u64(GCM_MAX_PAYLOAD_BYTES + 1));
     }
 
     #[test]

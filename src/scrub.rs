@@ -1,7 +1,17 @@
+//! Repository policy scrub tests.
+//!
+//! This file is a lightweight "policy CI" layer implemented as unit tests:
+//! it scans selected source files with `include_str!` and fails when banned API
+//! names, missing safety markers, or surface-contract regressions reappear.
+//!
+//! The goal is to catch architectural drift early (naming regressions, Ct policy
+//! regressions, unsafe root exports) without introducing a separate lint tool.
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
+    // Shared helper for negative text assertions used by policy checks below.
     fn assert_none(label: &str, haystack: &str, forbidden: &[&str]) {
         for needle in forbidden {
             assert!(

@@ -7,10 +7,14 @@ use crate::{Aes128, Aes256, BlockCipher};
 
 #[inline]
 fn ghash_mul(x: u128, y: u128) -> u128 {
+    // SP 800-38D field polynomial x^128 + x^7 + x^2 + x + 1, reused by POLYVAL
+    // through byte/bit reversal in RFC 8452. In reflected GHASH bit order,
+    // x^7 + x^2 + x + 1 is encoded as 0xe1 in the most-significant byte.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
+        // Branch-free conditional xor via all-ones/all-zero masks.
         let bit = u8::try_from((x >> (127 - i)) & 1).expect("single bit");
         let bit_mask = 0u128.wrapping_sub(u128::from(bit));
         z ^= v & bit_mask;
@@ -24,6 +28,7 @@ fn ghash_mul(x: u128, y: u128) -> u128 {
 
 #[inline]
 fn mulx_ghash(v: u128) -> u128 {
+    // Multiply by x in the reflected GHASH field representation.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
     if (v & 1) != 0 {
         (v >> 1) ^ R
@@ -196,6 +201,7 @@ impl Aes128GcmSiv {
     }
 
     /// Encrypt `data` in place and return a detached 16-byte tag.
+    #[must_use]
     pub fn encrypt(&self, nonce: &[u8; 12], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         let (ciphertext, tag, _, _) = encrypt_core(&self.keygen, false, nonce, aad, data);
         data.copy_from_slice(&ciphertext);
@@ -231,6 +237,7 @@ impl Aes256GcmSiv {
     }
 
     /// Encrypt `data` in place and return a detached 16-byte tag.
+    #[must_use]
     pub fn encrypt(&self, nonce: &[u8; 12], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         let (ciphertext, tag, _, _) = encrypt_core(&self.keygen, true, nonce, aad, data);
         data.copy_from_slice(&ciphertext);
