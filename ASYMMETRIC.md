@@ -1082,13 +1082,6 @@ These charts also use operations per second on a log scale.
 
 ![EC encryption Kiviat diagram (radar chart)](assets/ec-encryption-radar.svg)
 
-### Apple-Silicon Go-Fast Status
-
-There is currently no asymmetric/public-key Apple go-fast alternative path
-under `fast/Apple-Silicon`. The active go-fast kernels are symmetric/hash/GHASH
-only, so asymmetric performance remains represented by the Pilot tables and
-Kiviat diagrams above.
-
 ## Practical Guidance
 
 - Use `RSA` when you need standards-backed encryption or signatures.
