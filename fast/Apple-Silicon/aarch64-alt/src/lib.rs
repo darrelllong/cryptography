@@ -9,3 +9,4 @@ pub mod aes128_armv8;
 pub mod aes256_armv8;
 pub mod ghash_armv8;
 pub mod sha256_armv8;
+pub mod sha3_armv8;

@@ -56,9 +56,21 @@ const RC: [u64; 24] = [
     0x8000_0000_8000_8008,
 ];
 
+// Runtime-dispatching entry point: hardware on aarch64 + FEAT_SHA3, else soft.
 #[inline]
 fn keccak_f1600(state: &mut [u64; 25]) {
-    // 24 rounds, each applying theta -> rho -> pi -> chi -> iota.
+    #[cfg(target_arch = "aarch64")]
+    {
+        if std::arch::is_aarch64_feature_detected!("sha3") {
+            // SAFETY: feature detection confirms FEAT_SHA3 is present.
+            unsafe { return keccak_f1600_sha3(state); }
+        }
+    }
+    keccak_f1600_soft(state);
+}
+
+// Pure-Rust fallback — 24 rounds of theta → rho → pi → chi → iota.
+fn keccak_f1600_soft(state: &mut [u64; 25]) {
     for &rc in &RC {
         // theta: parity of each column.
         let mut c = [0u64; 5];
@@ -94,6 +106,118 @@ fn keccak_f1600(state: &mut [u64; 25]) {
         }
 
         // iota: inject round constant.
+        state[0] ^= rc;
+    }
+}
+
+// FEAT_SHA3 hardware path: uses EOR3 (3-way XOR), RAX1 (rotate-and-XOR),
+// and BCAX (bit-clear-and-XOR) intrinsics.  Theta column parities and D
+// vectors are computed with EOR3/RAX1; chi replaces the scalar NOT+AND+XOR
+// triple with a single BCAX per lane pair.  Rho+Pi remain scalar (each of
+// the 24 non-zero lanes has a distinct rotation, so XAR offers no advantage
+// when lanes are processed sequentially).
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "sha3")]
+unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
+    use core::arch::aarch64::*;
+
+    // Pack two scalars into a 128-bit SIMD register [a, b].
+    #[inline(always)]
+    unsafe fn u64x2(a: u64, b: u64) -> uint64x2_t {
+        vcombine_u64(vdup_n_u64(a), vdup_n_u64(b))
+    }
+
+    for &rc in &RC {
+        // === Theta ===
+        // Column parities: c[x] = XOR of 5 lanes in column x.
+        // EOR3(a,b,c) = a^b^c; chaining two EOR3s gives a 5-way XOR.
+
+        // c[0] and c[1] in one SIMD register.
+        let c01 = {
+            let t = veor3q_u64(
+                u64x2(state[0],  state[1]),
+                u64x2(state[5],  state[6]),
+                u64x2(state[10], state[11]),
+            );
+            veor3q_u64(t, u64x2(state[15], state[16]), u64x2(state[20], state[21]))
+        };
+        // c[2] and c[3].
+        let c23 = {
+            let t = veor3q_u64(
+                u64x2(state[2],  state[3]),
+                u64x2(state[7],  state[8]),
+                u64x2(state[12], state[13]),
+            );
+            veor3q_u64(t, u64x2(state[17], state[18]), u64x2(state[22], state[23]))
+        };
+        // c[4] is the odd column; compute it scalar.
+        let c4 = state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24];
+
+        let c0 = vgetq_lane_u64::<0>(c01);
+        let c1 = vgetq_lane_u64::<1>(c01);
+        let c2 = vgetq_lane_u64::<0>(c23);
+        let c3 = vgetq_lane_u64::<1>(c23);
+
+        // D[x] = C[(x+4)%5] ^ rotate_left(C[(x+1)%5], 1).
+        // vrax1q_u64(a, b) = a ^ rotate_left(b, 1), elementwise.
+        //   D[0] = c4 ^ rotl(c1, 1)    D[1] = c0 ^ rotl(c2, 1)
+        //   D[2] = c1 ^ rotl(c3, 1)    D[3] = c2 ^ rotl(c4, 1)
+        let d01 = vrax1q_u64(u64x2(c4, c0), u64x2(c1, c2));
+        let d23 = vrax1q_u64(u64x2(c1, c2), u64x2(c3, c4));
+        let d4  = c3 ^ c0.rotate_left(1);   // scalar
+
+        let d = [
+            vgetq_lane_u64::<0>(d01),
+            vgetq_lane_u64::<1>(d01),
+            vgetq_lane_u64::<0>(d23),
+            vgetq_lane_u64::<1>(d23),
+            d4,
+        ];
+
+        // Apply D[x] to every lane in column x.
+        for y in 0..5 {
+            for x in 0..5 {
+                state[x + 5 * y] ^= d[x];
+            }
+        }
+
+        // === Rho + Pi (scalar) ===
+        // Each of the 24 non-zero-rotation lanes has a unique RHO value, so
+        // XAR (which applies the same rotation to both elements of a pair)
+        // gives no advantage.  Keep the existing scalar loop.
+        let mut b = [0u64; 25];
+        for i in 0..25 {
+            b[PI[i]] = state[i].rotate_left(RHO[i]);
+        }
+
+        // === Chi using BCAX ===
+        // chi[x] = b[x] ^ (!b[(x+1)%5] & b[(x+2)%5])
+        //        = BCAX(b[x], b[(x+2)%5], b[(x+1)%5])
+        // vbcaxq_u64(a, b, c) = a ^ (b & !c), elementwise.
+        // Process each row of 5 lanes as two SIMD pairs + one scalar.
+        for y in 0..5 {
+            let r = y * 5;
+            // x=0: BCAX(b[0], b[2], b[1])    x=1: BCAX(b[1], b[3], b[2])
+            let chi01 = vbcaxq_u64(
+                u64x2(b[r],   b[r+1]),
+                u64x2(b[r+2], b[r+3]),
+                u64x2(b[r+1], b[r+2]),
+            );
+            // x=2: BCAX(b[2], b[4], b[3])    x=3: BCAX(b[3], b[0], b[4])
+            let chi23 = vbcaxq_u64(
+                u64x2(b[r+2], b[r+3]),
+                u64x2(b[r+4], b[r  ]),
+                u64x2(b[r+3], b[r+4]),
+            );
+            state[r  ] = vgetq_lane_u64::<0>(chi01);
+            state[r+1] = vgetq_lane_u64::<1>(chi01);
+            state[r+2] = vgetq_lane_u64::<0>(chi23);
+            state[r+3] = vgetq_lane_u64::<1>(chi23);
+            // x=4: BCAX(b[4], b[1], b[0]) = b[4] ^ (b[1] & !b[0])
+            state[r+4] = b[r+4] ^ (b[r+1] & !b[r]);
+        }
+
+        // === Iota ===
         state[0] ^= rc;
     }
 }
