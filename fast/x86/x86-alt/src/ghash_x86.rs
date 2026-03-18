@@ -104,10 +104,12 @@ unsafe fn mul_hw(x: u128, y: u128) -> u128 {
     let a = x.reverse_bits();
     let b = y.reverse_bits();
 
-    let a0 = u64::try_from(a & u128::from(u64::MAX)).expect("masked low limb fits");
-    let a1 = u64::try_from(a >> 64).expect("high limb fits");
-    let b0 = u64::try_from(b & u128::from(u64::MAX)).expect("masked low limb fits");
-    let b1 = u64::try_from(b >> 64).expect("high limb fits");
+    // Safety: AND with u64::MAX guarantees bits 64..127 are zero; shift by 64
+    // guarantees bits 64..127 of the original value become bits 0..63.
+    let a0 = (a & u128::from(u64::MAX)) as u64;
+    let a1 = (a >> 64) as u64;
+    let b0 = (b & u128::from(u64::MAX)) as u64;
+    let b1 = (b >> 64) as u64;
 
     // Schoolbook over GF(2): four 64x64 carry-less products + cross-term combine.
     let p00 = clmul64_hw(a0, b0);

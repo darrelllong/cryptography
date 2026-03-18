@@ -161,7 +161,7 @@ fn eq_mask_u8(a: u8, b: u8) -> u8 {
     0u8.wrapping_sub(is_zero)
 }
 
-pub(crate) fn zeroize_slice<T: Copy + Default>(slice: &mut [T]) {
+pub fn zeroize_slice<T: Copy + Default>(slice: &mut [T]) {
     // Shared by `Drop` impls and `new_wiping` constructors so expanded round
     // keys do not remain in memory longer than necessary.
     for item in slice.iter_mut() {

@@ -27,6 +27,18 @@ pub struct Aes256X86 {
     inv_round_keys: [[u8; 16]; 15],
 }
 
+impl Drop for Aes256X86 {
+    fn drop(&mut self) {
+        // Zeroize both schedules so key material does not linger after drop.
+        for b in self.round_keys.iter_mut().flatten()
+            .chain(self.inv_round_keys.iter_mut().flatten())
+        {
+            unsafe { std::ptr::write_volatile(b, 0u8) };
+        }
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl Aes256X86 {
     #[must_use]
     pub fn is_supported() -> bool {
