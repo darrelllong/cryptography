@@ -146,7 +146,7 @@ mod tests {
     fn hmac_sha3_256_matches_openssl() {
         let key = b"key";
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::ct::run_openssl(
+        let Some(expected) = crate::test_utils::run_openssl(
             &[
                 "dgst",
                 "-sha3-256",
@@ -244,7 +244,7 @@ mod tests {
     fn hmac_sha256_matches_openssl() {
         let key = b"key";
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::ct::run_openssl(
+        let Some(expected) = crate::test_utils::run_openssl(
             &[
                 "dgst",
                 "-sha256",

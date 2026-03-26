@@ -121,16 +121,9 @@ const SBOXES: [[u8; 64]; 8] = [
     ],
 ];
 
-/// Build packed ANF coefficients for `DesCt`.
-///
-/// Each 6->4 DES S-box output bit is represented as a 64-bit mask over all
-/// monomials in six variables. At runtime `DesCt` builds the active monomial
-/// mask for the input and reduces it with parity. This keeps the checked-in Ct
-/// code much smaller than hand-writing eight separate 6->4 logic networks.
-///
-/// Construction-wise, this is the usual truth-table to ANF conversion:
-/// enumerate the 64 S-box inputs, then apply the in-place Moebius transform to
-/// recover the ANF coefficients for each output bit.
+/// Build packed ANF coefficients for `DesCt`: 64-bit monomial masks per output
+/// bit, one mask per S-box.  Runtime evaluates via subset-mask intersection and
+/// parity, avoiding secret-indexed S-box lookups entirely.
 const fn build_sbox_anf() -> [[u64; 4]; 8] {
     let mut out = [[0u64; 4]; 8];
     let mut sbox_idx = 0usize;
@@ -176,23 +169,10 @@ const fn build_sbox_anf() -> [[u64; 4]; 8] {
 const SBOX_ANF: [[u64; 4]; 8] = build_sbox_anf();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Byte-level precomputed permutation tables
+// Byte-level precomputed permutation tables (used by `Des`, not `DesCt`)
 //
-// These are the original fast software tables used by `Des`.
-// `DesCt` intentionally does not touch them; it uses loop-based permutations
-// and packed ANF S-box evaluation instead.
-//
-// For a permutation perm of width W bits:
-//   table[b][v]  =  contribution to the W-bit output
-//                   when input byte b (big-endian, b=0 is MSB byte)
-//                   has value v.
-//
-// The original loop:
-//   for (i, &src) in perm.iter().enumerate() { out |= bit(input, src) << (W-1-i) }
-// becomes:
-//   out = table[0][byte0] | table[1][byte1] | … | table[B-1][byteB-1]
-//
-// Tables are computed entirely at compile time via const fns.
+// table[byte_idx][byte_val] = that byte's contribution to the permuted output.
+// OR-ing all eight byte contributions gives the full result.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
@@ -333,7 +313,6 @@ fn permute64_to48(input: u64, table: &[u8; 48]) -> u64 {
     out
 }
 
-/// Left-rotate a `bits`-wide value by `n` positions.
 #[inline]
 fn rotate_left(val: u32, n: u8, bits: u8) -> u32 {
     let mask = (1u32 << bits) - 1;
@@ -454,17 +433,9 @@ fn sbox_ct(sbox_idx: usize, input: u8) -> u8 {
         | (parity64(active & coeffs[3]) << 3)
 }
 
-/// Constant-time DES f-function using fixed boolean S-box evaluation.
-///
-/// This mirrors the normal DES round function exactly:
-/// 1. expand R with the E permutation,
-/// 2. XOR the subkey,
-/// 3. run the eight S-boxes,
-/// 4. apply P.
-///
-/// The difference is only in representation: `Des` uses byte tables for
-/// throughput, while `DesCt` performs the E/P permutations with fixed loops and
-/// evaluates the S-boxes through the packed ANF form above.
+/// Constant-time DES f-function: same E / XOR-K / S / P steps as the fast
+/// path, but S-boxes are evaluated via ANF and permutations via fixed loops
+/// rather than secret-indexed byte tables.
 fn f_ct(r: u32, subkey: u64) -> u32 {
     let mut expanded = 0u64;
     for (i, &src) in E.iter().enumerate() {
@@ -498,7 +469,6 @@ fn des_block(block: u64, schedule: &KeySchedule) -> u64 {
     let mut l = u32::try_from((permuted >> 32) & 0xFFFF_FFFF).expect("upper DES half fits in u32");
     let mut r = u32::try_from(permuted & 0xFFFF_FFFF).expect("lower DES half fits in u32");
 
-    // 16 Feistel rounds.
     for &subkey in schedule {
         let tmp = r;
         r = l ^ f(r, subkey);
@@ -1337,7 +1307,7 @@ mod tests {
         let key_hex = "133457799bbcdff1";
         let pt_hex = "0123456789abcdef";
         let Some(expected) =
-            crate::ct::run_openssl_enc("-des-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
+            crate::test_utils::run_openssl_enc("-des-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
         else {
             return;
         };
@@ -1354,7 +1324,7 @@ mod tests {
         let key_hex = "133457799bbcdff100112233445566778899aabbccddeeff";
         let pt_hex = "0123456789abcdef";
         let Some(expected) =
-            crate::ct::run_openssl_enc("-des-ede3-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
+            crate::test_utils::run_openssl_enc("-des-ede3-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
         else {
             return;
         };

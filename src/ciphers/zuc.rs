@@ -138,6 +138,25 @@ struct ZucCore {
     r2: u32,
 }
 
+/// Extract four 32-bit words X0..X3 from the 31-bit LFSR cells (spec §2.2.2).
+///
+/// Each LFSR cell s[i] is a 31-bit value held in bits [30:0] of a u32.
+/// The spec defines two 16-bit "halves" per cell:
+///   s[i]^H = bits [30:15] (upper 16 bits of the 31-bit value)
+///   s[i]^L = bits [15:0]  (lower 16 bits, bit 15 being the topmost)
+///
+/// The four reorganized words are assembled as:
+///   X0 = s[15]^H ‖ s[14]^L   ← newest cell upper / second-newest lower
+///   X1 = s[11]^L ‖ s[ 9]^H   ← bits [14:0]‖0 of s[11] / upper of s[9]
+///   X2 = s[ 7]^L ‖ s[ 5]^H
+///   X3 = s[ 2]^L ‖ s[ 0]^H   ← feeds the keystream word, not F
+///
+/// Bit manipulation:
+///   s[i]^H in the high 16 bits of result:
+///     s[15] << 1 moves bit 30→31..bit 15→16; mask 0xFFFF_0000 keeps [31:16].
+///     s[k] << 16 moves bits [14:0] to [30:16]; mask keeps [31:16].
+///   s[i]^H in the low 16 bits of result:
+///     s[k] >> 15 moves bits [30:15] to [15:0]; mask 0xFFFF keeps [15:0].
 #[inline]
 fn bit_reorganization(s: &[u32; 16]) -> (u32, u32, u32, u32) {
     let x0 = ((s[15] << 1) & 0xFFFF_0000) | (s[14] & 0xFFFF);
@@ -164,6 +183,16 @@ fn nonlinear_f<const CT: bool>(core: &mut ZucCore, x0: u32, x1: u32, x2: u32) ->
     w
 }
 
+/// Compute the LFSR feedback word for working mode (spec §2.2.2).
+///
+/// The LFSR recurrence over GF(2³¹ − 1) is:
+///
+///   s₁₆ = 2¹⁵·s₁₅ + 2¹⁷·s₁₃ + 2²¹·s₁₀ + 2²⁰·s₄ + (2⁸ + 1)·s₀  (mod 2³¹−1)
+///
+/// Here s[0] is the oldest cell (about to be shifted out) and s[15] the
+/// newest.  Multiplication by 2ⁿ mod (2³¹−1) is a 31-bit left rotation by n
+/// bits (since 2³¹ ≡ 1 mod 2³¹−1), implemented by [`mul31`].  The `(2⁸+1)·s₀`
+/// term is split as `s[0] + mul31(s[0], 8)`.
 #[inline]
 fn lfsr_feedback(s: &[u32; 16]) -> u32 {
     let mut v = s[0];

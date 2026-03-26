@@ -48,8 +48,6 @@ const Z: [u64; 5] = [
 //   if m = 4: tmp ⊕= k_{i-3}
 //   tmp ⊕= S⁻¹(tmp)                  applies (I ⊕ S⁻¹)
 //   k_i  = ∼3 ⊕ zⱼ[(i−m) mod 62] ⊕ k_{i-m} ⊕ tmp
-//
-// Note: ∼k_{i-m} ⊕ 3 = ∼3 ⊕ k_{i-m}  (XOR is associative/commutative).
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn simon_expand(key: &[u8], n: u32, m: usize, t: usize, z_idx: usize, mask: u64, rk: &mut [u64]) {

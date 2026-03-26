@@ -64,6 +64,21 @@ fn sbox_ct_nibble(input: u8, sbox_anf: [u16; 4]) -> u8 {
     crate::ct::eval_nibble_sbox(sbox_anf, input)
 }
 
+/// Apply a 4-bit S-box to all 32 bitslice lanes in parallel.
+///
+/// **Bitslice representation.**  Serpent stores one 128-bit block as four 32-bit
+/// words `[x0, x1, x2, x3]`.  Bit `i` of word `j` represents the `j`th input
+/// bit of the `i`th S-box "lane" — so there are 32 parallel 4-bit S-box
+/// instances, one per bit-position 0..31 across all four words.
+///
+/// To apply the S-box to lane `i`:
+///   1. Collect the 4-bit input nibble: bit `i` of each of x0..x3.
+///   2. Look up `table[nibble]` to get the 4-bit output.
+///   3. Distribute the output bits back to bit `i` of each output word.
+///
+/// This is the standard bitsliced evaluation loop over all 32 lanes.  The `Ct`
+/// variant ([`apply_sbox_ct`]) replaces the table lookup with the ANF evaluator
+/// from `crate::ct` to eliminate secret-indexed memory reads.
 #[inline]
 fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
     // Bitslice mapping: bit `i` from each word forms one 4-bit S-box input,

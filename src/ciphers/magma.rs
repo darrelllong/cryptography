@@ -39,6 +39,10 @@ fn t(v: u32) -> u32 {
     r
 }
 
+/// Compute all monomials up to degree 3 of a 4-bit input.
+///
+/// Magma's S-boxes have Boolean degree ≤ 3, so these monomials span all ANF
+/// terms that appear.  The `pi*_ct` functions XOR the terms with coefficient 1.
 #[inline]
 fn nibble_monomials(nibble: u8) -> ([u8; 4], [u8; 6], [u8; 4]) {
     let bits = [
@@ -64,13 +68,9 @@ fn nibble_monomials(nibble: u8) -> ([u8; 4], [u8; 6], [u8; 4]) {
     (bits, pairs, triples)
 }
 
-// The Ct path uses eight tiny 4->4 circuits. For Magma these are small enough
-// to keep in source directly, unlike the larger DES and Grasshopper S-boxes.
-//
-// Each `pi*_ct` function is the ANF of one RFC S-box, written directly over
-// the four input bits. Terms like `x01` or `x123` are monomials, and a literal
-// `1` in a `b*` expression is the ANF constant term. The four `b*` wires are
-// then packed back into the substituted nibble.
+// Each `pi*_ct` is the ANF of one RFC 8891 S-box written over the four input
+// bits.  Pairs/triples from `nibble_monomials` are the product terms; a bare
+// `1` in a `b*` expression is the ANF constant term.
 #[inline]
 fn pi0_ct(nibble: u8) -> u8 {
     let (bits, pairs, triples) = nibble_monomials(nibble);

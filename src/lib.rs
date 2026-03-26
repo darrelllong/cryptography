@@ -12,6 +12,8 @@
 //!   randomness-dependent operations.
 
 mod ct;
+#[cfg(test)]
+mod test_utils;
 
 pub use ct::zeroize_slice;
 

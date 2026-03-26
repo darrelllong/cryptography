@@ -449,7 +449,7 @@ mod tests {
     fn seed_matches_openssl_ecb() {
         let key_hex = "000102030405060708090a0b0c0d0e0f";
         let pt_hex = "00000000000000000000000000000000";
-        let Some(expected) = crate::ct::run_openssl_enc("-seed-ecb", key_hex, None, &h16(pt_hex))
+        let Some(expected) = crate::test_utils::run_openssl_enc("-seed-ecb", key_hex, None, &h16(pt_hex))
         else {
             return;
         };

@@ -86,6 +86,18 @@ fn inv_sbox_layer_ct(state: u64) -> u64 {
     out
 }
 
+/// Apply the PRESENT P-layer bit permutation (ISO/IEC 29192-2 §2.3).
+///
+/// The P-layer sends source bit `i` to destination bit `P(i)` where:
+///   P(i) = 16·i mod 63   for i ∈ 0..62
+///   P(63) = 63            (MSB is fixed)
+///
+/// The formula produces a full permutation on 63 elements because
+/// gcd(16, 63) = 1 (easily verified: 63 = 3·16 + 15; 16 = 1·15 + 1; gcd = 1),
+/// so "stride-16" cycles through all 63 bit positions before repeating.
+///
+/// Implementation: "scatter" mode — for each source bit, compute its
+/// destination and set that bit in the output.
 #[inline]
 fn p_layer(state: u64) -> u64 {
     // PRESENT bit permutation:
@@ -102,6 +114,12 @@ fn p_layer(state: u64) -> u64 {
     out
 }
 
+/// Inverse P-layer — "gather" mode using the same stride-16 formula.
+///
+/// `inv_p_layer` reads output bit `i` from source position `P(i) = 16·i mod 63`.
+/// This is the inverse of `p_layer`'s scatter because gather-P undoes
+/// scatter-P for any permutation P: gather-P(scatter-P(v))[i] = v[i].
+/// (Proof: gather-P(scatter-P(v))[i] = scatter-P(v)[P(i)] = v[P⁻¹(P(i))] = v[i].)
 #[inline]
 fn inv_p_layer(state: u64) -> u64 {
     let mut out = 0u64;

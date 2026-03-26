@@ -1895,7 +1895,7 @@ mod tests {
         let key_hex = "000102030405060708090a0b0c0d0e0f";
         let pt_hex = "00112233445566778899aabbccddeeff";
         let Some(expected) =
-            crate::ct::run_openssl_enc("-aes-128-ecb", key_hex, None, &parse::<16>(pt_hex))
+            crate::test_utils::run_openssl_enc("-aes-128-ecb", key_hex, None, &parse::<16>(pt_hex))
         else {
             return;
         };

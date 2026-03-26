@@ -153,6 +153,10 @@ impl BigUint {
         let mut acc = 0u64;
         let mut shift = 0u32;
 
+        // Walk bytes from least-significant (last byte of the big-endian input)
+        // to most-significant, packing eight bytes at a time into a 64-bit limb.
+        // When `shift` reaches 64, the current limb is full — push it and start
+        // the next one.  Any remaining bytes at the end form a partial limb.
         for &byte in bytes.iter().rev() {
             acc |= u64::from(byte) << shift;
             shift += 8;

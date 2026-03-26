@@ -537,7 +537,7 @@ mod tests {
         let q = BigUint::from_u64(53);
         let (public, _) = Rsa::from_primes(&p, &q).expect("valid RSA key");
 
-        let Some(expected) = crate::ct::run_openssl(
+        let Some(expected) = crate::test_utils::run_openssl(
             &[
                 "pkey", "-pubin", "-inform", "PEM", "-pubout", "-outform", "DER",
             ],
@@ -555,13 +555,13 @@ mod tests {
         let q = BigUint::from_u64(53);
         let (_, private) = Rsa::from_primes(&p, &q).expect("valid RSA key");
 
-        let Some(expected) = crate::ct::run_openssl(
+        let Some(expected) = crate::test_utils::run_openssl(
             &["pkey", "-inform", "PEM", "-outform", "DER"],
             private.to_pkcs8_pem().as_bytes(),
         ) else {
             return;
         };
 
-        assert_eq!(expected, private.to_pkcs1_der());
+        assert_eq!(expected, private.to_pkcs8_der());
     }
 }

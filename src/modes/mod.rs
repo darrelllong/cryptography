@@ -180,6 +180,28 @@ fn xex_decrypt_block<C: BlockCipher>(cipher: &C, tweak: &[u8; 16], block: &mut [
     xor_block16_in_place(block, tweak);
 }
 
+/// Multiply `x` and `y` in GF(2¹²⁸) using the GCM field — variable-time.
+///
+/// **Field definition.**  GCM uses GF(2¹²⁸) with the reduction polynomial
+/// f(α) = α¹²⁸ + α⁷ + α² + α + 1.  Elements are 128-bit polynomials over
+/// GF(2); addition is XOR; multiplication is polynomial multiply mod f.
+///
+/// **Bit convention.**  GCM uses a "reflected" bit order where bit 127 of the
+/// `u128` represents the coefficient of α⁰ (constant term) and bit 0
+/// represents α¹²⁷.  Under this convention, multiplying by α is a right-shift
+/// by 1.  If the low bit (α¹²⁷) was 1, the shift overflows and must be reduced
+/// by XOR-ing with `R`.
+///
+/// **`R` constant.**  `R = 0xe100_..._0000` encodes the remainder
+/// `f(α) mod α¹²⁸ = α⁷ + α² + α + 1` in reflected bit order:
+/// 0xe1 = 1110_0001 → bits 7,6,5,0 → coefficients α⁰,α¹,α²,α⁷ ✓
+///
+/// **Algorithm.**  Standard right-to-left binary scalar multiplication:
+/// for each bit of `x` (MSB first in the reflected convention), conditionally
+/// accumulate `v` into `z`, then advance `v` by one α-multiplication step.
+///
+/// Not constant-time — branches on bits of `x` and `v`.  Use [`ghash_mul_ct`]
+/// when the inputs may be secret.
 #[inline]
 fn ghash_mul_vt(x: u128, y: u128) -> u128 {
     // SP 800-38D Algorithm 1 reduction constant for p(x)=x^128+x^7+x^2+x+1.
@@ -187,9 +209,6 @@ fn ghash_mul_vt(x: u128, y: u128) -> u128 {
     // (x^7+x^2+x+1) encode as 0xe1 in the most-significant byte.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
-    // Portable reference GHASH multiplication. This is not constant-time; use
-    // a CLMUL-backed implementation or a dedicated constant-time GHASH path in
-    // production code with a strict side-channel threat model.
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
@@ -205,6 +224,11 @@ fn ghash_mul_vt(x: u128, y: u128) -> u128 {
     z
 }
 
+/// Multiply `x` and `y` in GF(2¹²⁸) — constant-time version of [`ghash_mul_vt`].
+///
+/// Same field and algorithm as `ghash_mul_vt`, but both conditional XORs are
+/// replaced with branchless masking so neither the bit-pattern of `x` nor the
+/// carry bit of `v` leaks through timing.
 #[inline]
 fn ghash_mul_ct(x: u128, y: u128) -> u128 {
     // Same reflected reduction constant as `ghash_mul_vt`: in GHASH bit order,
@@ -1864,7 +1888,7 @@ mod tests {
         let plaintext =
             parse::<31>("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e");
 
-        let Some(expected) = crate::ct::run_openssl(
+        let Some(expected) = crate::test_utils::run_openssl(
             &[
                 "enc",
                 "-aes-128-xts",

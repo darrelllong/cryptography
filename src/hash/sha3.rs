@@ -632,7 +632,7 @@ mod tests {
     #[test]
     fn sha3_224_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-224", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-224", "-binary"], msg) else {
             return;
         };
         assert_eq!(Sha3_224::digest(msg).as_slice(), expected.as_slice());
@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn sha3_256_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-256", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-256", "-binary"], msg) else {
             return;
         };
         assert_eq!(Sha3_256::digest(msg).as_slice(), expected.as_slice());
@@ -650,7 +650,7 @@ mod tests {
     #[test]
     fn sha3_384_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-384", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-384", "-binary"], msg) else {
             return;
         };
         assert_eq!(Sha3_384::digest(msg).as_slice(), expected.as_slice());
@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn sha3_512_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::ct::run_openssl(&["dgst", "-sha3-512", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-512", "-binary"], msg) else {
             return;
         };
         assert_eq!(Sha3_512::digest(msg).as_slice(), expected.as_slice());

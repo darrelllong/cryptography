@@ -59,9 +59,17 @@ const fn ror4(x: u8) -> u8 {
     ((x >> 1) | ((x & 1) << 3)) & 0x0f
 }
 
-// Twofish defines q0 / q1 as nibble permutations built from four 4-bit
-// lookup stages. We keep that structure visible so the fast and `Ct` paths
-// share the same logic and only differ in how each nibble is selected.
+// Twofish defines q0 / q1 as 8-bit bijections built from two rounds of a
+// balanced Feistel network over nibble pairs, interleaved with four fixed
+// 4-bit lookup stages (T0..T3).  We keep that structure visible so the fast
+// and `Ct` paths share the same logic and only differ in how each nibble is
+// selected (direct table vs. `ct_lookup_u8_16`).
+//
+// One round of the Feistel mix: given upper nibble `a` and lower nibble `b`,
+//   a' = a ^ b
+//   b' = a ^ ror4(b) ^ ((a << 3) & 0xf)
+// where ror4 is a 4-bit right rotation.  This provides the avalanche that
+// makes q a non-trivial permutation despite the small nibble tables.
 const fn q_perm_const(x: u8, which: usize) -> u8 {
     let (t0, t1, t2, t3) = if which == 0 {
         (&Q0_T0, &Q0_T1, &Q0_T2, &Q0_T3)
@@ -71,12 +79,16 @@ const fn q_perm_const(x: u8, which: usize) -> u8 {
 
     let a0 = x >> 4;
     let b0 = x & 0x0f;
+    // Round 1 Feistel mix.
     let a1 = a0 ^ b0;
     let b1 = a0 ^ ror4(b0) ^ ((a0 << 3) & 0x0f);
+    // Two independent nibble lookups.
     let a2 = nibble_lookup(t0, a1);
     let b2 = nibble_lookup(t1, b1);
+    // Round 2 Feistel mix.
     let a3 = a2 ^ b2;
     let b3 = a2 ^ ror4(b2) ^ ((a2 << 3) & 0x0f);
+    // Final two independent nibble lookups.
     let a4 = nibble_lookup(t2, a3);
     let b4 = nibble_lookup(t3, b3);
     (b4 << 4) | a4

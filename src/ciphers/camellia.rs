@@ -995,7 +995,7 @@ mod tests {
         let key_hex = "0123456789abcdeffedcba9876543210";
         let pt_hex = "0123456789abcdeffedcba9876543210";
         let Some(expected) =
-            crate::ct::run_openssl_enc("-camellia-128-ecb", key_hex, None, &h16(pt_hex))
+            crate::test_utils::run_openssl_enc("-camellia-128-ecb", key_hex, None, &h16(pt_hex))
         else {
             return;
         };

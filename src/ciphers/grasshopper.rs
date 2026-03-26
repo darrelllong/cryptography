@@ -78,16 +78,10 @@ const PI_INV: [u8; 256] = [
     199, 214, 32, 10, 8, 0, 76, 215, 116,
 ];
 
-/// Build packed ANF coefficients for the forward or inverse Grasshopper S-box.
+/// Packed ANF coefficients for the Grasshopper S-box (forward or inverse).
 ///
-/// The 8->8 Kuznyechik S-box is dense enough that a hand-written explicit
-/// circuit would be unwieldy. `GrasshopperCt` therefore stores each output bit
-/// as two packed 128-bit monomial masks and evaluates them with parity at
-/// runtime instead of indexing the 256-byte tables.
-///
-/// As with `DesCt`, this starts from the 256-byte truth table and applies the
-/// in-place Moebius transform to recover ANF coefficients. The result is split
-/// into two `u128`s because the 8-variable monomial space has 256 entries.
+/// Two `u128`s per output bit — 256 monomials for 8 input variables.
+/// `GrasshopperCt` evaluates with parity instead of indexing the 256-byte table.
 const fn build_pi_anf(table: &[u8; 256]) -> [[u128; 2]; 8] {
     crate::ct::build_byte_sbox_anf(table)
 }
@@ -201,11 +195,6 @@ fn apply_l_inv(block: &mut [u8; 16]) {
     }
 }
 
-/// Evaluate one Grasshopper S-box byte from the packed ANF representation.
-///
-/// The active monomials for the byte are expanded once, then each output bit
-/// is recovered by intersecting with the precomputed masks and taking parity.
-/// That parity step is the GF(2) sum of all ANF terms selected by this input.
 #[inline]
 fn pi_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
     crate::ct::eval_byte_sbox(coeffs, input)

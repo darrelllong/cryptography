@@ -46,6 +46,13 @@ const SBOX: [u8; 256] = [
 // where Ti[b] = L(SBOX[b] << (24 - 8*i)).  Four tables × 256 × 4 bytes = 4 KB.
 // The Ct path cannot use these because it must avoid secret-indexed lookups.
 
+/// SM4 encryption linear transform L (GM/T 0002-2012 §6.2.2).
+///
+/// `L(x) = x ⊕ (x ≪ 2) ⊕ (x ≪ 10) ⊕ (x ≪ 18) ⊕ (x ≪ 24)`
+///
+/// The four rotation distances {2, 10, 18, 24} are specified directly by the
+/// standard.  The key-schedule uses a different linear transform L' with
+/// rotations {13, 23} — see the round-key expansion path.
 const fn l_const(x: u32) -> u32 {
     // SM4 linear diffusion L from GB/T 32907-2016:
     // L(B) = B xor (B<<<2) xor (B<<<10) xor (B<<<18) xor (B<<<24).
@@ -515,7 +522,7 @@ mod tests {
         let key_hex = "0123456789abcdeffedcba9876543210";
         let pt_hex = "0123456789abcdeffedcba9876543210";
         let Some(expected) =
-            crate::ct::run_openssl_enc("-sm4-ecb", key_hex, None, &parse::<16>(pt_hex))
+            crate::test_utils::run_openssl_enc("-sm4-ecb", key_hex, None, &parse::<16>(pt_hex))
         else {
             return;
         };
