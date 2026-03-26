@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn ripemd160_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::ct::run_openssl(&["dgst", "-ripemd160", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-ripemd160", "-binary"], msg) else {
             return;
         };
         assert_eq!(Ripemd160::digest(msg).as_slice(), expected.as_slice());
