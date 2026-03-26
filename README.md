@@ -29,6 +29,17 @@ Security note:
   `SecRandomCopyBytes`, `getrandom`, or platform equivalent), and do not invent
   your own entropy source.
 
+## Related: entropy
+
+The [`entropy`](https://github.com/darrelllong/entropy) repository depends on
+this crate and provides everything outside the cryptographic core:
+
+- Non-cryptographic generators (LCG, MT19937, PCG, xoshiro, SFC, WyRand, …)
+- Stream-cipher RNGs wrapping ciphers from this crate (ChaCha20, Rabbit, ZUC, …)
+- Block-cipher CTR-mode RNGs (AES, Camellia, Twofish, Serpent, SM4, …)
+- Historical/broken generators for comparison (Dual_EC_DRBG, C stdlib variants)
+- Statistical test batteries: NIST SP 800-22, DIEHARD, DIEHARDER
+
 Implemented families:
 
 - DES and Triple-DES

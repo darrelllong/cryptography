@@ -9,6 +9,13 @@ generators (DRBGs).
 |------|-----------|----------|
 | `ctr_drbg.rs` | CTR_DRBG with AES-256 | NIST SP 800-90A Rev. 1 |
 
+This module is intentionally narrow.  `cryptography` provides only the
+CSPRNG primitive here; the sibling [`entropy`](https://github.com/darrelllong/entropy)
+repository depends on this crate and supplies a much broader collection of
+generators — stream-cipher RNGs, non-cryptographic generators (LCG, MT19937,
+PCG, xoshiro, …), and the full statistical test batteries (NIST SP 800-22,
+DIEHARD, DIEHARDER) that evaluate them.
+
 ## Important: seeding
 
 `CtrDrbgAes256` is **deterministic** once seeded.  It is not an OS entropy
