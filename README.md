@@ -1332,3 +1332,7 @@ Boyar-Peralta AES S-box circuit paper is stored at
   url         = {https://csrc.nist.gov/pubs/fips/204/final},
 }
 ```
+
+<p align="center">
+  <img src="assets/ship_of_fools.png" width="50%" alt="Ship of Fools">
+</p>
