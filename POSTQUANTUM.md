@@ -151,6 +151,124 @@ let sig_round =
 assert!(MlDsa::verify(&pk, b"release manifest", &sig_round));
 ```
 
+## Parameter Comparison
+
+### ML-KEM: Security vs. Cost
+
+Each parameter set trades security level for larger keys, ciphertexts, and slower
+operations. The charts below compare all three sets across key axes (M1 Max numbers;
+values normalized so the smallest/fastest = 100).
+
+**Key and ciphertext sizes (bytes; FIPS 203 §7)**
+
+| Parameter | Security | Public Key | Private Key | Ciphertext | Shared Secret |
+|---|:---:|---:|---:|---:|---:|
+| ML-KEM-512  | NIST 1 |  800 | 1 632 |  768 | 32 |
+| ML-KEM-768  | NIST 3 | 1 184 | 2 400 | 1 088 | 32 |
+| ML-KEM-1024 | NIST 5 | 1 568 | 3 168 | 1 568 | 32 |
+
+```mermaid
+xychart-beta
+  title "ML-KEM: relative key/ciphertext size (smaller = better, 512 baseline = 100)"
+  x-axis ["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"]
+  y-axis "relative size (%)" 0 --> 200
+  bar [100, 148, 196]
+  bar [100, 147, 194]
+  bar [100, 142, 204]
+```
+
+_Bars: public key / private key / ciphertext (each normalized to ML-KEM-512)._
+
+**Performance (M1 Max, lower ms/op = better)**
+
+```mermaid
+xychart-beta
+  title "ML-KEM keygen speed (ms/op, lower is better)"
+  x-axis ["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"]
+  y-axis "ms/op" 0 --> 0.06
+  bar [0.01947, 0.03204, 0.05098]
+```
+
+```mermaid
+xychart-beta
+  title "ML-KEM encaps speed (ms/op, lower is better)"
+  x-axis ["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"]
+  y-axis "ms/op" 0 --> 0.06
+  bar [0.01937, 0.03123, 0.04864]
+```
+
+```mermaid
+xychart-beta
+  title "ML-KEM decaps speed (ms/op, lower is better)"
+  x-axis ["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"]
+  y-axis "ms/op" 0 --> 0.06
+  bar [0.01935, 0.03189, 0.04946]
+```
+
+### ML-DSA: Security vs. Cost
+
+**Key and signature sizes (bytes; FIPS 204 §7)**
+
+| Parameter | Security | Public Key | Private Key | Signature |
+|---|:---:|---:|---:|---:|
+| ML-DSA-44 | NIST 2 | 1 312 | 2 528 | 2 420 |
+| ML-DSA-65 | NIST 3 | 1 952 | 4 000 | 3 309 |
+| ML-DSA-87 | NIST 5 | 2 592 | 4 864 | 4 627 |
+
+```mermaid
+xychart-beta
+  title "ML-DSA: relative key/signature size (smaller = better, ML-DSA-44 baseline = 100)"
+  x-axis ["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]
+  y-axis "relative size (%)" 0 --> 200
+  bar [100, 149, 198]
+  bar [100, 158, 192]
+  bar [100, 137, 191]
+```
+
+_Bars: public key / private key / signature (each normalized to ML-DSA-44)._
+
+**Performance (M1 Max, lower ms/op = better)**
+
+```mermaid
+xychart-beta
+  title "ML-DSA keygen speed (ms/op, lower is better)"
+  x-axis ["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]
+  y-axis "ms/op" 0 --> 0.25
+  bar [0.07784, 0.1379, 0.2101]
+```
+
+```mermaid
+xychart-beta
+  title "ML-DSA sign speed (ms/op, lower is better)"
+  x-axis ["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]
+  y-axis "ms/op" 0 --> 0.55
+  bar [0.2071, 0.3587, 0.4731]
+```
+
+```mermaid
+xychart-beta
+  title "ML-DSA verify speed (ms/op, lower is better)"
+  x-axis ["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]
+  y-axis "ms/op" 0 --> 0.25
+  bar [0.07184, 0.1214, 0.207]
+```
+
+### Cross-scheme comparison
+
+At NIST Level 3 (the common comparison point):
+
+| Metric | ML-KEM-768 | ML-DSA-65 |
+|---|---:|---:|
+| Public key (bytes) | 1 184 | 1 952 |
+| Private key (bytes) | 2 400 | 4 000 |
+| Payload (bytes) | 1 088 CT + 32 SS | 3 309 sig |
+| Keygen (M1 ms/op) | 0.032 | 0.138 |
+| Primary op (M1 ms/op) | 0.031 encaps | 0.359 sign |
+| Secondary op (M1 ms/op) | 0.032 decaps | 0.121 verify |
+
+ML-DSA signing is ~10× slower than ML-KEM encapsulation at Level 3 due to the
+rejection-sampling loop; verification is closer to ML-KEM decaps speed.
+
 ## Benchmarks
 
 Measured with [pilot-bench](https://github.com/ascar-io/pilot-bench) via:
