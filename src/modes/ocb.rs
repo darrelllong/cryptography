@@ -259,6 +259,7 @@ impl<C: BlockCipher> Ocb<C> {
         self.cipher.encrypt(&mut tag_input);
         let expected = xor_block(&tag_input, &aad_hash);
         if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
+            crate::ct::zeroize_slice(&mut plaintext);
             return false;
         }
 

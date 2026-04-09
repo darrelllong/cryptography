@@ -185,6 +185,11 @@ impl EdDsaPublicKey {
             return None;
         }
         let curve = TwistedEdwardsCurve::new(p, a, d, n, gx, gy)?;
+        // Reject non-canonical coordinates: is_on_curve reduces mod p, so a
+        // coordinate of p+k passes the curve equation.  Enforce ax, ay < p.
+        if &ax >= &curve.p || &ay >= &curve.p {
+            return None;
+        }
         let a_point = EdwardsPoint::new(ax, ay);
         if !validate_public_point(&curve, &a_point) {
             return None;
@@ -245,6 +250,9 @@ impl EdDsaPublicKey {
             return None;
         }
         let curve = TwistedEdwardsCurve::new(p, a, d, n, gx, gy)?;
+        if &ax >= &curve.p || &ay >= &curve.p {
+            return None;
+        }
         let a_point = EdwardsPoint::new(ax, ay);
         if !validate_public_point(&curve, &a_point) {
             return None;
@@ -465,6 +473,13 @@ impl EdDsaSignature {
         let ry = fields.next()?;
         let s = fields.next()?;
         if fields.next().is_some() || s.is_zero() || s >= curve.n {
+            return None;
+        }
+        // Reject non-canonical coordinates: is_on_curve reduces mod p internally
+        // so a coordinate of p+k passes the curve equation, but the stored
+        // point would have non-canonical field representatives.  The wire-bytes
+        // path already enforces y < p; enforce the same here.
+        if &rx >= &curve.p || &ry >= &curve.p {
             return None;
         }
         let r_point = EdwardsPoint::new(rx, ry);

@@ -213,9 +213,10 @@ impl Aes128GcmSiv {
         let (_, _, _, enc_cipher) = encrypt_core(&self.keygen, false, nonce, aad, &[]);
         let mut counter = *tag;
         counter[15] |= 0x80;
-        let plaintext = aes_ctr_le32_enc(&enc_cipher, &counter, data);
+        let mut plaintext = aes_ctr_le32_enc(&enc_cipher, &counter, data);
         let (_, expected_tag, _, _) = encrypt_core(&self.keygen, false, nonce, aad, &plaintext);
         if crate::ct::constant_time_eq_mask(&expected_tag, tag) != u8::MAX {
+            crate::ct::zeroize_slice(&mut plaintext);
             return false;
         }
         data.copy_from_slice(&plaintext);
@@ -249,9 +250,10 @@ impl Aes256GcmSiv {
         let (_, _, _, enc_cipher) = encrypt_core(&self.keygen, true, nonce, aad, &[]);
         let mut counter = *tag;
         counter[15] |= 0x80;
-        let plaintext = aes_ctr_le32_enc(&enc_cipher, &counter, data);
+        let mut plaintext = aes_ctr_le32_enc(&enc_cipher, &counter, data);
         let (_, expected_tag, _, _) = encrypt_core(&self.keygen, true, nonce, aad, &plaintext);
         if crate::ct::constant_time_eq_mask(&expected_tag, tag) != u8::MAX {
+            crate::ct::zeroize_slice(&mut plaintext);
             return false;
         }
         data.copy_from_slice(&plaintext);

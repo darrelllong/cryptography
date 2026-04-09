@@ -1090,6 +1090,10 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
 
         let expected = self.compute_tag(nonce, aad, &plaintext);
         if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
+            // Zeroize the decrypted buffer before dropping: CCM must decrypt
+            // before authenticating (MAC is over plaintext), so on auth failure
+            // the plaintext briefly exists on the heap and must be wiped.
+            crate::ct::zeroize_slice(&mut plaintext);
             return false;
         }
 

@@ -183,5 +183,59 @@ mod tests {
                 "missing required Ct export `{ct_export}` in lib.rs"
             );
         }
+
+        // Source-level ct implementation checks.
+        //
+        // Verifies that each Ct-required module's source contains at least one
+        // ct S-box indicator — a function or primitive specific to the constant-
+        // time path.  This is stronger than the export-name check above: it
+        // would catch a module that exports a `*Ct` name but contains no ct
+        // S-box implementation at all.
+        //
+        // Limitation: this does not prove that the Ct struct *dispatches* to
+        // the ct path — it only proves a ct implementation exists in the file.
+        // The per-cipher `ct_sboxes_match_tables` and `fast_and_ct_match` tests
+        // provide the behavioral contract; this check catches gross structural
+        // omissions (e.g. a new cipher added with an empty Ct stub).
+        //
+        // The indicators are intentionally cipher-specific because ct strategies
+        // differ: generic ANF (`eval_byte_sbox`), generic table-scan
+        // (`ct_lookup_u32`), custom ANF (`sbox_ct`, `pi_ct`), or synthesized
+        // boolean circuit (`sbox_bool`).
+        let ct_indicators: &[&str] = &[
+            "eval_byte_sbox",   // generic 8-bit ANF (Grasshopper, Camellia, SEED, SM4, SNOW 3G, ZUC)
+            "eval_nibble_sbox", // generic 4-bit ANF (PRESENT, Serpent)
+            "ct_lookup_u32",    // full-table-scan 256-entry (CAST-128)
+            "ct_lookup_u8_16",  // full-table-scan 16-entry (Twofish)
+            "sbox_bool",        // synthesized boolean circuit (AES)
+            "sbox_ct",          // custom ANF per-S-box (DES)
+            "pi_ct",            // custom ANF per-S-box (Magma)
+        ];
+
+        let ct_module_sources: &[(&str, &str)] = &[
+            ("aes",        include_str!("ciphers/aes.rs")),
+            ("camellia",   include_str!("ciphers/camellia.rs")),
+            ("cast128",    include_str!("ciphers/cast128.rs")),
+            ("des",        include_str!("ciphers/des.rs")),
+            ("grasshopper",include_str!("ciphers/grasshopper.rs")),
+            ("magma",      include_str!("ciphers/magma.rs")),
+            ("present",    include_str!("ciphers/present.rs")),
+            ("seed",       include_str!("ciphers/seed.rs")),
+            ("serpent",    include_str!("ciphers/serpent.rs")),
+            ("sm4",        include_str!("ciphers/sm4.rs")),
+            ("snow3g",     include_str!("ciphers/snow3g.rs")),
+            ("twofish",    include_str!("ciphers/twofish.rs")),
+            ("zuc",        include_str!("ciphers/zuc.rs")),
+        ];
+
+        for (name, src) in ct_module_sources {
+            let has_ct_impl = ct_indicators.iter().any(|marker| src.contains(marker));
+            assert!(
+                has_ct_impl,
+                "Ct-required module `{name}` contains no ct S-box indicator \
+                 ({}) — Ct struct may be an empty stub",
+                ct_indicators.join(", ")
+            );
+        }
     }
 }

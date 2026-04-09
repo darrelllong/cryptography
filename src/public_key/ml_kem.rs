@@ -211,8 +211,19 @@ impl MlKemPublicKey {
         if bytes.len() != params.public_key_len() {
             return None;
         }
-        // Parse once for structural validity.
-        unpack_public_key(params.profile(), bytes)?;
+        let p = params.profile();
+        let (pkpv, rho) = unpack_public_key(p, bytes)?;
+        // Re-encode and compare to reject non-canonical NTT coefficients.
+        // poly_from_bytes accepts any 12-bit value [0, 4095]; values in
+        // [3329, 4095] are not valid mod-Q representatives and would silently
+        // produce wrong encapsulation results.  poly_to_bytes normalises to
+        // [0, Q), so a round-trip mismatch indicates a non-canonical input.
+        // The private key import already does this; public key import must too.
+        let mut reencoded = polyvec_to_bytes(&pkpv);
+        reencoded.extend_from_slice(&rho);
+        if reencoded != bytes {
+            return None;
+        }
         Some(Self {
             params,
             bytes: bytes.to_vec(),

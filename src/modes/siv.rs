@@ -220,6 +220,9 @@ impl<C: BlockCipher> Siv<C> {
         ctr_apply(&self.ctr_cipher, &counter, &mut plaintext);
         let expected = s2v(&self.mac_cipher, components, &plaintext);
         if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
+            // SIV must decrypt before authenticating (S2V is over plaintext),
+            // so zeroize the speculative plaintext before dropping on failure.
+            crate::ct::zeroize_slice(&mut plaintext);
             return false;
         }
         ciphertext.copy_from_slice(&plaintext);

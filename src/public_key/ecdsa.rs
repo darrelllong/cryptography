@@ -116,6 +116,11 @@ impl EcdsaPublicKey {
     #[must_use]
     pub fn from_wire_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
+        // Same subgroup check as from_key_blob: reject torsion points on
+        // curves with h > 1 (e.g. binary curves where h = 2).
+        if !curve.scalar_mul(&q, &curve.n).is_infinity() {
+            return None;
+        }
         Some(Self { curve, q })
     }
 
@@ -151,6 +156,16 @@ impl EcdsaPublicKey {
         // Both components must lie in [1, n).
         if signature.r.is_zero() || signature.s.is_zero() || &signature.r >= n || &signature.s >= n
         {
+            return false;
+        }
+
+        // Reject high-s to prevent malleability: for any valid (r, s), the
+        // pair (r, n-s) also satisfies the verification equation, so without
+        // this check two distinct byte strings verify for the same message.
+        // Matches the low-s enforcement in sign_digest_with_nonce.
+        let mut half_n = n.clone();
+        half_n.shr1();
+        if signature.s.cmp(&half_n).is_gt() {
             return false;
         }
 
@@ -253,6 +268,13 @@ impl EcdsaPublicKey {
         if !curve.is_on_curve(&public_point) {
             return None;
         }
+        // For curves with cofactor h > 1 (e.g. binary curves), an on-curve
+        // point may lie in a small torsion subgroup of order h rather than n.
+        // Verify n·Q = O so that u₂·Q in verification is never decoupled from
+        // the private key.  For h = 1 this is always true but costs little.
+        if !curve.scalar_mul(&public_point, &curve.n).is_infinity() {
+            return None;
+        }
         Some(Self {
             curve,
             q: public_point,
@@ -345,6 +367,9 @@ impl EcdsaPublicKey {
         };
         let public_point = AffinePoint::new(public_x, public_y);
         if !curve.is_on_curve(&public_point) {
+            return None;
+        }
+        if !curve.scalar_mul(&public_point, &curve.n).is_infinity() {
             return None;
         }
         Some(Self {

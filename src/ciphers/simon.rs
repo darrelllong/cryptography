@@ -25,9 +25,22 @@ use super::simon_speck_util::{load_le, rotl, rotr, store_le};
 // ─────────────────────────────────────────────────────────────────────────────
 // Z sequences — Table 3.2
 //
-// Five 62-bit LFSR constants.  Bit i (0-indexed from LSB) of Z[j] gives the
-// i-th element of sequence zⱼ, used cyclically modulo 62 in the key schedule.
-// Values match the Python reference implementation (NSA, 2013).
+// WHY they exist: without a varying constant, the key schedule recurrence
+//   k_i = ∼k_{i−m} ⊕ tmp
+// produces identical round keys whenever all master-key words are equal (e.g.
+// an all-zero key yields all-zero round keys).  Injecting a different bit each
+// round — drawn from a pseudo-random sequence — breaks that symmetry and
+// prevents slide and related-key attacks that exploit a degenerate schedule.
+//
+// WHAT they are: five binary sequences of period 62, tabulated directly in
+// the paper (Table 3.2).  The paper states they were produced by binary LFSRs
+// with primitive feedback polynomials, but does not list those polynomials;
+// the sequences are reproduced verbatim from the NSA Python reference
+// implementation (2013).
+//
+// HOW to access: bit i of sequence z_j is  (Z[j] >> (i % 62)) & 1  (LSB = bit 0).
+// The schedule uses  i' = (round_index − m)  so that the first key-schedule
+// step draws Z bit 0, the next draws bit 1, and so on, cycling every 62 steps.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const Z: [u64; 5] = [
@@ -174,17 +187,23 @@ macro_rules! simon_variant {
     };
 }
 
-//                          n    m   T    z  mask                      key  blk
-simon_variant!(Simon32_64, 16, 4, 32, 0, 0xffff_u64, 8, 4);
-simon_variant!(Simon48_72, 24, 3, 36, 0, 0xff_ffff_u64, 9, 6);
-simon_variant!(Simon48_96, 24, 4, 36, 1, 0xff_ffff_u64, 12, 6);
-simon_variant!(Simon64_96, 32, 3, 42, 2, 0xffff_ffff_u64, 12, 8);
-simon_variant!(Simon64_128, 32, 4, 44, 3, 0xffff_ffff_u64, 16, 8);
-simon_variant!(Simon96_96, 48, 2, 52, 2, 0xffff_ffff_ffff_u64, 12, 12);
-simon_variant!(Simon96_144, 48, 3, 54, 3, 0xffff_ffff_ffff_u64, 18, 12);
-simon_variant!(Simon128_128, 64, 2, 68, 2, u64::MAX, 16, 16);
-simon_variant!(Simon128_192, 64, 3, 69, 3, u64::MAX, 24, 16);
-simon_variant!(Simon128_256, 64, 4, 72, 4, u64::MAX, 32, 16);
+// All parameters transcribed from Table 3.1 of the 2013 paper.
+// Each row: (n=word bits, m=key words, T=rounds, z=Z-seq index).
+// T is ALSO the compile-time array size for round_keys — a wrong value
+// silently produces a wrong cipher, so each row cites the paper directly.
+// The KAT vectors in the tests below provide a second, independent check.
+//
+//                           n    m    T    z   mask                      key  blk   paper §T
+simon_variant!(Simon32_64,  16,  4,  32,  0,  0xffff_u64,               8,  4); // Table 3.1 T=32
+simon_variant!(Simon48_72,  24,  3,  36,  0,  0xff_ffff_u64,            9,  6); // Table 3.1 T=36
+simon_variant!(Simon48_96,  24,  4,  36,  1,  0xff_ffff_u64,           12,  6); // Table 3.1 T=36
+simon_variant!(Simon64_96,  32,  3,  42,  2,  0xffff_ffff_u64,         12,  8); // Table 3.1 T=42
+simon_variant!(Simon64_128, 32,  4,  44,  3,  0xffff_ffff_u64,         16,  8); // Table 3.1 T=44
+simon_variant!(Simon96_96,  48,  2,  52,  2,  0xffff_ffff_ffff_u64,   12, 12); // Table 3.1 T=52
+simon_variant!(Simon96_144, 48,  3,  54,  3,  0xffff_ffff_ffff_u64,   18, 12); // Table 3.1 T=54
+simon_variant!(Simon128_128, 64, 2,  68,  2,  u64::MAX,                16, 16); // Table 3.1 T=68
+simon_variant!(Simon128_192, 64, 3,  69,  3,  u64::MAX,                24, 16); // Table 3.1 T=69
+simon_variant!(Simon128_256, 64, 4,  72,  4,  u64::MAX,                32, 16); // Table 3.1 T=72
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests — known-answer vectors from Appendix B of the 2013 paper;
