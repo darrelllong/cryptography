@@ -139,10 +139,15 @@ impl RsaPrivateKey {
         let m1 = self.p_ctx.pow(&c_mod_p, &self.d_p);
         let m2 = self.q_ctx.pow(&c_mod_q, &self.d_q);
 
-        let delta = if m1 >= m2 {
-            m1.sub_ref(&m2)
+        // CRT recombination: h = (m1 - m2) mod p.
+        // m2 is reduced mod q but NOT mod p, so m2 can be ≥ p.
+        // Reduce m2 mod p first so that the conditional subtraction stays in
+        // [0, p) and `m1 + p - m2_mod_p` is always non-negative.
+        let m2_mod_p = m2.modulo(&self.p);
+        let delta = if m1 >= m2_mod_p {
+            m1.sub_ref(&m2_mod_p)
         } else {
-            m1.add_ref(&self.p).sub_ref(&m2)
+            m1.add_ref(&self.p).sub_ref(&m2_mod_p)
         };
         let h = BigUint::mod_mul(&self.q_inv, &delta, &self.p);
         m2.add_ref(&self.q.mul_ref(&h))

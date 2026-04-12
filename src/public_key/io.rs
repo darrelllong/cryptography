@@ -65,7 +65,9 @@ pub(crate) fn decode_biguints(input: &[u8]) -> Option<Vec<BigUint>> {
     }
 
     let (seq_len, mut pos) = decode_der_len(rest)?;
-    if pos + seq_len != rest.len() {
+    // Use checked_add: seq_len can be usize::MAX with crafted input (eight
+    // 0xff length bytes), and adding pos to it would otherwise overflow.
+    if pos.checked_add(seq_len) != Some(rest.len()) {
         return None;
     }
 
@@ -79,8 +81,10 @@ pub(crate) fn decode_biguints(input: &[u8]) -> Option<Vec<BigUint>> {
 
         let (len, len_len) = decode_der_len(rest.get(pos..)?)?;
         pos += len_len;
-        let field = rest.get(pos..pos + len)?;
-        pos += len;
+        // pos + len can overflow when len ≈ usize::MAX; use checked_add.
+        let end = pos.checked_add(len)?;
+        let field = rest.get(pos..end)?;
+        pos = end;
         out.push(decode_der_biguint(field)?);
     }
 
