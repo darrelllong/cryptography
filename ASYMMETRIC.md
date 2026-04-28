@@ -122,6 +122,15 @@ behavior explicit at import sites.
 - `Ed25519` — RFC 8032 Edwards-curve signatures
 - `EdwardsElGamal` — Edwards-curve ElGamal encryption
 
+### Montgomery-curve ECDH (RFC 7748)
+
+- `X25519` — Curve25519 ECDH, constant-time Montgomery ladder
+- `X448` — Curve448 ECDH, constant-time Montgomery ladder
+
+These two are the only public-key primitives in the crate that aim for
+constant-time execution; see the [Curve25519 / Curve448 ECDH section
+below](#curve25519--curve448-ecdh-rfc-7748) for details.
+
 The Edwards arithmetic is generic over `TwistedEdwardsCurve`, but the only
 built-in named Edwards domain currently shipped in-tree is `ed25519()`.
 
@@ -442,8 +451,7 @@ callers.
 #### Paillier
 
 Reference: Pascal Paillier, "Public-Key Cryptosystems Based on Composite
-Degree Residuosity Classes" (1999); see
-`pubs/paillier-1999-composite-residuosity.pdf`.
+Degree Residuosity Classes" (1999); see `pubs/paillier-1999.pdf`.
 
 Core arithmetic:
 
@@ -581,10 +589,8 @@ external parameter database.
 
 #### ECDH
 
-Reference: SEC 1 v2.0, SEC 2 v2.0, and NIST SP 800-56A Rev. 3 (see
-`pubs/sec1-v2-elliptic-curve-cryptography.pdf`,
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`, and
-`pubs/sp800-56a-r3.pdf`).
+Reference: SEC 1 v2.0, SEC 2 v2.0, and NIST SP 800-56A Rev. 3 (these are
+external standards; no local PDFs are checked into `pubs/`).
 
 Shared secret:
 
@@ -620,8 +626,8 @@ through a KDF before use as a symmetric key.
 #### ECIES
 
 Reference: SEC 1 v2.0 and NIST SP 800-56A Rev. 3 for the EC key-establishment
-model and point encodings (see `pubs/sec1-v2-elliptic-curve-cryptography.pdf`
-and `pubs/sp800-56a-r3.pdf`).
+model and point encodings (external standards; no local PDFs are checked into
+`pubs/`).
 
 `ECIES` is the standard way to encrypt arbitrary byte strings to a static EC
 public key. It combines ephemeral ECDH with a symmetric encryption step, so the
@@ -674,11 +680,10 @@ parameters need to travel with the key.
 
 #### EC-ElGamal
 
-Reference: the ElGamal paper for the discrete-logarithm construction and SEC 1
-v2.0 / SEC 2 v2.0 for the elliptic-curve group and point encodings (see
-`pubs/elgamal-1985.pdf`,
-`pubs/sec1-v2-elliptic-curve-cryptography.pdf`, and
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`).
+Reference: the ElGamal paper for the discrete-logarithm construction
+(`pubs/elgamal-1985.pdf`); SEC 1 v2.0 and SEC 2 v2.0 for the elliptic-curve
+group and point encodings (external standards; no local PDFs are checked into
+`pubs/`).
 
 EC-ElGamal has three distinct plaintext layers stacked on the same key pair.
 
@@ -739,10 +744,9 @@ embeds the full curve parameters.
 
 #### ECDSA
 
-Reference: FIPS 186-5 and the local elliptic-curve standards in SEC 1 / SEC 2
-(see `pubs/fips186-5.pdf`,
-`pubs/sec1-v2-elliptic-curve-cryptography.pdf`, and
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`).
+Reference: FIPS 186-5 (`pubs/fips186-5.pdf`); SEC 1 v2.0 and SEC 2 v2.0 for the
+underlying elliptic-curve point encodings (external standards; no local PDFs are
+checked into `pubs/`).
 
 Core arithmetic (FIPS 186-5):
 
@@ -794,11 +798,9 @@ well tested, but it is not a hardened constant-time signing engine.
 
 #### Edwards DH
 
-Reference: NIST SP 800-56A Rev. 3 for the DH model, with the Edwards-group
-arithmetic and compressed-point conventions used in this crate anchored by the
-same local curve references (`pubs/sec1-v2-elliptic-curve-cryptography.pdf`,
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`,
-`pubs/fips186-5.pdf`).
+Reference: NIST SP 800-56A Rev. 3 for the DH model (external standard) with
+Edwards-group arithmetic and compressed-point conventions matching FIPS 186-5
+(`pubs/fips186-5.pdf`).
 
 `EdwardsDh` provides the same core operation on a twisted Edwards curve:
 
@@ -817,11 +819,10 @@ fixture and benchmark path today is the built-in `ed25519()` domain.
 
 #### Edwards ElGamal
 
-Reference: the ElGamal paper for the encryption law, with the Edwards-curve
-group and encoding choices in this crate tied to the same local curve
-references used for `Ed25519` and `EdwardsDh` (see `pubs/elgamal-1985.pdf`,
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`, and
-`pubs/fips186-5.pdf`).
+Reference: the ElGamal paper for the encryption law (`pubs/elgamal-1985.pdf`)
+with Edwards-curve group and encoding choices matching the Ed25519 / EdDSA
+side of the crate (`pubs/fips186-5.pdf`; SEC 2 v2.0 is an external standard
+with no local PDF).
 
 `EdwardsElGamal` mirrors the same ElGamal construction on a twisted Edwards
 group:
@@ -852,9 +853,9 @@ currently target the built-in `ed25519()` domain.
 
 #### Ed25519
 
-Reference: FIPS 186-5 for EdDSA and the local elliptic-curve references for
-the underlying group and parameter conventions (see `pubs/fips186-5.pdf`,
-`pubs/sec2-v2-recommended-elliptic-curve-domain-parameters.pdf`).
+Reference: FIPS 186-5 for EdDSA (`pubs/fips186-5.pdf`); SEC 2 v2.0 for the
+underlying elliptic-curve parameter conventions is an external standard with
+no local PDF.
 
 `Ed25519` is the fixed-curve RFC 8032 signature construction built on the
 Edwards arithmetic in this crate. Unlike the generic `EdDsa` layer, it follows
@@ -905,6 +906,76 @@ control.
 The test coverage for this module now includes the full RFC 8032 section 7.1
 Ed25519 vector set, along with strict parsing and rejection checks for malformed
 public keys and signatures.
+
+### Curve25519 / Curve448 ECDH (RFC 7748)
+
+Reference: RFC 7748, "Elliptic Curves for Security", §5 (X25519, X448) and
+§5.2 (test vectors).
+
+`X25519` and `X448` are the Montgomery-form ECDH primitives:
+
+```math
+\text{X25519}: \quad y^2 = x^3 + 486662\,x^2 + x \quad \text{over } \mathrm{GF}(2^{255} - 19)
+```
+
+```math
+\text{X448}: \quad y^2 = x^3 + 156326\,x^2 + x \quad \text{over } \mathrm{GF}(2^{448} - 2^{224} - 1)
+```
+
+The crate ships these as a constant-time exception within `cryptography::vt`.
+Unlike the rest of the public-key surface (which uses the variable-time
+in-tree `BigUint`), X25519 and X448 use dedicated fixed-radix limb
+representations:
+
+- X25519: 5 limbs of radix $2^{51}$, two-pass carry reduction with the
+  `2^{255} \equiv 19 \pmod p` wrap-around factor.
+- X448: 8 limbs of radix $2^{56}$, two-pass carry reduction with the
+  `2^{448} \equiv 2^{224} + 1 \pmod p` wrap-around factor.
+
+In both cases the Montgomery ladder uses mask-driven `cswap` so the access
+pattern depends on the loop index, not on the secret scalar bit. Field
+multiply, square, conditional subtract, and final canonicalisation are
+written without data-dependent branches or table lookups.
+
+Scalar clamping follows RFC 7748 §5 exactly:
+
+- X25519: `k[0] &= 248; k[31] &= 127; k[31] |= 64`
+- X448: `k[0] &= 252; k[55] |= 128`
+
+The encoded `u`-coordinate inputs likewise follow the spec:
+
+- X25519: high bit of `u[31]` is masked off before decoding
+- X448: full 448-bit `u`-coordinate, no masking
+
+The shared-secret API (`agree`) returns `Option<[u8; N]>` and rejects the
+all-zero output, as RFC 7748 §6 recommends for low-order point detection.
+The raw `scalar_mult` function exposes the unconditional RFC 7748 mapping
+(useful for KAT validation and protocol layers that prefer to do their own
+low-order check).
+
+Example (X25519):
+
+```rust
+use cryptography::CtrDrbgAes256;
+use cryptography::vt::X25519;
+
+let mut rng = CtrDrbgAes256::new(&[0x33u8; 48]);
+let (pub_a, priv_a) = X25519::generate(&mut rng);
+let (pub_b, priv_b) = X25519::generate(&mut rng);
+let shared_a = priv_a.agree(&pub_b).expect("non-low-order");
+let shared_b = priv_b.agree(&pub_a).expect("non-low-order");
+assert_eq!(shared_a, shared_b);
+```
+
+Test coverage in `cargo test`:
+
+- RFC 7748 §5.2 single-step vectors for X25519 and X448
+- iterated tests at 1 and 1000 iterations (run by default)
+- iterated tests at 1 000 000 iterations (gated `#[ignore]`; run with
+  `cargo test --release -- --ignored rfc7748_section5_2_iter_1m`)
+- ECDH symmetry round-trip (`A * (B * G) == B * (A * G)`)
+- low-order rejection by `agree`
+- field-arithmetic sanity (`x * x^{-1} = 1`)
 
 ## Byte-Oriented APIs
 
@@ -1026,6 +1097,35 @@ $e = 65{,}537$.
 | `edwards_elgamal_encrypt` | 1.793 | ±0.01397 | 60 | 2.577 | ±0.007879 | 30 |
 | `edwards_elgamal_decrypt` | 1.332 | ±0.009984 | 102 | 1.94 | ±0.008723 | 30 |
 
+### X25519 / X448 (RFC 7748)
+
+Pilot-driven measurements on a single Apple M4 host (`Hardy`). M4 Pro and
+AMD EPYC 7452 columns are pending re-run of `scripts/bench_all_pk_full.sh`
+on the canonical hosts. The four operations per curve correspond to:
+
+- `*_keygen`: random 32 / 56-byte private scalar plus base-point scalar mult.
+- `*_agree`: full ECDH `agree(peer)` including the all-zero rejection check.
+- `*_scalar_mult_base`: raw `scalar_mult_base(scalar)` without key wrappers.
+- `*_scalar_mult`: raw `scalar_mult(scalar, u)` for an arbitrary `u`.
+
+| Operation | Apple M4 ms/op | Apple M4 ± CI | Apple M4 Runs |
+|---|---:|---:|---:|
+| `x25519_keygen` | 0.01781 | ±0.0002796 | 30 |
+| `x25519_agree` | 0.01743 | ±0.0001084 | 48 |
+| `x25519_scalar_mult_base` | 0.01751 | ±4.072e-05 | 117 |
+| `x25519_scalar_mult` | 0.01752 | ±5.054e-05 | 62 |
+| `x448_keygen` | 0.1676 | ±0.003723 | 122 |
+| `x448_agree` | 0.1699 | ±0.02012 | 31 |
+| `x448_scalar_mult_base` | 0.1666 | ±0.003181 | 56 |
+| `x448_scalar_mult` | 0.165 | ±0.003365 | 33 |
+
+X448 is roughly 9–10× slower than X25519 per scalar multiplication, in line
+with the larger field (448 vs 255 bits) and the larger ladder (448 vs 255
+iterations). Within each curve, `agree`, `scalar_mult`, and
+`scalar_mult_base` measure essentially the same primitive — the gap between
+them is at the noise floor, which is the expected outcome for a constant-time
+ladder.
+
 ### ML-KEM (Kyber)
 
 | Operation | M4 Pro ms/op | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 ms/op | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
@@ -1092,9 +1192,9 @@ These charts also use operations per second on a log scale.
   and understand their wrapper model.
 - Use `CtrDrbgAes256` (or another strong `Csprng`) for all randomized public-key
   operations.
-- Keep an eye on 2048-bit and larger timings; the in-tree bigint backend is now
-  respectable, but it is still an implementation detail that may be replaced by
-  `num-bigint` if larger practical workloads demand it.
+- Keep an eye on 2048-bit and larger timings; the in-tree bigint backend is
+  respectable but not a tuned industrial multiprecision library. The crate-wide
+  policy is to keep the arithmetic kernels pure Rust and in-tree.
 
 ## References
 

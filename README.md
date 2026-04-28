@@ -76,6 +76,16 @@ Supporting primitives:
   `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`
 - SP 800-90A Rev. 1: `CtrDrbgAes256`
 
+RFC 7748 constant-time ECDH (under `cryptography::vt`):
+
+- `X25519` — Curve25519 ECDH, 32-byte scalar / u-coordinate / shared secret.
+- `X448` — Curve448 ECDH, 56-byte scalar / u-coordinate / shared secret.
+
+Both are constant-time in the secret scalar (mask-driven `cswap`, fixed-radix
+limbs, no data-dependent branches or table lookups), and both are validated
+against the full RFC 7748 §5.2 KAT set including the 1 000 000-iteration
+vectors.
+
 Asymmetric post-quantum work:
 
 - ML-KEM (Kyber) under `cryptography::vt`:
@@ -217,18 +227,20 @@ Xts::new(Aes128::new(&data_key), Aes128::new(&tweak_key)).encrypt_sector(&tweak,
 
 The mode layer implements:
 
-- SP 800-38A: ECB, CBC, CFB (full-block), OFB, CTR
+- SP 800-38A: ECB, CBC, CFB (full-block), CFB8, OFB, CTR
 - SP 800-38B: CMAC
-- SP 800-38D: GCM, GMAC
+- SP 800-38C: CCM
+- SP 800-38D: GCM, GMAC (`Gcm`/`Gmac` constant-time, `GcmVt`/`GmacVt` variable-time)
 - SP 800-38E: XTS (for 128-bit block ciphers)
-- RFC 8439: ChaCha20-Poly1305
+- SP 800-38F / RFC 3394: AES Key Wrap (`AesKeyWrap`, no padding)
+- RFC 5297: SIV
+- RFC 7253: OCB3
+- RFC 8452: AES-GCM-SIV (`Aes128GcmSiv`, `Aes256GcmSiv`)
+- RFC 8439: Poly1305, ChaCha20-Poly1305
+- Bellare-Rogaway-Wagner EAX
 
 `Gcm` enforces the SP 800-38D per-call payload bound of
 `68_719_476_704` bytes (`2^32 - 2` counter blocks) to prevent counter wrap.
-
-RFC 8452's AES-GCM-SIV is a nonce-misuse-resistant AEAD built around AES and
-`POLYVAL`, so it belongs in a later authenticated-encryption layer rather than
-in the basic mode adapters.
 
 ### Stream-cipher example
 
@@ -257,8 +269,9 @@ zuc.fill(&mut buf);
 The crate root exports:
 
 - `StreamCipher` for byte-oriented keystream APIs
-- `Aead` for detached-tag authenticated encryption wrappers (`Gcm`, `GcmVt`,
-  `ChaCha20Poly1305`)
+- `Aead` for detached-tag authenticated encryption wrappers, implemented for
+  `Gcm`, `GcmVt`, `Ccm`, `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`,
+  and `ChaCha20Poly1305`
 
 ### Hash / XOF / HMAC example
 
@@ -676,10 +689,18 @@ path for the same key and input.
 
 ## Design Notes
 
-- No `unsafe`.
-- No hardware AES intrinsics in the main AES implementation; keeping the core
-  portable and safe matters on every processor family, not just one benchmark
-  host.
+- The core ciphers, hashes, modes, CSPRNG, and public-key arithmetic are
+  written in safe, portable Rust without architecture intrinsics.
+- Two narrow, deliberate exceptions to the "no `unsafe`" rule:
+  - `crate::ct::zeroize_slice` uses `ptr::write_volatile` so the compiler
+    cannot elide key-clearing writes.
+  - `src/hash/sha3.rs` includes an aarch64 FEAT_SHA3 fast path
+    (`keccak_f1600_sha3`) gated on runtime feature detection, with the
+    portable scalar Keccak-f[1600] kept as the always-correct fallback. This
+    is the only architecture-specific path in the in-tree library; AES does
+    not use AES-NI / AESE intrinsics in `src/`.
+- Optional alternative kernels (Apple Silicon and x86 "go-fast") live under
+  `fast/` outside the main library tree.
 - No heap allocation inside block encrypt/decrypt paths.
 - Benchmark and test coverage are tracked in [ANALYSIS.md](ANALYSIS.md).
 - Reference PDFs used during implementation live in `pubs/`.

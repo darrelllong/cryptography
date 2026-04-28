@@ -20,16 +20,16 @@ boundary.
 
 | File | Scheme | Standard |
 |------|--------|----------|
-| `rsa.rs` | RSA textbook arithmetic | FIPS 186 |
+| `rsa.rs` | RSA textbook arithmetic | RFC 8017 / PKCS #1 v2.2 |
 | `rsa_pkcs1.rs` | OAEP encryption, PSS signatures | PKCS #1 v2.2 / RFC 8017 |
-| `rsa_io.rs` | Key serialization: PKCS #1, PKCS #8, SPKI, flat XML | RFC 3447 / RFC 5958 |
-| `dh.rs` | Finite-field Diffie-Hellman | RFC 3526 |
-| `dsa.rs` | Digital Signature Algorithm | FIPS 186 |
+| `rsa_io.rs` | Key serialization: PKCS #1, PKCS #8, SPKI, flat XML | RFC 8017 / RFC 5958 |
+| `dh.rs` | Finite-field Diffie-Hellman (prime-order subgroup) | NIST SP 800-56A |
+| `dsa.rs` | Digital Signature Algorithm | FIPS 186-5 |
 | `elgamal.rs` | ElGamal encryption over a prime-order group | Taher ElGamal 1985 |
-| `cocks.rs` | Cocks IBE (identity-based encryption) | Clifford Cocks 2001 |
-| `paillier.rs` | Paillier homomorphic encryption | Pascal Paillier 1999 |
-| `rabin.rs` | Rabin encryption | Michael Rabin 1979 |
-| `schmidt_samoa.rs` | Schmidt-Samoa encryption | Katja Schmidt-Samoa 2006 |
+| `cocks.rs` | Cocks "Note on Non-Secret Encryption" (predecessor of RSA) | Clifford Cocks 1973 |
+| `paillier.rs` | Paillier additively homomorphic encryption | Pascal Paillier 1999 |
+| `rabin.rs` | Rabin encryption (square-root trapdoor) | Michael Rabin 1979 |
+| `schmidt_samoa.rs` | Schmidt-Samoa encryption | Katja Schmidt-Samoa 2005 |
 
 ## Elliptic-curve schemes (Weierstrass)
 
@@ -41,15 +41,28 @@ boundary.
 | `ec_elgamal.rs` | ElGamal encryption over an elliptic-curve group |
 | `ecies.rs` | ECIES hybrid encryption |
 
-## Elliptic-curve schemes (Edwards / Montgomery)
+## Elliptic-curve schemes (twisted Edwards)
 
 | File | Scheme |
 |------|--------|
-| `ec_edwards.rs` | Twisted Edwards-form arithmetic; Ed25519 / Ed448 curves |
+| `ec_edwards.rs` | Twisted Edwards arithmetic; built-in `ed25519()` curve constructor |
 | `ed25519.rs` | Ed25519 signing (RFC 8032) |
-| `eddsa.rs` | Generic EdDSA over Edwards curves |
-| `edwards_dh.rs` | X25519 / X448 Diffie-Hellman (RFC 7748) |
+| `eddsa.rs` | Generic EdDSA over any twisted Edwards curve |
+| `edwards_dh.rs` | Edwards-curve Diffie-Hellman (compressed-point shared secret) |
 | `edwards_elgamal.rs` | ElGamal encryption on Edwards curves |
+
+## Montgomery-curve ECDH (RFC 7748, constant-time)
+
+| File | Scheme | Standard |
+|------|--------|----------|
+| `x25519.rs` | X25519 ECDH on Curve25519, Montgomery ladder | RFC 7748 §5 |
+| `x448.rs` | X448 ECDH on Curve448, Montgomery ladder | RFC 7748 §5 |
+
+Unlike the rest of this directory (which uses the variable-time `BigUint`
+backend), `x25519.rs` and `x448.rs` carry their own fixed-radix limb
+implementations (5×51 and 8×56 respectively) and drive the ladder with
+mask-based `cswap`. They are the only public-key primitives in the crate
+that aim for constant-time execution.
 
 ## Post-quantum schemes
 

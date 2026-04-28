@@ -26,6 +26,7 @@ use cryptography::public_key::ec_edwards::ed25519;
 use cryptography::vt::{
     p256, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh,
     ElGamal, MlKem, MlKemParameterSet, Paillier, Rsa, RsaOaep, RsaPss,
+    X25519, X448,
 };
 ```
 
@@ -340,7 +341,7 @@ Representative methods:
 `Gcm` and `Gmac` are the safe-default constant-time GHASH-backed variants.
 `GcmVt` and `GmacVt` are the explicit variable-time reference/performance
 variants.
-`Aead` is the shared detached-tag trait implemented by `Gcm`, `GcmVt`,
+`Aead` is the shared detached-tag trait implemented by `Gcm`, `GcmVt`, `Ccm`,
 `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`, and `ChaCha20Poly1305`.
 `Gcm` and `GcmVt` enforce the SP 800-38D per-call payload bound of
 $(2^{32}-2)$ counter blocks (`68_719_476_704` bytes); oversized inputs panic
@@ -924,6 +925,52 @@ let sig = private.sign_message::<Sha512, _>(b"eddsa", &mut rng).expect("sign");
 assert!(public.verify_message::<Sha512>(b"eddsa", &sig));
 ```
 
+#### Curve25519 / Curve448 Diffie-Hellman (RFC 7748)
+
+`X25519` and `X448` are the Montgomery-ladder ECDH primitives from RFC 7748.
+Unlike the rest of `cryptography::vt`, both are constant-time in the secret
+scalar: the field arithmetic uses fixed-radix limbs (5×51 for X25519, 8×56 for
+X448), conditional swaps are mask-driven, and there is no data-dependent
+branching or table indexing.
+
+Functional API:
+
+- `X25519::scalar_mult(&[u8; 32], &[u8; 32]) -> [u8; 32]`
+- `X25519::scalar_mult_base(&[u8; 32]) -> [u8; 32]`
+- `X25519::generate(rng) -> (X25519PublicKey, X25519PrivateKey)`
+- `X448::scalar_mult(&[u8; 56], &[u8; 56]) -> [u8; 56]`
+- `X448::scalar_mult_base(&[u8; 56]) -> [u8; 56]`
+- `X448::generate(rng) -> (X448PublicKey, X448PrivateKey)`
+
+Key types:
+
+- `X25519PrivateKey` / `X25519PublicKey` (32-byte raw)
+- `X448PrivateKey` / `X448PublicKey` (56-byte raw)
+
+Both private-key types zeroise on drop and expose `from_raw_bytes` /
+`to_raw_bytes` / `from_raw_bytes_wiping` / `to_public_key` / `agree`. `agree`
+returns `Option<[u8; N]>` and rejects the all-zero output (low-order point)
+per the conservative recommendation in RFC 7748 §6.
+
+Example (X25519):
+
+```rust
+use cryptography::CtrDrbgAes256;
+use cryptography::vt::X25519;
+
+let mut rng = CtrDrbgAes256::new(&[0x11u8; 48]);
+let (pub_a, priv_a) = X25519::generate(&mut rng);
+let (pub_b, priv_b) = X25519::generate(&mut rng);
+let shared_a = priv_a.agree(&pub_b).expect("non-low-order");
+let shared_b = priv_b.agree(&pub_a).expect("non-low-order");
+assert_eq!(shared_a, shared_b);
+```
+
+Validation: RFC 7748 §5.2 KAT vectors are wired in `cargo test`, including
+the iterated vectors at 1, 1000, and 1 000 000 iterations. The 1 M-iteration
+tests are gated `#[ignore]`; run them with
+`cargo test --release -- --ignored rfc7748_section5_2_iter_1m`.
+
 #### Edwards Diffie-Hellman
 
 Generation and agreement:
@@ -1209,49 +1256,6 @@ Special DES-family constructors:
 ### Public-Key Surface
 
 #### Integer and finite-field types
-
-##### `MlKemParameterSet`
-
-- `MlKem512`, `MlKem768`, `MlKem1024`
-- `k()`
-- `public_key_len()`
-- `private_key_len()`
-- `ciphertext_len()`
-- `shared_secret_len()`
-
-##### `MlKemPublicKey`
-
-- metadata:
-  - `parameter_set()`
-- encoding:
-  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
-  - `to_key_blob()`, `from_key_blob(...)`
-
-##### `MlKemPrivateKey`
-
-- metadata:
-  - `parameter_set()`
-- encoding:
-  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
-  - `to_key_blob()`, `from_key_blob(...)`
-
-##### `MlKemCiphertext`
-
-- metadata:
-  - `parameter_set()`
-- encoding:
-  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
-
-##### `MlKemSharedSecret`
-
-- `to_wire_bytes()`
-- `from_wire_bytes(...)`
-
-##### `MlKem`
-
-- `keygen(params)` *(staged: arithmetic implementation pending)*
-- `encaps(public_key)` *(staged: arithmetic implementation pending)*
-- `decaps(private_key, ciphertext)` *(staged: arithmetic implementation pending)*
 
 ##### `RsaPublicKey`
 
@@ -1826,3 +1830,130 @@ These educational integer-scheme families all expose the same broad pattern:
 ##### `EdwardsElGamal`
 
 - `generate(curve, rng)`
+
+#### Post-quantum lattice types
+
+##### `MlKemParameterSet`
+
+- `MlKem512`, `MlKem768`, `MlKem1024`
+- `k()`
+- `public_key_len()`
+- `private_key_len()`
+- `ciphertext_len()`
+- `shared_secret_len()`
+
+##### `MlKemPublicKey`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+  - `to_key_blob()`, `from_key_blob(...)`
+
+##### `MlKemPrivateKey`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+  - `to_key_blob()`, `from_key_blob(...)`
+
+##### `MlKemCiphertext`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+
+##### `MlKemSharedSecret`
+
+- `to_wire_bytes()`
+- `from_wire_bytes(...)`
+
+##### `MlKem`
+
+- `keygen(params, rng)`
+- `keygen_from_seed(params, d, z)`
+- `encaps(public_key, rng)`
+- `encaps_with_randomness(public_key, m)`
+- `decaps(private_key, ciphertext)`
+
+##### `MlDsaParameterSet`
+
+- `MlDsa44`, `MlDsa65`, `MlDsa87`
+- `public_key_len()`
+- `private_key_len()`
+- `signature_len()`
+
+##### `MlDsaPublicKey`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+  - `to_key_blob()`, `from_key_blob(...)`
+
+##### `MlDsaPrivateKey`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+  - `to_key_blob()`, `from_key_blob(...)`
+
+##### `MlDsaSignature`
+
+- metadata:
+  - `parameter_set()`
+- encoding:
+  - `to_wire_bytes()`, `from_wire_bytes(params, ...)`
+
+##### `MlDsa`
+
+- `keygen(params, rng)`
+- `keygen_from_seed(params, seed)`
+- `sign(private_key, message, rng)`
+- `sign_with_randomness(private_key, message, rnd)`
+- `sign_with_randomness_and_context(private_key, message, rnd, ctx)`
+- `verify(public_key, message, signature)`
+- `verify_with_context(public_key, message, signature, ctx)`
+
+#### RFC 7748 constant-time ECDH types
+
+##### `X25519`
+
+- `scalar_mult(&[u8; 32], &[u8; 32]) -> [u8; 32]`
+- `scalar_mult_base(&[u8; 32]) -> [u8; 32]`
+- `generate(rng) -> (X25519PublicKey, X25519PrivateKey)`
+
+##### `X25519PrivateKey`
+
+- `from_raw_bytes(&[u8; 32])`
+- `from_raw_bytes_wiping(&mut [u8; 32])`
+- `to_raw_bytes()`
+- `to_public_key()`
+- `agree(&X25519PublicKey) -> Option<[u8; 32]>`
+
+##### `X25519PublicKey`
+
+- `from_raw_bytes(&[u8; 32])`
+- `to_raw_bytes()`
+
+##### `X448`
+
+- `scalar_mult(&[u8; 56], &[u8; 56]) -> [u8; 56]`
+- `scalar_mult_base(&[u8; 56]) -> [u8; 56]`
+- `generate(rng) -> (X448PublicKey, X448PrivateKey)`
+
+##### `X448PrivateKey`
+
+- `from_raw_bytes(&[u8; 56])`
+- `from_raw_bytes_wiping(&mut [u8; 56])`
+- `to_raw_bytes()`
+- `to_public_key()`
+- `agree(&X448PublicKey) -> Option<[u8; 56]>`
+
+##### `X448PublicKey`
+
+- `from_raw_bytes(&[u8; 56])`
+- `to_raw_bytes()`

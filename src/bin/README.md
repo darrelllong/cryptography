@@ -14,6 +14,7 @@ interactively.
 | `pilot_cipher.rs` | Quick encrypt/decrypt smoke test for symmetric ciphers |
 | `pilot_pk.rs` | Interactive exercise of public-key keygen / sign / verify / encrypt / decrypt |
 | `pilot_sm4.rs` | SM4-specific pilot; exercises both table-driven and constant-time paths |
+| `profile_ct_anf.rs` | Profile Ct-ANF helper activity (build with `--features ct_profile`) |
 
 ## Running
 

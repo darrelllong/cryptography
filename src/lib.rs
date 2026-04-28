@@ -340,8 +340,13 @@ impl Aead for Aes256GcmSiv {
 
 /// Explicit variable-time public-key surface.
 ///
-/// All items in this namespace use variable-time big-integer and ECC arithmetic
+/// Most items in this namespace use variable-time big-integer and ECC arithmetic
 /// and are unsuitable for side-channel exposed production signing/decryption.
+///
+/// Exception: `X25519` and `X448` (RFC 7748) are constant-time. They live
+/// here because they share serialization conventions with the rest of the
+/// public-key surface, but the scalar-mult primitive itself is hardened
+/// against timing side channels on the secret scalar.
 pub mod vt {
     pub use crate::public_key::bigint::{BigInt, BigUint, MontgomeryCtx, Sign};
     pub use crate::public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
@@ -382,6 +387,8 @@ pub mod vt {
     pub use crate::public_key::schmidt_samoa::{
         SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey,
     };
+    pub use crate::public_key::x25519::{X25519, X25519PrivateKey, X25519PublicKey};
+    pub use crate::public_key::x448::{X448, X448PrivateKey, X448PublicKey};
 }
 
 #[cfg(test)]

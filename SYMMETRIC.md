@@ -1,10 +1,14 @@
 # SYMMETRIC
 
 The symmetric side follows the same project-wide implementation rule as the
-rest of the crate: pure idiomatic Rust, no architecture intrinsics, no C/FFI,
-and as few dependencies as possible. Where a fast table-driven path and a
-portable software constant-time path pull in different directions, the crate
-keeps both visible rather than hiding the tradeoff.
+rest of the crate: pure idiomatic Rust, no C/FFI, and as few dependencies as
+possible. Architecture intrinsics are intentionally avoided in the cipher
+cores; the only intrinsic path in the in-tree library is an aarch64
+`FEAT_SHA3` Keccak-f[1600] fast path, gated on runtime feature detection,
+with the portable scalar Keccak as the always-correct fallback. Where a fast
+table-driven path and a portable software constant-time path pull in
+different directions, the crate keeps both visible rather than hiding the
+tradeoff.
 
 ## Common Block-Cipher API
 

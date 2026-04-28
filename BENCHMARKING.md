@@ -117,6 +117,8 @@ pilot-bench.
 | Ed25519 | `ed25519_keygen`, `ed25519_sign`, `ed25519_verify` |
 | Edwards DH | `edwards_dh_keygen`, `edwards_dh_agree`, `edwards_dh_serialize` |
 | Edwards ElGamal | `edwards_elgamal_keygen`, `edwards_elgamal_encrypt`, `edwards_elgamal_decrypt` |
+| X25519 (RFC 7748) | `x25519_keygen`, `x25519_agree`, `x25519_scalar_mult_base`, `x25519_scalar_mult` |
+| X448 (RFC 7748) | `x448_keygen`, `x448_agree`, `x448_scalar_mult_base`, `x448_scalar_mult` |
 | ML-KEM | `mlkem512_keygen`, `mlkem512_encaps`, `mlkem512_decaps`, `mlkem768_keygen`, `mlkem768_encaps`, `mlkem768_decaps`, `mlkem1024_keygen`, `mlkem1024_encaps`, `mlkem1024_decaps` |
 | ML-DSA | `mldsa44_keygen`, `mldsa44_sign`, `mldsa44_verify`, `mldsa65_keygen`, `mldsa65_sign`, `mldsa65_verify`, `mldsa87_keygen`, `mldsa87_sign`, `mldsa87_verify` |
 | DSA 1024 | `dsa_sign_1024`, `dsa_verify_1024` |

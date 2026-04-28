@@ -94,6 +94,16 @@ measure edwards_elgamal_keygen
 measure edwards_elgamal_encrypt
 measure edwards_elgamal_decrypt
 
+hdr "X25519 / X448 (RFC 7748)"
+measure x25519_keygen
+measure x25519_agree
+measure x25519_scalar_mult_base
+measure x25519_scalar_mult
+measure x448_keygen
+measure x448_agree
+measure x448_scalar_mult_base
+measure x448_scalar_mult
+
 hdr "ML-KEM (Kyber)"
 measure mlkem512_keygen
 measure mlkem512_encaps

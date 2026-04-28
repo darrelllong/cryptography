@@ -6,6 +6,8 @@ Hash functions, extendable-output functions (XOFs), and keyed constructions.
 
 | File | Algorithm | Standard |
 |------|-----------|----------|
+| `md5.rs` | MD5 (legacy) | RFC 1321 |
+| `ripemd160.rs` | RIPEMD-160 (legacy) | Dobbertin-Bosselaers-Preneel 1996 |
 | `sha1.rs` | SHA-1 | FIPS 180-4 |
 | `sha2.rs` | SHA-224, SHA-256, SHA-384, SHA-512, SHA-512/224, SHA-512/256 | FIPS 180-4 |
 | `sha3.rs` | SHA3-224/256/384/512, SHAKE128, SHAKE256 | FIPS 202 |
@@ -20,6 +22,8 @@ HMAC state machine.
 
 ```
 Digest trait
+  ├── Md5
+  ├── Ripemd160
   ├── Sha1
   ├── Sha224 / Sha256 / Sha384 / Sha512 / Sha512_224 / Sha512_256
   └── Sha3_224 / Sha3_256 / Sha3_384 / Sha3_512

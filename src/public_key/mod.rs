@@ -72,3 +72,5 @@ pub mod rsa;
 pub mod rsa_io;
 pub mod rsa_pkcs1;
 pub mod schmidt_samoa;
+pub mod x25519;
+pub mod x448;

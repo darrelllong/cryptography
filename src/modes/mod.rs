@@ -21,10 +21,6 @@
 //! The point of this layer is to separate primitive choice from mode choice:
 //! one block cipher implementation can be dropped into several standardized
 //! operating modes without duplicating the mode logic in every cipher module.
-//!
-//! Higher-level special-purpose modes such as AES-GCM-SIV (RFC 8452) are still
-//! intentionally left for a later layer; they need additional domain-specific
-//! machinery beyond the basic block-cipher adapters here.
 
 use crate::BlockCipher;
 

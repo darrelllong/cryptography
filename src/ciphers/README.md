@@ -45,5 +45,9 @@ concerns — operating modes, authenticated encryption, MAC construction — liv
 
 ## Shared utilities
 
-`simon_speck_util.rs` — shared round-function helpers factored out of
-`simon.rs` and `speck.rs` to avoid duplication.
+- `simon_speck_util.rs` — shared round-function helpers factored out of
+  `simon.rs` and `speck.rs` to avoid duplication.
+- `cast128_tables.rs` — RFC 2144 Appendix A S-box constants, kept in a separate
+  file so `cast128.rs` shows the algorithm rather than the data tables.
+- `mod.rs` — module declarations, public re-exports, and the Ct policy note
+  enforced by `src/scrub.rs`.

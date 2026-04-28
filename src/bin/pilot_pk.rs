@@ -43,9 +43,9 @@ use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
     ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, Paillier, Rabin, Rsa, RsaOaep,
-    RsaPss, SchmidtSamoa,
+    RsaPss, SchmidtSamoa, X25519, X448,
 };
-use cryptography::{CtrDrbgAes256, Sha256};
+use cryptography::{Csprng, CtrDrbgAes256, Sha256};
 
 const MSG: [u8; 32] = [0x42; 32];
 const EC_MSG: [u8; 16] = [0x24; 16];
@@ -726,6 +726,88 @@ fn main() {
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::verify(&pk, &MSG, &sig));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── X25519 (RFC 7748) ─────────────────────────────────────────────────
+        "x25519_keygen" => {
+            let n = pk_iters(2000);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(X25519::generate(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "x25519_agree" => {
+            let (pub_a, _) = X25519::generate(&mut rng);
+            let (_, priv_b) = X25519::generate(&mut rng);
+            let n = pk_iters(2000);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(priv_b.agree(&pub_a).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "x25519_scalar_mult_base" => {
+            let mut secret = [0u8; 32];
+            rng.fill_bytes(&mut secret);
+            let n = pk_iters(2000);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(X25519::scalar_mult_base(&secret));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "x25519_scalar_mult" => {
+            let mut secret = [0u8; 32];
+            rng.fill_bytes(&mut secret);
+            let mut u = [0u8; 32];
+            u[0] = 9;
+            let n = pk_iters(2000);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(X25519::scalar_mult(&secret, &u));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── X448 (RFC 7748) ───────────────────────────────────────────────────
+        "x448_keygen" => {
+            let n = pk_iters(500);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(X448::generate(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "x448_agree" => {
+            let (pub_a, _) = X448::generate(&mut rng);
+            let (_, priv_b) = X448::generate(&mut rng);
+            let n = pk_iters(500);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(priv_b.agree(&pub_a).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "x448_scalar_mult_base" => {
+            let mut secret = [0u8; 56];
+            rng.fill_bytes(&mut secret);
+            let n = pk_iters(500);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(X448::scalar_mult_base(&secret));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "x448_scalar_mult" => {
+            let mut secret = [0u8; 56];
+            rng.fill_bytes(&mut secret);
+            let mut u = [0u8; 56];
+            u[0] = 5;
+            let n = pk_iters(500);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(X448::scalar_mult(&secret, &u));
             }
             ms_per_op(t0.elapsed(), n)
         }
