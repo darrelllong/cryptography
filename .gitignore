@@ -5,4 +5,7 @@ Cargo.lock
 /pilot_result_*/
 /scripts/cipher_outputs/
 /scripts/shakespeare.txt
+/scripts/.katex-validator/node_modules/
+/scripts/.katex-validator/package-lock.json
+/scripts/.katex-validator/package.json
 /third_party/

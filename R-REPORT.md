@@ -1,100 +1,107 @@
 # Symmetric-Cipher Randomness Report
 
-Generated 2026-04-28 18:34:20 PDT by `scripts/cipher_randomness.R`.
+Generated 2026-04-28 21:47:14 PDT by `scripts/cipher_randomness.R`.
 Toolchain: R 4.5.0, randtoolbox 2.0.5, tseries 0.10.61.
 
-**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (5,638,483 bytes; MD5 `02f80fa7827df3210e62ffd5ed7e5b42`; byte-entropy 4.8887 bits/byte).
+**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (5,638,483 bytes; MD5 `02f80fa7827df3210e62ffd5ed7e5b42`; byte-entropy 4.888720 bits/byte).
 
 **Caveat.** Passing this battery is **necessary** for a usable symmetric primitive but is **not sufficient** for cryptographic security; the battery rules out gross statistical defects in the keystream, not key-recovery, distinguishing-attack, or related-key resistance.
+
+**Entropy precision.** Sample entropy on a finite byte stream cannot equal the ideal $8$ bits exactly. The maximum-likelihood plug-in estimator has expected bias $-(K-1)/(2 n \ln 2)$ bits for $K$ bins and $n$ samples; with $K = 256$ and $n =$ 5,638,483, that bound is approximately $3.26 \times 10^{-5}$ bits, and the Miller-Madow correction subtracts a finite-sample estimate of the same form. Multinomial sampling noise contributes a further $O(1/\sqrt{n})$ fluctuation. Below, byte-entropy values are printed to six decimals so this irreducible deviation from $8.0$ is visible.
 
 **Method.** Each cipher encrypts the full plaintext under a fresh OS-random key.
 Block ciphers run in CTR mode with a random IV; stream ciphers run in their native keystream mode.
 Ciphertext is sliced into chunks of 8, 16, and 32 bytes; each chunk is mapped to a Uniform(0,1)
-candidate by interpreting its leading ≤ 8 bytes as a big-endian fraction.
+candidate by interpreting its leading at-most-8 bytes as a big-endian fraction.
 
 **Battery.**
 0. Shannon entropy of the raw byte stream (ideal: 8.000 bits/byte).
 1. Shannon entropy of the chunk values binned into 256 cells (per chunk size; ideal: 8.000 bits).
-2. First ten raw moments (deviation from Uniform(0,1) ideals 1/(k+1)).
-3. FFT power spectrum: peak/mean ratio, plus a KS test of the normalised periodogram against Exp(1) (= flat spectrum under H0).
+2. First ten raw moments (deviation from Uniform(0,1) ideals $1/(k+1)$).
+3. FFT power spectrum: peak/mean ratio, plus a KS test of the normalised periodogram against $\mathrm{Exp}(1)$ (= flat spectrum under $H_0$).
 4. Kolmogorov-Smirnov test against Uniform(0,1).
-5. `randtoolbox::gap.test` (gaps between recurrences in [0, 0.5]).
+5. `randtoolbox::gap.test` (gaps between recurrences in $[0, 0.5]$).
 6. `randtoolbox::freq.test` on the chunk values binned into 16 cells.
 7. `randtoolbox::order.test` on tuples of size 4 (data truncated to a multiple of 4).
 8. Wald-Wolfowitz runs test on the bit stream (`tseries::runs.test`).
 
-**Decision rule.** A cipher fails the battery if **≥ 3** of (a) p-values fall below α = 0.001, or (b) entropy estimates deviate from the ideal 8.0 bits by more than 0.001 bits.
+**Decision rule.** A cipher fails the battery if at least $3$ of (a) p-values fall below $\alpha = 0.001$, or (b) entropy estimates deviate from the ideal $8.0$ bits by more than $0.001$ bits.
 
 ## Definitions
 
-Let `b[0..L-1]` be the ciphertext byte stream of length `L` and let
-`u[0..k-1]` be the per-chunk Uniform(0,1) candidates, one per `N`-byte
-chunk, computed as `u[j] = sum_{i=0..min(N,8)-1} b[j*N + i] / 256^(i+1)`.
-The null hypothesis throughout is **H₀: u is i.i.d. Uniform(0,1)**.
+Let $b_0, b_1, \ldots, b_{L-1}$ be the ciphertext byte stream of length $L$
+and let $u_0, u_1, \ldots, u_{k-1}$ be the per-chunk Uniform(0,1) candidates,
+one per $N$-byte chunk, computed as
+
+$$
+u_j = \sum_{i=0}^{\min(N,8)-1} \frac{b_{jN+i}}{256^{i+1}}.
+$$
+
+Under $H_0$, the $u_j$ are independent and identically distributed Uniform(0,1).
 
 | Symbol | Definition |
 |--------|------------|
-| `L` | ciphertext length in bytes (= length of plaintext, since CTR/keystream is length-preserving). |
-| `N` | chunk size in bytes (8, 16, or 32). |
-| `k` | sample count for chunk size `N`: `k = floor(L / N)`. |
-| `u[j]` | the `j`-th chunk's leading-≤8-byte big-endian fraction, in [0,1). |
-| `α` | per-test rejection threshold = 0.001. | 
-| `tol` | per-entropy rejection threshold in bits/sample = 0.001. |
-| `p` | classical p-value: P(test statistic ≥ observed \| H₀); small `p` ⇒ reject H₀. |
-| `H` | Shannon entropy in bits, with the Miller–Madow finite-sample correction; ideal = 8.0000 for 256 equally likely symbols. |
-| `byte H` | `H` of the per-byte distribution over the full ciphertext. |
-| `chunk H` | `H` of the chunk values `u` binned into 256 equal-width cells. |
-| moment `k` | `m_k = (1/n) Σ u[j]^k`, the `k`-th raw sample moment. |
-| ideal `k` | `E[U^k] = 1/(k+1)` under U ∼ Uniform(0,1). |
-| `\|dev\|` | absolute deviation `\|m_k − 1/(k+1)\|` (smaller is better). |
-| `FFT peak/mean` | Fisher’s g (un-normalised): `max(|U_f|^2) / mean(|U_f|^2)` over non-DC bins of the centered FFT. |
-| `FFT spectrum KS (vs flat)` | KS p-value testing the normalised periodogram against Exp(1) (the white-noise null). |
-| `KS vs Uniform(0,1)` | Kolmogorov–Smirnov p-value testing `u` against U(0,1). |
-| `gap.test` | randtoolbox gaps-between-recurrences test on `u` (default lower=0, upper=0.5). |
-| `freq.test` | randtoolbox frequency χ² on `u` binned into 16 cells. |
-| `order.test` | randtoolbox order-pattern test on disjoint 4-tuples of `u` (data truncated to a multiple of 4). |
-| `runs.test` | Wald–Wolfowitz two-level runs test on the bit stream above/below 0.5. |
-| `rejects/total` | number of p-values below `α` (plus entropy misses) over the total test count. |
+| $L$ | ciphertext length in bytes (= length of plaintext, since CTR/keystream is length-preserving). |
+| $N$ | chunk size in bytes (8, 16, or 32). |
+| $k = \lfloor L/N \rfloor$ | number of samples for chunk size $N$. |
+| $u_j$ | the $j$-th chunk's leading at-most-8-byte big-endian fraction, in $[0,1)$. |
+| $\alpha = 0.001$ | per-test rejection threshold. |
+| $\mathrm{tol} = 0.001$ | per-entropy rejection threshold (bits/sample). |
+| $p$ | classical p-value $\Pr(T \ge T_\mathrm{obs} \mid H_0)$; small $p$ rejects $H_0$. |
+| $H$ | Shannon entropy in bits, with the Miller-Madow finite-sample correction; ideal $= 8.0000$ for 256 equally likely symbols. |
+| `byte H` | $H$ of the per-byte distribution over the full ciphertext. |
+| `chunk H` | $H$ of the chunk values $u$ binned into 256 equal-width cells. |
+| $m_k$ | the $k$-th raw sample moment, $m_k = \frac{1}{n}\sum_{j} u_j^k$. |
+| ideal $k$ | $E[U^k] = 1/(k+1)$ for $U \sim \mathrm{Uniform}(0,1)$. |
+| `dev` | absolute deviation $\lvert m_k - 1/(k+1) \rvert$ (smaller is better). |
+| `FFT peak/mean` | Fisher's g (un-normalised): $\max_f \lvert U_f \rvert^2 / \overline{\lvert U_f \rvert^2}$ over non-DC bins of the centered FFT. |
+| `FFT spectrum KS (vs flat)` | KS p-value testing the normalised periodogram against $\mathrm{Exp}(1)$ (the white-noise null). |
+| `KS vs Uniform(0,1)` | Kolmogorov-Smirnov p-value testing $u$ against $\mathrm{Uniform}(0,1)$. |
+| `gap.test` | randtoolbox gaps-between-recurrences test on $u$ (default lower $=0$, upper $=0.5$). |
+| `freq.test` | randtoolbox frequency $\chi^2$ on $u$ binned into 16 cells. |
+| `order.test` | randtoolbox order-pattern test on disjoint 4-tuples of $u$ (data truncated to a multiple of 4). |
+| `runs.test` | Wald-Wolfowitz two-level runs test on the bit stream above/below $0.5$. |
+| `rejects/total` | number of p-values below $\alpha$ (plus entropy misses) over the total test count. |
 | `min p` | smallest p-value across the cipher's full battery. |
 
 ## Summary
 
-| cipher | token | byte H (bits) | rejects/total | min p | verdict |
-|--------|-------|---------------|---------------|-------|---------|
-| AES-128 | `aes128` | 8.0000 | 0/22 | 0.064 | PASS |
-| AES-192 | `aes192` | 8.0000 | 0/22 | 0.062 | PASS |
-| AES-256 | `aes256` | 8.0000 | 0/22 | 0.180 | PASS |
-| Camellia-128 | `camellia128` | 8.0000 | 0/22 | 0.044 | PASS |
-| Camellia-192 | `camellia192` | 8.0000 | 1/22 | 2.9e-04 | PASS |
-| Camellia-256 | `camellia256` | 8.0000 | 0/22 | 0.122 | PASS |
-| CAST-128 | `cast128` | 8.0000 | 0/22 | 0.003 | PASS |
-| DES | `des` | 8.0000 | 0/22 | 0.230 | PASS |
-| 3DES | `3des` | 8.0000 | 0/22 | 0.143 | PASS |
-| Kuznyechik | `grasshopper` | 8.0000 | 0/22 | 0.054 | PASS |
-| Magma | `magma` | 8.0000 | 0/22 | 0.042 | PASS |
-| PRESENT-80 | `present80` | 8.0000 | 1/22 | 3.4e-05 | PASS |
-| PRESENT-128 | `present128` | 8.0000 | 0/22 | 0.060 | PASS |
-| SEED | `seed` | 8.0000 | 1/22 | <1e-12 | PASS |
-| Serpent-128 | `serpent128` | 8.0000 | 0/22 | 0.013 | PASS |
-| Serpent-192 | `serpent192` | 8.0000 | 0/22 | 0.033 | PASS |
-| Serpent-256 | `serpent256` | 8.0000 | 0/22 | 0.042 | PASS |
-| SM4 | `sm4` | 8.0000 | 0/22 | 0.205 | PASS |
-| Twofish-128 | `twofish128` | 8.0000 | 2/22 | 2.3e-06 | PASS |
-| Twofish-256 | `twofish256` | 8.0000 | 0/22 | 0.049 | PASS |
-| Simon32/64 | `simon32_64` | 8.0000 | 0/22 | 0.003 | PASS |
-| Simon64/128 | `simon64_128` | 8.0000 | 0/22 | 0.007 | PASS |
-| Simon128/128 | `simon128_128` | 8.0000 | 0/22 | 0.014 | PASS |
-| Simon128/256 | `simon128_256` | 8.0000 | 0/22 | 0.007 | PASS |
-| Speck32/64 | `speck32_64` | 8.0000 | 0/22 | 0.168 | PASS |
-| Speck64/128 | `speck64_128` | 8.0000 | 0/22 | 0.011 | PASS |
-| Speck128/128 | `speck128_128` | 8.0000 | 0/22 | 0.073 | PASS |
-| Speck128/256 | `speck128_256` | 8.0000 | 0/22 | 0.326 | PASS |
-| ChaCha20 | `chacha20` | 8.0000 | 0/22 | 0.146 | PASS |
-| XChaCha20 | `xchacha20` | 8.0000 | 0/22 | 0.067 | PASS |
-| Salsa20 | `salsa20` | 8.0000 | 0/22 | 0.026 | PASS |
-| Rabbit | `rabbit` | 8.0000 | 0/22 | 0.042 | PASS |
-| ZUC-128 | `zuc128` | 8.0000 | 0/22 | 0.206 | PASS |
-| SNOW 3G | `snow3g` | 8.0000 | 0/22 | 0.026 | PASS |
+| cipher | token | byte H (bits) | $8 - H$ (bits) | rejects/total | min p | verdict |
+|--------|-------|---------------|----------------|---------------|-------|---------|
+| AES-128 | `aes128` | 8.000006 | -5.94e-06 | 0/22 | 0.064 | PASS |
+| AES-192 | `aes192` | 7.999996 | 4.10e-06 | 0/22 | 0.062 | PASS |
+| AES-256 | `aes256` | 8.000004 | -3.94e-06 | 0/22 | 0.180 | PASS |
+| Camellia-128 | `camellia128` | 7.999995 | 4.72e-06 | 0/22 | 0.044 | PASS |
+| Camellia-192 | `camellia192` | 8.000001 | -6.27e-07 | 1/22 | 2.9e-04 | PASS |
+| Camellia-256 | `camellia256` | 8.000003 | -3.32e-06 | 0/22 | 0.122 | PASS |
+| CAST-128 | `cast128` | 7.999999 | 5.59e-07 | 0/22 | 0.003 | PASS |
+| DES | `des` | 7.999997 | 2.62e-06 | 0/22 | 0.230 | PASS |
+| 3DES | `3des` | 8.000001 | -1.11e-06 | 0/22 | 0.143 | PASS |
+| Kuznyechik | `grasshopper` | 8.000003 | -2.56e-06 | 0/22 | 0.054 | PASS |
+| Magma | `magma` | 8.000003 | -2.52e-06 | 0/22 | 0.042 | PASS |
+| PRESENT-80 | `present80` | 7.999999 | 5.86e-07 | 1/22 | 3.4e-05 | PASS |
+| PRESENT-128 | `present128` | 7.999996 | 4.27e-06 | 0/22 | 0.060 | PASS |
+| SEED | `seed` | 8.000001 | -5.05e-07 | 1/22 | <1e-12 | PASS |
+| Serpent-128 | `serpent128` | 8.000000 | -4.09e-07 | 0/22 | 0.013 | PASS |
+| Serpent-192 | `serpent192` | 8.000000 | 2.12e-07 | 0/22 | 0.033 | PASS |
+| Serpent-256 | `serpent256` | 8.000004 | -3.86e-06 | 0/22 | 0.042 | PASS |
+| SM4 | `sm4` | 7.999998 | 2.03e-06 | 0/22 | 0.205 | PASS |
+| Twofish-128 | `twofish128` | 8.000002 | -1.79e-06 | 2/22 | 2.3e-06 | PASS |
+| Twofish-256 | `twofish256` | 7.999997 | 3.14e-06 | 0/22 | 0.049 | PASS |
+| Simon32/64 | `simon32_64` | 8.000003 | -3.45e-06 | 0/22 | 0.003 | PASS |
+| Simon64/128 | `simon64_128` | 8.000005 | -4.55e-06 | 0/22 | 0.007 | PASS |
+| Simon128/128 | `simon128_128` | 7.999995 | 5.14e-06 | 0/22 | 0.014 | PASS |
+| Simon128/256 | `simon128_256` | 7.999997 | 2.74e-06 | 0/22 | 0.007 | PASS |
+| Speck32/64 | `speck32_64` | 7.999997 | 3.26e-06 | 0/22 | 0.168 | PASS |
+| Speck64/128 | `speck64_128` | 7.999994 | 5.93e-06 | 0/22 | 0.011 | PASS |
+| Speck128/128 | `speck128_128` | 8.000003 | -2.99e-06 | 0/22 | 0.073 | PASS |
+| Speck128/256 | `speck128_256` | 8.000000 | 3.23e-08 | 0/22 | 0.326 | PASS |
+| ChaCha20 | `chacha20` | 7.999998 | 1.88e-06 | 0/22 | 0.146 | PASS |
+| XChaCha20 | `xchacha20` | 8.000001 | -1.41e-06 | 0/22 | 0.067 | PASS |
+| Salsa20 | `salsa20` | 7.999998 | 2.08e-06 | 0/22 | 0.026 | PASS |
+| Rabbit | `rabbit` | 8.000003 | -2.77e-06 | 0/22 | 0.042 | PASS |
+| ZUC-128 | `zuc128` | 8.000000 | 3.35e-07 | 0/22 | 0.206 | PASS |
+| SNOW 3G | `snow3g` | 7.999998 | 1.86e-06 | 0/22 | 0.026 | PASS |
 
 **All ciphers passed the battery.**
 
@@ -102,16 +109,16 @@ The null hypothesis throughout is **H₀: u is i.i.d. Uniform(0,1)**.
 
 ### AES-128 (`aes128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 5.94e-06).
+Byte-stream Shannon entropy: **8.000006 bits/byte** (ideal: $8$; signed deviation $H - 8 = 5.94 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0001 bits, dev 5.34e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000053 bits; signed deviation $H - 8 = 5.34 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500010 | 0.500000 | 9.71e-06 |
 | 2 | 0.333487 | 0.333333 | 1.54e-04 |
 | 3 | 0.250226 | 0.250000 | 2.26e-04 |
@@ -130,17 +137,17 @@ Tests:
 | FFT peak/mean | 13.52 |
 | FFT spectrum KS (vs flat) | 0.673 |
 | KS vs Uniform(0,1) | 0.697 |
-| randtoolbox gap.test  | 0.285 |
+| randtoolbox gap.test | 0.285 |
 | randtoolbox freq.test (16 bins) | 0.441 |
 | randtoolbox order.test (d=4) | 0.333 |
 | tseries runs.test (bits) | 0.277 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.77e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000018 bits; signed deviation $H - 8 = 1.77 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499489 | 0.500000 | 5.11e-04 |
 | 2 | 0.333112 | 0.333333 | 2.21e-04 |
 | 3 | 0.249976 | 0.250000 | 2.44e-05 |
@@ -159,17 +166,17 @@ Tests:
 | FFT peak/mean | 12.26 |
 | FFT spectrum KS (vs flat) | 0.285 |
 | KS vs Uniform(0,1) | 0.256 |
-| randtoolbox gap.test  | 0.524 |
+| randtoolbox gap.test | 0.524 |
 | randtoolbox freq.test (16 bins) | 0.439 |
 | randtoolbox order.test (d=4) | 0.258 |
 | tseries runs.test (bits) | 0.277 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 4.67e-06)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999995 bits; signed deviation $H - 8 = -4.67 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500199 | 0.500000 | 1.99e-04 |
 | 2 | 0.333704 | 0.333333 | 3.71e-04 |
 | 3 | 0.250431 | 0.250000 | 4.31e-04 |
@@ -188,7 +195,7 @@ Tests:
 | FFT peak/mean | 11.29 |
 | FFT spectrum KS (vs flat) | 0.845 |
 | KS vs Uniform(0,1) | 0.590 |
-| randtoolbox gap.test  | 0.064 |
+| randtoolbox gap.test | 0.064 |
 | randtoolbox freq.test (16 bins) | 0.432 |
 | randtoolbox order.test (d=4) | 0.273 |
 | tseries runs.test (bits) | 0.277 |
@@ -197,16 +204,16 @@ Tests:
 
 ### AES-192 (`aes192`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 4.10e-06).
+Byte-stream Shannon entropy: **7.999996 bits/byte** (ideal: $8$; signed deviation $H - 8 = -4.10 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 3.67e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999963 bits; signed deviation $H - 8 = -3.67 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499875 | 0.500000 | 1.25e-04 |
 | 2 | 0.333268 | 0.333333 | 6.56e-05 |
 | 3 | 0.249994 | 0.250000 | 5.85e-06 |
@@ -225,17 +232,17 @@ Tests:
 | FFT peak/mean | 11.70 |
 | FFT spectrum KS (vs flat) | 0.922 |
 | KS vs Uniform(0,1) | 0.291 |
-| randtoolbox gap.test  | 0.080 |
+| randtoolbox gap.test | 0.080 |
 | randtoolbox freq.test (16 bins) | 0.062 |
 | randtoolbox order.test (d=4) | 0.834 |
 | tseries runs.test (bits) | 0.909 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 4.74e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999953 bits; signed deviation $H - 8 = -4.74 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499716 | 0.500000 | 2.84e-04 |
 | 2 | 0.333138 | 0.333333 | 1.96e-04 |
 | 3 | 0.249904 | 0.250000 | 9.56e-05 |
@@ -254,17 +261,17 @@ Tests:
 | FFT peak/mean | 12.36 |
 | FFT spectrum KS (vs flat) | 0.699 |
 | KS vs Uniform(0,1) | 0.518 |
-| randtoolbox gap.test  | 0.952 |
+| randtoolbox gap.test | 0.952 |
 | randtoolbox freq.test (16 bins) | 0.387 |
 | randtoolbox order.test (d=4) | 0.423 |
 | tseries runs.test (bits) | 0.909 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 1.46e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999985 bits; signed deviation $H - 8 = -1.46 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500003 | 0.500000 | 2.53e-06 |
 | 2 | 0.333369 | 0.333333 | 3.58e-05 |
 | 3 | 0.250060 | 0.250000 | 6.01e-05 |
@@ -283,7 +290,7 @@ Tests:
 | FFT peak/mean | 14.28 |
 | FFT spectrum KS (vs flat) | 0.907 |
 | KS vs Uniform(0,1) | 0.896 |
-| randtoolbox gap.test  | 0.887 |
+| randtoolbox gap.test | 0.887 |
 | randtoolbox freq.test (16 bins) | 0.907 |
 | randtoolbox order.test (d=4) | 0.677 |
 | tseries runs.test (bits) | 0.909 |
@@ -292,16 +299,16 @@ Tests:
 
 ### AES-256 (`aes256`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.94e-06).
+Byte-stream Shannon entropy: **8.000004 bits/byte** (ideal: $8$; signed deviation $H - 8 = 3.94 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.59e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999984 bits; signed deviation $H - 8 = -1.59 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499946 | 0.500000 | 5.39e-05 |
 | 2 | 0.333320 | 0.333333 | 1.35e-05 |
 | 3 | 0.250010 | 0.250000 | 9.94e-06 |
@@ -320,17 +327,17 @@ Tests:
 | FFT peak/mean | 11.55 |
 | FFT spectrum KS (vs flat) | 0.713 |
 | KS vs Uniform(0,1) | 0.964 |
-| randtoolbox gap.test  | 0.180 |
+| randtoolbox gap.test | 0.180 |
 | randtoolbox freq.test (16 bins) | 0.355 |
 | randtoolbox order.test (d=4) | 0.972 |
 | tseries runs.test (bits) | 0.927 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.85e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999982 bits; signed deviation $H - 8 = -1.85 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499811 | 0.500000 | 1.89e-04 |
 | 2 | 0.333309 | 0.333333 | 2.42e-05 |
 | 3 | 0.250115 | 0.250000 | 1.15e-04 |
@@ -349,17 +356,17 @@ Tests:
 | FFT peak/mean | 12.88 |
 | FFT spectrum KS (vs flat) | 0.755 |
 | KS vs Uniform(0,1) | 0.564 |
-| randtoolbox gap.test  | 0.205 |
+| randtoolbox gap.test | 0.205 |
 | randtoolbox freq.test (16 bins) | 0.494 |
 | randtoolbox order.test (d=4) | 0.598 |
 | tseries runs.test (bits) | 0.927 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 8.60e-06)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000009 bits; signed deviation $H - 8 = 8.60 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499074 | 0.500000 | 9.26e-04 |
 | 2 | 0.332636 | 0.333333 | 6.97e-04 |
 | 3 | 0.249568 | 0.250000 | 4.32e-04 |
@@ -378,7 +385,7 @@ Tests:
 | FFT peak/mean | 11.85 |
 | FFT spectrum KS (vs flat) | 0.975 |
 | KS vs Uniform(0,1) | 0.213 |
-| randtoolbox gap.test  | 0.474 |
+| randtoolbox gap.test | 0.474 |
 | randtoolbox freq.test (16 bins) | 0.354 |
 | randtoolbox order.test (d=4) | 0.285 |
 | tseries runs.test (bits) | 0.927 |
@@ -387,16 +394,16 @@ Tests:
 
 ### Camellia-128 (`camellia128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 4.72e-06).
+Byte-stream Shannon entropy: **7.999995 bits/byte** (ideal: $8$; signed deviation $H - 8 = -4.72 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 8.44e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999992 bits; signed deviation $H - 8 = -8.44 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500265 | 0.500000 | 2.65e-04 |
 | 2 | 0.333603 | 0.333333 | 2.70e-04 |
 | 3 | 0.250282 | 0.250000 | 2.82e-04 |
@@ -415,17 +422,17 @@ Tests:
 | FFT peak/mean | 14.68 |
 | FFT spectrum KS (vs flat) | 0.930 |
 | KS vs Uniform(0,1) | 0.389 |
-| randtoolbox gap.test  | 0.125 |
+| randtoolbox gap.test | 0.125 |
 | randtoolbox freq.test (16 bins) | 0.044 |
 | randtoolbox order.test (d=4) | 0.592 |
 | tseries runs.test (bits) | 0.387 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 5.13e-06)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000005 bits; signed deviation $H - 8 = 5.13 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499940 | 0.500000 | 5.98e-05 |
 | 2 | 0.333154 | 0.333333 | 1.80e-04 |
 | 3 | 0.249798 | 0.250000 | 2.02e-04 |
@@ -444,17 +451,17 @@ Tests:
 | FFT peak/mean | 12.13 |
 | FFT spectrum KS (vs flat) | 0.221 |
 | KS vs Uniform(0,1) | 0.590 |
-| randtoolbox gap.test  | 0.090 |
+| randtoolbox gap.test | 0.090 |
 | randtoolbox freq.test (16 bins) | 0.159 |
 | randtoolbox order.test (d=4) | 0.814 |
 | tseries runs.test (bits) | 0.387 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 2.89e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999971 bits; signed deviation $H - 8 = -2.89 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499999 | 0.500000 | 1.24e-06 |
 | 2 | 0.333229 | 0.333333 | 1.04e-04 |
 | 3 | 0.249838 | 0.250000 | 1.62e-04 |
@@ -473,7 +480,7 @@ Tests:
 | FFT peak/mean | 10.88 |
 | FFT spectrum KS (vs flat) | 0.274 |
 | KS vs Uniform(0,1) | 0.619 |
-| randtoolbox gap.test  | 0.260 |
+| randtoolbox gap.test | 0.260 |
 | randtoolbox freq.test (16 bins) | 0.632 |
 | randtoolbox order.test (d=4) | 0.349 |
 | tseries runs.test (bits) | 0.387 |
@@ -482,16 +489,16 @@ Tests:
 
 ### Camellia-192 (`camellia192`)
 
-Verdict: PASS — 1 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 1 / 22).
+Verdict: PASS &mdash; 1 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 1 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 6.27e-07).
+Byte-stream Shannon entropy: **8.000001 bits/byte** (ideal: $8$; signed deviation $H - 8 = 6.27 \times 10^{-7}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 8.57e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999991 bits; signed deviation $H - 8 = -8.57 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499700 | 0.500000 | 3.00e-04 |
 | 2 | 0.332877 | 0.333333 | 4.56e-04 |
 | 3 | 0.249522 | 0.250000 | 4.78e-04 |
@@ -510,17 +517,17 @@ Tests:
 | FFT peak/mean | 13.11 |
 | FFT spectrum KS (vs flat) | 0.746 |
 | KS vs Uniform(0,1) | 0.244 |
-| randtoolbox gap.test  | 0.283 |
+| randtoolbox gap.test | 0.283 |
 | randtoolbox freq.test (16 bins) | 0.526 |
 | randtoolbox order.test (d=4) | 0.134 |
 | tseries runs.test (bits) | 0.152 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.87e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999981 bits; signed deviation $H - 8 = -1.87 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499589 | 0.500000 | 4.11e-04 |
 | 2 | 0.332671 | 0.333333 | 6.62e-04 |
 | 3 | 0.249307 | 0.250000 | 6.93e-04 |
@@ -539,17 +546,17 @@ Tests:
 | FFT peak/mean | 13.45 |
 | FFT spectrum KS (vs flat) | 0.789 |
 | KS vs Uniform(0,1) | 0.206 |
-| randtoolbox gap.test  | 0.418 |
+| randtoolbox gap.test | 0.418 |
 | randtoolbox freq.test (16 bins) | 0.175 |
 | randtoolbox order.test (d=4) | 0.151 |
 | tseries runs.test (bits) | 0.152 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 1.99e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000020 bits; signed deviation $H - 8 = 1.99 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499462 | 0.500000 | 5.38e-04 |
 | 2 | 0.332473 | 0.333333 | 8.60e-04 |
 | 3 | 0.249064 | 0.250000 | 9.36e-04 |
@@ -568,7 +575,7 @@ Tests:
 | FFT peak/mean | 12.84 |
 | FFT spectrum KS (vs flat) | 0.644 |
 | KS vs Uniform(0,1) | 0.265 |
-| randtoolbox gap.test  | 2.9e-04 |
+| randtoolbox gap.test | 2.9e-04 |
 | randtoolbox freq.test (16 bins) | 0.435 |
 | randtoolbox order.test (d=4) | 0.655 |
 | tseries runs.test (bits) | 0.152 |
@@ -577,16 +584,16 @@ Tests:
 
 ### Camellia-256 (`camellia256`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.32e-06).
+Byte-stream Shannon entropy: **8.000003 bits/byte** (ideal: $8$; signed deviation $H - 8 = 3.32 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.10e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000011 bits; signed deviation $H - 8 = 1.10 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499685 | 0.500000 | 3.15e-04 |
 | 2 | 0.333019 | 0.333333 | 3.14e-04 |
 | 3 | 0.249692 | 0.250000 | 3.08e-04 |
@@ -605,17 +612,17 @@ Tests:
 | FFT peak/mean | 11.90 |
 | FFT spectrum KS (vs flat) | 0.395 |
 | KS vs Uniform(0,1) | 0.649 |
-| randtoolbox gap.test  | 0.236 |
+| randtoolbox gap.test | 0.236 |
 | randtoolbox freq.test (16 bins) | 0.577 |
 | randtoolbox order.test (d=4) | 0.703 |
 | tseries runs.test (bits) | 0.230 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 3.45e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000035 bits; signed deviation $H - 8 = 3.45 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499302 | 0.500000 | 6.98e-04 |
 | 2 | 0.332555 | 0.333333 | 7.78e-04 |
 | 3 | 0.249204 | 0.250000 | 7.96e-04 |
@@ -634,17 +641,17 @@ Tests:
 | FFT peak/mean | 12.06 |
 | FFT spectrum KS (vs flat) | 0.512 |
 | KS vs Uniform(0,1) | 0.308 |
-| randtoolbox gap.test  | 0.122 |
+| randtoolbox gap.test | 0.122 |
 | randtoolbox freq.test (16 bins) | 0.816 |
 | randtoolbox order.test (d=4) | 0.373 |
 | tseries runs.test (bits) | 0.230 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0001 bits, dev 7.17e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000072 bits; signed deviation $H - 8 = 7.17 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499336 | 0.500000 | 6.64e-04 |
 | 2 | 0.332645 | 0.333333 | 6.88e-04 |
 | 3 | 0.249224 | 0.250000 | 7.76e-04 |
@@ -663,7 +670,7 @@ Tests:
 | FFT peak/mean | 12.65 |
 | FFT spectrum KS (vs flat) | 0.163 |
 | KS vs Uniform(0,1) | 0.367 |
-| randtoolbox gap.test  | 0.728 |
+| randtoolbox gap.test | 0.728 |
 | randtoolbox freq.test (16 bins) | 0.175 |
 | randtoolbox order.test (d=4) | 0.453 |
 | tseries runs.test (bits) | 0.230 |
@@ -672,16 +679,16 @@ Tests:
 
 ### CAST-128 (`cast128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 5.59e-07).
+Byte-stream Shannon entropy: **7.999999 bits/byte** (ideal: $8$; signed deviation $H - 8 = -5.59 \times 10^{-7}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.99e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000020 bits; signed deviation $H - 8 = 1.99 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499999 | 0.500000 | 1.37e-06 |
 | 2 | 0.333413 | 0.333333 | 7.96e-05 |
 | 3 | 0.250128 | 0.250000 | 1.28e-04 |
@@ -700,17 +707,17 @@ Tests:
 | FFT peak/mean | 13.25 |
 | FFT spectrum KS (vs flat) | 0.190 |
 | KS vs Uniform(0,1) | 0.984 |
-| randtoolbox gap.test  | 0.930 |
+| randtoolbox gap.test | 0.930 |
 | randtoolbox freq.test (16 bins) | 0.873 |
 | randtoolbox order.test (d=4) | 0.806 |
 | tseries runs.test (bits) | 0.176 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0001 bits, dev 5.01e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000050 bits; signed deviation $H - 8 = 5.01 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500325 | 0.500000 | 3.25e-04 |
 | 2 | 0.333648 | 0.333333 | 3.14e-04 |
 | 3 | 0.250317 | 0.250000 | 3.17e-04 |
@@ -729,17 +736,17 @@ Tests:
 | FFT peak/mean | 13.62 |
 | FFT spectrum KS (vs flat) | 0.931 |
 | KS vs Uniform(0,1) | 0.867 |
-| randtoolbox gap.test  | 0.863 |
+| randtoolbox gap.test | 0.863 |
 | randtoolbox freq.test (16 bins) | 0.818 |
 | randtoolbox order.test (d=4) | 0.790 |
 | tseries runs.test (bits) | 0.176 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 2.77e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000028 bits; signed deviation $H - 8 = 2.77 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500073 | 0.500000 | 7.29e-05 |
 | 2 | 0.333347 | 0.333333 | 1.38e-05 |
 | 3 | 0.250019 | 0.250000 | 1.92e-05 |
@@ -758,7 +765,7 @@ Tests:
 | FFT peak/mean | 10.67 |
 | FFT spectrum KS (vs flat) | 0.836 |
 | KS vs Uniform(0,1) | 0.881 |
-| randtoolbox gap.test  | 0.003 |
+| randtoolbox gap.test | 0.003 |
 | randtoolbox freq.test (16 bins) | 0.561 |
 | randtoolbox order.test (d=4) | 0.406 |
 | tseries runs.test (bits) | 0.176 |
@@ -767,16 +774,16 @@ Tests:
 
 ### DES (`des`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.62e-06).
+Byte-stream Shannon entropy: **7.999997 bits/byte** (ideal: $8$; signed deviation $H - 8 = -2.62 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 3.97e-07)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000000 bits; signed deviation $H - 8 = -3.97 \times 10^{-7}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499965 | 0.500000 | 3.47e-05 |
 | 2 | 0.333230 | 0.333333 | 1.03e-04 |
 | 3 | 0.249903 | 0.250000 | 9.65e-05 |
@@ -795,17 +802,17 @@ Tests:
 | FFT peak/mean | 15.47 |
 | FFT spectrum KS (vs flat) | 0.952 |
 | KS vs Uniform(0,1) | 0.360 |
-| randtoolbox gap.test  | 0.275 |
+| randtoolbox gap.test | 0.275 |
 | randtoolbox freq.test (16 bins) | 0.523 |
 | randtoolbox order.test (d=4) | 0.406 |
 | tseries runs.test (bits) | 0.952 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 4.29e-06)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999996 bits; signed deviation $H - 8 = -4.29 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499934 | 0.500000 | 6.64e-05 |
 | 2 | 0.333247 | 0.333333 | 8.68e-05 |
 | 3 | 0.249955 | 0.250000 | 4.54e-05 |
@@ -824,17 +831,17 @@ Tests:
 | FFT peak/mean | 14.19 |
 | FFT spectrum KS (vs flat) | 0.905 |
 | KS vs Uniform(0,1) | 0.844 |
-| randtoolbox gap.test  | 0.394 |
+| randtoolbox gap.test | 0.394 |
 | randtoolbox freq.test (16 bins) | 0.988 |
 | randtoolbox order.test (d=4) | 0.240 |
 | tseries runs.test (bits) | 0.952 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 6.33e-06)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999994 bits; signed deviation $H - 8 = -6.33 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500113 | 0.500000 | 1.13e-04 |
 | 2 | 0.333256 | 0.333333 | 7.70e-05 |
 | 3 | 0.249877 | 0.250000 | 1.23e-04 |
@@ -853,7 +860,7 @@ Tests:
 | FFT peak/mean | 12.07 |
 | FFT spectrum KS (vs flat) | 0.464 |
 | KS vs Uniform(0,1) | 0.746 |
-| randtoolbox gap.test  | 0.916 |
+| randtoolbox gap.test | 0.916 |
 | randtoolbox freq.test (16 bins) | 0.927 |
 | randtoolbox order.test (d=4) | 0.230 |
 | tseries runs.test (bits) | 0.952 |
@@ -862,16 +869,16 @@ Tests:
 
 ### 3DES (`3des`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 1.11e-06).
+Byte-stream Shannon entropy: **8.000001 bits/byte** (ideal: $8$; signed deviation $H - 8 = 1.11 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 5.80e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000006 bits; signed deviation $H - 8 = 5.80 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500598 | 0.500000 | 5.98e-04 |
 | 2 | 0.334015 | 0.333333 | 6.81e-04 |
 | 3 | 0.250664 | 0.250000 | 6.64e-04 |
@@ -890,17 +897,17 @@ Tests:
 | FFT peak/mean | 12.46 |
 | FFT spectrum KS (vs flat) | 0.662 |
 | KS vs Uniform(0,1) | 0.228 |
-| randtoolbox gap.test  | 0.378 |
+| randtoolbox gap.test | 0.378 |
 | randtoolbox freq.test (16 bins) | 0.465 |
 | randtoolbox order.test (d=4) | 0.655 |
 | tseries runs.test (bits) | 0.143 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.81e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999982 bits; signed deviation $H - 8 = -1.81 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500112 | 0.500000 | 1.12e-04 |
 | 2 | 0.333550 | 0.333333 | 2.17e-04 |
 | 3 | 0.250243 | 0.250000 | 2.43e-04 |
@@ -919,17 +926,17 @@ Tests:
 | FFT peak/mean | 11.02 |
 | FFT spectrum KS (vs flat) | 0.874 |
 | KS vs Uniform(0,1) | 0.952 |
-| randtoolbox gap.test  | 0.611 |
+| randtoolbox gap.test | 0.611 |
 | randtoolbox freq.test (16 bins) | 0.727 |
 | randtoolbox order.test (d=4) | 0.806 |
 | tseries runs.test (bits) | 0.143 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 2.50e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999975 bits; signed deviation $H - 8 = -2.50 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499348 | 0.500000 | 6.52e-04 |
 | 2 | 0.332700 | 0.333333 | 6.34e-04 |
 | 3 | 0.249409 | 0.250000 | 5.91e-04 |
@@ -948,7 +955,7 @@ Tests:
 | FFT peak/mean | 12.04 |
 | FFT spectrum KS (vs flat) | 0.900 |
 | KS vs Uniform(0,1) | 0.739 |
-| randtoolbox gap.test  | 0.551 |
+| randtoolbox gap.test | 0.551 |
 | randtoolbox freq.test (16 bins) | 0.914 |
 | randtoolbox order.test (d=4) | 0.493 |
 | tseries runs.test (bits) | 0.143 |
@@ -957,16 +964,16 @@ Tests:
 
 ### Kuznyechik (`grasshopper`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.56e-06).
+Byte-stream Shannon entropy: **8.000003 bits/byte** (ideal: $8$; signed deviation $H - 8 = 2.56 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.54e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999985 bits; signed deviation $H - 8 = -1.54 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500213 | 0.500000 | 2.13e-04 |
 | 2 | 0.333580 | 0.333333 | 2.47e-04 |
 | 3 | 0.250218 | 0.250000 | 2.18e-04 |
@@ -985,17 +992,17 @@ Tests:
 | FFT peak/mean | 12.73 |
 | FFT spectrum KS (vs flat) | 0.334 |
 | KS vs Uniform(0,1) | 0.460 |
-| randtoolbox gap.test  | 0.239 |
+| randtoolbox gap.test | 0.239 |
 | randtoolbox freq.test (16 bins) | 0.157 |
 | randtoolbox order.test (d=4) | 0.418 |
 | tseries runs.test (bits) | 0.249 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 3.81e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000038 bits; signed deviation $H - 8 = 3.81 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499702 | 0.500000 | 2.98e-04 |
 | 2 | 0.333085 | 0.333333 | 2.48e-04 |
 | 3 | 0.249788 | 0.250000 | 2.12e-04 |
@@ -1014,17 +1021,17 @@ Tests:
 | FFT peak/mean | 13.43 |
 | FFT spectrum KS (vs flat) | 0.401 |
 | KS vs Uniform(0,1) | 0.866 |
-| randtoolbox gap.test  | 0.854 |
+| randtoolbox gap.test | 0.854 |
 | randtoolbox freq.test (16 bins) | 0.557 |
 | randtoolbox order.test (d=4) | 0.240 |
 | tseries runs.test (bits) | 0.249 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 3.96e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000040 bits; signed deviation $H - 8 = 3.96 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499393 | 0.500000 | 6.07e-04 |
 | 2 | 0.332628 | 0.333333 | 7.05e-04 |
 | 3 | 0.249340 | 0.250000 | 6.60e-04 |
@@ -1043,7 +1050,7 @@ Tests:
 | FFT peak/mean | 11.55 |
 | FFT spectrum KS (vs flat) | 0.771 |
 | KS vs Uniform(0,1) | 0.440 |
-| randtoolbox gap.test  | 0.253 |
+| randtoolbox gap.test | 0.253 |
 | randtoolbox freq.test (16 bins) | 0.097 |
 | randtoolbox order.test (d=4) | 0.054 |
 | tseries runs.test (bits) | 0.249 |
@@ -1052,16 +1059,16 @@ Tests:
 
 ### Magma (`magma`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.52e-06).
+Byte-stream Shannon entropy: **8.000003 bits/byte** (ideal: $8$; signed deviation $H - 8 = 2.52 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.19e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000012 bits; signed deviation $H - 8 = 1.19 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500033 | 0.500000 | 3.31e-05 |
 | 2 | 0.333359 | 0.333333 | 2.59e-05 |
 | 3 | 0.250037 | 0.250000 | 3.70e-05 |
@@ -1080,17 +1087,17 @@ Tests:
 | FFT peak/mean | 14.75 |
 | FFT spectrum KS (vs flat) | 0.068 |
 | KS vs Uniform(0,1) | 0.914 |
-| randtoolbox gap.test  | 0.260 |
+| randtoolbox gap.test | 0.260 |
 | randtoolbox freq.test (16 bins) | 0.791 |
 | randtoolbox order.test (d=4) | 0.805 |
 | tseries runs.test (bits) | 0.597 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.20e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999988 bits; signed deviation $H - 8 = -1.20 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499882 | 0.500000 | 1.18e-04 |
 | 2 | 0.333242 | 0.333333 | 9.13e-05 |
 | 3 | 0.249961 | 0.250000 | 3.87e-05 |
@@ -1109,17 +1116,17 @@ Tests:
 | FFT peak/mean | 12.57 |
 | FFT spectrum KS (vs flat) | 0.446 |
 | KS vs Uniform(0,1) | 0.845 |
-| randtoolbox gap.test  | 0.861 |
+| randtoolbox gap.test | 0.861 |
 | randtoolbox freq.test (16 bins) | 0.878 |
 | randtoolbox order.test (d=4) | 0.858 |
 | tseries runs.test (bits) | 0.597 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 1.33e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999987 bits; signed deviation $H - 8 = -1.33 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499129 | 0.500000 | 8.71e-04 |
 | 2 | 0.332282 | 0.333333 | 1.05e-03 |
 | 3 | 0.249002 | 0.250000 | 9.98e-04 |
@@ -1138,7 +1145,7 @@ Tests:
 | FFT peak/mean | 13.65 |
 | FFT spectrum KS (vs flat) | 0.582 |
 | KS vs Uniform(0,1) | 0.042 |
-| randtoolbox gap.test  | 0.875 |
+| randtoolbox gap.test | 0.875 |
 | randtoolbox freq.test (16 bins) | 0.286 |
 | randtoolbox order.test (d=4) | 0.409 |
 | tseries runs.test (bits) | 0.597 |
@@ -1147,16 +1154,16 @@ Tests:
 
 ### PRESENT-80 (`present80`)
 
-Verdict: PASS — 1 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 1 / 22).
+Verdict: PASS &mdash; 1 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 1 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 5.86e-07).
+Byte-stream Shannon entropy: **7.999999 bits/byte** (ideal: $8$; signed deviation $H - 8 = -5.86 \times 10^{-7}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.69e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000017 bits; signed deviation $H - 8 = 1.69 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499844 | 0.500000 | 1.56e-04 |
 | 2 | 0.333388 | 0.333333 | 5.46e-05 |
 | 3 | 0.250152 | 0.250000 | 1.52e-04 |
@@ -1175,17 +1182,17 @@ Tests:
 | FFT peak/mean | 12.50 |
 | FFT spectrum KS (vs flat) | 0.978 |
 | KS vs Uniform(0,1) | 0.396 |
-| randtoolbox gap.test  | 3.4e-05 |
+| randtoolbox gap.test | 3.4e-05 |
 | randtoolbox freq.test (16 bins) | 0.313 |
 | randtoolbox order.test (d=4) | 0.123 |
 | tseries runs.test (bits) | 0.216 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.69e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000017 bits; signed deviation $H - 8 = 1.69 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500301 | 0.500000 | 3.01e-04 |
 | 2 | 0.333931 | 0.333333 | 5.98e-04 |
 | 3 | 0.250694 | 0.250000 | 6.94e-04 |
@@ -1204,17 +1211,17 @@ Tests:
 | FFT peak/mean | 13.11 |
 | FFT spectrum KS (vs flat) | 0.696 |
 | KS vs Uniform(0,1) | 0.208 |
-| randtoolbox gap.test  | 0.598 |
+| randtoolbox gap.test | 0.598 |
 | randtoolbox freq.test (16 bins) | 0.405 |
 | randtoolbox order.test (d=4) | 0.806 |
 | tseries runs.test (bits) | 0.216 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9997 bits, dev 2.60e-04)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999740 bits; signed deviation $H - 8 = -2.60 \times 10^{-4}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499856 | 0.500000 | 1.44e-04 |
 | 2 | 0.333570 | 0.333333 | 2.37e-04 |
 | 3 | 0.250353 | 0.250000 | 3.53e-04 |
@@ -1233,7 +1240,7 @@ Tests:
 | FFT peak/mean | 10.55 |
 | FFT spectrum KS (vs flat) | 0.523 |
 | KS vs Uniform(0,1) | 0.272 |
-| randtoolbox gap.test  | 0.758 |
+| randtoolbox gap.test | 0.758 |
 | randtoolbox freq.test (16 bins) | 0.050 |
 | randtoolbox order.test (d=4) | 0.740 |
 | tseries runs.test (bits) | 0.216 |
@@ -1242,16 +1249,16 @@ Tests:
 
 ### PRESENT-128 (`present128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 4.27e-06).
+Byte-stream Shannon entropy: **7.999996 bits/byte** (ideal: $8$; signed deviation $H - 8 = -4.27 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.89e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999981 bits; signed deviation $H - 8 = -1.89 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500199 | 0.500000 | 1.99e-04 |
 | 2 | 0.333438 | 0.333333 | 1.04e-04 |
 | 3 | 0.250009 | 0.250000 | 8.98e-06 |
@@ -1270,17 +1277,17 @@ Tests:
 | FFT peak/mean | 14.58 |
 | FFT spectrum KS (vs flat) | 0.969 |
 | KS vs Uniform(0,1) | 0.251 |
-| randtoolbox gap.test  | 0.748 |
+| randtoolbox gap.test | 0.748 |
 | randtoolbox freq.test (16 bins) | 0.060 |
 | randtoolbox order.test (d=4) | 0.064 |
 | tseries runs.test (bits) | 0.650 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 2.24e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999978 bits; signed deviation $H - 8 = -2.24 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500450 | 0.500000 | 4.50e-04 |
 | 2 | 0.333630 | 0.333333 | 2.96e-04 |
 | 3 | 0.250135 | 0.250000 | 1.35e-04 |
@@ -1299,17 +1306,17 @@ Tests:
 | FFT peak/mean | 12.42 |
 | FFT spectrum KS (vs flat) | 0.263 |
 | KS vs Uniform(0,1) | 0.087 |
-| randtoolbox gap.test  | 0.983 |
+| randtoolbox gap.test | 0.983 |
 | randtoolbox freq.test (16 bins) | 0.195 |
 | randtoolbox order.test (d=4) | 0.399 |
 | tseries runs.test (bits) | 0.650 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9999 bits, dev 8.33e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999917 bits; signed deviation $H - 8 = -8.33 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500347 | 0.500000 | 3.47e-04 |
 | 2 | 0.333562 | 0.333333 | 2.29e-04 |
 | 3 | 0.250087 | 0.250000 | 8.71e-05 |
@@ -1328,7 +1335,7 @@ Tests:
 | FFT peak/mean | 12.70 |
 | FFT spectrum KS (vs flat) | 0.684 |
 | KS vs Uniform(0,1) | 0.636 |
-| randtoolbox gap.test  | 0.241 |
+| randtoolbox gap.test | 0.241 |
 | randtoolbox freq.test (16 bins) | 0.201 |
 | randtoolbox order.test (d=4) | 0.544 |
 | tseries runs.test (bits) | 0.650 |
@@ -1337,16 +1344,16 @@ Tests:
 
 ### SEED (`seed`)
 
-Verdict: PASS — 1 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 1 / 22).
+Verdict: PASS &mdash; 1 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 1 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 5.05e-07).
+Byte-stream Shannon entropy: **8.000001 bits/byte** (ideal: $8$; signed deviation $H - 8 = 5.05 \times 10^{-7}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 5.66e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000006 bits; signed deviation $H - 8 = 5.66 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500462 | 0.500000 | 4.62e-04 |
 | 2 | 0.333770 | 0.333333 | 4.37e-04 |
 | 3 | 0.250344 | 0.250000 | 3.44e-04 |
@@ -1365,17 +1372,17 @@ Tests:
 | FFT peak/mean | 12.47 |
 | FFT spectrum KS (vs flat) | 0.450 |
 | KS vs Uniform(0,1) | 0.278 |
-| randtoolbox gap.test  | 0.419 |
+| randtoolbox gap.test | 0.419 |
 | randtoolbox freq.test (16 bins) | 0.278 |
 | randtoolbox order.test (d=4) | 0.334 |
 | tseries runs.test (bits) | 0.822 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0001 bits, dev 5.15e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000051 bits; signed deviation $H - 8 = 5.15 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500250 | 0.500000 | 2.50e-04 |
 | 2 | 0.333585 | 0.333333 | 2.52e-04 |
 | 3 | 0.250197 | 0.250000 | 1.97e-04 |
@@ -1394,17 +1401,17 @@ Tests:
 | FFT peak/mean | 15.09 |
 | FFT spectrum KS (vs flat) | 0.536 |
 | KS vs Uniform(0,1) | 0.725 |
-| randtoolbox gap.test  | <1e-12 |
+| randtoolbox gap.test | <1e-12 |
 | randtoolbox freq.test (16 bins) | 0.776 |
 | randtoolbox order.test (d=4) | 0.050 |
 | tseries runs.test (bits) | 0.822 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 1.97e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000020 bits; signed deviation $H - 8 = 1.97 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500269 | 0.500000 | 2.69e-04 |
 | 2 | 0.333574 | 0.333333 | 2.40e-04 |
 | 3 | 0.250174 | 0.250000 | 1.74e-04 |
@@ -1423,7 +1430,7 @@ Tests:
 | FFT peak/mean | 13.04 |
 | FFT spectrum KS (vs flat) | 0.902 |
 | KS vs Uniform(0,1) | 0.755 |
-| randtoolbox gap.test  | 0.638 |
+| randtoolbox gap.test | 0.638 |
 | randtoolbox freq.test (16 bins) | 0.466 |
 | randtoolbox order.test (d=4) | 0.616 |
 | tseries runs.test (bits) | 0.822 |
@@ -1432,16 +1439,16 @@ Tests:
 
 ### Serpent-128 (`serpent128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 4.09e-07).
+Byte-stream Shannon entropy: **8.000000 bits/byte** (ideal: $8$; signed deviation $H - 8 = 4.09 \times 10^{-7}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 3.92e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000004 bits; signed deviation $H - 8 = 3.92 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499545 | 0.500000 | 4.55e-04 |
 | 2 | 0.332810 | 0.333333 | 5.23e-04 |
 | 3 | 0.249486 | 0.250000 | 5.14e-04 |
@@ -1460,17 +1467,17 @@ Tests:
 | FFT peak/mean | 13.78 |
 | FFT spectrum KS (vs flat) | 0.724 |
 | KS vs Uniform(0,1) | 0.125 |
-| randtoolbox gap.test  | 0.554 |
+| randtoolbox gap.test | 0.554 |
 | randtoolbox freq.test (16 bins) | 0.352 |
 | randtoolbox order.test (d=4) | 0.527 |
 | tseries runs.test (bits) | 0.496 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 2.59e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000026 bits; signed deviation $H - 8 = 2.59 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499195 | 0.500000 | 8.05e-04 |
 | 2 | 0.332382 | 0.333333 | 9.52e-04 |
 | 3 | 0.249078 | 0.250000 | 9.22e-04 |
@@ -1489,17 +1496,17 @@ Tests:
 | FFT peak/mean | 12.52 |
 | FFT spectrum KS (vs flat) | 0.785 |
 | KS vs Uniform(0,1) | 0.033 |
-| randtoolbox gap.test  | 0.723 |
+| randtoolbox gap.test | 0.723 |
 | randtoolbox freq.test (16 bins) | 0.215 |
 | randtoolbox order.test (d=4) | 0.556 |
 | tseries runs.test (bits) | 0.496 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 4.15e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000041 bits; signed deviation $H - 8 = 4.15 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499072 | 0.500000 | 9.28e-04 |
 | 2 | 0.332158 | 0.333333 | 1.18e-03 |
 | 3 | 0.248758 | 0.250000 | 1.24e-03 |
@@ -1518,7 +1525,7 @@ Tests:
 | FFT peak/mean | 12.75 |
 | FFT spectrum KS (vs flat) | 0.971 |
 | KS vs Uniform(0,1) | 0.161 |
-| randtoolbox gap.test  | 0.815 |
+| randtoolbox gap.test | 0.815 |
 | randtoolbox freq.test (16 bins) | 0.013 |
 | randtoolbox order.test (d=4) | 0.526 |
 | tseries runs.test (bits) | 0.496 |
@@ -1527,16 +1534,16 @@ Tests:
 
 ### Serpent-192 (`serpent192`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.12e-07).
+Byte-stream Shannon entropy: **8.000000 bits/byte** (ideal: $8$; signed deviation $H - 8 = -2.12 \times 10^{-7}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 4.12e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999996 bits; signed deviation $H - 8 = -4.12 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500615 | 0.500000 | 6.15e-04 |
 | 2 | 0.334018 | 0.333333 | 6.85e-04 |
 | 3 | 0.250620 | 0.250000 | 6.20e-04 |
@@ -1555,17 +1562,17 @@ Tests:
 | FFT peak/mean | 13.89 |
 | FFT spectrum KS (vs flat) | 0.059 |
 | KS vs Uniform(0,1) | 0.033 |
-| randtoolbox gap.test  | 0.098 |
+| randtoolbox gap.test | 0.098 |
 | randtoolbox freq.test (16 bins) | 0.329 |
 | randtoolbox order.test (d=4) | 0.770 |
 | tseries runs.test (bits) | 0.199 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 2.06e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000021 bits; signed deviation $H - 8 = 2.06 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500970 | 0.500000 | 9.70e-04 |
 | 2 | 0.334304 | 0.333333 | 9.71e-04 |
 | 3 | 0.250869 | 0.250000 | 8.69e-04 |
@@ -1584,17 +1591,17 @@ Tests:
 | FFT peak/mean | 14.25 |
 | FFT spectrum KS (vs flat) | 0.512 |
 | KS vs Uniform(0,1) | 0.054 |
-| randtoolbox gap.test  | 0.100 |
+| randtoolbox gap.test | 0.100 |
 | randtoolbox freq.test (16 bins) | 0.560 |
 | randtoolbox order.test (d=4) | 0.753 |
 | tseries runs.test (bits) | 0.199 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 2.45e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999976 bits; signed deviation $H - 8 = -2.45 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.501262 | 0.500000 | 1.26e-03 |
 | 2 | 0.334760 | 0.333333 | 1.43e-03 |
 | 3 | 0.251417 | 0.250000 | 1.42e-03 |
@@ -1613,7 +1620,7 @@ Tests:
 | FFT peak/mean | 12.80 |
 | FFT spectrum KS (vs flat) | 0.420 |
 | KS vs Uniform(0,1) | 0.186 |
-| randtoolbox gap.test  | 0.793 |
+| randtoolbox gap.test | 0.793 |
 | randtoolbox freq.test (16 bins) | 0.608 |
 | randtoolbox order.test (d=4) | 0.774 |
 | tseries runs.test (bits) | 0.199 |
@@ -1622,16 +1629,16 @@ Tests:
 
 ### Serpent-256 (`serpent256`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.86e-06).
+Byte-stream Shannon entropy: **8.000004 bits/byte** (ideal: $8$; signed deviation $H - 8 = 3.86 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.04e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000010 bits; signed deviation $H - 8 = 1.04 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500162 | 0.500000 | 1.62e-04 |
 | 2 | 0.333511 | 0.333333 | 1.77e-04 |
 | 3 | 0.250179 | 0.250000 | 1.79e-04 |
@@ -1650,17 +1657,17 @@ Tests:
 | FFT peak/mean | 12.39 |
 | FFT spectrum KS (vs flat) | 0.410 |
 | KS vs Uniform(0,1) | 0.870 |
-| randtoolbox gap.test  | 0.045 |
+| randtoolbox gap.test | 0.045 |
 | randtoolbox freq.test (16 bins) | 0.961 |
 | randtoolbox order.test (d=4) | 0.858 |
 | tseries runs.test (bits) | 0.202 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 3.84e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000038 bits; signed deviation $H - 8 = 3.84 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500336 | 0.500000 | 3.36e-04 |
 | 2 | 0.333510 | 0.333333 | 1.76e-04 |
 | 3 | 0.250062 | 0.250000 | 6.22e-05 |
@@ -1679,17 +1686,17 @@ Tests:
 | FFT peak/mean | 11.19 |
 | FFT spectrum KS (vs flat) | 0.124 |
 | KS vs Uniform(0,1) | 0.351 |
-| randtoolbox gap.test  | 0.042 |
+| randtoolbox gap.test | 0.042 |
 | randtoolbox freq.test (16 bins) | 0.894 |
 | randtoolbox order.test (d=4) | 0.811 |
 | tseries runs.test (bits) | 0.202 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 2.55e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999975 bits; signed deviation $H - 8 = -2.55 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.501028 | 0.500000 | 1.03e-03 |
 | 2 | 0.333886 | 0.333333 | 5.52e-04 |
 | 3 | 0.250222 | 0.250000 | 2.22e-04 |
@@ -1708,7 +1715,7 @@ Tests:
 | FFT peak/mean | 11.60 |
 | FFT spectrum KS (vs flat) | 0.556 |
 | KS vs Uniform(0,1) | 0.095 |
-| randtoolbox gap.test  | 0.672 |
+| randtoolbox gap.test | 0.672 |
 | randtoolbox freq.test (16 bins) | 0.313 |
 | randtoolbox order.test (d=4) | 0.806 |
 | tseries runs.test (bits) | 0.202 |
@@ -1717,16 +1724,16 @@ Tests:
 
 ### SM4 (`sm4`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.03e-06).
+Byte-stream Shannon entropy: **7.999998 bits/byte** (ideal: $8$; signed deviation $H - 8 = -2.03 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.29e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999987 bits; signed deviation $H - 8 = -1.29 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499928 | 0.500000 | 7.16e-05 |
 | 2 | 0.333411 | 0.333333 | 7.81e-05 |
 | 3 | 0.250141 | 0.250000 | 1.41e-04 |
@@ -1745,17 +1752,17 @@ Tests:
 | FFT peak/mean | 14.04 |
 | FFT spectrum KS (vs flat) | 0.772 |
 | KS vs Uniform(0,1) | 0.613 |
-| randtoolbox gap.test  | 0.609 |
+| randtoolbox gap.test | 0.609 |
 | randtoolbox freq.test (16 bins) | 0.419 |
 | randtoolbox order.test (d=4) | 0.725 |
 | tseries runs.test (bits) | 0.325 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 7.9999 bits, dev 8.75e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999913 bits; signed deviation $H - 8 = -8.75 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500273 | 0.500000 | 2.73e-04 |
 | 2 | 0.333656 | 0.333333 | 3.22e-04 |
 | 3 | 0.250326 | 0.250000 | 3.26e-04 |
@@ -1774,17 +1781,17 @@ Tests:
 | FFT peak/mean | 11.44 |
 | FFT spectrum KS (vs flat) | 0.992 |
 | KS vs Uniform(0,1) | 0.509 |
-| randtoolbox gap.test  | 0.882 |
+| randtoolbox gap.test | 0.882 |
 | randtoolbox freq.test (16 bins) | 0.231 |
 | randtoolbox order.test (d=4) | 0.877 |
 | tseries runs.test (bits) | 0.325 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9999 bits, dev 6.98e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999930 bits; signed deviation $H - 8 = -6.98 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499810 | 0.500000 | 1.90e-04 |
 | 2 | 0.333149 | 0.333333 | 1.84e-04 |
 | 3 | 0.249851 | 0.250000 | 1.49e-04 |
@@ -1803,7 +1810,7 @@ Tests:
 | FFT peak/mean | 11.63 |
 | FFT spectrum KS (vs flat) | 0.250 |
 | KS vs Uniform(0,1) | 0.409 |
-| randtoolbox gap.test  | 0.629 |
+| randtoolbox gap.test | 0.629 |
 | randtoolbox freq.test (16 bins) | 0.205 |
 | randtoolbox order.test (d=4) | 0.686 |
 | tseries runs.test (bits) | 0.325 |
@@ -1812,16 +1819,16 @@ Tests:
 
 ### Twofish-128 (`twofish128`)
 
-Verdict: PASS — 2 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 2 / 22).
+Verdict: PASS &mdash; 2 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 2 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 1.79e-06).
+Byte-stream Shannon entropy: **8.000002 bits/byte** (ideal: $8$; signed deviation $H - 8 = 1.79 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 2.33e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000002 bits; signed deviation $H - 8 = 2.33 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500259 | 0.500000 | 2.59e-04 |
 | 2 | 0.333518 | 0.333333 | 1.85e-04 |
 | 3 | 0.250147 | 0.250000 | 1.47e-04 |
@@ -1840,17 +1847,17 @@ Tests:
 | FFT peak/mean | 16.65 |
 | FFT spectrum KS (vs flat) | 0.694 |
 | KS vs Uniform(0,1) | 0.244 |
-| randtoolbox gap.test  | 2.8e-05 |
+| randtoolbox gap.test | 2.8e-05 |
 | randtoolbox freq.test (16 bins) | 0.014 |
 | randtoolbox order.test (d=4) | 0.373 |
 | tseries runs.test (bits) | 0.011 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 7.9999 bits, dev 6.48e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999935 bits; signed deviation $H - 8 = -6.48 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500929 | 0.500000 | 9.29e-04 |
 | 2 | 0.334291 | 0.333333 | 9.57e-04 |
 | 3 | 0.250914 | 0.250000 | 9.14e-04 |
@@ -1869,17 +1876,17 @@ Tests:
 | FFT peak/mean | 13.59 |
 | FFT spectrum KS (vs flat) | 0.842 |
 | KS vs Uniform(0,1) | 0.078 |
-| randtoolbox gap.test  | 2.3e-06 |
+| randtoolbox gap.test | 2.3e-06 |
 | randtoolbox freq.test (16 bins) | 0.100 |
 | randtoolbox order.test (d=4) | 0.061 |
 | tseries runs.test (bits) | 0.011 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9999 bits, dev 5.03e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999950 bits; signed deviation $H - 8 = -5.03 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500860 | 0.500000 | 8.60e-04 |
 | 2 | 0.334097 | 0.333333 | 7.63e-04 |
 | 3 | 0.250661 | 0.250000 | 6.61e-04 |
@@ -1898,7 +1905,7 @@ Tests:
 | FFT peak/mean | 11.59 |
 | FFT spectrum KS (vs flat) | 0.709 |
 | KS vs Uniform(0,1) | 0.600 |
-| randtoolbox gap.test  | 0.907 |
+| randtoolbox gap.test | 0.907 |
 | randtoolbox freq.test (16 bins) | 0.638 |
 | randtoolbox order.test (d=4) | 0.795 |
 | tseries runs.test (bits) | 0.011 |
@@ -1907,16 +1914,16 @@ Tests:
 
 ### Twofish-256 (`twofish256`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.14e-06).
+Byte-stream Shannon entropy: **7.999997 bits/byte** (ideal: $8$; signed deviation $H - 8 = -3.14 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.71e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000017 bits; signed deviation $H - 8 = 1.71 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499984 | 0.500000 | 1.62e-05 |
 | 2 | 0.333333 | 0.333333 | 7.00e-07 |
 | 3 | 0.249998 | 0.250000 | 2.10e-06 |
@@ -1935,17 +1942,17 @@ Tests:
 | FFT peak/mean | 13.12 |
 | FFT spectrum KS (vs flat) | 0.946 |
 | KS vs Uniform(0,1) | 0.926 |
-| randtoolbox gap.test  | 0.981 |
+| randtoolbox gap.test | 0.981 |
 | randtoolbox freq.test (16 bins) | 0.923 |
 | randtoolbox order.test (d=4) | 0.656 |
 | tseries runs.test (bits) | 0.049 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 5.21e-06)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000005 bits; signed deviation $H - 8 = 5.21 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500106 | 0.500000 | 1.06e-04 |
 | 2 | 0.333485 | 0.333333 | 1.51e-04 |
 | 3 | 0.250144 | 0.250000 | 1.44e-04 |
@@ -1964,17 +1971,17 @@ Tests:
 | FFT peak/mean | 12.35 |
 | FFT spectrum KS (vs flat) | 0.859 |
 | KS vs Uniform(0,1) | 0.634 |
-| randtoolbox gap.test  | 0.970 |
+| randtoolbox gap.test | 0.970 |
 | randtoolbox freq.test (16 bins) | 0.918 |
 | randtoolbox order.test (d=4) | 0.494 |
 | tseries runs.test (bits) | 0.049 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 1.86e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000019 bits; signed deviation $H - 8 = 1.86 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499878 | 0.500000 | 1.22e-04 |
 | 2 | 0.333195 | 0.333333 | 1.38e-04 |
 | 3 | 0.249872 | 0.250000 | 1.28e-04 |
@@ -1993,7 +2000,7 @@ Tests:
 | FFT peak/mean | 10.84 |
 | FFT spectrum KS (vs flat) | 0.258 |
 | KS vs Uniform(0,1) | 0.911 |
-| randtoolbox gap.test  | 0.549 |
+| randtoolbox gap.test | 0.549 |
 | randtoolbox freq.test (16 bins) | 0.939 |
 | randtoolbox order.test (d=4) | 0.088 |
 | tseries runs.test (bits) | 0.049 |
@@ -2002,16 +2009,16 @@ Tests:
 
 ### Simon32/64 (`simon32_64`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.45e-06).
+Byte-stream Shannon entropy: **8.000003 bits/byte** (ideal: $8$; signed deviation $H - 8 = 3.45 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 3.31e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000033 bits; signed deviation $H - 8 = 3.31 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499622 | 0.500000 | 3.78e-04 |
 | 2 | 0.333004 | 0.333333 | 3.30e-04 |
 | 3 | 0.249723 | 0.250000 | 2.77e-04 |
@@ -2030,17 +2037,17 @@ Tests:
 | FFT peak/mean | 13.22 |
 | FFT spectrum KS (vs flat) | 0.131 |
 | KS vs Uniform(0,1) | 0.632 |
-| randtoolbox gap.test  | 0.980 |
+| randtoolbox gap.test | 0.980 |
 | randtoolbox freq.test (16 bins) | 0.512 |
 | randtoolbox order.test (d=4) | 0.712 |
 | tseries runs.test (bits) | 0.406 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0001 bits, dev 8.64e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000086 bits; signed deviation $H - 8 = 8.64 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.498971 | 0.500000 | 1.03e-03 |
 | 2 | 0.332356 | 0.333333 | 9.77e-04 |
 | 3 | 0.249132 | 0.250000 | 8.68e-04 |
@@ -2059,17 +2066,17 @@ Tests:
 | FFT peak/mean | 12.88 |
 | FFT spectrum KS (vs flat) | 0.138 |
 | KS vs Uniform(0,1) | 0.125 |
-| randtoolbox gap.test  | 0.271 |
+| randtoolbox gap.test | 0.271 |
 | randtoolbox freq.test (16 bins) | 0.546 |
 | randtoolbox order.test (d=4) | 0.661 |
 | tseries runs.test (bits) | 0.406 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0002 bits, dev 1.82e-04)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000182 bits; signed deviation $H - 8 = 1.82 \times 10^{-4}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499806 | 0.500000 | 1.94e-04 |
 | 2 | 0.333298 | 0.333333 | 3.52e-05 |
 | 3 | 0.250069 | 0.250000 | 6.86e-05 |
@@ -2088,7 +2095,7 @@ Tests:
 | FFT peak/mean | 11.06 |
 | FFT spectrum KS (vs flat) | 0.835 |
 | KS vs Uniform(0,1) | 0.892 |
-| randtoolbox gap.test  | 0.003 |
+| randtoolbox gap.test | 0.003 |
 | randtoolbox freq.test (16 bins) | 0.554 |
 | randtoolbox order.test (d=4) | 0.566 |
 | tseries runs.test (bits) | 0.406 |
@@ -2097,16 +2104,16 @@ Tests:
 
 ### Simon64/128 (`simon64_128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 4.55e-06).
+Byte-stream Shannon entropy: **8.000005 bits/byte** (ideal: $8$; signed deviation $H - 8 = 4.55 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.50e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999985 bits; signed deviation $H - 8 = -1.50 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500733 | 0.500000 | 7.33e-04 |
 | 2 | 0.333953 | 0.333333 | 6.20e-04 |
 | 3 | 0.250487 | 0.250000 | 4.87e-04 |
@@ -2125,17 +2132,17 @@ Tests:
 | FFT peak/mean | 15.15 |
 | FFT spectrum KS (vs flat) | 0.979 |
 | KS vs Uniform(0,1) | 0.014 |
-| randtoolbox gap.test  | 0.344 |
+| randtoolbox gap.test | 0.344 |
 | randtoolbox freq.test (16 bins) | 0.105 |
 | randtoolbox order.test (d=4) | 0.783 |
 | tseries runs.test (bits) | 0.552 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 7.9999 bits, dev 9.34e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999907 bits; signed deviation $H - 8 = -9.34 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.501173 | 0.500000 | 1.17e-03 |
 | 2 | 0.334568 | 0.333333 | 1.23e-03 |
 | 3 | 0.251120 | 0.250000 | 1.12e-03 |
@@ -2154,17 +2161,17 @@ Tests:
 | FFT peak/mean | 11.48 |
 | FFT spectrum KS (vs flat) | 0.602 |
 | KS vs Uniform(0,1) | 0.007 |
-| randtoolbox gap.test  | 0.571 |
+| randtoolbox gap.test | 0.571 |
 | randtoolbox freq.test (16 bins) | 0.288 |
 | randtoolbox order.test (d=4) | 0.578 |
 | tseries runs.test (bits) | 0.552 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9999 bits, dev 1.12e-04)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999888 bits; signed deviation $H - 8 = -1.12 \times 10^{-4}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500368 | 0.500000 | 3.68e-04 |
 | 2 | 0.333679 | 0.333333 | 3.46e-04 |
 | 3 | 0.250265 | 0.250000 | 2.65e-04 |
@@ -2183,7 +2190,7 @@ Tests:
 | FFT peak/mean | 11.55 |
 | FFT spectrum KS (vs flat) | 0.652 |
 | KS vs Uniform(0,1) | 0.440 |
-| randtoolbox gap.test  | 0.047 |
+| randtoolbox gap.test | 0.047 |
 | randtoolbox freq.test (16 bins) | 0.607 |
 | randtoolbox order.test (d=4) | 0.211 |
 | tseries runs.test (bits) | 0.552 |
@@ -2192,16 +2199,16 @@ Tests:
 
 ### Simon128/128 (`simon128_128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 5.14e-06).
+Byte-stream Shannon entropy: **7.999995 bits/byte** (ideal: $8$; signed deviation $H - 8 = -5.14 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 2.18e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000022 bits; signed deviation $H - 8 = 2.18 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499937 | 0.500000 | 6.32e-05 |
 | 2 | 0.333289 | 0.333333 | 4.44e-05 |
 | 3 | 0.249961 | 0.250000 | 3.92e-05 |
@@ -2220,17 +2227,17 @@ Tests:
 | FFT peak/mean | 11.89 |
 | FFT spectrum KS (vs flat) | 0.646 |
 | KS vs Uniform(0,1) | 0.992 |
-| randtoolbox gap.test  | 0.579 |
+| randtoolbox gap.test | 0.579 |
 | randtoolbox freq.test (16 bins) | 0.876 |
 | randtoolbox order.test (d=4) | 0.014 |
 | tseries runs.test (bits) | 0.670 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0001 bits, dev 1.01e-04)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000101 bits; signed deviation $H - 8 = 1.01 \times 10^{-4}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499789 | 0.500000 | 2.11e-04 |
 | 2 | 0.333054 | 0.333333 | 2.79e-04 |
 | 3 | 0.249717 | 0.250000 | 2.83e-04 |
@@ -2249,17 +2256,17 @@ Tests:
 | FFT peak/mean | 13.84 |
 | FFT spectrum KS (vs flat) | 0.538 |
 | KS vs Uniform(0,1) | 0.963 |
-| randtoolbox gap.test  | 0.148 |
+| randtoolbox gap.test | 0.148 |
 | randtoolbox freq.test (16 bins) | 0.952 |
 | randtoolbox order.test (d=4) | 0.047 |
 | tseries runs.test (bits) | 0.670 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 1.58e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000016 bits; signed deviation $H - 8 = 1.58 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500393 | 0.500000 | 3.93e-04 |
 | 2 | 0.333737 | 0.333333 | 4.04e-04 |
 | 3 | 0.250399 | 0.250000 | 3.99e-04 |
@@ -2278,7 +2285,7 @@ Tests:
 | FFT peak/mean | 13.42 |
 | FFT spectrum KS (vs flat) | 0.686 |
 | KS vs Uniform(0,1) | 0.781 |
-| randtoolbox gap.test  | 0.964 |
+| randtoolbox gap.test | 0.964 |
 | randtoolbox freq.test (16 bins) | 0.862 |
 | randtoolbox order.test (d=4) | 0.458 |
 | tseries runs.test (bits) | 0.670 |
@@ -2287,16 +2294,16 @@ Tests:
 
 ### Simon128/256 (`simon128_256`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.74e-06).
+Byte-stream Shannon entropy: **7.999997 bits/byte** (ideal: $8$; signed deviation $H - 8 = -2.74 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.90e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999981 bits; signed deviation $H - 8 = -1.90 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499554 | 0.500000 | 4.46e-04 |
 | 2 | 0.332767 | 0.333333 | 5.67e-04 |
 | 3 | 0.249392 | 0.250000 | 6.08e-04 |
@@ -2315,17 +2322,17 @@ Tests:
 | FFT peak/mean | 11.63 |
 | FFT spectrum KS (vs flat) | 0.397 |
 | KS vs Uniform(0,1) | 0.312 |
-| randtoolbox gap.test  | 0.007 |
+| randtoolbox gap.test | 0.007 |
 | randtoolbox freq.test (16 bins) | 0.271 |
 | randtoolbox order.test (d=4) | 0.869 |
 | tseries runs.test (bits) | 0.608 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 2.52e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000025 bits; signed deviation $H - 8 = 2.52 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499361 | 0.500000 | 6.39e-04 |
 | 2 | 0.332524 | 0.333333 | 8.10e-04 |
 | 3 | 0.249122 | 0.250000 | 8.78e-04 |
@@ -2344,17 +2351,17 @@ Tests:
 | FFT peak/mean | 11.28 |
 | FFT spectrum KS (vs flat) | 0.982 |
 | KS vs Uniform(0,1) | 0.363 |
-| randtoolbox gap.test  | 0.478 |
+| randtoolbox gap.test | 0.478 |
 | randtoolbox freq.test (16 bins) | 0.558 |
 | randtoolbox order.test (d=4) | 0.626 |
 | tseries runs.test (bits) | 0.608 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9999 bits, dev 6.17e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999938 bits; signed deviation $H - 8 = -6.17 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499509 | 0.500000 | 4.91e-04 |
 | 2 | 0.332627 | 0.333333 | 7.06e-04 |
 | 3 | 0.249198 | 0.250000 | 8.02e-04 |
@@ -2373,7 +2380,7 @@ Tests:
 | FFT peak/mean | 11.79 |
 | FFT spectrum KS (vs flat) | 0.380 |
 | KS vs Uniform(0,1) | 0.695 |
-| randtoolbox gap.test  | 0.898 |
+| randtoolbox gap.test | 0.898 |
 | randtoolbox freq.test (16 bins) | 0.977 |
 | randtoolbox order.test (d=4) | 0.653 |
 | tseries runs.test (bits) | 0.608 |
@@ -2382,16 +2389,16 @@ Tests:
 
 ### Speck32/64 (`speck32_64`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.26e-06).
+Byte-stream Shannon entropy: **7.999997 bits/byte** (ideal: $8$; signed deviation $H - 8 = -3.26 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 2.98e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999970 bits; signed deviation $H - 8 = -2.98 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499844 | 0.500000 | 1.56e-04 |
 | 2 | 0.333122 | 0.333333 | 2.11e-04 |
 | 3 | 0.249779 | 0.250000 | 2.21e-04 |
@@ -2410,17 +2417,17 @@ Tests:
 | FFT peak/mean | 11.57 |
 | FFT spectrum KS (vs flat) | 0.679 |
 | KS vs Uniform(0,1) | 0.501 |
-| randtoolbox gap.test  | 0.227 |
+| randtoolbox gap.test | 0.227 |
 | randtoolbox freq.test (16 bins) | 0.168 |
 | randtoolbox order.test (d=4) | 0.282 |
 | tseries runs.test (bits) | 0.559 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 2.86e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999971 bits; signed deviation $H - 8 = -2.86 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499715 | 0.500000 | 2.85e-04 |
 | 2 | 0.332938 | 0.333333 | 3.95e-04 |
 | 3 | 0.249583 | 0.250000 | 4.17e-04 |
@@ -2439,17 +2446,17 @@ Tests:
 | FFT peak/mean | 12.21 |
 | FFT spectrum KS (vs flat) | 0.846 |
 | KS vs Uniform(0,1) | 0.715 |
-| randtoolbox gap.test  | 0.719 |
+| randtoolbox gap.test | 0.719 |
 | randtoolbox freq.test (16 bins) | 0.733 |
 | randtoolbox order.test (d=4) | 0.335 |
 | tseries runs.test (bits) | 0.559 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 3.31e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999967 bits; signed deviation $H - 8 = -3.31 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499176 | 0.500000 | 8.24e-04 |
 | 2 | 0.332431 | 0.333333 | 9.02e-04 |
 | 3 | 0.249151 | 0.250000 | 8.49e-04 |
@@ -2468,7 +2475,7 @@ Tests:
 | FFT peak/mean | 10.28 |
 | FFT spectrum KS (vs flat) | 0.428 |
 | KS vs Uniform(0,1) | 0.198 |
-| randtoolbox gap.test  | 0.549 |
+| randtoolbox gap.test | 0.549 |
 | randtoolbox freq.test (16 bins) | 0.422 |
 | randtoolbox order.test (d=4) | 0.877 |
 | tseries runs.test (bits) | 0.559 |
@@ -2477,16 +2484,16 @@ Tests:
 
 ### Speck64/128 (`speck64_128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 5.93e-06).
+Byte-stream Shannon entropy: **7.999994 bits/byte** (ideal: $8$; signed deviation $H - 8 = -5.93 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 3.62e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000004 bits; signed deviation $H - 8 = 3.62 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500098 | 0.500000 | 9.78e-05 |
 | 2 | 0.333411 | 0.333333 | 7.72e-05 |
 | 3 | 0.250074 | 0.250000 | 7.38e-05 |
@@ -2505,17 +2512,17 @@ Tests:
 | FFT peak/mean | 14.60 |
 | FFT spectrum KS (vs flat) | 0.739 |
 | KS vs Uniform(0,1) | 0.915 |
-| randtoolbox gap.test  | 0.011 |
+| randtoolbox gap.test | 0.011 |
 | randtoolbox freq.test (16 bins) | 0.211 |
 | randtoolbox order.test (d=4) | 0.992 |
 | tseries runs.test (bits) | 0.097 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 4.53e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000045 bits; signed deviation $H - 8 = 4.53 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500142 | 0.500000 | 1.42e-04 |
 | 2 | 0.333413 | 0.333333 | 7.93e-05 |
 | 3 | 0.250035 | 0.250000 | 3.52e-05 |
@@ -2534,17 +2541,17 @@ Tests:
 | FFT peak/mean | 14.14 |
 | FFT spectrum KS (vs flat) | 0.936 |
 | KS vs Uniform(0,1) | 0.670 |
-| randtoolbox gap.test  | 0.623 |
+| randtoolbox gap.test | 0.623 |
 | randtoolbox freq.test (16 bins) | 0.424 |
 | randtoolbox order.test (d=4) | 0.977 |
 | tseries runs.test (bits) | 0.097 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 3.11e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999969 bits; signed deviation $H - 8 = -3.11 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500382 | 0.500000 | 3.82e-04 |
 | 2 | 0.333577 | 0.333333 | 2.44e-04 |
 | 3 | 0.250167 | 0.250000 | 1.67e-04 |
@@ -2563,7 +2570,7 @@ Tests:
 | FFT peak/mean | 10.63 |
 | FFT spectrum KS (vs flat) | 0.826 |
 | KS vs Uniform(0,1) | 0.778 |
-| randtoolbox gap.test  | 0.387 |
+| randtoolbox gap.test | 0.387 |
 | randtoolbox freq.test (16 bins) | 0.159 |
 | randtoolbox order.test (d=4) | 0.999 |
 | tseries runs.test (bits) | 0.097 |
@@ -2572,16 +2579,16 @@ Tests:
 
 ### Speck128/128 (`speck128_128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.99e-06).
+Byte-stream Shannon entropy: **8.000003 bits/byte** (ideal: $8$; signed deviation $H - 8 = 2.99 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 5.80e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999994 bits; signed deviation $H - 8 = -5.80 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500301 | 0.500000 | 3.01e-04 |
 | 2 | 0.333738 | 0.333333 | 4.05e-04 |
 | 3 | 0.250413 | 0.250000 | 4.13e-04 |
@@ -2600,17 +2607,17 @@ Tests:
 | FFT peak/mean | 13.02 |
 | FFT spectrum KS (vs flat) | 0.954 |
 | KS vs Uniform(0,1) | 0.361 |
-| randtoolbox gap.test  | 0.624 |
+| randtoolbox gap.test | 0.624 |
 | randtoolbox freq.test (16 bins) | 0.456 |
 | randtoolbox order.test (d=4) | 0.733 |
 | tseries runs.test (bits) | 0.665 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.59e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999984 bits; signed deviation $H - 8 = -1.59 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500177 | 0.500000 | 1.77e-04 |
 | 2 | 0.333792 | 0.333333 | 4.59e-04 |
 | 3 | 0.250545 | 0.250000 | 5.45e-04 |
@@ -2629,17 +2636,17 @@ Tests:
 | FFT peak/mean | 11.36 |
 | FFT spectrum KS (vs flat) | 0.958 |
 | KS vs Uniform(0,1) | 0.399 |
-| randtoolbox gap.test  | 0.989 |
+| randtoolbox gap.test | 0.989 |
 | randtoolbox freq.test (16 bins) | 0.766 |
 | randtoolbox order.test (d=4) | 0.113 |
 | tseries runs.test (bits) | 0.665 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9999 bits, dev 8.74e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999913 bits; signed deviation $H - 8 = -8.74 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499923 | 0.500000 | 7.67e-05 |
 | 2 | 0.333496 | 0.333333 | 1.63e-04 |
 | 3 | 0.250225 | 0.250000 | 2.25e-04 |
@@ -2658,7 +2665,7 @@ Tests:
 | FFT peak/mean | 11.58 |
 | FFT spectrum KS (vs flat) | 0.852 |
 | KS vs Uniform(0,1) | 0.598 |
-| randtoolbox gap.test  | 0.695 |
+| randtoolbox gap.test | 0.695 |
 | randtoolbox freq.test (16 bins) | 0.802 |
 | randtoolbox order.test (d=4) | 0.073 |
 | tseries runs.test (bits) | 0.665 |
@@ -2667,16 +2674,16 @@ Tests:
 
 ### Speck128/256 (`speck128_256`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.23e-08).
+Byte-stream Shannon entropy: **8.000000 bits/byte** (ideal: $8$; signed deviation $H - 8 = -3.23 \times 10^{-8}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.63e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000016 bits; signed deviation $H - 8 = 1.63 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500083 | 0.500000 | 8.30e-05 |
 | 2 | 0.333399 | 0.333333 | 6.53e-05 |
 | 3 | 0.250046 | 0.250000 | 4.61e-05 |
@@ -2695,17 +2702,17 @@ Tests:
 | FFT peak/mean | 13.54 |
 | FFT spectrum KS (vs flat) | 0.801 |
 | KS vs Uniform(0,1) | 0.988 |
-| randtoolbox gap.test  | 0.875 |
+| randtoolbox gap.test | 0.875 |
 | randtoolbox freq.test (16 bins) | 0.831 |
 | randtoolbox order.test (d=4) | 0.738 |
 | tseries runs.test (bits) | 0.948 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 3.81e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000038 bits; signed deviation $H - 8 = 3.81 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500388 | 0.500000 | 3.88e-04 |
 | 2 | 0.333795 | 0.333333 | 4.61e-04 |
 | 3 | 0.250455 | 0.250000 | 4.55e-04 |
@@ -2724,17 +2731,17 @@ Tests:
 | FFT peak/mean | 16.01 |
 | FFT spectrum KS (vs flat) | 0.359 |
 | KS vs Uniform(0,1) | 0.441 |
-| randtoolbox gap.test  | 0.821 |
+| randtoolbox gap.test | 0.821 |
 | randtoolbox freq.test (16 bins) | 0.665 |
 | randtoolbox order.test (d=4) | 0.326 |
 | tseries runs.test (bits) | 0.948 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 1.74e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999983 bits; signed deviation $H - 8 = -1.74 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500389 | 0.500000 | 3.89e-04 |
 | 2 | 0.333626 | 0.333333 | 2.93e-04 |
 | 3 | 0.250179 | 0.250000 | 1.79e-04 |
@@ -2753,7 +2760,7 @@ Tests:
 | FFT peak/mean | 13.10 |
 | FFT spectrum KS (vs flat) | 0.729 |
 | KS vs Uniform(0,1) | 0.584 |
-| randtoolbox gap.test  | 0.515 |
+| randtoolbox gap.test | 0.515 |
 | randtoolbox freq.test (16 bins) | 0.479 |
 | randtoolbox order.test (d=4) | 0.693 |
 | tseries runs.test (bits) | 0.948 |
@@ -2762,16 +2769,16 @@ Tests:
 
 ### ChaCha20 (`chacha20`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 1.88e-06).
+Byte-stream Shannon entropy: **7.999998 bits/byte** (ideal: $8$; signed deviation $H - 8 = -1.88 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 9.39e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999991 bits; signed deviation $H - 8 = -9.39 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500021 | 0.500000 | 2.08e-05 |
 | 2 | 0.333323 | 0.333333 | 1.08e-05 |
 | 3 | 0.249928 | 0.250000 | 7.17e-05 |
@@ -2790,17 +2797,17 @@ Tests:
 | FFT peak/mean | 15.04 |
 | FFT spectrum KS (vs flat) | 0.647 |
 | KS vs Uniform(0,1) | 0.683 |
-| randtoolbox gap.test  | 0.146 |
+| randtoolbox gap.test | 0.146 |
 | randtoolbox freq.test (16 bins) | 0.638 |
 | randtoolbox order.test (d=4) | 0.464 |
 | tseries runs.test (bits) | 0.307 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 1.45e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999985 bits; signed deviation $H - 8 = -1.45 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499238 | 0.500000 | 7.62e-04 |
 | 2 | 0.332505 | 0.333333 | 8.28e-04 |
 | 3 | 0.249144 | 0.250000 | 8.56e-04 |
@@ -2819,17 +2826,17 @@ Tests:
 | FFT peak/mean | 11.38 |
 | FFT spectrum KS (vs flat) | 0.995 |
 | KS vs Uniform(0,1) | 0.294 |
-| randtoolbox gap.test  | 0.531 |
+| randtoolbox gap.test | 0.531 |
 | randtoolbox freq.test (16 bins) | 0.609 |
 | randtoolbox order.test (d=4) | 0.806 |
 | tseries runs.test (bits) | 0.307 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0001 bits, dev 8.42e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000084 bits; signed deviation $H - 8 = 8.42 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499368 | 0.500000 | 6.32e-04 |
 | 2 | 0.332660 | 0.333333 | 6.73e-04 |
 | 3 | 0.249274 | 0.250000 | 7.26e-04 |
@@ -2848,7 +2855,7 @@ Tests:
 | FFT peak/mean | 11.50 |
 | FFT spectrum KS (vs flat) | 0.311 |
 | KS vs Uniform(0,1) | 0.578 |
-| randtoolbox gap.test  | 0.380 |
+| randtoolbox gap.test | 0.380 |
 | randtoolbox freq.test (16 bins) | 0.554 |
 | randtoolbox order.test (d=4) | 0.528 |
 | tseries runs.test (bits) | 0.307 |
@@ -2857,16 +2864,16 @@ Tests:
 
 ### XChaCha20 (`xchacha20`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 1.41e-06).
+Byte-stream Shannon entropy: **8.000001 bits/byte** (ideal: $8$; signed deviation $H - 8 = 1.41 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.05e-07)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000000 bits; signed deviation $H - 8 = 1.05 \times 10^{-7}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500499 | 0.500000 | 4.99e-04 |
 | 2 | 0.333960 | 0.333333 | 6.26e-04 |
 | 3 | 0.250644 | 0.250000 | 6.44e-04 |
@@ -2885,17 +2892,17 @@ Tests:
 | FFT peak/mean | 13.00 |
 | FFT spectrum KS (vs flat) | 0.964 |
 | KS vs Uniform(0,1) | 0.393 |
-| randtoolbox gap.test  | 0.902 |
+| randtoolbox gap.test | 0.902 |
 | randtoolbox freq.test (16 bins) | 0.953 |
 | randtoolbox order.test (d=4) | 0.496 |
 | tseries runs.test (bits) | 0.131 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 3.06e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000031 bits; signed deviation $H - 8 = 3.06 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500888 | 0.500000 | 8.88e-04 |
 | 2 | 0.334235 | 0.333333 | 9.01e-04 |
 | 3 | 0.250802 | 0.250000 | 8.02e-04 |
@@ -2914,17 +2921,17 @@ Tests:
 | FFT peak/mean | 14.41 |
 | FFT spectrum KS (vs flat) | 0.522 |
 | KS vs Uniform(0,1) | 0.174 |
-| randtoolbox gap.test  | 0.262 |
+| randtoolbox gap.test | 0.262 |
 | randtoolbox freq.test (16 bins) | 0.552 |
 | randtoolbox order.test (d=4) | 0.159 |
 | tseries runs.test (bits) | 0.131 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 3.19e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000032 bits; signed deviation $H - 8 = 3.19 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.501019 | 0.500000 | 1.02e-03 |
 | 2 | 0.334202 | 0.333333 | 8.69e-04 |
 | 3 | 0.250630 | 0.250000 | 6.30e-04 |
@@ -2943,7 +2950,7 @@ Tests:
 | FFT peak/mean | 11.98 |
 | FFT spectrum KS (vs flat) | 0.224 |
 | KS vs Uniform(0,1) | 0.067 |
-| randtoolbox gap.test  | 0.217 |
+| randtoolbox gap.test | 0.217 |
 | randtoolbox freq.test (16 bins) | 0.333 |
 | randtoolbox order.test (d=4) | 0.548 |
 | tseries runs.test (bits) | 0.131 |
@@ -2952,16 +2959,16 @@ Tests:
 
 ### Salsa20 (`salsa20`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.08e-06).
+Byte-stream Shannon entropy: **7.999998 bits/byte** (ideal: $8$; signed deviation $H - 8 = -2.08 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 3.06e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 7.999969 bits; signed deviation $H - 8 = -3.06 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500350 | 0.500000 | 3.50e-04 |
 | 2 | 0.333802 | 0.333333 | 4.69e-04 |
 | 3 | 0.250480 | 0.250000 | 4.80e-04 |
@@ -2980,17 +2987,17 @@ Tests:
 | FFT peak/mean | 12.31 |
 | FFT spectrum KS (vs flat) | 0.575 |
 | KS vs Uniform(0,1) | 0.252 |
-| randtoolbox gap.test  | 0.551 |
+| randtoolbox gap.test | 0.551 |
 | randtoolbox freq.test (16 bins) | 0.145 |
 | randtoolbox order.test (d=4) | 0.742 |
 | tseries runs.test (bits) | 0.737 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 2.67e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 7.999973 bits; signed deviation $H - 8 = -2.67 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500373 | 0.500000 | 3.73e-04 |
 | 2 | 0.333913 | 0.333333 | 5.80e-04 |
 | 3 | 0.250652 | 0.250000 | 6.52e-04 |
@@ -3009,17 +3016,17 @@ Tests:
 | FFT peak/mean | 12.50 |
 | FFT spectrum KS (vs flat) | 0.764 |
 | KS vs Uniform(0,1) | 0.536 |
-| randtoolbox gap.test  | 0.904 |
+| randtoolbox gap.test | 0.904 |
 | randtoolbox freq.test (16 bins) | 0.655 |
 | randtoolbox order.test (d=4) | 0.879 |
 | tseries runs.test (bits) | 0.737 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 7.9999 bits, dev 8.85e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 7.999912 bits; signed deviation $H - 8 = -8.85 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500264 | 0.500000 | 2.64e-04 |
 | 2 | 0.333805 | 0.333333 | 4.71e-04 |
 | 3 | 0.250549 | 0.250000 | 5.49e-04 |
@@ -3038,7 +3045,7 @@ Tests:
 | FFT peak/mean | 10.36 |
 | FFT spectrum KS (vs flat) | 0.931 |
 | KS vs Uniform(0,1) | 0.809 |
-| randtoolbox gap.test  | 0.481 |
+| randtoolbox gap.test | 0.481 |
 | randtoolbox freq.test (16 bins) | 0.747 |
 | randtoolbox order.test (d=4) | 0.026 |
 | tseries runs.test (bits) | 0.737 |
@@ -3047,16 +3054,16 @@ Tests:
 
 ### Rabbit (`rabbit`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 2.77e-06).
+Byte-stream Shannon entropy: **8.000003 bits/byte** (ideal: $8$; signed deviation $H - 8 = 2.77 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 1.49e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000015 bits; signed deviation $H - 8 = 1.49 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500063 | 0.500000 | 6.34e-05 |
 | 2 | 0.333484 | 0.333333 | 1.50e-04 |
 | 3 | 0.250182 | 0.250000 | 1.82e-04 |
@@ -3075,17 +3082,17 @@ Tests:
 | FFT peak/mean | 13.39 |
 | FFT spectrum KS (vs flat) | 0.882 |
 | KS vs Uniform(0,1) | 0.864 |
-| randtoolbox gap.test  | 0.925 |
+| randtoolbox gap.test | 0.925 |
 | randtoolbox freq.test (16 bins) | 0.886 |
 | randtoolbox order.test (d=4) | 0.500 |
 | tseries runs.test (bits) | 0.362 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0001 bits, dev 7.95e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000080 bits; signed deviation $H - 8 = 7.95 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500147 | 0.500000 | 1.47e-04 |
 | 2 | 0.333485 | 0.333333 | 1.51e-04 |
 | 3 | 0.250123 | 0.250000 | 1.23e-04 |
@@ -3104,17 +3111,17 @@ Tests:
 | FFT peak/mean | 12.77 |
 | FFT spectrum KS (vs flat) | 0.955 |
 | KS vs Uniform(0,1) | 0.683 |
-| randtoolbox gap.test  | 0.253 |
+| randtoolbox gap.test | 0.253 |
 | randtoolbox freq.test (16 bins) | 0.763 |
 | randtoolbox order.test (d=4) | 0.375 |
 | tseries runs.test (bits) | 0.362 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0001 bits, dev 1.47e-04)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000147 bits; signed deviation $H - 8 = 1.47 \times 10^{-4}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499309 | 0.500000 | 6.91e-04 |
 | 2 | 0.332646 | 0.333333 | 6.87e-04 |
 | 3 | 0.249358 | 0.250000 | 6.42e-04 |
@@ -3133,7 +3140,7 @@ Tests:
 | FFT peak/mean | 13.19 |
 | FFT spectrum KS (vs flat) | 0.588 |
 | KS vs Uniform(0,1) | 0.722 |
-| randtoolbox gap.test  | 0.103 |
+| randtoolbox gap.test | 0.103 |
 | randtoolbox freq.test (16 bins) | 0.990 |
 | randtoolbox order.test (d=4) | 0.042 |
 | tseries runs.test (bits) | 0.362 |
@@ -3142,16 +3149,16 @@ Tests:
 
 ### ZUC-128 (`zuc128`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 3.35e-07).
+Byte-stream Shannon entropy: **8.000000 bits/byte** (ideal: $8$; signed deviation $H - 8 = -3.35 \times 10^{-7}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 3.39e-05)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000034 bits; signed deviation $H - 8 = 3.39 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499683 | 0.500000 | 3.17e-04 |
 | 2 | 0.332831 | 0.333333 | 5.02e-04 |
 | 3 | 0.249447 | 0.250000 | 5.53e-04 |
@@ -3170,17 +3177,17 @@ Tests:
 | FFT peak/mean | 13.75 |
 | FFT spectrum KS (vs flat) | 0.926 |
 | KS vs Uniform(0,1) | 0.317 |
-| randtoolbox gap.test  | 0.775 |
+| randtoolbox gap.test | 0.775 |
 | randtoolbox freq.test (16 bins) | 0.894 |
 | randtoolbox order.test (d=4) | 0.840 |
 | tseries runs.test (bits) | 0.237 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0001 bits, dev 7.16e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000072 bits; signed deviation $H - 8 = 7.16 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500003 | 0.500000 | 2.75e-06 |
 | 2 | 0.333128 | 0.333333 | 2.06e-04 |
 | 3 | 0.249706 | 0.250000 | 2.94e-04 |
@@ -3199,17 +3206,17 @@ Tests:
 | FFT peak/mean | 10.62 |
 | FFT spectrum KS (vs flat) | 0.331 |
 | KS vs Uniform(0,1) | 0.657 |
-| randtoolbox gap.test  | 0.973 |
+| randtoolbox gap.test | 0.973 |
 | randtoolbox freq.test (16 bins) | 0.762 |
 | randtoolbox order.test (d=4) | 0.329 |
 | tseries runs.test (bits) | 0.237 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0001 bits, dev 1.13e-04)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000113 bits; signed deviation $H - 8 = 1.13 \times 10^{-4}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.499681 | 0.500000 | 3.19e-04 |
 | 2 | 0.332849 | 0.333333 | 4.84e-04 |
 | 3 | 0.249520 | 0.250000 | 4.80e-04 |
@@ -3228,7 +3235,7 @@ Tests:
 | FFT peak/mean | 12.83 |
 | FFT spectrum KS (vs flat) | 0.899 |
 | KS vs Uniform(0,1) | 0.557 |
-| randtoolbox gap.test  | 0.206 |
+| randtoolbox gap.test | 0.206 |
 | randtoolbox freq.test (16 bins) | 0.932 |
 | randtoolbox order.test (d=4) | 0.587 |
 | tseries runs.test (bits) | 0.237 |
@@ -3237,16 +3244,16 @@ Tests:
 
 ### SNOW 3G (`snow3g`)
 
-Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
+Verdict: PASS &mdash; 0 test rejection(s) at $\alpha = 0.001$, 0 entropy miss(es) at $\mathrm{tol} = 0.001$ (total 0 / 22).
 
-Byte-stream Shannon entropy: **8.0000 bits/byte** (ideal: 8.0000; deviation 1.86e-06).
+Byte-stream Shannon entropy: **7.999998 bits/byte** (ideal: $8$; signed deviation $H - 8 = -1.86 \times 10^{-6}$ bits).
 
-**8-byte chunks** (704,810 samples; chunk-entropy 8.0000 bits, dev 9.71e-06)
+**8-byte chunks** (704,810 samples; chunk-entropy 8.000010 bits; signed deviation $H - 8 = 9.71 \times 10^{-6}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500373 | 0.500000 | 3.73e-04 |
 | 2 | 0.333647 | 0.333333 | 3.14e-04 |
 | 3 | 0.250251 | 0.250000 | 2.51e-04 |
@@ -3265,17 +3272,17 @@ Tests:
 | FFT peak/mean | 12.43 |
 | FFT spectrum KS (vs flat) | 0.782 |
 | KS vs Uniform(0,1) | 0.572 |
-| randtoolbox gap.test  | 0.866 |
+| randtoolbox gap.test | 0.866 |
 | randtoolbox freq.test (16 bins) | 0.425 |
 | randtoolbox order.test (d=4) | 0.036 |
 | tseries runs.test (bits) | 0.186 |
 
-**16-byte chunks** (352,405 samples; chunk-entropy 8.0000 bits, dev 4.77e-05)
+**16-byte chunks** (352,405 samples; chunk-entropy 8.000048 bits; signed deviation $H - 8 = 4.77 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500318 | 0.500000 | 3.18e-04 |
 | 2 | 0.333518 | 0.333333 | 1.85e-04 |
 | 3 | 0.250067 | 0.250000 | 6.72e-05 |
@@ -3294,17 +3301,17 @@ Tests:
 | FFT peak/mean | 13.77 |
 | FFT spectrum KS (vs flat) | 0.225 |
 | KS vs Uniform(0,1) | 0.432 |
-| randtoolbox gap.test  | 0.775 |
+| randtoolbox gap.test | 0.775 |
 | randtoolbox freq.test (16 bins) | 0.739 |
 | randtoolbox order.test (d=4) | 0.651 |
 | tseries runs.test (bits) | 0.186 |
 
-**32-byte chunks** (176,202 samples; chunk-entropy 8.0000 bits, dev 4.98e-05)
+**32-byte chunks** (176,202 samples; chunk-entropy 8.000050 bits; signed deviation $H - 8 = 4.98 \times 10^{-5}$ bits)
 
-Moments (sample / ideal / |dev|):
+Moments (sample, ideal, dev):
 
-| k | sample | ideal | \|dev\| |
-|---|--------|-------|----------|
+| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |
+|-----|--------------|-----------------|-----|
 | 1 | 0.500721 | 0.500000 | 7.21e-04 |
 | 2 | 0.333873 | 0.333333 | 5.40e-04 |
 | 3 | 0.250351 | 0.250000 | 3.51e-04 |
@@ -3323,7 +3330,7 @@ Tests:
 | FFT peak/mean | 12.07 |
 | FFT spectrum KS (vs flat) | 0.549 |
 | KS vs Uniform(0,1) | 0.111 |
-| randtoolbox gap.test  | 0.261 |
+| randtoolbox gap.test | 0.261 |
 | randtoolbox freq.test (16 bins) | 0.908 |
 | randtoolbox order.test (d=4) | 0.026 |
 | tseries runs.test (bits) | 0.186 |

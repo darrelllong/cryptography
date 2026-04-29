@@ -5,8 +5,8 @@
 # tests on the ciphertext sliced into 8-, 16-, and 32-byte chunks.
 #
 # For each chunk size, every chunk is mapped to a value in [0,1) by treating
-# its leading bytes as a big-endian fraction (≤ 53 bits — the precision limit
-# of an IEEE-754 double).  The battery is:
+# its leading bytes as a big-endian fraction (at most 53 bits, the precision
+# limit of an IEEE-754 double).  The battery is:
 #   * Shannon entropy of the raw byte stream (ideal: 8.000 bits/byte) and of
 #     the chunk values binned into 256 cells (ideal: 8.000 bits, with a small
 #     finite-sample bias correction);
@@ -18,7 +18,7 @@
 #   * runs test on the bit stream.
 #
 # The script writes R-REPORT.md and lists any cipher whose battery rejected
-# at α = 0.001 on three or more independent tests.
+# at alpha = 0.001 on three or more independent tests.
 
 suppressPackageStartupMessages({
   library(randtoolbox)
@@ -46,7 +46,7 @@ REPORT     <- file.path(ROOT, "R-REPORT.md")
 
 PG_URL  <- "https://www.gutenberg.org/cache/epub/100/pg100.txt"
 ALPHA       <- 0.001    # rejection threshold for an individual test
-FAIL_AT     <- 3        # cipher "fails" if ≥ this many tests reject
+FAIL_AT     <- 3        # cipher "fails" if at least this many tests reject
 ENTROPY_TOL <- 0.001    # bits/byte; deviation > tol from 8.0 is suspicious
 
 CIPHERS <- c(
@@ -189,8 +189,8 @@ moments <- function(u) {
 }
 
 # Fisher's g test: sharpest periodogram peak vs. mean. Under H0 (white noise)
-# the distribution of g is known. We summarise with the "max ratio" — peak
-# divided by mean — and a KS test of the normalised periodogram against a
+# the distribution of g is known. We summarise with the "max ratio" (peak
+# divided by mean) and a KS test of the normalised periodogram against a
 # flat spectrum.
 fft_summary <- function(u) {
   x <- u - mean(u)
@@ -220,7 +220,7 @@ silent_gap <- function(u) {
   r$p.value
 }
 silent_freq <- function(u) {
-  # `freq.test(u, seq = 0:15)` bins u into 16 cells and runs χ² of bin counts.
+  # `freq.test(u, seq = 0:15)` bins u into 16 cells and runs chi-squared of bin counts.
   res <- tryCatch(
     capture.output(r <- randtoolbox::freq.test(u, seq = 0:15, echo = FALSE)),
     error = function(e) NULL)
@@ -334,12 +334,26 @@ names(verdicts) <- CIPHERS
 failures <- character(0)
 
 for (cipher in CIPHERS) {
-  message(sprintf("[%-14s] encrypting + analysing", cipher))
-  ct <- encrypt(cipher)
-  byte_entropies[cipher] <- byte_entropy(ct)
-  results <- list()
-  for (n in CHUNK_SIZES) {
-    results[[as.character(n)]] <- analyse(ct, n)
+  ct_path <- file.path(OUT_DIR, paste0(cipher, ".bin"))
+  cache_path <- file.path(OUT_DIR, paste0(cipher, ".results.rds"))
+  ct_mtime <- file.info(ct_path)$mtime
+  cache_fresh <- file.exists(cache_path) &&
+                 file.info(cache_path)$mtime >= ct_mtime
+  if (cache_fresh) {
+    message(sprintf("[%-14s] using cached analysis", cipher))
+    cached <- readRDS(cache_path)
+    byte_entropies[cipher] <- cached$byte_entropy
+    results <- cached$results
+  } else {
+    message(sprintf("[%-14s] encrypting + analysing", cipher))
+    ct <- encrypt(cipher)
+    byte_entropies[cipher] <- byte_entropy(ct)
+    results <- list()
+    for (n in CHUNK_SIZES) {
+      results[[as.character(n)]] <- analyse(ct, n)
+    }
+    saveRDS(list(byte_entropy = byte_entropies[cipher], results = results),
+            cache_path)
   }
   all_results[[cipher]] <- results
   verdicts[[cipher]]    <- verdict(results, byte_entropies[cipher])
@@ -350,6 +364,19 @@ for (cipher in CIPHERS) {
 # ──────────────────────────────────────────────────────────────────────────────
 # Report writer
 # ──────────────────────────────────────────────────────────────────────────────
+fmt_sci_latex <- function(x) {
+  # Render a real number as KaTeX-safe scientific notation:  m \times 10^{e}.
+  # Avoids putting "1.23e-05" inside `$...$`, where `e-05` would be parsed as
+  # the variable `e` minus the integer `05`.
+  if (is.na(x)) return("\\mathrm{NA}")
+  if (x == 0)  return("0")
+  s <- if (x < 0) "-" else ""
+  ax <- abs(x)
+  e  <- floor(log10(ax))
+  m  <- ax / 10^e
+  sprintf("%s%.2f \\times 10^{%d}", s, m, e)
+}
+
 fmt_p <- function(p) {
   if (is.na(p))   return("   n/a")
   if (p < 1e-12) return("<1e-12")
@@ -364,76 +391,86 @@ lines <- c(
   sprintf("Toolchain: R %s, randtoolbox %s, tseries %s.",
           r_version_str, randtoolbox_ver, tseries_ver),
   "",
-  sprintf("**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (%s bytes; MD5 `%s`; byte-entropy %.4f bits/byte).",
+  sprintf("**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (%s bytes; MD5 `%s`; byte-entropy %.6f bits/byte).",
           formatC(plaintext_size, format = "d", big.mark = ","),
           plaintext_sha256,
           plaintext_entropy),
   "",
   "**Caveat.** Passing this battery is **necessary** for a usable symmetric primitive but is **not sufficient** for cryptographic security; the battery rules out gross statistical defects in the keystream, not key-recovery, distinguishing-attack, or related-key resistance.",
   "",
+  sprintf("**Entropy precision.** Sample entropy on a finite byte stream cannot equal the ideal $8$ bits exactly. The maximum-likelihood plug-in estimator has expected bias $-(K-1)/(2 n \\ln 2)$ bits for $K$ bins and $n$ samples; with $K = 256$ and $n =$ %s, that bound is approximately $%s$ bits, and the Miller-Madow correction subtracts a finite-sample estimate of the same form. Multinomial sampling noise contributes a further $O(1/\\sqrt{n})$ fluctuation. Below, byte-entropy values are printed to six decimals so this irreducible deviation from $8.0$ is visible.",
+          formatC(plaintext_size, format = "d", big.mark = ","),
+          fmt_sci_latex((256 - 1) / (2 * plaintext_size * log(2)))),
+  "",
   "**Method.** Each cipher encrypts the full plaintext under a fresh OS-random key.",
   "Block ciphers run in CTR mode with a random IV; stream ciphers run in their native keystream mode.",
   "Ciphertext is sliced into chunks of 8, 16, and 32 bytes; each chunk is mapped to a Uniform(0,1)",
-  "candidate by interpreting its leading ≤ 8 bytes as a big-endian fraction.",
+  "candidate by interpreting its leading at-most-8 bytes as a big-endian fraction.",
   "",
   "**Battery.**",
   "0. Shannon entropy of the raw byte stream (ideal: 8.000 bits/byte).",
   "1. Shannon entropy of the chunk values binned into 256 cells (per chunk size; ideal: 8.000 bits).",
-  "2. First ten raw moments (deviation from Uniform(0,1) ideals 1/(k+1)).",
-  "3. FFT power spectrum: peak/mean ratio, plus a KS test of the normalised periodogram against Exp(1) (= flat spectrum under H0).",
+  "2. First ten raw moments (deviation from Uniform(0,1) ideals $1/(k+1)$).",
+  "3. FFT power spectrum: peak/mean ratio, plus a KS test of the normalised periodogram against $\\mathrm{Exp}(1)$ (= flat spectrum under $H_0$).",
   "4. Kolmogorov-Smirnov test against Uniform(0,1).",
-  "5. `randtoolbox::gap.test` (gaps between recurrences in [0, 0.5]).",
+  "5. `randtoolbox::gap.test` (gaps between recurrences in $[0, 0.5]$).",
   "6. `randtoolbox::freq.test` on the chunk values binned into 16 cells.",
   "7. `randtoolbox::order.test` on tuples of size 4 (data truncated to a multiple of 4).",
   "8. Wald-Wolfowitz runs test on the bit stream (`tseries::runs.test`).",
   "",
-  sprintf("**Decision rule.** A cipher fails the battery if **≥ %d** of (a) p-values fall below α = %g, or (b) entropy estimates deviate from the ideal 8.0 bits by more than %g bits.",
+  sprintf("**Decision rule.** A cipher fails the battery if at least $%d$ of (a) p-values fall below $\\alpha = %g$, or (b) entropy estimates deviate from the ideal $8.0$ bits by more than $%g$ bits.",
           FAIL_AT, ALPHA, ENTROPY_TOL),
   "",
   "## Definitions",
   "",
-  "Let `b[0..L-1]` be the ciphertext byte stream of length `L` and let",
-  "`u[0..k-1]` be the per-chunk Uniform(0,1) candidates, one per `N`-byte",
-  "chunk, computed as `u[j] = sum_{i=0..min(N,8)-1} b[j*N + i] / 256^(i+1)`.",
-  "The null hypothesis throughout is **H₀: u is i.i.d. Uniform(0,1)**.",
+  "Let $b_0, b_1, \\ldots, b_{L-1}$ be the ciphertext byte stream of length $L$",
+  "and let $u_0, u_1, \\ldots, u_{k-1}$ be the per-chunk Uniform(0,1) candidates,",
+  "one per $N$-byte chunk, computed as",
+  "",
+  "$$",
+  "u_j = \\sum_{i=0}^{\\min(N,8)-1} \\frac{b_{jN+i}}{256^{i+1}}.",
+  "$$",
+  "",
+  "Under $H_0$, the $u_j$ are independent and identically distributed Uniform(0,1).",
   "",
   "| Symbol | Definition |",
   "|--------|------------|",
-  "| `L` | ciphertext length in bytes (= length of plaintext, since CTR/keystream is length-preserving). |",
-  "| `N` | chunk size in bytes (8, 16, or 32). |",
-  "| `k` | sample count for chunk size `N`: `k = floor(L / N)`. |",
-  "| `u[j]` | the `j`-th chunk's leading-≤8-byte big-endian fraction, in [0,1). |",
-  sprintf("| `α` | per-test rejection threshold = %g. | ", ALPHA),
-  sprintf("| `tol` | per-entropy rejection threshold in bits/sample = %g. |", ENTROPY_TOL),
-  "| `p` | classical p-value: P(test statistic ≥ observed \\| H₀); small `p` ⇒ reject H₀. |",
-  "| `H` | Shannon entropy in bits, with the Miller–Madow finite-sample correction; ideal = 8.0000 for 256 equally likely symbols. |",
-  "| `byte H` | `H` of the per-byte distribution over the full ciphertext. |",
-  "| `chunk H` | `H` of the chunk values `u` binned into 256 equal-width cells. |",
-  "| moment `k` | `m_k = (1/n) Σ u[j]^k`, the `k`-th raw sample moment. |",
-  "| ideal `k` | `E[U^k] = 1/(k+1)` under U ∼ Uniform(0,1). |",
-  "| `\\|dev\\|` | absolute deviation `\\|m_k − 1/(k+1)\\|` (smaller is better). |",
-  "| `FFT peak/mean` | Fisher’s g (un-normalised): `max(|U_f|^2) / mean(|U_f|^2)` over non-DC bins of the centered FFT. |",
-  "| `FFT spectrum KS (vs flat)` | KS p-value testing the normalised periodogram against Exp(1) (the white-noise null). |",
-  "| `KS vs Uniform(0,1)` | Kolmogorov–Smirnov p-value testing `u` against U(0,1). |",
-  "| `gap.test` | randtoolbox gaps-between-recurrences test on `u` (default lower=0, upper=0.5). |",
-  "| `freq.test` | randtoolbox frequency χ² on `u` binned into 16 cells. |",
-  "| `order.test` | randtoolbox order-pattern test on disjoint 4-tuples of `u` (data truncated to a multiple of 4). |",
-  "| `runs.test` | Wald–Wolfowitz two-level runs test on the bit stream above/below 0.5. |",
-  "| `rejects/total` | number of p-values below `α` (plus entropy misses) over the total test count. |",
+  "| $L$ | ciphertext length in bytes (= length of plaintext, since CTR/keystream is length-preserving). |",
+  "| $N$ | chunk size in bytes (8, 16, or 32). |",
+  "| $k = \\lfloor L/N \\rfloor$ | number of samples for chunk size $N$. |",
+  "| $u_j$ | the $j$-th chunk's leading at-most-8-byte big-endian fraction, in $[0,1)$. |",
+  sprintf("| $\\alpha = %g$ | per-test rejection threshold. |", ALPHA),
+  sprintf("| $\\mathrm{tol} = %g$ | per-entropy rejection threshold (bits/sample). |", ENTROPY_TOL),
+  "| $p$ | classical p-value $\\Pr(T \\ge T_\\mathrm{obs} \\mid H_0)$; small $p$ rejects $H_0$. |",
+  "| $H$ | Shannon entropy in bits, with the Miller-Madow finite-sample correction; ideal $= 8.0000$ for 256 equally likely symbols. |",
+  "| `byte H` | $H$ of the per-byte distribution over the full ciphertext. |",
+  "| `chunk H` | $H$ of the chunk values $u$ binned into 256 equal-width cells. |",
+  "| $m_k$ | the $k$-th raw sample moment, $m_k = \\frac{1}{n}\\sum_{j} u_j^k$. |",
+  "| ideal $k$ | $E[U^k] = 1/(k+1)$ for $U \\sim \\mathrm{Uniform}(0,1)$. |",
+  "| `dev` | absolute deviation $\\lvert m_k - 1/(k+1) \\rvert$ (smaller is better). |",
+  "| `FFT peak/mean` | Fisher's g (un-normalised): $\\max_f \\lvert U_f \\rvert^2 / \\overline{\\lvert U_f \\rvert^2}$ over non-DC bins of the centered FFT. |",
+  "| `FFT spectrum KS (vs flat)` | KS p-value testing the normalised periodogram against $\\mathrm{Exp}(1)$ (the white-noise null). |",
+  "| `KS vs Uniform(0,1)` | Kolmogorov-Smirnov p-value testing $u$ against $\\mathrm{Uniform}(0,1)$. |",
+  "| `gap.test` | randtoolbox gaps-between-recurrences test on $u$ (default lower $=0$, upper $=0.5$). |",
+  "| `freq.test` | randtoolbox frequency $\\chi^2$ on $u$ binned into 16 cells. |",
+  "| `order.test` | randtoolbox order-pattern test on disjoint 4-tuples of $u$ (data truncated to a multiple of 4). |",
+  "| `runs.test` | Wald-Wolfowitz two-level runs test on the bit stream above/below $0.5$. |",
+  "| `rejects/total` | number of p-values below $\\alpha$ (plus entropy misses) over the total test count. |",
   "| `min p` | smallest p-value across the cipher's full battery. |",
   "",
   "## Summary",
   "",
-  "| cipher | token | byte H (bits) | rejects/total | min p | verdict |",
-  "|--------|-------|---------------|---------------|-------|---------|"
+  "| cipher | token | byte H (bits) | $8 - H$ (bits) | rejects/total | min p | verdict |",
+  "|--------|-------|---------------|----------------|---------------|-------|---------|"
 )
 
 for (cipher in CIPHERS) {
   v <- verdicts[[cipher]]
-  lines <- c(lines, sprintf("| %s | `%s` | %.4f | %d/%d | %s | %s |",
+  lines <- c(lines, sprintf("| %s | `%s` | %.6f | %.2e | %d/%d | %s | %s |",
                             display_name(cipher),
                             cipher,
                             byte_entropies[cipher],
+                            8 - byte_entropies[cipher],
                             v$rejects, v$total,
                             fmt_p(v$min_p),
                             if (v$pass) "PASS" else "**FAIL**"))
@@ -453,28 +490,28 @@ lines <- c(lines, "## Per-cipher detail", "")
 for (cipher in CIPHERS) {
   lines <- c(lines, sprintf("### %s (`%s`)", display_name(cipher), cipher), "")
   v <- verdicts[[cipher]]
-  lines <- c(lines, sprintf("Verdict: %s — %d test rejection(s) at α=%g, %d entropy miss(es) at tol=%g (total %d / %d).",
+  lines <- c(lines, sprintf("Verdict: %s &mdash; %d test rejection(s) at $\\alpha = %g$, %d entropy miss(es) at $\\mathrm{tol} = %g$ (total %d / %d).",
                             if (v$pass) "PASS" else "**FAIL**",
                             v$p_rejects, ALPHA,
                             v$entropy_misses, ENTROPY_TOL,
                             v$rejects, v$total),
              "",
-             sprintf("Byte-stream Shannon entropy: **%.4f bits/byte** (ideal: 8.0000; deviation %.2e).",
+             sprintf("Byte-stream Shannon entropy: **%.6f bits/byte** (ideal: $8$; signed deviation $H - 8 = %s$ bits).",
                      byte_entropies[cipher],
-                     abs(byte_entropies[cipher] - 8)),
+                     fmt_sci_latex(byte_entropies[cipher] - 8)),
              "")
   for (n in CHUNK_SIZES) {
     r <- all_results[[cipher]][[as.character(n)]]
     lines <- c(lines,
-               sprintf("**%d-byte chunks** (%s samples; chunk-entropy %.4f bits, dev %.2e)", n,
+               sprintf("**%d-byte chunks** (%s samples; chunk-entropy %.6f bits; signed deviation $H - 8 = %s$ bits)", n,
                        formatC(r$samples, format = "d", big.mark = ","),
                        r$chunk_entropy,
-                       abs(r$chunk_entropy - 8)),
+                       fmt_sci_latex(r$chunk_entropy - 8)),
                "",
-               "Moments (sample / ideal / |dev|):",
+               "Moments (sample, ideal, dev):",
                "",
-               "| k | sample | ideal | \\|dev\\| |",
-               "|---|--------|-------|----------|")
+               "| $k$ | sample $m_k$ | ideal $1/(k+1)$ | dev |",
+               "|-----|--------------|-----------------|-----|")
     for (k in 1:10) {
       lines <- c(lines, sprintf("| %d | %.6f | %.6f | %.2e |",
                                 k, r$moments$values[k],
@@ -488,7 +525,7 @@ for (cipher in CIPHERS) {
                sprintf("| FFT peak/mean | %.2f |", r$fft$peak_ratio),
                sprintf("| FFT spectrum KS (vs flat) | %s |", fmt_p(r$fft_ks_p)),
                sprintf("| KS vs Uniform(0,1) | %s |", fmt_p(r$ks_uniform_p)),
-               sprintf("| randtoolbox gap.test  | %s |", fmt_p(r$gap_p)),
+               sprintf("| randtoolbox gap.test | %s |", fmt_p(r$gap_p)),
                sprintf("| randtoolbox freq.test (16 bins) | %s |", fmt_p(r$freq_p)),
                sprintf("| randtoolbox order.test (d=4) | %s |", fmt_p(r$order_p)),
                sprintf("| tseries runs.test (bits) | %s |", fmt_p(r$runs_bits_p)),
