@@ -8,3 +8,7 @@ Cargo.lock
 /ml/out/
 /ml/__pycache__/
 /pilot_result_*/
+/scripts/cipher_outputs/
+/scripts/cipher_plots/
+/scripts/shakespeare.txt
+/third_party/

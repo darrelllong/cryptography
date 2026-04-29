@@ -285,5 +285,7 @@ in [README.md](README.md).
   Signature Standard (FIPS 204)*, 2024.
   DOI: [10.6028/NIST.FIPS.204](https://doi.org/10.6028/NIST.FIPS.204)
   (local copy: `pubs/fips204-ml-dsa.pdf`)
-- Vendored reference code (for differential testing/benchmark calibration):
-  `third_party/ml-kem/kyber-ref`, `third_party/ml-dsa/dilithium-ref`
+- Reference code (for differential testing / benchmark calibration) is
+  fetched on demand into a gitignored `third_party/` directory by
+  `scripts/fetch_mlkem_refs.sh` and `scripts/fetch_mldsa_refs.sh`. The
+  trees are not vendored in the repository.
