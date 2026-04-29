@@ -2,11 +2,6 @@
 /benchmarks/target
 /fuzz/target
 Cargo.lock
-/ml/.venv/
-/ml/.venv-*/
-/ml/data/
-/ml/out/
-/ml/__pycache__/
 /pilot_result_*/
 /scripts/cipher_outputs/
 /scripts/shakespeare.txt

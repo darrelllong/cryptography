@@ -48,18 +48,6 @@ Important entry points:
 - `bash scripts/bench_all.sh`
 - `bash scripts/bench_all_pk_full.sh`
 
-## Machine-Learning Experiments
-
-The `ml/` directory is a separate experiment harness for distinguisher tests.
-It is intentionally treated as a research sidecar, not as evidence that any
-implemented primitive is broken. The published runs so far remain effectively
-at chance on held-out data.
-
-For model families, commands, and result summaries, see:
-
-- [README.md](README.md)
-- [ml/README.md](ml/README.md)
-
 ## Reading Guide
 
 - Start with [README.md](README.md) for usage.

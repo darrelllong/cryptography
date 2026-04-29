@@ -1,27 +1,41 @@
 # cryptography
 
-Pure, safe, portable Rust implementations of classical and modern ciphers
-written directly from the published specifications.
+Safe, portable Rust implementations of classical and modern ciphers written
+directly from the published specifications.
 
-Project-wide implementation rules:
+Project-wide implementation rules for the **root crate**:
 
-- pure idiomatic Rust
-- no architecture intrinsics
+- safe, idiomatic Rust on every public API boundary
 - no C/FFI escape hatches
 - as few dependencies as practical
+- one optional aarch64 fast path: SHA-3 dispatches to the FEAT_SHA3 keccak
+  intrinsic when the CPU advertises it (`src/hash/sha3.rs`), and falls back
+  to the pure-Rust permutation otherwise
+
+Optional sibling crates under `fast/` (Apple-Silicon AES/GHASH/SHA-256, x86
+PCLMULQDQ GHASH) provide architecture-specific kernels behind explicit
+`is_supported()` capability checks.  They are out of the root crate's
+"no architecture intrinsics" perimeter and are tested separately.
 
 That policy applies to the symmetric, hash, CSPRNG, and public-key layers
-alike. The goal is to keep the code readable, portable, and auditable in one
-language, and to add a dependency only when it clearly buys real
-interoperability or maintenance value.
+of the root crate alike. The goal is to keep the code readable, portable,
+and auditable in one language, and to add a dependency only when it clearly
+buys real interoperability or maintenance value.
 
 Security note:
 
-- Public-key operations are currently variable-time and are exported under
-  `cryptography::vt` to make that property explicit at the API boundary.
-- Constant-time symmetric implementations stay at the root namespace (for
-  example `Aes128Ct`, `Gcm`, `Gmac`), while variable-time reference paths are
-  explicitly named (`GcmVt`, `GmacVt`).
+- Public-key operations are variable-time **by policy** — writing
+  constant-time public-key code at the bigint level is a research-grade
+  effort and out of scope for this crate. Two equivalent paths reach the
+  same types: `cryptography::vt::Ecdsa` (flat re-export, kept as a hint
+  that the surface is variable-time) and `cryptography::public_key::ecdsa`
+  (the natural module tree). Pick whichever reads better in your code.
+  X25519 / X448 are exceptions and use the constant-time RFC 7748 ladder.
+- Constant-time symmetric implementations are explicitly suffixed `Ct`
+  (e.g. `Aes128Ct`, `Sm4Ct`, `Zuc128Ct`); the bare-named types
+  (`Aes128`, `Sm4`, `Zuc128`) are reference table-driven implementations
+  and are **not** constant-time. AEAD wrappers `Gcm`, `Gmac`, `GcmVt`, and
+  `GmacVt` make the choice explicit per construction.
 - This crate intentionally does **not** provide an OS entropy source.
   `CtrDrbgAes256` is deterministic once seeded. All key generation, randomized
   padding, and nonce-dependent operations inherit seed quality from caller-
@@ -620,72 +634,6 @@ Production note:
 - The historical schemes and the exposed raw primitives are included as
   specialized primitives. Treat them as specialized tools, not as the
   default choice for new deployments.
-
-Generate a balanced dataset of raw samples:
-
-```text
-cargo run --release --bin gen_ml_dataset -- --output ml/data
-```
-
-For wider samples, pass `--sample-len`:
-
-```text
-cargo run --release --bin gen_ml_dataset -- --output ml/data --sample-len 256
-```
-
-Train the model in the local PyTorch virtualenv:
-
-```text
-ml/.venv-torch/bin/python ml/train_distinguisher.py --generate
-```
-
-The trainer exposes three architecture families:
-
-- `cnn`: residual 1D CNN baseline
-- `transformer`: patch Transformer for wider samples (`--patch-len` controls the patch width)
-- `byte_transformer`: byte-level Transformer that attends over every byte token
-
-It also exposes `--model-size base|large|xlarge` so you can scale the network
-along with the dataset.
-
-For example, a wider patch-Transformer run looks like:
-
-```text
-ml/.venv-torch/bin/python ml/train_distinguisher.py --generate \
-  --sample-len 256 \
-  --architecture transformer \
-  --model-size large \
-  --patch-len 16
-```
-
-And the byte-level Transformer path is:
-
-```text
-ml/.venv-torch/bin/python ml/train_distinguisher.py --generate \
-  --sample-len 256 \
-  --architecture byte_transformer \
-  --model-size base
-```
-
-This writes the trained model and weights to `ml/out/`:
-
-- `cipher_distinguisher.pt`
-- `cipher_distinguisher_state_dict.pt`
-- `labels.json`
-- `metrics.json`
-- `history.csv`
-
-For the fuller ML workflow, including the adaptive overnight runner and dataset
-auditing, see [ml/README.md](ml/README.md).
-
-## ML Distinguisher Experiment
-
-The repository also includes a PyTorch experiment under `ml/` for testing
-whether a deep network can distinguish raw cipher output from chance.
-
-The dataset uses only the fast cipher implementations. The `Ct` variants are
-not separate classes because they should emit exactly the same bits as the fast
-path for the same key and input.
 
 ## Design Notes
 
