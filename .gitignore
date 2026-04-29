@@ -4,10 +4,8 @@
 Cargo.lock
 /pilot_result_*/
 /scripts/cipher_outputs/
-/scripts/cipher_plots/
 /scripts/shakespeare.txt
 /scripts/.katex-validator/node_modules/
 /scripts/.katex-validator/package-lock.json
 /scripts/.katex-validator/package.json
-/R-REPORT.md
 /third_party/
