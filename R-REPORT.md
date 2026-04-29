@@ -1,6 +1,6 @@
 # Symmetric-Cipher Randomness Report
 
-Generated 2026-04-28 17:39:14 PDT by `scripts/cipher_randomness.R`.
+Generated 2026-04-28 18:34:20 PDT by `scripts/cipher_randomness.R`.
 Toolchain: R 4.5.0, randtoolbox 2.0.5, tseries 0.10.61.
 
 **Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (5,638,483 bytes; MD5 `02f80fa7827df3210e62ffd5ed7e5b42`; byte-entropy 4.8887 bits/byte).
@@ -25,50 +25,82 @@ candidate by interpreting its leading ≤ 8 bytes as a big-endian fraction.
 
 **Decision rule.** A cipher fails the battery if **≥ 3** of (a) p-values fall below α = 0.001, or (b) entropy estimates deviate from the ideal 8.0 bits by more than 0.001 bits.
 
+## Definitions
+
+Let `b[0..L-1]` be the ciphertext byte stream of length `L` and let
+`u[0..k-1]` be the per-chunk Uniform(0,1) candidates, one per `N`-byte
+chunk, computed as `u[j] = sum_{i=0..min(N,8)-1} b[j*N + i] / 256^(i+1)`.
+The null hypothesis throughout is **H₀: u is i.i.d. Uniform(0,1)**.
+
+| Symbol | Definition |
+|--------|------------|
+| `L` | ciphertext length in bytes (= length of plaintext, since CTR/keystream is length-preserving). |
+| `N` | chunk size in bytes (8, 16, or 32). |
+| `k` | sample count for chunk size `N`: `k = floor(L / N)`. |
+| `u[j]` | the `j`-th chunk's leading-≤8-byte big-endian fraction, in [0,1). |
+| `α` | per-test rejection threshold = 0.001. | 
+| `tol` | per-entropy rejection threshold in bits/sample = 0.001. |
+| `p` | classical p-value: P(test statistic ≥ observed \| H₀); small `p` ⇒ reject H₀. |
+| `H` | Shannon entropy in bits, with the Miller–Madow finite-sample correction; ideal = 8.0000 for 256 equally likely symbols. |
+| `byte H` | `H` of the per-byte distribution over the full ciphertext. |
+| `chunk H` | `H` of the chunk values `u` binned into 256 equal-width cells. |
+| moment `k` | `m_k = (1/n) Σ u[j]^k`, the `k`-th raw sample moment. |
+| ideal `k` | `E[U^k] = 1/(k+1)` under U ∼ Uniform(0,1). |
+| `\|dev\|` | absolute deviation `\|m_k − 1/(k+1)\|` (smaller is better). |
+| `FFT peak/mean` | Fisher’s g (un-normalised): `max(|U_f|^2) / mean(|U_f|^2)` over non-DC bins of the centered FFT. |
+| `FFT spectrum KS (vs flat)` | KS p-value testing the normalised periodogram against Exp(1) (the white-noise null). |
+| `KS vs Uniform(0,1)` | Kolmogorov–Smirnov p-value testing `u` against U(0,1). |
+| `gap.test` | randtoolbox gaps-between-recurrences test on `u` (default lower=0, upper=0.5). |
+| `freq.test` | randtoolbox frequency χ² on `u` binned into 16 cells. |
+| `order.test` | randtoolbox order-pattern test on disjoint 4-tuples of `u` (data truncated to a multiple of 4). |
+| `runs.test` | Wald–Wolfowitz two-level runs test on the bit stream above/below 0.5. |
+| `rejects/total` | number of p-values below `α` (plus entropy misses) over the total test count. |
+| `min p` | smallest p-value across the cipher's full battery. |
+
 ## Summary
 
-| cipher | byte H (bits) | rejects/total | min p | verdict |
-|--------|---------------|---------------|-------|---------|
-| `aes128` | 8.0000 | 0/22 | 0.064 | PASS |
-| `aes192` | 8.0000 | 0/22 | 0.062 | PASS |
-| `aes256` | 8.0000 | 0/22 | 0.180 | PASS |
-| `camellia128` | 8.0000 | 0/22 | 0.044 | PASS |
-| `camellia192` | 8.0000 | 1/22 | 2.9e-04 | PASS |
-| `camellia256` | 8.0000 | 0/22 | 0.122 | PASS |
-| `cast128` | 8.0000 | 0/22 | 0.003 | PASS |
-| `des` | 8.0000 | 0/22 | 0.230 | PASS |
-| `3des` | 8.0000 | 0/22 | 0.143 | PASS |
-| `grasshopper` | 8.0000 | 0/22 | 0.054 | PASS |
-| `magma` | 8.0000 | 0/22 | 0.042 | PASS |
-| `present80` | 8.0000 | 1/22 | 3.4e-05 | PASS |
-| `present128` | 8.0000 | 0/22 | 0.060 | PASS |
-| `seed` | 8.0000 | 1/22 | <1e-12 | PASS |
-| `serpent128` | 8.0000 | 0/22 | 0.013 | PASS |
-| `serpent192` | 8.0000 | 0/22 | 0.033 | PASS |
-| `serpent256` | 8.0000 | 0/22 | 0.042 | PASS |
-| `sm4` | 8.0000 | 0/22 | 0.205 | PASS |
-| `twofish128` | 8.0000 | 2/22 | 2.3e-06 | PASS |
-| `twofish256` | 8.0000 | 0/22 | 0.049 | PASS |
-| `simon32_64` | 8.0000 | 0/22 | 0.003 | PASS |
-| `simon64_128` | 8.0000 | 0/22 | 0.007 | PASS |
-| `simon128_128` | 8.0000 | 0/22 | 0.014 | PASS |
-| `simon128_256` | 8.0000 | 0/22 | 0.007 | PASS |
-| `speck32_64` | 8.0000 | 0/22 | 0.168 | PASS |
-| `speck64_128` | 8.0000 | 0/22 | 0.011 | PASS |
-| `speck128_128` | 8.0000 | 0/22 | 0.073 | PASS |
-| `speck128_256` | 8.0000 | 0/22 | 0.326 | PASS |
-| `chacha20` | 8.0000 | 0/22 | 0.146 | PASS |
-| `xchacha20` | 8.0000 | 0/22 | 0.067 | PASS |
-| `salsa20` | 8.0000 | 0/22 | 0.026 | PASS |
-| `rabbit` | 8.0000 | 0/22 | 0.042 | PASS |
-| `zuc128` | 8.0000 | 0/22 | 0.206 | PASS |
-| `snow3g` | 8.0000 | 0/22 | 0.026 | PASS |
+| cipher | token | byte H (bits) | rejects/total | min p | verdict |
+|--------|-------|---------------|---------------|-------|---------|
+| AES-128 | `aes128` | 8.0000 | 0/22 | 0.064 | PASS |
+| AES-192 | `aes192` | 8.0000 | 0/22 | 0.062 | PASS |
+| AES-256 | `aes256` | 8.0000 | 0/22 | 0.180 | PASS |
+| Camellia-128 | `camellia128` | 8.0000 | 0/22 | 0.044 | PASS |
+| Camellia-192 | `camellia192` | 8.0000 | 1/22 | 2.9e-04 | PASS |
+| Camellia-256 | `camellia256` | 8.0000 | 0/22 | 0.122 | PASS |
+| CAST-128 | `cast128` | 8.0000 | 0/22 | 0.003 | PASS |
+| DES | `des` | 8.0000 | 0/22 | 0.230 | PASS |
+| 3DES | `3des` | 8.0000 | 0/22 | 0.143 | PASS |
+| Kuznyechik | `grasshopper` | 8.0000 | 0/22 | 0.054 | PASS |
+| Magma | `magma` | 8.0000 | 0/22 | 0.042 | PASS |
+| PRESENT-80 | `present80` | 8.0000 | 1/22 | 3.4e-05 | PASS |
+| PRESENT-128 | `present128` | 8.0000 | 0/22 | 0.060 | PASS |
+| SEED | `seed` | 8.0000 | 1/22 | <1e-12 | PASS |
+| Serpent-128 | `serpent128` | 8.0000 | 0/22 | 0.013 | PASS |
+| Serpent-192 | `serpent192` | 8.0000 | 0/22 | 0.033 | PASS |
+| Serpent-256 | `serpent256` | 8.0000 | 0/22 | 0.042 | PASS |
+| SM4 | `sm4` | 8.0000 | 0/22 | 0.205 | PASS |
+| Twofish-128 | `twofish128` | 8.0000 | 2/22 | 2.3e-06 | PASS |
+| Twofish-256 | `twofish256` | 8.0000 | 0/22 | 0.049 | PASS |
+| Simon32/64 | `simon32_64` | 8.0000 | 0/22 | 0.003 | PASS |
+| Simon64/128 | `simon64_128` | 8.0000 | 0/22 | 0.007 | PASS |
+| Simon128/128 | `simon128_128` | 8.0000 | 0/22 | 0.014 | PASS |
+| Simon128/256 | `simon128_256` | 8.0000 | 0/22 | 0.007 | PASS |
+| Speck32/64 | `speck32_64` | 8.0000 | 0/22 | 0.168 | PASS |
+| Speck64/128 | `speck64_128` | 8.0000 | 0/22 | 0.011 | PASS |
+| Speck128/128 | `speck128_128` | 8.0000 | 0/22 | 0.073 | PASS |
+| Speck128/256 | `speck128_256` | 8.0000 | 0/22 | 0.326 | PASS |
+| ChaCha20 | `chacha20` | 8.0000 | 0/22 | 0.146 | PASS |
+| XChaCha20 | `xchacha20` | 8.0000 | 0/22 | 0.067 | PASS |
+| Salsa20 | `salsa20` | 8.0000 | 0/22 | 0.026 | PASS |
+| Rabbit | `rabbit` | 8.0000 | 0/22 | 0.042 | PASS |
+| ZUC-128 | `zuc128` | 8.0000 | 0/22 | 0.206 | PASS |
+| SNOW 3G | `snow3g` | 8.0000 | 0/22 | 0.026 | PASS |
 
 **All ciphers passed the battery.**
 
 ## Per-cipher detail
 
-### `aes128`
+### AES-128 (`aes128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -163,7 +195,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/aes128.png)
 
-### `aes192`
+### AES-192 (`aes192`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -258,7 +290,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/aes192.png)
 
-### `aes256`
+### AES-256 (`aes256`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -353,7 +385,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/aes256.png)
 
-### `camellia128`
+### Camellia-128 (`camellia128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -448,7 +480,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/camellia128.png)
 
-### `camellia192`
+### Camellia-192 (`camellia192`)
 
 Verdict: PASS — 1 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 1 / 22).
 
@@ -543,7 +575,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/camellia192.png)
 
-### `camellia256`
+### Camellia-256 (`camellia256`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -638,7 +670,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/camellia256.png)
 
-### `cast128`
+### CAST-128 (`cast128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -733,7 +765,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/cast128.png)
 
-### `des`
+### DES (`des`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -828,7 +860,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/des.png)
 
-### `3des`
+### 3DES (`3des`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -923,7 +955,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/3des.png)
 
-### `grasshopper`
+### Kuznyechik (`grasshopper`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1018,7 +1050,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/grasshopper.png)
 
-### `magma`
+### Magma (`magma`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1113,7 +1145,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/magma.png)
 
-### `present80`
+### PRESENT-80 (`present80`)
 
 Verdict: PASS — 1 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 1 / 22).
 
@@ -1208,7 +1240,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/present80.png)
 
-### `present128`
+### PRESENT-128 (`present128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1303,7 +1335,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/present128.png)
 
-### `seed`
+### SEED (`seed`)
 
 Verdict: PASS — 1 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 1 / 22).
 
@@ -1398,7 +1430,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/seed.png)
 
-### `serpent128`
+### Serpent-128 (`serpent128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1493,7 +1525,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/serpent128.png)
 
-### `serpent192`
+### Serpent-192 (`serpent192`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1588,7 +1620,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/serpent192.png)
 
-### `serpent256`
+### Serpent-256 (`serpent256`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1683,7 +1715,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/serpent256.png)
 
-### `sm4`
+### SM4 (`sm4`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1778,7 +1810,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/sm4.png)
 
-### `twofish128`
+### Twofish-128 (`twofish128`)
 
 Verdict: PASS — 2 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 2 / 22).
 
@@ -1873,7 +1905,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/twofish128.png)
 
-### `twofish256`
+### Twofish-256 (`twofish256`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -1968,7 +2000,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/twofish256.png)
 
-### `simon32_64`
+### Simon32/64 (`simon32_64`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2063,7 +2095,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/simon32_64.png)
 
-### `simon64_128`
+### Simon64/128 (`simon64_128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2158,7 +2190,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/simon64_128.png)
 
-### `simon128_128`
+### Simon128/128 (`simon128_128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2253,7 +2285,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/simon128_128.png)
 
-### `simon128_256`
+### Simon128/256 (`simon128_256`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2348,7 +2380,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/simon128_256.png)
 
-### `speck32_64`
+### Speck32/64 (`speck32_64`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2443,7 +2475,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/speck32_64.png)
 
-### `speck64_128`
+### Speck64/128 (`speck64_128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2538,7 +2570,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/speck64_128.png)
 
-### `speck128_128`
+### Speck128/128 (`speck128_128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2633,7 +2665,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/speck128_128.png)
 
-### `speck128_256`
+### Speck128/256 (`speck128_256`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2728,7 +2760,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/speck128_256.png)
 
-### `chacha20`
+### ChaCha20 (`chacha20`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2823,7 +2855,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/chacha20.png)
 
-### `xchacha20`
+### XChaCha20 (`xchacha20`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -2918,7 +2950,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/xchacha20.png)
 
-### `salsa20`
+### Salsa20 (`salsa20`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -3013,7 +3045,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/salsa20.png)
 
-### `rabbit`
+### Rabbit (`rabbit`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -3108,7 +3140,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/rabbit.png)
 
-### `zuc128`
+### ZUC-128 (`zuc128`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
@@ -3203,7 +3235,7 @@ Tests:
 
 ![spectrum](scripts/cipher_plots/zuc128.png)
 
-### `snow3g`
+### SNOW 3G (`snow3g`)
 
 Verdict: PASS — 0 test rejection(s) at α=0.001, 0 entropy miss(es) at tol=0.001 (total 0 / 22).
 
