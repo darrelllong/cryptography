@@ -1,8 +1,27 @@
 [package]
-name = "cryptography"
-version = "0.2.0"
+name = "cryptography-rs"
+version = "0.5.0"
 edition = "2021"
 license = "BSD-2-Clause"
+authors = ["Darrell Long"]
+description = "Block ciphers, hashes, public-key, and post-quantum primitives implemented directly from their specifications and original papers."
+repository = "https://github.com/darrelllong/cryptography"
+readme = "README.md"
+documentation = "https://docs.rs/cryptography-rs"
+keywords = ["cryptography", "ciphers", "hash", "public-key", "post-quantum"]
+categories = ["cryptography", "algorithms"]
+exclude = [
+    "fast/**",
+    "fuzz/**",
+    "benchmarks/**",
+    "assets/**",
+    "scripts/**",
+    "target/**",
+    ".claude/**",
+    ".codex/**",
+    "pubs/**",
+    "cipher_plots/**",
+]
 autobenches = false
 
 [lib]
