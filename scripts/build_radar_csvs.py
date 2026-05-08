@@ -158,6 +158,42 @@ PK_PQ = [
     ("NTRU-EES-401EP1 enc", "ntruees401ep1_encrypt"),
 ]
 
+# Per-scheme breakdowns for the POSTQUANTUM.md radars.
+PK_MLKEM = [
+    ("ML-KEM-512 keygen",  "mlkem512_keygen"),
+    ("ML-KEM-512 encaps",  "mlkem512_encaps"),
+    ("ML-KEM-512 decaps",  "mlkem512_decaps"),
+    ("ML-KEM-768 keygen",  "mlkem768_keygen"),
+    ("ML-KEM-768 encaps",  "mlkem768_encaps"),
+    ("ML-KEM-768 decaps",  "mlkem768_decaps"),
+    ("ML-KEM-1024 keygen", "mlkem1024_keygen"),
+    ("ML-KEM-1024 encaps", "mlkem1024_encaps"),
+    ("ML-KEM-1024 decaps", "mlkem1024_decaps"),
+]
+
+PK_MLDSA = [
+    ("ML-DSA-44 keygen", "mldsa44_keygen"),
+    ("ML-DSA-44 sign",   "mldsa44_sign"),
+    ("ML-DSA-44 verify", "mldsa44_verify"),
+    ("ML-DSA-65 keygen", "mldsa65_keygen"),
+    ("ML-DSA-65 sign",   "mldsa65_sign"),
+    ("ML-DSA-65 verify", "mldsa65_verify"),
+    ("ML-DSA-87 keygen", "mldsa87_keygen"),
+    ("ML-DSA-87 sign",   "mldsa87_sign"),
+    ("ML-DSA-87 verify", "mldsa87_verify"),
+]
+
+PK_NTRU = [
+    ("NTRU-HPS-509 keygen",  "ntruhps509_keygen"),
+    ("NTRU-HPS-509 encaps",  "ntruhps509_encaps"),
+    ("NTRU-HPS-509 decaps",  "ntruhps509_decaps"),
+    ("NTRU-HPS-677 encaps",  "ntruhps677_encaps"),
+    ("NTRU-HPS-821 encaps",  "ntruhps821_encaps"),
+    ("NTRU-HRSS-701 keygen", "ntruhrss701_keygen"),
+    ("NTRU-HRSS-701 encaps", "ntruhrss701_encaps"),
+    ("NTRU-HRSS-701 decaps", "ntruhrss701_decaps"),
+]
+
 
 def select(rows: dict[str, dict[str, float]], pairs: Iterable[tuple[str, str]]) -> list[tuple[str, dict[str, float]]]:
     out: list[tuple[str, dict[str, float]]] = []
@@ -196,6 +232,9 @@ def main() -> None:
     write_csv("hash", select(hsh, HASH_REPRESENTATIVE), PLATFORMS)
     write_csv("pk_rsa_ec", invert_to_ops_per_sec(select(pk, PK_RSA_DSA_EC)), PLATFORMS)
     write_csv("pk_pq", invert_to_ops_per_sec(select(pk, PK_PQ)), PLATFORMS)
+    write_csv("pk_mlkem", invert_to_ops_per_sec(select(pk, PK_MLKEM)), PLATFORMS)
+    write_csv("pk_mldsa", invert_to_ops_per_sec(select(pk, PK_MLDSA)), PLATFORMS)
+    write_csv("pk_ntru", invert_to_ops_per_sec(select(pk, PK_NTRU)), PLATFORMS)
 
     print("CSVs written to", CSV_DIR)
 

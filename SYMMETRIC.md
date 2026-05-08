@@ -261,160 +261,207 @@ Design philosophy by family:
 
 ## Symmetric Performance
 
-Measured with [pilot-bench](https://github.com/ascar-io/pilot-bench) driving
-`pilot_cipher`, a dedicated Rust binary that encrypts 1 MiB per round and
-prints MB/s to stdout.  Pilot repeats the round until a 20 % confidence
-interval is achieved, correcting for autocorrelation and startup transients.
-Columns: **Block** and **Key** in bits; **MB/s** mean; **± CI** half-width at
-95 %; **Runs** rounds required to reach CI. The tables below are parallel runs
-on:
+Measured with [pilot-bench](https://github.com/darrelllong/pilot-bench)
+driving `pilot_cipher`, a dedicated Rust binary that encrypts a fixed
+workload per round and prints MB/s to stdout. Pilot repeats the round until
+the chosen confidence interval is achieved, correcting for autocorrelation
+and startup transients.
 
-- Apple M4 Pro (`Dyson.local`)
+Columns: **Block** and **Key** in bits; **MB/s** mean; **±CI** half-width at
+**90%**; **Runs** rounds required to reach CI. The 2026-05-08 sweep was run
+with `PILOT_PRESET=normal --confidence-level 0.90` (10% CI half-width target,
+autocorrelation tolerance 0.2, ≥ 50 rounds minimum sample size). The tables
+below are parallel runs on:
+
+- Apple M1 Max (`wigner.local`)
 - AMD EPYC 7452 (`moore.soe.ucsc.edu`, single-core slice)
+- Broadcom BCM2712 / Cortex-A76 (`darby.local`, Raspberry Pi 5)
 
 ### AES
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| aes128 | 128 | 128 | 460.2 | ±6.923 | 30 | 230.6 | ±7.088 | 30 |
-| aes128ct | 128 | 128 | 61.2 | ±0.4115 | 121 | 33.75 | ±0.1116 | 67 |
-| aes192 | 128 | 192 | 398.6 | ±5.201 | 75 | 199 | ±1.453 | 77 |
-| aes192ct | 128 | 192 | 51.23 | ±0.2163 | 30 | 28.36 | ±0.09374 | 45 |
-| aes256 | 128 | 256 | 334.5 | ±5.208 | 61 | 174.4 | ±1.294 | 60 |
-| aes256ct | 128 | 256 | 43.34 | ±0.2367 | 30 | 24.41 | ±0.05811 | 58 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| aes128 | 128 | 128 | 356.4 | ±0.9831 | 80 | 235.7 | ±1.829 | 140 | 139.8 | ±0.8045 | 82 |
+| aes128ct | 128 | 128 | 46.17 | ±0.1039 | 320 | 34.02 | ±0.1248 | 50 | 24.23 | ±0.1035 | 170 |
+| aes192 | 128 | 192 | 315.5 | ±0.4863 | 110 | 202.1 | ±2.235 | 50 | 160 | ±0.9786 | 141 |
+| aes192ct | 128 | 192 | 38.12 | ±0.06481 | 80 | 28.54 | ±0.09537 | 50 | 20.21 | ±0.07067 | 50 |
+| aes256 | 128 | 256 | 250.6 | ±0.7166 | 50 | 177.1 | ±2.168 | 50 | 138.8 | ±0.7857 | 50 |
+| aes256ct | 128 | 256 | 32.4 | ±0.04632 | 410 | 24.56 | ±0.08353 | 50 | 17.29 | ±0.01844 | 50 |
 
 ### Camellia
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| camellia128 | 128 | 128 | 139.4 | ±1.527 | 30 | 85.6 | ±0.3457 | 117 |
-| camellia128ct | 128 | 128 | 13.38 | ±0.07387 | 92 | 2.004 | ±0.003011 | 30 |
-| camellia192 | 128 | 192 | 101.9 | ±0.537 | 79 | 63.83 | ±0.2938 | 30 |
-| camellia192ct | 128 | 192 | 4.689 | ±0.06366 | 30 | 1.504 | ±0.002087 | 48 |
-| camellia256 | 128 | 256 | 101.8 | ±0.7546 | 45 | 63.65 | ±0.2809 | 31 |
-| camellia256ct | 128 | 256 | 4.687 | ±0.06364 | 30 | 1.504 | ±0.003277 | 60 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| camellia128 | 128 | 128 | 97.47 | ±0.09227 | 50 | 86.53 | ±0.5178 | 50 | 67.81 | ±0.1235 | 110 |
+| camellia128ct | 128 | 128 | 6.931 | ±0.009323 | 50 | 5.597 | ±0.03744 | 50 | 4.069 | ±0.04814 | 89 |
+| camellia192 | 128 | 192 | 72.04 | ±0.03742 | 110 | 64.47 | ±0.4882 | 50 | 51.04 | ±0.1498 | 111 |
+| camellia192ct | 128 | 192 | 5.186 | ±0.01478 | 268 | 4.21 | ±0.03525 | 50 | 3.062 | ±0.03578 | 53 |
+| camellia256 | 128 | 256 | 71.88 | ±0.05252 | 80 | 64.65 | ±0.3383 | 85 | 51.1 | ±0.4869 | 50 |
+| camellia256ct | 128 | 256 | 5.194 | ±0.01374 | 291 | 4.22 | ±0.07457 | 50 | 3.072 | ±0.004415 | 50 |
 
 ### CAST-128
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| cast128 | 64 | 128 | 310.1 | ±2.876 | 36 | 103.7 | ±0.5374 | 58 |
-| cast128ct | 64 | 128 | 3.965 | ±0.0415 | 30 | 1.825 | ±0.01507 | 30 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| cast128 | 64 | 128 | 159.3 | ±0.1357 | 110 | 105.2 | ±1.108 | 50 | 82.47 | ±0.2638 | 50 |
+| cast128ct | 64 | 128 | 3.177 | ±0.001347 | 260 | 1.793 | ±0.01978 | 50 | 1.232 | ±0.007739 | 50 |
 
 ### DES / 3DES
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| des | 64 | 56 | 78.2 | ±0.3919 | 30 | 54.64 | ±0.7965 | 30 |
-| desct | 64 | 56 | 7.743 | ±0.02073 | 30 | 3.448 | ±0.008777 | 30 |
-| 3des | 64 | 168 | 22.57 | ±0.6182 | 32 | 17.44 | ±0.0762 | 31 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| des | 64 | 56 | 57.25 | ±0.4965 | 50 | 55.1 | ±0.9686 | 50 | 30.34 | ±0.03162 | 170 |
+| desct | 64 | 56 | 6.725 | ±0.02042 | 140 | 3.431 | ±0.02564 | 110 | 3.244 | ±0.05373 | 50 |
+| 3des | 64 | 168 | 17.88 | ±0.008375 | 140 | 17.79 | ±0.09266 | 80 | 12.98 | ±0.004598 | 50 |
 
 ### Grasshopper (GOST R 34.12-2015)
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| grasshopper | 128 | 256 | 25.62 | ±0.09658 | 95 | 12.74 | ±0.05128 | 60 |
-| grasshopperct | 128 | 256 | 4.059 | ±0.05462 | 30 | 1.577 | ±0.002743 | 30 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| grasshopper | 128 | 256 | 21.29 | ±0.02079 | 170 | 12.72 | ±0.0412 | 50 | 8.468 | ±0.01668 | 85 |
+| grasshopperct | 128 | 256 | 4.651 | ±0.00615 | 230 | 3.284 | ±0.01514 | 50 | 2.539 | ±0.0008846 | 138 |
 
 ### Magma (GOST R 34.12-2015)
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| magma | 64 | 256 | 60.38 | ±0.3278 | 90 | 41.29 | ±0.112 | 57 |
-| magmact | 64 | 256 | 14.09 | ±0.1227 | 42 | 6.367 | ±0.01607 | 30 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| magma | 64 | 256 | 37.02 | ±0.0281 | 322 | 41.59 | ±0.1462 | 50 | 35.3 | ±0.02601 | 50 |
+| magmact | 64 | 256 | 8.633 | ±0.003988 | 264 | 6.355 | ±0.008156 | 50 | 4.207 | ±0.004817 | 50 |
 
 ### PRESENT
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| present80 | 64 | 80 | 12.07 | ±0.1417 | 60 | 2.735 | ±0.003738 | 37 |
-| present80ct | 64 | 80 | 3.896 | ±0.02912 | 155 | 1.308 | ±0.003027 | 30 |
-| present128 | 64 | 128 | 12.35 | ±0.2248 | 30 | 2.734 | ±0.004611 | 49 |
-| present128ct | 64 | 128 | 3.966 | ±0.03544 | 30 | 1.306 | ±0.003018 | 60 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| present80 | 64 | 80 | 8.504 | ±0.001738 | 140 | 2.715 | ±0.01966 | 50 | 2.591 | ±0.002261 | 231 |
+| present80ct | 64 | 80 | 3.136 | ±0.005488 | 266 | 1.298 | ±0.006678 | 81 | 0.9516 | ±0.006601 | 50 |
+| present128 | 64 | 128 | 8.49 | ±0.01227 | 382 | 2.721 | ±0.003386 | 50 | 2.588 | ±0.0168 | 100 |
+| present128ct | 64 | 128 | 3.141 | ±0.0007753 | 110 | 1.299 | ±0.00775 | 53 | 0.9535 | ±0.004759 | 50 |
 
 ### SEED
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| seed | 128 | 128 | 71.39 | ±0.2284 | 60 | 46.13 | ±0.1755 | 30 |
-| seedct | 128 | 128 | 9.504 | ±0.01974 | 30 | 1.491 | ±0.002914 | 45 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| seed | 128 | 128 | 47.61 | ±0.05084 | 50 | 46.36 | ±0.1403 | 58 | 37.62 | ±0.02907 | 80 |
+| seedct | 128 | 128 | 5.891 | ±0.2516 | 57 | 4.112 | ±0.03756 | 80 | 3.082 | ±0.0006498 | 212 |
 
 ### Serpent
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| serpent128 | 128 | 128 | 10.83 | ±0.04038 | 30 | 4.751 | ±0.01487 | 30 |
-| serpent128ct | 128 | 128 | 7.03 | ±0.02025 | 32 | 1.851 | ±0.003566 | 88 |
-| serpent192 | 128 | 192 | 10.86 | ±0.03361 | 51 | 4.73 | ±0.01376 | 30 |
-| serpent192ct | 128 | 192 | 7.008 | ±0.1108 | 30 | 1.848 | ±0.00389 | 70 |
-| serpent256 | 128 | 256 | 10.83 | ±0.04685 | 44 | 4.733 | ±0.01293 | 60 |
-| serpent256ct | 128 | 256 | 6.991 | ±0.01398 | 104 | 1.849 | ±0.002784 | 50 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| serpent128 | 128 | 128 | 8.632 | ±0.01872 | 290 | 4.743 | ±0.007977 | 110 | 3.494 | ±0.0109 | 50 |
+| serpent128ct | 128 | 128 | 5.83 | ±0.02114 | 144 | 1.844 | ±0.001824 | 81 | 2.207 | ±0.02392 | 84 |
+| serpent192 | 128 | 192 | 8.643 | ±0.002149 | 110 | 4.736 | ±0.008116 | 82 | 3.495 | ±0.004474 | 80 |
+| serpent192ct | 128 | 192 | 5.842 | ±0.002745 | 200 | 1.844 | ±0.001803 | 50 | 2.214 | ±0.00753 | 113 |
+| serpent256 | 128 | 256 | 8.621 | ±0.03315 | 204 | 4.737 | ±0.006896 | 81 | 3.496 | ±0.004042 | 170 |
+| serpent256ct | 128 | 256 | 5.838 | ±0.01326 | 117 | 1.849 | ±0.001933 | 50 | 2.217 | ±0.00282 | 54 |
 
 ### SM4
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| sm4 | 128 | 128 | 185.6 | ±1.638 | 150 | 128.2 | ±0.9843 | 30 |
-| sm4ct | 128 | 128 | 13.53 | ±0.04346 | 127 | 2.24 | ±0.005738 | 30 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| sm4 | 128 | 128 | 151.1 | ±0.1664 | 110 | 127 | ±0.4938 | 50 | 92.68 | ±0.3086 | 50 |
+| sm4ct | 128 | 128 | 6.969 | ±0.004205 | 119 | 6.51 | ±0.01012 | 50 | 4.518 | ±0.002819 | 50 |
 
 ### Twofish
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| twofish128 | 128 | 128 | 14.55 | ±0.09168 | 31 | 9.156 | ±0.171 | 30 |
-| twofish128ct | 128 | 128 | 2.702 | ±0.005262 | 30 | 1.12 | ±0.00286 | 60 |
-| twofish192 | 128 | 192 | 14.34 | ±0.2681 | 90 | 8.111 | ±0.07719 | 45 |
-| twofish192ct | 128 | 192 | 2.323 | ±0.02819 | 165 | 0.8461 | ±0.01275 | 31 |
-| twofish256 | 128 | 256 | 13.94 | ±0.03303 | 70 | 7.167 | ±0.06002 | 55 |
-| twofish256ct | 128 | 256 | 2.034 | ±0.005795 | 60 | 0.6832 | ±0.001777 | 37 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| twofish128 | 128 | 128 | 9.738 | ±0.005917 | 110 | 8.534 | ±0.05697 | 50 | 3.008 | ±0.03873 | 265 |
+| twofish128ct | 128 | 128 | 1.559 | ±0.005333 | 50 | 1.114 | ±0.004214 | 84 | 0.8263 | ±0.00348 | 50 |
+| twofish192 | 128 | 192 | 8.932 | ±0.003328 | 110 | 7.491 | ±0.04178 | 50 | 2.967 | ±0.0009436 | 50 |
+| twofish192ct | 128 | 192 | 1.252 | ±0.001759 | 140 | 0.8459 | ±0.002061 | 50 | 0.6786 | ±0.005858 | 50 |
+| twofish256 | 128 | 256 | 8.189 | ±0.03009 | 170 | 6.355 | ±0.03226 | 80 | 2.911 | ±0.001273 | 50 |
+| twofish256ct | 128 | 256 | 1.045 | ±0.004595 | 194 | 0.6793 | ±0.005783 | 50 | 0.5782 | ±0.001756 | 50 |
 
 ### Simon
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| simon32_64 | 32 | 64 | 82.52 | ±0.3267 | 32 | 51.64 | ±0.1995 | 32 |
-| simon48_72 | 48 | 72 | 105.3 | ±0.5297 | 60 | 68.16 | ±0.2938 | 31 |
-| simon48_96 | 48 | 96 | 105.8 | ±0.5125 | 60 | 68.34 | ±0.3193 | 30 |
-| simon64_96 | 64 | 96 | 138.7 | ±0.882 | 61 | 88.03 | ±0.4782 | 39 |
-| simon64_128 | 64 | 128 | 131.2 | ±0.6786 | 60 | 84.18 | ±0.4384 | 30 |
-| simon96_96 | 96 | 96 | 134 | ±0.626 | 48 | 90.93 | ±0.4078 | 34 |
-| simon96_144 | 96 | 144 | 128.6 | ±0.5692 | 33 | 87.8 | ±0.4553 | 30 |
-| simon128_128 | 128 | 128 | 244.3 | ±1.738 | 30 | 137.6 | ±0.7216 | 113 |
-| simon128_192 | 128 | 192 | 239.5 | ±1.748 | 30 | 137.3 | ±0.8945 | 30 |
-| simon128_256 | 128 | 256 | 228.2 | ±1.336 | 54 | 129.7 | ±0.7399 | 30 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| simon32_64 | 32 | 64 | 58.66 | ±0.0704 | 170 | 52.11 | ±0.1861 | 52 | 43.36 | ±0.03966 | 110 |
+| simon48_72 | 48 | 72 | 75.62 | ±0.1634 | 50 | 68.91 | ±0.3342 | 53 | 44.61 | ±0.2145 | 80 |
+| simon48_96 | 48 | 96 | 75.72 | ±0.05977 | 110 | 68.84 | ±0.2542 | 110 | 56.34 | ±0.09593 | 590 |
+| simon64_96 | 64 | 96 | 97.83 | ±0.1002 | 50 | 89.19 | ±0.4715 | 50 | 74.96 | ±0.2704 | 50 |
+| simon64_128 | 64 | 128 | 92.56 | ±0.07547 | 80 | 85.35 | ±0.3437 | 80 | 71.72 | ±0.175 | 80 |
+| simon96_96 | 96 | 96 | 96.89 | ±0.1023 | 200 | 91.99 | ±0.4026 | 50 | 74.97 | ±0.1697 | 110 |
+| simon96_144 | 96 | 144 | 92.97 | ±0.05825 | 140 | 85.64 | ±0.5421 | 50 | 72.31 | ±0.1722 | 50 |
+| simon128_128 | 128 | 128 | 179 | ±0.1919 | 50 | 139.7 | ±0.9062 | 84 | 141.2 | ±0.7199 | 80 |
+| simon128_192 | 128 | 192 | 174.4 | ±0.9633 | 50 | 139.5 | ±0.5422 | 50 | 139.1 | ±0.6279 | 80 |
+| simon128_256 | 128 | 256 | 166.5 | ±0.3014 | 50 | 132.4 | ±0.5397 | 83 | 134.4 | ±0.5315 | 58 |
 
 ### Speck
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| speck32_64 | 32 | 64 | 202.6 | ±1.301 | 66 | 102.4 | ±0.4766 | 47 |
-| speck48_72 | 48 | 72 | 296.7 | ±1.755 | 30 | 150.6 | ±1.134 | 30 |
-| speck48_96 | 48 | 96 | 260.5 | ±1.68 | 36 | 140.6 | ±0.8969 | 40 |
-| speck64_96 | 64 | 96 | 311.8 | ±2.333 | 60 | 208.6 | ±1.478 | 47 |
-| speck64_128 | 64 | 128 | 297.5 | ±1.487 | 57 | 204.9 | ±1.873 | 35 |
-| speck96_96 | 96 | 96 | 379.4 | ±2.337 | 41 | 204.3 | ±1.833 | 30 |
-| speck96_144 | 96 | 144 | 362.9 | ±2.695 | 46 | 201.9 | ±1.551 | 60 |
-| speck128_128 | 128 | 128 | 925.5 | ±7.761 | 55 | 407.8 | ±6.654 | 128 |
-| speck128_192 | 128 | 192 | 895.7 | ±6.574 | 84 | 394.8 | ±6.199 | 60 |
-| speck128_256 | 128 | 256 | 866.1 | ±9.775 | 30 | 383.3 | ±5.291 | 36 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| speck32_64 | 32 | 64 | 141.9 | ±0.1727 | 50 | 103.2 | ±0.4277 | 51 | 68.43 | ±0.1763 | 50 |
+| speck48_72 | 48 | 72 | 213 | ±0.4183 | 260 | 153.7 | ±1.497 | 50 | 100 | ±0.3182 | 110 |
+| speck48_96 | 48 | 96 | 173.2 | ±0.3022 | 170 | 142.6 | ±1.391 | 50 | 106.7 | ±0.3557 | 86 |
+| speck64_96 | 64 | 96 | 193.5 | ±0.2764 | 80 | 213.1 | ±1.807 | 50 | 113.8 | ±0.4108 | 50 |
+| speck64_128 | 64 | 128 | 184.7 | ±0.2486 | 81 | 208.3 | ±2.982 | 50 | 109.6 | ±0.4366 | 54 |
+| speck96_96 | 96 | 96 | 252.2 | ±0.3605 | 50 | 209.6 | ±1.315 | 80 | 161.7 | ±0.9923 | 173 |
+| speck96_144 | 96 | 144 | 241.7 | ±0.3399 | 50 | 205.5 | ±1.838 | 140 | 156.3 | ±2.924 | 175 |
+| speck128_128 | 128 | 128 | 700.8 | ±0.8438 | 50 | 413.3 | ±7.241 | 50 | 207.2 | ±1.591 | 200 |
+| speck128_192 | 128 | 192 | 669 | ±2.187 | 80 | 401.4 | ±6.254 | 50 | 202.9 | ±3.498 | 290 |
+| speck128_256 | 128 | 256 | 642.9 | ±0.901 | 140 | 392.9 | ±9.408 | 50 | 200.4 | ±1.628 | 230 |
 
 ### Stream ciphers
 
-| Cipher | Block | Key | M4 Pro MB/s | M4 Pro ± CI | M4 Pro Runs | AMD EPYC 7452 MB/s | AMD EPYC 7452 ± CI | AMD EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| chacha20 | stream | 256 | 775.9 | ±8.859 | 39 | 414.6 | ±7.206 | 31 |
-| xchacha20 | stream | 256 | 778.9 | ±11.46 | 30 | 417.9 | ±5.124 | 38 |
-| salsa20 | stream | 256 | 790.5 | ±10.37 | 35 | 406.6 | ±6.389 | 43 |
-| rabbit | stream | 128 | 1401 | ±49.8 | 37 | 400.1 | ±5.626 | 30 |
-| snow3g | stream | 128 | 499.9 | ±5.939 | 45 | 272.7 | ±2.918 | 30 |
-| snow3gct | stream | 128 | 59.22 | ±0.1654 | 47 | 6.921 | ±0.0157 | 120 |
-| zuc128 | stream | 128 | 521.3 | ±5.939 | 127 | 266 | ±1.998 | 120 |
-| zuc128ct | stream | 128 | 61.53 | ±0.2327 | 48 | 8.859 | ±0.02948 | 30 |
+| Cipher | Block | Key | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| chacha20 | stream | 256 | 537.6 | ±8.841 | 170 | 416.5 | ±13.17 | 55 | 229.3 | ±2.632 | 141 |
+| xchacha20 | stream | 256 | 565.9 | ±0.8631 | 110 | 421.4 | ±9.901 | 50 | 229.7 | ±3.133 | 85 |
+| salsa20 | stream | 256 | 544.3 | ±0.8385 | 230 | 414.9 | ±5.487 | 50 | 387.5 | ±3.457 | 621 |
+| rabbit | stream | 128 | 998.2 | ±1.742 | 80 | 498.1 | ±24.29 | 50 | 343.6 | ±5.432 | 50 |
+| snow3g | stream | 128 | 336.8 | ±0.5364 | 50 | 277.2 | ±2.431 | 140 | 224.7 | ±4.484 | 294 |
+| snow3gct | stream | 128 | 39.37 | ±0.7302 | 170 | 24.05 | ±0.05734 | 80 | 17.31 | ±0.01423 | 80 |
+| zuc128 | stream | 128 | 366.2 | ±0.228 | 410 | 262.8 | ±7.309 | 50 | 229.1 | ±1.296 | 507 |
+| zuc128ct | stream | 128 | 39.65 | ±0.09218 | 170 | 25.08 | ±0.1789 | 80 | 17.76 | ±0.02297 | 50 |
+### Hash and XOF throughput
 
-Cross-platform summary Kiviat diagram (radar chart):
+`pilot_hash` reports the same MB/s shape as `pilot_cipher`, absorbing a
+fixed input per round and finalizing into a hash digest or squeezing a
+fixed-size XOF output. SHAKE128 / SHAKE256 squeeze 32 bytes per round so the
+per-byte input cost dominates.
 
-![Symmetric platform Kiviat diagram (radar chart)](assets/symmetric-platform-radar.svg)
+### MD5 / SHA-1 / RIPEMD-160 (legacy)
 
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| md5 | 128 | 265.5 | ±0.4472 | 80 | 407.6 | ±9.286 | 50 | 171.7 | ±0.8412 | 110 |
+| sha1 | 160 | 212.6 | ±0.3821 | 50 | 276 | ±10.76 | 52 | 127.9 | ±0.6307 | 115 |
+| ripemd160 | 160 | 276.1 | ±0.6673 | 85 | 135.1 | ±2.878 | 50 | 69.97 | ±0.2279 | 290 |
+
+### SHA-2 (FIPS 180-4)
+
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| sha224 | 224 | 194.5 | ±0.3132 | 50 | 210.8 | ±4.164 | 80 | 115.7 | ±0.5723 | 50 |
+| sha256 | 256 | 183.4 | ±9.603 | 170 | 213.4 | ±3.165 | 50 | 115.7 | ±0.4852 | 170 |
+| sha384 | 384 | 296.2 | ±0.2573 | 143 | 331.8 | ±5.48 | 80 | 183.3 | ±0.8976 | 140 |
+| sha512 | 512 | 295.7 | ±0.4227 | 50 | 330.8 | ±5.068 | 140 | 183.2 | ±1.346 | 50 |
+| sha512_224 | 224 | 282.5 | ±3.542 | 50 | 327.5 | ±10.29 | 50 | 183.2 | ±1.086 | 142 |
+| sha512_256 | 256 | 294.3 | ±2.018 | 170 | 332.5 | ±2.884 | 80 | 182.7 | ±1.394 | 80 |
+
+### SHA-3 (FIPS 202)
+
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| sha3_224 | 224 | 355.4 | ±1.02 | 140 | 321.1 | ±6.156 | 55 | 79.26 | ±0.2791 | 80 |
+| sha3_256 | 256 | 334.7 | ±0.5567 | 50 | 299.9 | ±6.291 | 54 | 94.73 | ±0.4218 | 170 |
+| sha3_384 | 384 | 258.5 | ±0.387 | 50 | 233.4 | ±4.093 | 80 | 72.56 | ±0.2045 | 200 |
+| sha3_512 | 512 | 180.7 | ±0.3678 | 50 | 164.3 | ±2.234 | 51 | 50.33 | ±0.1565 | 50 |
+
+### SHAKE XOFs (FIPS 202; 32-byte squeeze)
+
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| shake128 | xof | 413 | ±1.212 | 50 | 370.7 | ±4.559 | 140 | 116.2 | ±1.12 | 50 |
+| shake256 | xof | 336.3 | ±0.7572 | 50 | 302.2 | ±5.264 | 140 | 94.53 | ±0.5017 | 50 |
+Cross-platform summary Kiviat diagrams (radar charts; log-radial axis,
+outer ring = faster):
+
+![Symmetric throughput Kiviat (Wigner / Moore / Darby)](assets/sweep-2026-05-08-symmetric-radar.svg)
+
+![Hash throughput Kiviat (Wigner / Moore / Darby)](assets/sweep-2026-05-08-hash-radar.svg)
 The Kiviat diagram (radar chart) below compares representative fast-vs-`Ct`
 pairs across
 table-driven ciphers. Simon and Speck are absent because their designs are

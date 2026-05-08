@@ -231,10 +231,10 @@ identical `keygen`, `encaps`, `decaps` shapes; only the byte sizes change.
 | ML-KEM-1024 | NIST 5 | 1 568 | 3 168 | 1 568 | 32 |
 
 **Throughput across parameter sets and platforms** — each axis is an operation
-(keygen / encaps / decaps) for one parameter set; outer ring = faster. ±95% CI
+(keygen / encaps / decaps) for one parameter set; outer ring = faster. ±90% CI
 half-widths are in the benchmark tables below.
 
-![ML-KEM throughput radar](assets/mlkem-platform-radar.svg)
+![ML-KEM throughput radar (Wigner / Moore / Darby)](assets/sweep-2026-05-08-mlkem-radar.svg)
 
 ### ML-DSA: Security vs. Cost
 
@@ -249,7 +249,7 @@ half-widths are in the benchmark tables below.
 **Throughput across parameter sets and platforms** — each axis is an operation
 (keygen / sign / verify) for one parameter set; outer ring = faster.
 
-![ML-DSA throughput radar](assets/mldsa-platform-radar.svg)
+![ML-DSA throughput radar (Wigner / Moore / Darby)](assets/sweep-2026-05-08-mldsa-radar.svg)
 
 ### NTRU: Security vs. Cost
 
@@ -303,90 +303,102 @@ noise.
 
 ## Benchmarks
 
-Measured with [pilot-bench](https://github.com/ascar-io/pilot-bench) via:
+Measured with [pilot-bench](https://github.com/darrelllong/pilot-bench) via:
 
 ```text
 bash scripts/bench_all_pk_full.sh
 ```
 
-Numbers below are `ms/op`, with 95% CI half-width and rounds run.
+Numbers below are `ms/op`, with **90%** CI half-width and rounds run. The
+2026-05-08 sweep used `PILOT_PRESET=normal --confidence-level 0.90` (10% CI
+half-width target, autocorrelation tolerance 0.2, ≥ 50 rounds minimum sample
+size). The tables below are parallel runs on:
 
 - Apple M1 Max (`wigner.local`)
 - AMD EPYC 7452 (`moore.soe.ucsc.edu`, single-core slice)
+- Broadcom BCM2712 / Cortex-A76 (`darby.local`, Raspberry Pi 5)
 
 ### ML-KEM (Kyber)
 
-| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|
-| mlkem512_keygen | 0.01947 | ±2.831e-05 | 90 | 0.02968 | ±9.867e-05 | 31 |
-| mlkem512_encaps | 0.01937 | ±0.0001085 | 61 | 0.03102 | ±0.0001033 | 60 |
-| mlkem512_decaps | 0.01935 | ±5.455e-05 | 137 | 0.03489 | ±0.0002393 | 60 |
-| mlkem768_keygen | 0.03204 | ±4.69e-05 | 74 | 0.04913 | ±0.000296 | 30 |
-| mlkem768_encaps | 0.03123 | ±3.038e-05 | 162 | 0.05036 | ±0.001314 | 30 |
-| mlkem768_decaps | 0.03189 | ±0.000216 | 150 | 0.05708 | ±0.003447 | 40 |
-| mlkem1024_keygen | 0.05098 | ±0.0001014 | 240 | 0.07745 | ±0.0002653 | 30 |
-| mlkem1024_encaps | 0.04864 | ±4.308e-05 | 120 | 0.07629 | ±0.0002343 | 30 |
-| mlkem1024_decaps | 0.04946 | ±5.068e-05 | 30 | 0.08396 | ±0.0001918 | 30 |
+| Operation | Wigner (M1 Max) ms/op | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) ms/op | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) ms/op | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|
+| `mlkem512_keygen` | 0.01703 | ±7.847e-05 | 50 | 0.02536 | ±5.482e-05 | 80 | 0.05291 | ±0.0002066 | 50 |
+| `mlkem512_encaps` | 0.01612 | ±2.431e-05 | 50 | 0.02665 | ±0.0006511 | 50 | 0.05284 | ±0.0001552 | 116 |
+| `mlkem512_decaps` | 0.01639 | ±1.773e-05 | 80 | 0.02991 | ±0.0003324 | 50 | 0.05606 | ±0.0001612 | 142 |
+| `mlkem768_keygen` | 0.02779 | ±7.227e-05 | 50 | 0.04218 | ±0.0003994 | 110 | 0.08631 | ±0.0003145 | 50 |
+| `mlkem768_encaps` | 0.02594 | ±2.154e-05 | 296 | 0.0419 | ±0.0001054 | 50 | 0.08728 | ±0.0003385 | 80 |
+| `mlkem768_decaps` | 0.02654 | ±9.472e-05 | 110 | 0.04684 | ±9.01e-05 | 50 | 0.0914 | ±0.0002707 | 50 |
+| `mlkem1024_keygen` | 0.0439 | ±6.454e-05 | 80 | 0.06593 | ±0.0007346 | 50 | 0.137 | ±0.0004361 | 50 |
+| `mlkem1024_encaps` | 0.03975 | ±6.822e-05 | 80 | 0.06373 | ±0.0002676 | 50 | 0.1364 | ±0.0004771 | 50 |
+| `mlkem1024_decaps` | 0.04065 | ±3.935e-05 | 110 | 0.07061 | ±0.0001176 | 56 | 0.1428 | ±0.0003117 | 110 |
 
 ### ML-DSA (Dilithium)
 
-| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|
-| mldsa44_keygen | 0.07784 | ±0.002088 | 60 | 0.1142 | ±0.0002587 | 60 |
-| mldsa44_sign | 0.2071 | ±0.0006633 | 350 | 0.4592 | ±0.0006615 | 41 |
-| mldsa44_verify | 0.07184 | ±0.000123 | 152 | 0.119 | ±0.00325 | 30 |
-| mldsa65_keygen | 0.1379 | ±0.0002734 | 157 | 0.2068 | ±0.001588 | 30 |
-| mldsa65_sign | 0.3587 | ±0.05607 | 30 | 0.7465 | ±0.001896 | 37 |
-| mldsa65_verify | 0.1214 | ±0.001442 | 181 | 0.1893 | ±0.000978 | 30 |
-| mldsa87_keygen | 0.2101 | ±0.0001558 | 65 | 0.3138 | ±0.009709 | 30 |
-| mldsa87_sign | 0.4731 | ±0.001884 | 156 | 1.019 | ±0.00348 | 30 |
-| mldsa87_verify | 0.207 | ±0.0003116 | 151 | 0.3107 | ±0.001124 | 40 |
+| Operation | Wigner (M1 Max) ms/op | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) ms/op | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) ms/op | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|
+| `mldsa44_keygen` | 0.06385 | ±0.0001583 | 50 | 0.09451 | ±0.0001812 | 110 | 0.2791 | ±0.0003247 | 320 |
+| `mldsa44_sign` | 0.1572 | ±7.018e-05 | 50 | 0.3812 | ±0.001324 | 50 | 0.5605 | ±0.0003453 | 80 |
+| `mldsa44_verify` | 0.01678 | ±4.972e-05 | 111 | 0.03896 | ±0.000121 | 80 | 0.06158 | ±0.0008716 | 50 |
+| `mldsa65_keygen` | 0.1179 | ±0.0002556 | 80 | 0.1692 | ±0.001079 | 110 | 0.3735 | ±0.0008862 | 50 |
+| `mldsa65_sign` | 0.2659 | ±0.0004532 | 50 | 0.6691 | ±0.001186 | 80 | 0.9478 | ±0.003496 | 50 |
+| `mldsa65_verify` | 0.02498 | ±0.0003743 | 50 | 0.05598 | ±0.0001238 | 591 | 0.08762 | ±0.000738 | 140 |
+| `mldsa87_keygen` | 0.1726 | ±0.0002285 | 410 | 0.2448 | ±0.0007543 | 50 | 0.596 | ±0.0009311 | 52 |
+| `mldsa87_sign` | 0.168 | ±0.0001701 | 170 | 0.4168 | ±0.001193 | 52 | 0.5985 | ±0.0009905 | 170 |
+| `mldsa87_verify` | 0.03707 | ±0.000108 | 110 | 0.08329 | ±0.0002082 | 80 | 0.1371 | ±0.000586 | 110 |
 
 ### NTRU (NIST PQC round 3)
 
-| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|
-| ntruhps509_keygen   | 0.9587  | ±0.007179  |  60 | 1.264  | ±0.00275   |  30 |
-| ntruhps509_encaps   | 0.07949 | ±0.000565  |  30 | 0.1064 | ±0.0003404 |  90 |
-| ntruhps509_decaps   | 0.1355  | ±0.003243  |  34 | 0.152  | ±0.0004813 |  42 |
-| ntruhps677_keygen   | 1.073   | ±0.009453  | 102 | 1.769  | ±0.004486  |  44 |
-| ntruhps677_encaps   | 0.08488 | ±0.0007114 |  94 | 0.135  | ±0.0004764 |  49 |
-| ntruhps677_decaps   | 0.1006  | ±0.002053  |  43 | 0.1537 | ±0.001519  |  30 |
-| ntruhps821_keygen   | 2.288   | ±0.003679  | 120 | 2.864  | ±0.1528    |  30 |
-| ntruhps821_encaps   | 0.159   | ±0.0006922 |  38 | 0.1969 | ±0.0004668 |  30 |
-| ntruhps821_decaps   | 0.2871  | ±0.001907  |  35 | 0.2822 | ±0.001327  |  30 |
-| ntruhrss701_keygen  | 1.198   | ±0.03817   |  90 | 1.843  | ±0.0879    |  30 |
-| ntruhrss701_encaps  | 0.04527 | ±0.0007903 |  53 | 0.06832 | ±0.001074 |  39 |
-| ntruhrss701_decaps  | 0.1123  | ±0.003495  |  30 | 0.1693 | ±0.001493  |  30 |
+| Operation | Wigner (M1 Max) ms/op | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) ms/op | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) ms/op | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|
+| `ntruhps509_keygen` | 1.002 | ±0.04583 | 50 | 1.278 | ±0.002711 | 58 | 2.296 | ±0.002031 | 50 |
+| `ntruhps509_encaps` | 0.08268 | ±0.003083 | 50 | 0.1069 | ±0.0004561 | 50 | 0.1729 | ±0.0003729 | 80 |
+| `ntruhps509_decaps` | 0.1455 | ±0.0106 | 50 | 0.156 | ±0.001382 | 110 | 0.2853 | ±0.001599 | 50 |
+| `ntruhps677_keygen` | 1.219 | ±0.01126 | 320 | 1.798 | ±0.007316 | 53 | 3.042 | ±0.004702 | 87 |
+| `ntruhps677_encaps` | 0.08707 | ±0.0007503 | 50 | 0.1333 | ±0.001523 | 50 | 0.2079 | ±0.0009669 | 50 |
+| `ntruhps677_decaps` | 0.1052 | ±0.002519 | 80 | 0.1591 | ±0.000419 | 260 | 0.2803 | ±0.0004506 | 80 |
+| `ntruhps821_keygen` | 2.366 | ±0.07834 | 50 | 2.814 | ±0.01177 | 50 | 5.117 | ±0.008321 | 80 |
+| `ntruhps821_encaps` | 0.1762 | ±0.009012 | 80 | 0.1937 | ±0.0004173 | 80 | 0.3065 | ±0.0007033 | 50 |
+| `ntruhps821_decaps` | 0.3096 | ±0.01153 | 52 | 0.279 | ±0.0006073 | 80 | 0.4914 | ±0.001814 | 140 |
+| `ntruhrss701_keygen` | 1.28 | ±0.09556 | 50 | 1.904 | ±0.01062 | 54 | 3.57 | ±0.007388 | 50 |
+| `ntruhrss701_encaps` | 0.04845 | ±0.001142 | 50 | 0.06901 | ±0.004323 | 50 | 0.1175 | ±0.0003305 | 50 |
+| `ntruhrss701_decaps` | 0.1234 | ±0.002806 | 54 | 0.1691 | ±0.0004149 | 112 | 0.3118 | ±0.0004736 | 85 |
 
 ### NTRUEncrypt (IEEE Std 1363.1-2008)
 
-| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
-|---|---:|---:|---:|---:|---:|---:|
-| ntruees401ep1_keygen  | 0.7387  | ±0.004256  |  90 | 0.9273 | ±0.001791  |  37 |
-| ntruees401ep1_encrypt | 0.09144 | ±0.0003451 | 128 | 0.09403 | ±0.0005089 | 30 |
-| ntruees401ep1_decrypt | 0.1281  | ±0.0002626 |  51 | 0.1447 | ±0.0007402 |  98 |
-| ntruees443ep1_keygen  | 0.6759  | ±0.005047  | 101 | 1.203  | ±0.04758   |  30 |
-| ntruees443ep1_encrypt | 0.0367  | ±0.0001335 |  30 | 0.05629 | ±0.008363 |  30 |
-| ntruees443ep1_decrypt | 0.03739 | ±0.0001561 |  34 | 0.07494 | ±0.001655  |  30 |
-| ntruees449ep1_keygen  | 0.8699  | ±0.002396  |  90 | 1.105  | ±0.001782  |  66 |
-| ntruees449ep1_encrypt | 0.1267  | ±0.0001983 |  80 | 0.1342 | ±0.0004829 |  30 |
-| ntruees449ep1_decrypt | 0.1583  | ±0.0002213 |  57 | 0.1859 | ±0.01549   |  66 |
-| ntruees541ep1_keygen  | 3.943   | ±0.001493  |  62 | 6.611  | ±0.03802   |  30 |
-| ntruees541ep1_encrypt | 0.0634  | ±0.0002309 |  60 | 0.1025 | ±0.001393  |  30 |
-| ntruees541ep1_decrypt | 0.08225 | ±0.001326  |  30 | 0.1611 | ±0.003461  |  30 |
-| ntruees677ep1_keygen  | 1.105   | ±0.007408  | 120 | 1.585  | ±0.01588   |  32 |
-| ntruees677ep1_encrypt | 0.1629  | ±0.0003894 |  83 | 0.1774 | ±0.0005738 |  39 |
-| ntruees677ep1_decrypt | 0.2565  | ±0.0001352 |  60 | 0.3007 | ±0.0005775 | 180 |
-| ntruees1087ep1_keygen  | 1.672  | ±0.007268  |  74 | 3.626  | ±0.1565    |  30 |
-| ntruees1087ep1_encrypt | 0.1275 | ±0.0006563 |  30 | 0.2261 | ±0.01739   |  30 |
-| ntruees1087ep1_decrypt | 0.1822 | ±0.002804  |  99 | 0.2094 | ±0.01477   |  73 |
-| ntruees1087ep2_keygen  | 1.775  | ±0.003781  |  60 | 3.817  | ±0.09981   |  30 |
-| ntruees1087ep2_encrypt | 0.2016 | ±0.0006128 |  30 | 0.3872 | ±0.04044   |  30 |
-| ntruees1087ep2_decrypt | 0.3114 | ±0.0002275 | 150 | 0.6716 | ±0.01087   |  38 |
-| ntruees1499ep1_keygen  | 2.861  | ±0.02228   |  90 | 6.380  | ±0.1801    |  83 |
-| ntruees1499ep1_encrypt | 0.1986 | ±0.0005877 |  60 | 0.3014 | ±0.04331   | 213 |
-| ntruees1499ep1_decrypt | 0.2888 | ±0.001113  |  30 | 0.6236 | ±0.01522   | 103 |
+| Operation | Wigner (M1 Max) ms/op | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) ms/op | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) ms/op | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|
+| `ntruees401ep1_keygen` | 0.7645 | ±0.005618 | 140 | 0.9366 | ±0.002872 | 50 | 1.343 | ±0.02541 | 53 |
+| `ntruees401ep1_encrypt` | 0.1008 | ±0.001312 | 171 | 0.1091 | ±0.004532 | 80 | 0.2898 | ±0.0009549 | 80 |
+| `ntruees401ep1_decrypt` | 0.1385 | ±0.0003355 | 177 | 0.1582 | ±0.00105 | 81 | 0.4851 | ±0.002529 | 170 |
+| `ntruees443ep1_keygen` | 0.7524 | ±0.02073 | 80 | 0.862 | ±0.02262 | 50 | 1.308 | ±0.002847 | 110 |
+| `ntruees443ep1_encrypt` | 0.04354 | ±0.0005677 | 110 | 0.04403 | ±0.0003447 | 80 | 0.07591 | ±0.0006669 | 260 |
+| `ntruees443ep1_decrypt` | 0.04295 | ±0.0004111 | 57 | 0.04917 | ±0.0003307 | 50 | 0.105 | ±0.0005188 | 50 |
+| `ntruees449ep1_keygen` | 0.9509 | ±0.01351 | 50 | 1.113 | ±0.00314 | 50 | 1.624 | ±0.001674 | 50 |
+| `ntruees449ep1_encrypt` | 0.1449 | ±0.0002934 | 140 | 0.1545 | ±0.003887 | 50 | 0.3414 | ±0.0007413 | 50 |
+| `ntruees449ep1_decrypt` | 0.1771 | ±0.002304 | 50 | 0.1991 | ±0.001424 | 382 | 0.4925 | ±0.0007877 | 50 |
+| `ntruees541ep1_keygen` | 0.7433 | ±0.002493 | 53 | 1.044 | ±0.02334 | 50 | 1.375 | ±0.002495 | 50 |
+| `ntruees541ep1_encrypt` | 0.07745 | ±0.000181 | 50 | 0.07411 | ±0.0007479 | 112 | 0.1992 | ±0.0009162 | 561 |
+| `ntruees541ep1_decrypt` | 0.09241 | ±0.001237 | 52 | 0.0998 | ±0.0008372 | 140 | 0.2991 | ±0.0006596 | 50 |
+| `ntruees677ep1_keygen` | 1.203 | ±0.01825 | 50 | 1.585 | ±0.009279 | 50 | 2.373 | ±0.001855 | 140 |
+| `ntruees677ep1_encrypt` | 0.1819 | ±0.002014 | 140 | 0.2004 | ±0.002973 | 55 | 0.464 | ±0.003442 | 50 |
+| `ntruees677ep1_decrypt` | 0.2825 | ±0.002102 | 80 | 0.3248 | ±0.003849 | 50 | 0.828 | ±0.0008432 | 50 |
+| `ntruees1087ep1_keygen` | 1.76 | ±0.005377 | 176 | 2.649 | ±0.06399 | 50 | 3.701 | ±0.002887 | 80 |
+| `ntruees1087ep1_encrypt` | 0.141 | ±0.0002315 | 260 | 0.1547 | ±0.0009354 | 50 | 0.3323 | ±0.0005843 | 110 |
+| `ntruees1087ep1_decrypt` | 0.1835 | ±0.0003071 | 230 | 0.2254 | ±0.0009941 | 80 | 0.564 | ±0.00616 | 80 |
+| `ntruees1087ep2_keygen` | 1.869 | ±0.007425 | 110 | 2.764 | ±0.007286 | 56 | 3.843 | ±0.002942 | 140 |
+| `ntruees1087ep2_encrypt` | 0.2148 | ±0.0006427 | 50 | 0.244 | ±0.0009286 | 50 | 0.5671 | ±0.001289 | 201 |
+| `ntruees1087ep2_decrypt` | 0.3325 | ±0.001221 | 209 | 0.3946 | ±0.001984 | 80 | 1.014 | ±0.001434 | 80 |
+| `ntruees1499ep1_keygen` | 3.114 | ±0.01771 | 170 | 4.314 | ±0.01051 | 80 | 7.366 | ±0.004614 | 147 |
+| `ntruees1499ep1_encrypt` | 0.211 | ±0.000396 | 233 | 0.2415 | ±0.001777 | 80 | 0.5393 | ±0.001081 | 50 |
+| `ntruees1499ep1_decrypt` | 0.3017 | ±0.0002866 | 50 | 0.3725 | ±0.002614 | 50 | 0.9457 | ±0.008248 | 50 |
+Per-scheme cross-platform Kiviat diagrams (radar charts; log-radial ops/sec
+axis, outer ring = faster):
+
+![ML-KEM Kiviat (Wigner / Moore / Darby)](assets/sweep-2026-05-08-mlkem-radar.svg)
+
+![ML-DSA Kiviat (Wigner / Moore / Darby)](assets/sweep-2026-05-08-mldsa-radar.svg)
+
+![NTRU Kiviat (Wigner / Moore / Darby)](assets/sweep-2026-05-08-ntru-radar.svg)
 
 ## Benchmark Discussion
 
