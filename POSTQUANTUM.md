@@ -349,6 +349,9 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 | ntruees677ep1_keygen  | 1.105   | ±0.007408  | 120 | 1.585  | ±0.01588   |  32 |
 | ntruees677ep1_encrypt | 0.1629  | ±0.0003894 |  83 | 0.1774 | ±0.0005738 |  39 |
 | ntruees677ep1_decrypt | 0.2565  | ±0.0001352 |  60 | 0.3007 | ±0.0005775 | 180 |
+| ntruees1087ep2_keygen  | 1.775  | ±0.003781  |  60 | 3.817  | ±0.09981   |  30 |
+| ntruees1087ep2_encrypt | 0.2016 | ±0.0006128 |  30 | 0.3872 | ±0.04044   |  30 |
+| ntruees1087ep2_decrypt | 0.3114 | ±0.0002275 | 150 | 0.6716 | ±0.01087   |  38 |
 
 ## Benchmark Discussion
 

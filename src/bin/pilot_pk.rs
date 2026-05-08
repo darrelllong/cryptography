@@ -40,6 +40,7 @@
 ///   ntruees401ep1_keygen, ntruees401ep1_encrypt, ntruees401ep1_decrypt
 ///   ntruees449ep1_keygen, ntruees449ep1_encrypt, ntruees449ep1_decrypt
 ///   ntruees677ep1_keygen, ntruees677ep1_encrypt, ntruees677ep1_decrypt
+///   ntruees1087ep2_keygen, ntruees1087ep2_encrypt, ntruees1087ep2_decrypt
 ///
 /// Iteration scaling: set `PILOT_PK_ITERS_PERCENT` (1..=100). Default: 25.
 use std::hint::black_box;
@@ -49,9 +50,9 @@ use std::time::Instant;
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
-    ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, NtruEes401Ep1, NtruEes449Ep1,
-    NtruEes677Ep1, NtruHps509, NtruHps677, NtruHps821, NtruHrss701, Paillier, Rabin, Rsa, RsaOaep,
-    RsaPss, SchmidtSamoa, X25519, X448,
+    ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, NtruEes1087Ep2, NtruEes401Ep1,
+    NtruEes449Ep1, NtruEes677Ep1, NtruHps509, NtruHps677, NtruHps821, NtruHrss701, Paillier, Rabin,
+    Rsa, RsaOaep, RsaPss, SchmidtSamoa, X25519, X448,
 };
 use cryptography::{Csprng, CtrDrbgAes256, Sha256};
 
@@ -930,6 +931,34 @@ fn main() {
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(NtruEes677Ep1::decrypt(&sk, &ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRUEncrypt EES1087EP2 (IEEE Std 1363.1-2008, SHA-256) ───────────
+        "ntruees1087ep2_keygen" => {
+            let n = pk_iters(10);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes1087Ep2::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees1087ep2_encrypt" => {
+            let (pk, _) = NtruEes1087Ep2::keygen(&mut rng);
+            let n = pk_iters(20);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes1087Ep2::encrypt(&pk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees1087ep2_decrypt" => {
+            let (pk, sk) = NtruEes1087Ep2::keygen(&mut rng);
+            let ct = NtruEes1087Ep2::encrypt(&pk, &MSG, &mut rng).unwrap();
+            let n = pk_iters(20);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes1087Ep2::decrypt(&sk, &ct).unwrap());
             }
             ms_per_op(t0.elapsed(), n)
         }
