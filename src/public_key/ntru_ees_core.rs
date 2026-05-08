@@ -1394,6 +1394,17 @@ macro_rules! define_ees_set {
         pub struct $type_name;
 
         impl $type_name {
+            /// Wire-format public-key length in bytes for this set.
+            pub const PUBLIC_KEY_BYTES: usize = PUBLIC_KEY_BYTES;
+            /// Wire-format private-key length in bytes for this set.
+            pub const PRIVATE_KEY_BYTES: usize = PRIVATE_KEY_BYTES;
+            /// Wire-format ciphertext length in bytes for this set.
+            pub const CIPHERTEXT_BYTES: usize = CIPHERTEXT_BYTES;
+            /// Maximum byte length of a message that
+            /// [`Self::encrypt`] will accept; longer inputs return
+            /// [`NtruEesError::MessageTooLong`].
+            pub const MAX_MESSAGE_BYTES: usize = MAX_MESSAGE_BYTES;
+
             pub fn keygen<R: Csprng>(rng: &mut R) -> ($pk_ty, $sk_ty) {
                 let (pk_bytes, t) = __ees_core_keygen::<N, R>(&PARAMS, rng);
                 let pk = $pk_ty { bytes: pk_bytes.clone() };

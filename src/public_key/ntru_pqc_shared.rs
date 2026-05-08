@@ -515,6 +515,17 @@ macro_rules! define_pqc_kem {
         pub struct $type_name;
 
         impl $type_name {
+            /// Wire-format public-key length in bytes for this set.
+            pub const PUBLIC_KEY_BYTES: usize = PUBLIC_KEY_BYTES;
+            /// Wire-format private-key length in bytes for this set
+            /// (includes the implicit-rejection PRF key tail).
+            pub const PRIVATE_KEY_BYTES: usize = PRIVATE_KEY_BYTES;
+            /// Wire-format ciphertext length in bytes for this set.
+            pub const CIPHERTEXT_BYTES: usize = CIPHERTEXT_BYTES;
+            /// Shared-secret length in bytes (always 32 for the
+            /// round-3 NTRU sets).
+            pub const SHARED_SECRET_BYTES: usize = SHARED_SECRET_BYTES;
+
             pub fn keygen<R: $crate::Csprng>(rng: &mut R) -> ($pk_ty, $sk_ty) {
                 let mut pk = [0u8; PUBLIC_KEY_BYTES];
                 let mut sk = [0u8; PRIVATE_KEY_BYTES];

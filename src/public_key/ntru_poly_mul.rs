@@ -19,6 +19,18 @@
 //! the linear-convolution result modulo `x^N − 1` by adding the high half
 //! back into the low half.
 //!
+//! Side-channel: the schoolbook base case has no data-dependent
+//! branches — every `(i, j)` pair issues exactly one `wrapping_mul`
+//! and one `wrapping_add`, independent of operand values. Karatsuba's
+//! recursion structure (always the same three sub-multiplies, with
+//! data-independent partitioning) lifts that property to the
+//! recursive caller. So this multiplier is data-independent in its
+//! control flow given fixed input lengths. Caveat: `u16::wrapping_mul`
+//! is only constant-time at the hardware level on architectures whose
+//! integer multiplier is itself constant-time, which is the case on
+//! every CPU this crate targets (modern AArch64 / x86-64 / RISC-V
+//! `MUL`).
+//!
 //! The shared cyclic-multiply test cross-checks every output coefficient
 //! against the textbook double-loop reference at the production `N` values.
 
@@ -26,16 +38,21 @@ const KARA_THRESHOLD: usize = 48;
 
 /// Schoolbook polynomial multiply: `c = a * b` with `|c| = |a| + |b| - 1`.
 ///
-/// `c` is overwritten. Coefficient arithmetic is `u16` wrapping.
+/// `c` is overwritten. Coefficient arithmetic is `u16` wrapping. The
+/// inner loop is data-independent: every `(i, j)` pair issues exactly
+/// one `wrapping_mul` and one `wrapping_add` regardless of operand
+/// values. There is no early-continue on zero coefficients — that
+/// would leak the zero pattern of the secret operand through the
+/// instruction-count side channel, and modern CPUs make `wrapping_mul`
+/// on `u16` fast enough that the early-skip is not a worthwhile
+/// trade. The Karatsuba caller below inherits this property because
+/// every recursion level reduces to schoolbook at the base.
 fn poly_mul_schoolbook(c: &mut [u16], a: &[u16], b: &[u16]) {
     debug_assert_eq!(c.len(), a.len() + b.len() - 1);
     for slot in c.iter_mut() {
         *slot = 0;
     }
     for (i, &ai) in a.iter().enumerate() {
-        if ai == 0 {
-            continue;
-        }
         for (j, &bj) in b.iter().enumerate() {
             c[i + j] = c[i + j].wrapping_add(ai.wrapping_mul(bj));
         }
