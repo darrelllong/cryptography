@@ -365,6 +365,9 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 | ntruees401ep1_keygen  | 0.7387  | ±0.004256  |  90 | 0.9273 | ±0.001791  |  37 |
 | ntruees401ep1_encrypt | 0.09144 | ±0.0003451 | 128 | 0.09403 | ±0.0005089 | 30 |
 | ntruees401ep1_decrypt | 0.1281  | ±0.0002626 |  51 | 0.1447 | ±0.0007402 |  98 |
+| ntruees443ep1_keygen  | 0.6759  | ±0.005047  | 101 | 1.203  | ±0.04758   |  30 |
+| ntruees443ep1_encrypt | 0.0367  | ±0.0001335 |  30 | 0.05629 | ±0.008363 |  30 |
+| ntruees443ep1_decrypt | 0.03739 | ±0.0001561 |  34 | 0.07494 | ±0.001655  |  30 |
 | ntruees449ep1_keygen  | 0.8699  | ±0.002396  |  90 | 1.105  | ±0.001782  |  66 |
 | ntruees449ep1_encrypt | 0.1267  | ±0.0001983 |  80 | 0.1342 | ±0.0004829 |  30 |
 | ntruees449ep1_decrypt | 0.1583  | ±0.0002213 |  57 | 0.1859 | ±0.01549   |  66 |
@@ -394,7 +397,10 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 - `NTRU-HRSS-701` encaps is the cheapest post-quantum encapsulation in the
   table — at 0.045 ms on M1 it beats every ML-KEM size, because the HRSS
   encryption is a single trinary-by-dense convolution (the Karatsuba split
-  amortizes well for sparse trinary inputs).
+  amortizes well for sparse trinary inputs). `EES443EP1` encrypt/decrypt
+  match it (≈0.037 ms on M1) because the product-form `r = r_1 · r_2 + r_3`
+  with `df_1, df_2, df_3 = 9, 8, 5` reduces each ciphertext convolution to
+  three very sparse multiplies plus an addition.
 - `NTRU-HPS` and `NTRUEncrypt-EES` show the gap with NTT-friendly rings
   clearly: ML-KEM-512 keygen is ~50× faster than NTRU-HPS-509 keygen on the
   same host. The polynomial rings here are `Z_q[x] / (x^N − 1)` with prime
