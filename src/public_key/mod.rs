@@ -70,6 +70,7 @@ pub mod ntru_ees443ep1;
 pub mod ntru_ees449ep1;
 pub mod ntru_ees541ep1;
 pub mod ntru_ees677ep1;
+pub mod ntru_ees1087ep1;
 pub mod ntru_ees1087ep2;
 pub mod ntru_ees1499ep1;
 pub mod ntru_hps509;
