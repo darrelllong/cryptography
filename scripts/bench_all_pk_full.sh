@@ -156,5 +156,8 @@ measure ntruees677ep1_decrypt
 measure ntruees1087ep2_keygen
 measure ntruees1087ep2_encrypt
 measure ntruees1087ep2_decrypt
+measure ntruees1499ep1_keygen
+measure ntruees1499ep1_encrypt
+measure ntruees1499ep1_decrypt
 
 echo ""

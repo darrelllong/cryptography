@@ -274,6 +274,7 @@ parameter tables)**
 | EES541EP1  | 112-bit |   744 |   880 |   744 |  86 |
 | EES677EP1  | 192-bit |   931 | 1 101 |   931 | 101 |
 | EES1087EP2 | 256-bit | 1 495 | 1 767 | 1 495 | 170 |
+| EES1499EP1 | 256-bit | 2 062 | 2 437 | 2 062 | 247 |
 
 The private-key length is `PRIVATE_KEY_BYTES + PUBLIC_KEY_BYTES`: this
 crate stores the trinary trapdoor `t` (compactly packed) alongside the
@@ -375,6 +376,9 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 | ntruees1087ep2_keygen  | 1.775  | ±0.003781  |  60 | 3.817  | ±0.09981   |  30 |
 | ntruees1087ep2_encrypt | 0.2016 | ±0.0006128 |  30 | 0.3872 | ±0.04044   |  30 |
 | ntruees1087ep2_decrypt | 0.3114 | ±0.0002275 | 150 | 0.6716 | ±0.01087   |  38 |
+| ntruees1499ep1_keygen  | 2.861  | ±0.02228   |  90 | 6.380  | ±0.1801    |  83 |
+| ntruees1499ep1_encrypt | 0.1986 | ±0.0005877 |  60 | 0.3014 | ±0.04331   | 213 |
+| ntruees1499ep1_decrypt | 0.2888 | ±0.001113  |  30 | 0.6236 | ±0.01522   | 103 |
 
 ## Benchmark Discussion
 
