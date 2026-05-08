@@ -182,6 +182,162 @@ pub(crate) trait DigestChain: crate::hash::Digest + Sized {
 
 impl<D: crate::hash::Digest> DigestChain for D {}
 
+// ---- shared polynomial inverters (Bernstein–Yang + Hensel) -----------------
+
+/// Constant-time inverse of `a` in $R_2 = \mathbb{F}_2[x] / (x^N - 1)$.
+///
+/// Bernstein and Yang's swap-and-shift gcd recursion (TCHES 2019, "Fast
+/// constant-time gcd computation and modular inversion") with $2(N - 1) - 1$
+/// iterations, the worst-case bound from the cited paper. Every comparator,
+/// shift, and conditional in the loop is data-independent.
+pub(crate) fn poly_r2_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
+    let mut f = [0u16; N];
+    let mut g = [0u16; N];
+    let mut v = [0u16; N];
+    let mut w = [0u16; N];
+    w[0] = 1;
+    for fi in f.iter_mut() {
+        *fi = 1;
+    }
+    for i in 0..N - 1 {
+        g[N - 2 - i] = (a[i] ^ a[N - 1]) & 1;
+    }
+    g[N - 1] = 0;
+    let mut delta: i16 = 1;
+
+    for _ in 0..(2 * (N - 1) - 1) {
+        for i in (1..N).rev() {
+            v[i] = v[i - 1];
+        }
+        v[0] = 0;
+
+        let sign = (g[0] & f[0]) as i16;
+        let swap = both_negative_mask_i16(-delta, -(g[0] as i16));
+        delta ^= swap & (delta ^ -delta);
+        delta += 1;
+
+        for i in 0..N {
+            let t = (swap as u16) & (f[i] ^ g[i]);
+            f[i] ^= t;
+            g[i] ^= t;
+            let t = (swap as u16) & (v[i] ^ w[i]);
+            v[i] ^= t;
+            w[i] ^= t;
+        }
+        for i in 0..N {
+            g[i] ^= (sign as u16) & f[i];
+        }
+        for i in 0..N {
+            w[i] ^= (sign as u16) & v[i];
+        }
+        for i in 0..N - 1 {
+            g[i] = g[i + 1];
+        }
+        g[N - 1] = 0;
+    }
+
+    for i in 0..N - 1 {
+        r[i] = v[N - 2 - i];
+    }
+    r[N - 1] = 0;
+}
+
+/// Constant-time inverse of `a` in $S_3 = \mathbb{F}_3[x] / \Phi_n(x)$.
+/// Same Bernstein–Yang recursion as [`poly_r2_inv`] but over $\mathbb{F}_3$;
+/// `mod3_u8` keeps each step's coefficients canonical in $\{0, 1, 2\}$.
+pub(crate) fn poly_s3_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
+    let mut f = [0u16; N];
+    let mut g = [0u16; N];
+    let mut v = [0u16; N];
+    let mut w = [0u16; N];
+    w[0] = 1;
+    for fi in f.iter_mut() {
+        *fi = 1;
+    }
+    for i in 0..N - 1 {
+        g[N - 2 - i] = mod3_u8(((a[i] & 3) + 2 * (a[N - 1] & 3)) as u8) as u16;
+    }
+    g[N - 1] = 0;
+    let mut delta: i16 = 1;
+
+    for _ in 0..(2 * (N - 1) - 1) {
+        for i in (1..N).rev() {
+            v[i] = v[i - 1];
+        }
+        v[0] = 0;
+
+        let sign = mod3_u8((2 * g[0] * f[0]) as u8) as u16;
+        let swap = both_negative_mask_i16(-delta, -(g[0] as i16));
+        delta ^= swap & (delta ^ -delta);
+        delta += 1;
+
+        for i in 0..N {
+            let t = (swap as u16) & (f[i] ^ g[i]);
+            f[i] ^= t;
+            g[i] ^= t;
+            let t = (swap as u16) & (v[i] ^ w[i]);
+            v[i] ^= t;
+            w[i] ^= t;
+        }
+        for i in 0..N {
+            g[i] = mod3_u8((g[i] + sign * f[i]) as u8) as u16;
+        }
+        for i in 0..N {
+            w[i] = mod3_u8((w[i] + sign * v[i]) as u8) as u16;
+        }
+        for i in 0..N - 1 {
+            g[i] = g[i + 1];
+        }
+        g[N - 1] = 0;
+    }
+
+    let sign = f[0] as u16;
+    for i in 0..N - 1 {
+        r[i] = mod3_u8((sign * v[N - 2 - i]) as u8) as u16;
+    }
+    r[N - 1] = 0;
+}
+
+/// Hensel-lift an inverse of `a` from $R_2$ to $R_q = \mathbb{Z}_q[x] / (x^N - 1)$.
+///
+/// Newton-style 2-adic lift: given $a \cdot b \equiv 1 \pmod{2^k}$,
+/// the update $b \leftarrow b \cdot (2 - a \cdot b)$ doubles the precision
+/// to $\pmod{2^{2k}}$. Four iterations carry the precision from $2^1$ to
+/// $2^{16}$, which subsumes every $q$ in this NTRU family ($q \le 2^{13}$).
+/// All arithmetic is `u16` wrapping; the caller reduces modulo $q$ at use.
+pub(crate) fn poly_r2_inv_to_rq_inv<const N: usize>(
+    r: &mut [u16; N],
+    ai: &[u16; N],
+    a: &[u16; N],
+) {
+    let mut b = [0u16; N];
+    for i in 0..N {
+        b[i] = 0u16.wrapping_sub(a[i]);
+    }
+    r.copy_from_slice(ai);
+
+    let mut c = [0u16; N];
+    let mut s = [0u16; N];
+
+    use crate::public_key::ntru_poly_mul::poly_mul_cyclic as mul;
+
+    mul(&mut c, r, &b);
+    c[0] = c[0].wrapping_add(2);
+    mul(&mut s, &c, r);
+
+    mul(&mut c, &s, &b);
+    c[0] = c[0].wrapping_add(2);
+    mul(r, &c, &s);
+
+    mul(&mut c, r, &b);
+    c[0] = c[0].wrapping_add(2);
+    mul(&mut s, &c, r);
+
+    mul(&mut c, &s, &b);
+    c[0] = c[0].wrapping_add(2);
+    mul(r, &c, &s);
+}
+
 // ---- per-set wrapper macro --------------------------------------------------
 //
 // Each NIST PQC NTRU set ships a typed wrapper around its internal

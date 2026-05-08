@@ -94,7 +94,10 @@ impl Poly {
 }
 
 use crate::public_key::ntru_pqc_shared::{
-    cmov, crypto_sort_int32, mod3, mod3_u8, both_negative_mask_i16, DigestChain,
+    cmov, crypto_sort_int32, mod3, DigestChain,
+    poly_r2_inv as shared_poly_r2_inv,
+    poly_r2_inv_to_rq_inv as shared_poly_r2_inv_to_rq_inv,
+    poly_s3_inv as shared_poly_s3_inv,
 };
 
 #[inline(always)]
@@ -177,58 +180,7 @@ fn poly_lift(r: &mut Poly, a: &Poly) {
 // (v, w) so v · a ≡ gcd (mod x^N - 1) at exit. The 2(N-1)-1 iteration count
 // is the worst-case bound from the cited paper.
 
-fn poly_r2_inv(r: &mut Poly, a: &Poly) {
-    let mut f = [0u16; N];
-    let mut g = [0u16; N];
-    let mut v = [0u16; N];
-    let mut w = [0u16; N];
-    w[0] = 1;
-    for fi in f.iter_mut() {
-        *fi = 1;
-    }
-    for i in 0..N - 1 {
-        g[N - 2 - i] = (a.coeffs[i] ^ a.coeffs[N - 1]) & 1;
-    }
-    g[N - 1] = 0;
-    let mut delta: i16 = 1;
-
-    for _ in 0..(2 * (N - 1) - 1) {
-        // shift v
-        for i in (1..N).rev() {
-            v[i] = v[i - 1];
-        }
-        v[0] = 0;
-
-        let sign = (g[0] & f[0]) as i16;
-        let swap = both_negative_mask_i16(-delta, -(g[0] as i16));
-        delta ^= swap & (delta ^ -delta);
-        delta += 1;
-
-        for i in 0..N {
-            let t = (swap as u16) & (f[i] ^ g[i]);
-            f[i] ^= t;
-            g[i] ^= t;
-            let t = (swap as u16) & (v[i] ^ w[i]);
-            v[i] ^= t;
-            w[i] ^= t;
-        }
-        for i in 0..N {
-            g[i] ^= (sign as u16) & f[i];
-        }
-        for i in 0..N {
-            w[i] ^= (sign as u16) & v[i];
-        }
-        for i in 0..N - 1 {
-            g[i] = g[i + 1];
-        }
-        g[N - 1] = 0;
-    }
-
-    for i in 0..N - 1 {
-        r.coeffs[i] = v[N - 2 - i];
-    }
-    r.coeffs[N - 1] = 0;
-}
+fn poly_r2_inv(r: &mut Poly, a: &Poly) { shared_poly_r2_inv::<N>(&mut r.coeffs, &a.coeffs); }
 
 // ---- constant-time inverse in S_3 = F_3[x] / Phi_n(x) ----------------------
 //
@@ -236,59 +188,7 @@ fn poly_r2_inv(r: &mut Poly, a: &Poly) {
 // F_2. `mod3_u8` (in `ntru_pqc_shared`) keeps coefficients canonical
 // after every step.
 
-fn poly_s3_inv(r: &mut Poly, a: &Poly) {
-    let mut f = [0u16; N];
-    let mut g = [0u16; N];
-    let mut v = [0u16; N];
-    let mut w = [0u16; N];
-    w[0] = 1;
-    for fi in f.iter_mut() {
-        *fi = 1;
-    }
-    for i in 0..N - 1 {
-        g[N - 2 - i] =
-            mod3_u8(((a.coeffs[i] & 3) + 2 * (a.coeffs[N - 1] & 3)) as u8) as u16;
-    }
-    g[N - 1] = 0;
-    let mut delta: i16 = 1;
-
-    for _ in 0..(2 * (N - 1) - 1) {
-        for i in (1..N).rev() {
-            v[i] = v[i - 1];
-        }
-        v[0] = 0;
-
-        let sign = mod3_u8((2 * g[0] * f[0]) as u8) as u16;
-        let swap = both_negative_mask_i16(-delta, -(g[0] as i16));
-        delta ^= swap & (delta ^ -delta);
-        delta += 1;
-
-        for i in 0..N {
-            let t = (swap as u16) & (f[i] ^ g[i]);
-            f[i] ^= t;
-            g[i] ^= t;
-            let t = (swap as u16) & (v[i] ^ w[i]);
-            v[i] ^= t;
-            w[i] ^= t;
-        }
-        for i in 0..N {
-            g[i] = mod3_u8((g[i] + sign * f[i]) as u8) as u16;
-        }
-        for i in 0..N {
-            w[i] = mod3_u8((w[i] + sign * v[i]) as u8) as u16;
-        }
-        for i in 0..N - 1 {
-            g[i] = g[i + 1];
-        }
-        g[N - 1] = 0;
-    }
-
-    let sign = f[0] as u16;
-    for i in 0..N - 1 {
-        r.coeffs[i] = mod3_u8((sign * v[N - 2 - i]) as u8) as u16;
-    }
-    r.coeffs[N - 1] = 0;
-}
+fn poly_s3_inv(r: &mut Poly, a: &Poly) { shared_poly_s3_inv::<N>(&mut r.coeffs, &a.coeffs); }
 
 // ---- inverse in R_q = Z_q[x] / (x^N - 1) via Hensel lift from R_2 ----------
 //
@@ -298,33 +198,7 @@ fn poly_s3_inv(r: &mut Poly, a: &Poly) {
 // largest q in this NTRU family (q = 8192 = 2^13). All arithmetic is u16
 // wrapping; the final mod-q reduction happens at use sites.
 
-fn poly_r2_inv_to_rq_inv(r: &mut Poly, ai: &Poly, a: &Poly) {
-    let mut b = Poly::zero();
-    for i in 0..N {
-        b.coeffs[i] = 0u16.wrapping_sub(a.coeffs[i]);
-    }
-    r.coeffs = ai.coeffs;
-
-    let mut c = Poly::zero();
-    let mut s = Poly::zero();
-
-    // ai := ai * (2 - a*ai), four times.
-    poly_rq_mul(&mut c, r, &b);
-    c.coeffs[0] = c.coeffs[0].wrapping_add(2);
-    poly_rq_mul(&mut s, &c, r);
-
-    poly_rq_mul(&mut c, &s, &b);
-    c.coeffs[0] = c.coeffs[0].wrapping_add(2);
-    poly_rq_mul(r, &c, &s);
-
-    poly_rq_mul(&mut c, r, &b);
-    c.coeffs[0] = c.coeffs[0].wrapping_add(2);
-    poly_rq_mul(&mut s, &c, r);
-
-    poly_rq_mul(&mut c, &s, &b);
-    c.coeffs[0] = c.coeffs[0].wrapping_add(2);
-    poly_rq_mul(r, &c, &s);
-}
+fn poly_r2_inv_to_rq_inv(r: &mut Poly, ai: &Poly, a: &Poly) { shared_poly_r2_inv_to_rq_inv::<N>(&mut r.coeffs, &ai.coeffs, &a.coeffs); }
 
 fn poly_rq_inv(r: &mut Poly, a: &Poly) {
     let mut ai2 = Poly::zero();
