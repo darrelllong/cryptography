@@ -8,12 +8,17 @@ BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
 PK="${PILOT_PK_BIN:-$ROOT_DIR/target/release/pilot_pk}"
 PILOT_PRESET="${PILOT_PRESET:-quick}"
 PILOT_PK_ITERS_PERCENT="${PILOT_PK_ITERS_PERCENT:-25}"
+PILOT_CONFIDENCE_LEVEL="${PILOT_CONFIDENCE_LEVEL:-}"
 export PILOT_PK_ITERS_PERCENT
 
 measure() {
     local name=$1
     local out mean ci rounds
-    out=$("$BENCH" run_program --preset "$PILOT_PRESET" \
+    local extra=()
+    if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
+        extra+=(--confidence-level "${PILOT_CONFIDENCE_LEVEL}")
+    fi
+    out=$("$BENCH" run_program --preset "$PILOT_PRESET" "${extra[@]}" \
           --pi "${name},ms/op,0,1,1" \
           -- "$PK" "$name" 2>&1)
     mean=$(echo "$out" | awk '/Reading mean/{print $5}')

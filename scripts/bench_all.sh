@@ -8,12 +8,17 @@ BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
 CIPHER="${PILOT_CIPHER_BIN:-$ROOT_DIR/target/release/pilot_cipher}"
 PILOT_PRESET="${PILOT_PRESET:-quick}"
 PILOT_CIPHER_BYTES="${PILOT_CIPHER_BYTES:-262144}"
+PILOT_CONFIDENCE_LEVEL="${PILOT_CONFIDENCE_LEVEL:-}"
 export PILOT_CIPHER_BYTES
 
 measure() {
     local name=$1 block=$2 key=$3
     local out mean ci rounds
-    out=$("$BENCH" run_program --preset "$PILOT_PRESET" \
+    local extra=()
+    if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
+        extra+=(--confidence-level "${PILOT_CONFIDENCE_LEVEL}")
+    fi
+    out=$("$BENCH" run_program --preset "$PILOT_PRESET" "${extra[@]}" \
           --pi "${name},MB/s,0,1,1" \
           -- "$CIPHER" "$name" 2>&1)
     mean=$(echo  "$out" | awk '/Reading mean/{print $5}')
