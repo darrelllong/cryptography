@@ -25,10 +25,9 @@
 //! across all four NTRU parameter sets. This module is exposed under
 //! `crate::vt` to make that property explicit.
 
-use core::fmt;
+
 
 use crate::hash::sha3::Sha3_256;
-use crate::hash::Digest;
 use crate::Csprng;
 
 // ---- parameter constants ---------------------------------------------------
@@ -79,7 +78,7 @@ impl Poly {
 }
 
 use crate::public_key::ntru_pqc_shared::{
-    cmov, crypto_sort_int32, mod3, both_negative_mask_i16,
+    cmov, crypto_sort_int32, mod3, mod3_u8, both_negative_mask_i16, DigestChain,
 };
 
 #[inline(always)]
@@ -219,14 +218,6 @@ fn poly_r2_inv(r: &mut Poly, a: &Poly) {
 //
 // Same Bernstein–Yang gcd recursion as poly_r2_inv but over F_3 instead of
 // F_2. mod3_u8 keeps coefficients canonical after every step.
-
-#[inline]
-fn mod3_u8(a: u8) -> u8 {
-    let a = (a >> 2) + (a & 3); // 0..=4
-    let t = (a as i16) - 3;
-    let c = t >> 5;
-    (t ^ (c & ((a as i16) ^ t))) as u8
-}
 
 fn poly_s3_inv(r: &mut Poly, a: &Poly) {
     let mut f = [0u16; N];
@@ -805,317 +796,14 @@ fn kem_dec(
     cmov(k, &reject, fail as u8);
 }
 
-// ---- public API -------------------------------------------------------------
 
-/// NTRU-HPS-2048-677 public key.
-#[derive(Clone, Eq, PartialEq)]
-pub struct NtruHps677PublicKey {
-    bytes: [u8; PUBLIC_KEY_BYTES],
-}
+// ---- public API + standard tests (macro-generated) -------------------------
 
-/// NTRU-HPS-2048-677 private key.
-///
-/// Includes the implicit-rejection PRF key in the trailing 32 bytes.
-#[derive(Clone, Eq, PartialEq)]
-pub struct NtruHps677PrivateKey {
-    bytes: [u8; PRIVATE_KEY_BYTES],
-}
-
-/// NTRU-HPS-2048-677 ciphertext.
-#[derive(Clone, Eq, PartialEq)]
-pub struct NtruHps677Ciphertext {
-    bytes: [u8; CIPHERTEXT_BYTES],
-}
-
-/// NTRU-HPS-2048-677 shared secret (32 bytes).
-#[derive(Clone, Eq, PartialEq)]
-pub struct NtruHps677SharedSecret {
-    bytes: [u8; SHARED_SECRET_BYTES],
-}
-
-impl NtruHps677PublicKey {
-    /// Decode a public key from its canonical wire bytes.
-    #[must_use]
-    pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != PUBLIC_KEY_BYTES {
-            return None;
-        }
-        let mut out = [0u8; PUBLIC_KEY_BYTES];
-        out.copy_from_slice(bytes);
-        Some(Self { bytes: out })
-    }
-
-    /// Wire-byte encoding of the public key.
-    #[must_use]
-    pub fn to_wire_bytes(&self) -> [u8; PUBLIC_KEY_BYTES] {
-        self.bytes
-    }
-
-    /// Borrow the wire bytes without copying.
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8; PUBLIC_KEY_BYTES] {
-        &self.bytes
-    }
-}
-
-impl NtruHps677PrivateKey {
-    /// Decode a private key from its canonical wire bytes.
-    #[must_use]
-    pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != PRIVATE_KEY_BYTES {
-            return None;
-        }
-        let mut out = [0u8; PRIVATE_KEY_BYTES];
-        out.copy_from_slice(bytes);
-        Some(Self { bytes: out })
-    }
-
-    /// Wire-byte encoding of the private key.
-    #[must_use]
-    pub fn to_wire_bytes(&self) -> [u8; PRIVATE_KEY_BYTES] {
-        self.bytes
-    }
-
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8; PRIVATE_KEY_BYTES] {
-        &self.bytes
-    }
-}
-
-impl NtruHps677Ciphertext {
-    /// Decode a ciphertext from its canonical wire bytes.
-    #[must_use]
-    pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != CIPHERTEXT_BYTES {
-            return None;
-        }
-        let mut out = [0u8; CIPHERTEXT_BYTES];
-        out.copy_from_slice(bytes);
-        Some(Self { bytes: out })
-    }
-
-    /// Wire-byte encoding of the ciphertext.
-    #[must_use]
-    pub fn to_wire_bytes(&self) -> [u8; CIPHERTEXT_BYTES] {
-        self.bytes
-    }
-
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8; CIPHERTEXT_BYTES] {
-        &self.bytes
-    }
-}
-
-impl NtruHps677SharedSecret {
-    #[must_use]
-    pub fn to_wire_bytes(&self) -> [u8; SHARED_SECRET_BYTES] {
-        self.bytes
-    }
-
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8; SHARED_SECRET_BYTES] {
-        &self.bytes
-    }
-}
-
-impl fmt::Debug for NtruHps677PrivateKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("NtruHps677PrivateKey(<redacted>)")
-    }
-}
-
-impl fmt::Debug for NtruHps677SharedSecret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("NtruHps677SharedSecret(<redacted>)")
-    }
-}
-
-impl fmt::Debug for NtruHps677PublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NtruHps677PublicKey").finish()
-    }
-}
-
-impl fmt::Debug for NtruHps677Ciphertext {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NtruHps677Ciphertext").finish()
-    }
-}
-
-/// Namespace for NTRU-HPS-2048-677 KEM operations.
-pub struct NtruHps677;
-
-impl NtruHps677 {
-    /// Generate a key pair using `rng` for both the `(f, g)` seed and the
-    /// implicit-rejection PRF key.
-    pub fn keygen<R: Csprng>(rng: &mut R) -> (NtruHps677PublicKey, NtruHps677PrivateKey) {
-        let mut pk = [0u8; PUBLIC_KEY_BYTES];
-        let mut sk = [0u8; PRIVATE_KEY_BYTES];
-        kem_keypair_seeded(&mut pk, &mut sk, rng);
-        (
-            NtruHps677PublicKey { bytes: pk },
-            NtruHps677PrivateKey { bytes: sk },
-        )
-    }
-
-    /// Encapsulate a fresh shared secret against `pk`.
-    pub fn encaps<R: Csprng>(
-        pk: &NtruHps677PublicKey,
-        rng: &mut R,
-    ) -> (NtruHps677Ciphertext, NtruHps677SharedSecret) {
-        let mut ct = [0u8; CIPHERTEXT_BYTES];
-        let mut ss = [0u8; SHARED_SECRET_BYTES];
-        kem_enc_seeded(&mut ct, &mut ss, &pk.bytes, rng);
-        (
-            NtruHps677Ciphertext { bytes: ct },
-            NtruHps677SharedSecret { bytes: ss },
-        )
-    }
-
-    /// Decapsulate `ct` against `sk`. Returns the same shared secret as the
-    /// encapsulator on success and a deterministic implicit-rejection value
-    /// otherwise.
-    pub fn decaps(
-        sk: &NtruHps677PrivateKey,
-        ct: &NtruHps677Ciphertext,
-    ) -> NtruHps677SharedSecret {
-        let mut ss = [0u8; SHARED_SECRET_BYTES];
-        kem_dec(&mut ss, &ct.bytes, &sk.bytes);
-        NtruHps677SharedSecret { bytes: ss }
-    }
-}
-
-// ---- helper Sha3_256 chain (round-3 reference uses one-shot hash) ---------
-
-trait DigestChain: Digest + Sized {
-    fn chain(self, data: &[u8]) -> Self {
-        let mut me = self;
-        me.update(data);
-        me
-    }
-}
-
-impl<D: Digest> DigestChain for D {}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::CtrDrbgAes256;
-
-
-
-    #[test]
-    fn parameter_byte_lengths() {
-        assert_eq!(PUBLIC_KEY_BYTES, 930);
-        assert_eq!(PRIVATE_KEY_BYTES, 1234);
-        assert_eq!(CIPHERTEXT_BYTES, 930);
-        assert_eq!(SHARED_SECRET_BYTES, 32);
-        assert_eq!(SAMPLE_FG_BYTES, 3211);
-        assert_eq!(SAMPLE_FT_BYTES, 2535);
-        assert_eq!(PACK_TRINARY_BYTES, 136);
-        assert_eq!(WEIGHT, 254);
-    }
-
-    #[test]
-    fn roundtrip_random() {
-        let mut drbg = CtrDrbgAes256::new(&[0x42u8; 48]);
-        let (pk, sk) = NtruHps677::keygen(&mut drbg);
-        let (ct, ss_a) = NtruHps677::encaps(&pk, &mut drbg);
-        let ss_b = NtruHps677::decaps(&sk, &ct);
-        assert_eq!(ss_a.as_bytes(), ss_b.as_bytes());
-    }
-
-    #[test]
-    fn roundtrip_multiple_seeds() {
-        for seed in [0x00u8, 0x55, 0xaa, 0xff] {
-            let mut drbg = CtrDrbgAes256::new(&[seed; 48]);
-            let (pk, sk) = NtruHps677::keygen(&mut drbg);
-            let (ct, ss_a) = NtruHps677::encaps(&pk, &mut drbg);
-            let ss_b = NtruHps677::decaps(&sk, &ct);
-            assert_eq!(
-                ss_a.as_bytes(),
-                ss_b.as_bytes(),
-                "seed byte 0x{seed:02x}"
-            );
-        }
-    }
-
-    #[test]
-    fn implicit_rejection_on_corrupted_ciphertext() {
-        let mut drbg = CtrDrbgAes256::new(&[0x99u8; 48]);
-        let (pk, sk) = NtruHps677::keygen(&mut drbg);
-        let (ct, ss_a) = NtruHps677::encaps(&pk, &mut drbg);
-        let mut bad = ct.to_wire_bytes();
-        bad[0] ^= 0x01;
-        let bad_ct = NtruHps677Ciphertext::from_wire_bytes(&bad).unwrap();
-        let ss_bad = NtruHps677::decaps(&sk, &bad_ct);
-        assert_ne!(ss_bad.as_bytes(), ss_a.as_bytes());
-        // Implicit rejection is deterministic for a fixed (sk, ct).
-        let ss_bad2 = NtruHps677::decaps(&sk, &bad_ct);
-        assert_eq!(ss_bad.as_bytes(), ss_bad2.as_bytes());
-    }
-
-    #[test]
-    fn wire_format_roundtrip() {
-        let mut drbg = CtrDrbgAes256::new(&[0x21u8; 48]);
-        let (pk, sk) = NtruHps677::keygen(&mut drbg);
-        let (ct, _) = NtruHps677::encaps(&pk, &mut drbg);
-        let pk_bytes = pk.to_wire_bytes();
-        let sk_bytes = sk.to_wire_bytes();
-        let ct_bytes = ct.to_wire_bytes();
-        assert_eq!(pk_bytes.len(), PUBLIC_KEY_BYTES);
-        assert_eq!(sk_bytes.len(), PRIVATE_KEY_BYTES);
-        assert_eq!(ct_bytes.len(), CIPHERTEXT_BYTES);
-        let pk2 = NtruHps677PublicKey::from_wire_bytes(&pk_bytes).unwrap();
-        let sk2 = NtruHps677PrivateKey::from_wire_bytes(&sk_bytes).unwrap();
-        let ct2 = NtruHps677Ciphertext::from_wire_bytes(&ct_bytes).unwrap();
-        assert_eq!(pk, pk2);
-        assert_eq!(sk, sk2);
-        assert_eq!(ct, ct2);
-    }
-
-    /// Validates a sampled subset of the 100 entries in
-    /// `KAT/ntruhps2048677/PQCkemKAT_1234.rsp` (round 3, 2020-10-16).
-    /// See [`nist_kat_full`] for the full sweep.
-    #[test]
-    fn nist_kat_sampled_counts() {
-        let rsp = include_str!(
-            "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhps2048677/PQCkemKAT_1234.rsp"
-        );
-        for &count in crate::public_key::ntru_pqc_shared::KAT_SAMPLED_COUNTS {
-            run_kat_count(rsp, count);
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn nist_kat_full() {
-        let rsp = include_str!(
-            "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhps2048677/PQCkemKAT_1234.rsp"
-        );
-        for count in 0..100 {
-            run_kat_count(rsp, count);
-        }
-    }
-
-    fn run_kat_count(rsp: &str, count: usize) {
-        let entry = crate::public_key::ntru_pqc_shared::parse_kat_entry(rsp, count)
-            .unwrap_or_else(|| panic!("KAT count={count} missing"));
-        assert_eq!(entry.seed.len(), 48, "seed length");
-        let mut seed = [0u8; 48];
-        seed.copy_from_slice(&entry.seed);
-        let mut drbg = CtrDrbgAes256::new(&seed);
-
-        let (pk, sk) = NtruHps677::keygen(&mut drbg);
-        assert_eq!(pk.to_wire_bytes().as_slice(), entry.pk.as_slice(), "pk @ count={count}");
-        assert_eq!(sk.to_wire_bytes().as_slice(), entry.sk.as_slice(), "sk @ count={count}");
-
-        let (ct, ss) = NtruHps677::encaps(&pk, &mut drbg);
-        assert_eq!(ct.to_wire_bytes().as_slice(), entry.ct.as_slice(), "ct @ count={count}");
-        assert_eq!(ss.to_wire_bytes().as_slice(), entry.ss.as_slice(), "ss @ count={count}");
-
-        let ss2 = NtruHps677::decaps(&sk, &ct);
-        assert_eq!(ss.as_bytes(), ss2.as_bytes(), "decaps @ count={count}");
-    }
+crate::public_key::ntru_pqc_shared::define_pqc_kem! {
+    namespace = NtruHps677,
+    public_key = NtruHps677PublicKey,
+    private_key = NtruHps677PrivateKey,
+    ciphertext = NtruHps677Ciphertext,
+    shared_secret = NtruHps677SharedSecret,
+    kat_path = "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhps2048677/PQCkemKAT_1234.rsp",
 }
