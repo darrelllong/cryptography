@@ -18,17 +18,20 @@
 //! Side channels: variable-time arithmetic. This module is only used from
 //! types under [`crate::vt`].
 //!
-//! Storage strategy: hot polynomial buffers (`Poly<N>::coeffs`) are inline
-//! `[u16; N]` arrays via the `const N: usize` parameter, so the
-//! Karatsuba multiplier and the IGF / MGF inner loops avoid heap
-//! traffic. Wire-format byte buffers (`pk`, `sk`, `ct`) stay on the heap
-//! as `Vec<u8>` because their lengths are derived from `N` and `logq`
-//! through `const fn` and embedding them as additional const generics
-//! ($\lceil N \log_2 q / 8 \rceil$, etc.) would require
-//! `generic_const_exprs` (unstable). Wire buffers are constructed once
-//! per operation and never appear on the inner-loop hot path, so the
-//! `Vec` allocation cost is negligible compared with the `Poly`
-//! arithmetic.
+//! Storage strategy: hot polynomial buffers (`Poly<N>::coeffs`) are
+//! inline `[u16; N]` arrays via the `const N: usize` parameter, so the
+//! Karatsuba multiplier inner loop avoids heap traffic on those.
+//! Several other inputs and intermediates remain heap-resident:
+//! wire-format byte buffers (`pk`, `sk`, `ct`); the IGF state's `BitStr`
+//! `Vec<u8>` and the seed `Vec<u8>` it copies; `mgf`'s working buffer
+//! of accepted hash bytes; the trial-and-error trinary samplers in
+//! `sample_trinary` / `sample_trapdoor`; and the F_2 extended-Euclidean
+//! inverter that backs `poly_inverse_mod_q_cyclic`. None of these is
+//! removable without either `generic_const_exprs` (the wire buffers'
+//! lengths are derived from `N` and `logq`) or a redesign of the
+//! inverter / sampler. The IEEE 1363.1 EES keygen and encrypt paths
+//! therefore allocate; this is intentional but worth naming so a
+//! profiler reading the heap pattern is not surprised.
 
 use crate::hash::sha1::Sha1;
 use crate::hash::sha2::Sha256;

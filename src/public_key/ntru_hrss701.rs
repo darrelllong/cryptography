@@ -127,10 +127,12 @@ fn sample_iid_plus(r: &mut [u16; N], uniform_bytes: &[u8]) {
         r[i] = c | (0u16.wrapping_sub(c >> 1));
     }
 
-    // s = <x * r, r>; r[N-1] is zero.
+    // s = <x * r, r>; r[N-1] is zero. All arithmetic is u16 wrapping;
+    // the C reference widens to u32 around the multiplies but the
+    // truncation back to u16 makes the widening a no-op.
     let mut s: u16 = 0;
     for i in 0..N - 1 {
-        s = s.wrapping_add(((r[i + 1] as u32).wrapping_mul(r[i] as u32)) as u16);
+        s = s.wrapping_add(r[i + 1].wrapping_mul(r[i]));
     }
 
     // sign(s) — sign(0) = 1; the C uses `1 | (-(s>>15))`.
@@ -138,7 +140,7 @@ fn sample_iid_plus(r: &mut [u16; N], uniform_bytes: &[u8]) {
 
     let mut i = 0;
     while i < N {
-        r[i] = ((s_sign as u32).wrapping_mul(r[i] as u32)) as u16;
+        r[i] = s_sign.wrapping_mul(r[i]);
         i += 2;
     }
 
@@ -154,6 +156,10 @@ struct Hrss701Variant;
 
 impl crate::public_key::ntru_pqc_shared::NtruVariant<N, LOGQ> for Hrss701Variant {
     const Q_MASK: u16 = Q_MASK;
+    /// HRSS-701 doesn't use fixed-weight sampling; the value here is
+    /// irrelevant because every variant-specific `sample_*` /
+    /// `check_m` method is overridden below.
+    const WEIGHT: usize = 0;
     const SAMPLE_FG_BYTES: usize = SAMPLE_FG_BYTES;
     const SAMPLE_RM_BYTES: usize = SAMPLE_RM_BYTES;
     const PACK_TRINARY_BYTES: usize = PACK_TRINARY_BYTES;

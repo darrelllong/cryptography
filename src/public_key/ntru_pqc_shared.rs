@@ -48,20 +48,29 @@
 //! Side-channel inventory (the per-set modules link here instead of
 //! repeating it):
 //!
-//! - **Constant-time** (data-independent control flow / memory access):
-//!   the Bernstein–Yang $R_2$ and $S_3$ inverters, the four-round
+//! - **Constant-time** (data-independent control flow): the
+//!   Bernstein–Yang $R_2$ and $S_3$ inverters, the four-round
 //!   Newton/Hensel lift to $R_q$, the Batcher fixed-weight sort
 //!   ([`crypto_sort_int32`], used by HPS only), [`cmov`], `mod3`,
-//!   `mod3_u8`, the trinary samplers, and the SHA3-256 + AES-256
+//!   `mod3_u8`, the IID-uniform-mod-3 sampler, the SHA3-256 + AES-256
 //!   CTR-DRBG implementations from this crate's `hash` and `cprng`
-//!   modules.
+//!   modules, and the polynomial multiplier in
+//!   [`crate::public_key::ntru_poly_mul`] (its schoolbook base case
+//!   issues exactly one `wrapping_mul` and one `wrapping_add` per
+//!   coefficient pair, with no early-skip on zeros, and Karatsuba
+//!   inherits that property recursively).
 //!
-//! - **Variable-time** (data-dependent): the polynomial multiplier in
-//!   [`crate::public_key::ntru_poly_mul`]. Its schoolbook base case has
-//!   an early-`continue` on zero coefficients, which leaks the zero
-//!   pattern of the secret operands `f`, `r`, and `m` whenever they pass
-//!   through it. The four NIST modules are exposed under [`crate::vt`]
-//!   for this reason.
+//! - **Caveats**: `u16::wrapping_mul` is only constant-time at the
+//!   hardware level on architectures whose integer multiplier is
+//!   itself constant-time, which is the case on every CPU this crate
+//!   targets (modern AArch64 / x86-64 / RISC-V `MUL`). The four NIST
+//!   PQC NTRU modules remain re-exported under [`crate::vt`] because
+//!   that namespace is this crate's convention for "public-key
+//!   primitives that have not been independently formally vetted as
+//!   constant-time across all relevant micro-architectural channels"
+//!   — e.g. cache-timing on the `params` accesses, branch-predictor
+//!   training on the FO transform — not because of any specific
+//!   data-dependent branch in the source.
 
 /// Branch-free conditional move. When `b == 1`, `r` is set to `x`; when
 /// `b == 0`, `r` is unchanged. The caller is responsible for keeping `b`
@@ -391,7 +400,7 @@ pub(crate) fn poly_r2_inv_to_rq_inv<const N: usize>(
 
 // ---- per-set wrapper macro --------------------------------------------------
 //
-// Each NIST PQC NTRU set ships a typed wrapper around its internal
+// Each NIST PQC NTRU set ships a typed wrapper around the shared
 // `kem_keypair_seeded` / `kem_enc_seeded` / `kem_dec` routines and a fixed
 // set of byte-length constants (`PUBLIC_KEY_BYTES`, `PRIVATE_KEY_BYTES`,
 // `CIPHERTEXT_BYTES`, `SHARED_SECRET_BYTES`). The wrapper, the
@@ -401,6 +410,20 @@ pub(crate) fn poly_r2_inv_to_rq_inv<const N: usize>(
 // sampled NIST KAT, full NIST KAT) are mechanical — this macro emits
 // them so each NIST module is just the algebra plus the parameter
 // constants.
+//
+// Caller-scope identifiers the expansion captures (these must exist
+// in the calling module's namespace):
+//   - `N` (`const usize`): ring degree for this parameter set.
+//   - `LOGQ` (`const usize`): $\log_2 q$ for this parameter set.
+//   - `PUBLIC_KEY_BYTES`, `PRIVATE_KEY_BYTES`, `CIPHERTEXT_BYTES`,
+//     `SHARED_SECRET_BYTES` (`const usize`): wire-format byte sizes
+//     used as `[u8; …]` element counts in the newtype storage.
+//   - `SAMPLE_FG_BYTES`, `SAMPLE_RM_BYTES`, `OWCPA_MSGBYTES`
+//     (`const usize`): scratch-buffer sizes the macro stack-allocates
+//     and threads into the shared kem_*_seeded / kem_dec routines.
+// Every NIST PQC per-set file in this crate defines these; a future
+// module that uses different naming will hit a confusing macro-side
+// resolution error, so this list is the contract.
 
 macro_rules! define_pqc_kem {
     (
@@ -793,9 +816,12 @@ pub(crate) trait NtruVariant<const N: usize, const LOGQ: usize> {
     const OWCPA_BYTES: usize;
     const OWCPA_MSGBYTES: usize;
 
-    /// HPS-only fixed sampling weight. HRSS-701 ignores this; its
-    /// samplers do not consult it.
-    const WEIGHT: usize = 0;
+    /// HPS-only fixed sampling weight. HRSS-701 must set this to 0
+    /// explicitly — the trait deliberately declines to provide a
+    /// default so that a future variant which forgets to set
+    /// `WEIGHT` cannot silently feed 0 into [`owcpa_check_m`] and
+    /// accept every message.
+    const WEIGHT: usize;
 
     /// HPS default: $f$ via `sample_iid`, $g$ via `sample_fixed_type`
     /// with `WEIGHT`. HRSS overrides to use `sample_iid_plus` for both.
