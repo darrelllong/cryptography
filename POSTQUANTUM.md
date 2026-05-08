@@ -364,10 +364,16 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
   table — at 0.045 ms on M1 it beats every ML-KEM size, because the HRSS
   encryption is a single trinary-by-dense convolution (the Karatsuba split
   amortizes well for sparse trinary inputs).
-- `NTRU-HPS` and `NTRUEncrypt-EES` show the schoolbook-vs-NTT gap clearly:
-  ML-KEM-512 keygen is ~50× faster than NTRU-HPS-509 keygen on the same host.
-  Adding an in-tree NTT for the NTRU rings would close most of that gap; the
-  AVX2 reference C does this on x86 only and we deliberately don't.
+- `NTRU-HPS` and `NTRUEncrypt-EES` show the gap with NTT-friendly rings
+  clearly: ML-KEM-512 keygen is ~50× faster than NTRU-HPS-509 keygen on the
+  same host. The polynomial rings here are `Z_q[x] / (x^N − 1)` with prime
+  `N`, which do not admit a direct radix-2 NTT; an in-tree two-prime
+  Montgomery NTT at the smallest power-of-two length covering all
+  parameter sets (`M = 2048 ≥ 2 · 821 − 1`) was prototyped and discarded —
+  at `N ≤ 821` the length-2048 transform overhead exceeds Karatsuba's
+  `O(N^{log_2 3})` cost. A right-sized per-`N` NTT, Bluestein, or
+  Rader-style decomposition would close more of the gap; the AVX2
+  reference C avoids the question by going to assembly.
 
 Reference baselines (vendored C code) are available through:
 
