@@ -26,18 +26,12 @@
 //! the `count = 0` entry of the round-3 KAT `PQCkemKAT_1450.rsp` is
 //! reproduced byte-for-byte by the inline test.
 //!
-//! Side channels:
-//! the constant-time Bernstein–Yang inverters, the Batcher fixed-weight
-//! sort (HPS only), `cmov`, and the SHA3 / CTR-DRBG implementations are all
-//! data-independent. The polynomial multiplier in
-//! [`crate::public_key::ntru_poly_mul`] is *not*: its schoolbook base case
-//! has an early-`continue` on zero coefficients, which leaks the zero
-//! pattern of the secret operands `f`, `r`, and `m` whenever they pass
-//! through it. The module is exposed under [`crate::vt`] for that reason.
+//! Side channels: see [`crate::public_key::ntru_pqc_shared`]. HRSS-701
+//! uses iid-only sampling, so the Batcher fixed-weight sort referenced
+//! there is not on its hot path.
 
 
 
-use crate::Csprng;
 
 // ---- parameter constants ---------------------------------------------------
 
@@ -83,14 +77,12 @@ fn poly_lift_hrss(r: &mut [u16; N], a: &[u16; N]) {
     // Then b[k] = <z * x^k, a>.
     let t: u16 = (3 - (N % 3)) as u16;
 
+    // z[1] = 0 (drops the a[1]·0 and a[2]·0 cross-terms in b[0]/b[1]).
     let mut b = [0u16; N];
     b[0] = a[0]
         .wrapping_mul(2u16.wrapping_sub(t))
-        .wrapping_add(a[1].wrapping_mul(0))
         .wrapping_add(a[2].wrapping_mul(t));
-    b[1] = a[1]
-        .wrapping_mul(2u16.wrapping_sub(t))
-        .wrapping_add(a[2].wrapping_mul(0));
+    b[1] = a[1].wrapping_mul(2u16.wrapping_sub(t));
     b[2] = a[2].wrapping_mul(2u16.wrapping_sub(t));
 
     let mut zj: u16 = 0; // z[1]
@@ -98,6 +90,10 @@ fn poly_lift_hrss(r: &mut [u16; N], a: &[u16; N]) {
         b[0] = b[0].wrapping_add(a[i].wrapping_mul(zj.wrapping_add(2 * t)));
         b[1] = b[1].wrapping_add(a[i].wrapping_mul(zj.wrapping_add(t)));
         b[2] = b[2].wrapping_add(a[i].wrapping_mul(zj));
+        // `t` and `zj` are public constants of the loop iteration, so a
+        // hardware modulo is fine here; the rest of the file routes
+        // mod-3 reductions through `crate::public_key::ntru_pqc_shared::mod3`
+        // because they take secret-derived inputs.
         zj = (zj.wrapping_add(t)) % 3;
     }
     b[1] = b[1].wrapping_add(a[0].wrapping_mul(zj.wrapping_add(t)));
@@ -127,7 +123,7 @@ fn poly_lift_hrss(r: &mut [u16; N], a: &[u16; N]) {
 // only sampling distribution HRSS uses (replacing the HPS mix of IID for f
 // and fixed-weight for g/m).
 
-fn sample_iid_plus_arr(r: &mut [u16; N], uniform_bytes: &[u8]) {
+fn sample_iid_plus(r: &mut [u16; N], uniform_bytes: &[u8]) {
     debug_assert_eq!(uniform_bytes.len(), SAMPLE_IID_BYTES);
     crate::public_key::ntru_pqc_shared::sample_iid::<N>(r, uniform_bytes);
 
@@ -174,8 +170,8 @@ impl crate::public_key::ntru_pqc_shared::NtruVariant<N, LOGQ> for Hrss701Variant
 
     fn sample_fg(f: &mut [u16; N], g: &mut [u16; N], seed: &[u8]) {
         debug_assert_eq!(seed.len(), SAMPLE_FG_BYTES);
-        sample_iid_plus_arr(f, &seed[..SAMPLE_IID_BYTES]);
-        sample_iid_plus_arr(g, &seed[SAMPLE_IID_BYTES..]);
+        sample_iid_plus(f, &seed[..SAMPLE_IID_BYTES]);
+        sample_iid_plus(g, &seed[SAMPLE_IID_BYTES..]);
     }
 
     fn sample_rm(r: &mut [u16; N], m: &mut [u16; N], seed: &[u8]) {
@@ -210,32 +206,6 @@ impl crate::public_key::ntru_pqc_shared::NtruVariant<N, LOGQ> for Hrss701Variant
     }
 }
 
-// ---- CCA KEM wrapper (delegated entirely to the shared FO transform) -------
-
-fn kem_keypair_seeded<R: Csprng>(pk: &mut [u8], sk: &mut [u8], rng: &mut R) {
-    crate::public_key::ntru_pqc_shared::kem_keypair_seeded::<Hrss701Variant, R, N, LOGQ>(
-        pk, sk, rng,
-    );
-}
-
-fn kem_enc_seeded<R: Csprng>(
-    c: &mut [u8; CIPHERTEXT_BYTES],
-    k: &mut [u8; SHARED_SECRET_BYTES],
-    pk: &[u8; PUBLIC_KEY_BYTES],
-    rng: &mut R,
-) {
-    crate::public_key::ntru_pqc_shared::kem_enc_seeded::<Hrss701Variant, R, N, LOGQ>(c, k, pk, rng);
-}
-
-fn kem_dec(
-    k: &mut [u8; SHARED_SECRET_BYTES],
-    c: &[u8; CIPHERTEXT_BYTES],
-    sk: &[u8; PRIVATE_KEY_BYTES],
-) {
-    crate::public_key::ntru_pqc_shared::kem_dec::<Hrss701Variant, N, LOGQ>(k, c, sk);
-}
-
-
 // ---- public API + standard tests (macro-generated) -------------------------
 
 crate::public_key::ntru_pqc_shared::define_pqc_kem! {
@@ -244,5 +214,6 @@ crate::public_key::ntru_pqc_shared::define_pqc_kem! {
     private_key = NtruHrss701PrivateKey,
     ciphertext = NtruHrss701Ciphertext,
     shared_secret = NtruHrss701SharedSecret,
+    variant = Hrss701Variant,
     kat_path = "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhrss701/PQCkemKAT_1450.rsp",
 }

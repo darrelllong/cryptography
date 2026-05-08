@@ -37,17 +37,12 @@
 //! byte-for-byte by the inline test, including the published `pk`, `sk`,
 //! `ct`, and `ss`.
 //!
-//! Side channels:
-//! the constant-time Bernstein–Yang inverters, the Batcher fixed-weight
-//! sort (HPS only), `cmov`, and the SHA3 / CTR-DRBG implementations are all
-//! data-independent. The polynomial multiplier in
-//! [`crate::public_key::ntru_poly_mul`] is *not*: its schoolbook base case
-//! has an early-`continue` on zero coefficients, which leaks the zero
-//! pattern of the secret operands `f`, `r`, and `m` whenever they pass
-//! through it. The module is exposed under [`crate::vt`] for that reason.
+//! Side channels: see [`crate::public_key::ntru_pqc_shared`] for the
+//! per-primitive constant-time / variable-time analysis covering all four
+//! NIST PQC NTRU modules. This module is exposed under [`crate::vt`]
+//! because the shared polynomial multiplier is not constant-time.
 
 
-use crate::Csprng;
 
 // ---- parameter constants ---------------------------------------------------
 
@@ -88,6 +83,7 @@ struct Hps509Variant;
 
 impl crate::public_key::ntru_pqc_shared::NtruVariant<N, LOGQ> for Hps509Variant {
     const Q_MASK: u16 = Q_MASK;
+    const WEIGHT: usize = WEIGHT;
     const SAMPLE_FG_BYTES: usize = SAMPLE_FG_BYTES;
     const SAMPLE_RM_BYTES: usize = SAMPLE_RM_BYTES;
     const PACK_TRINARY_BYTES: usize = PACK_TRINARY_BYTES;
@@ -96,39 +92,9 @@ impl crate::public_key::ntru_pqc_shared::NtruVariant<N, LOGQ> for Hps509Variant 
     const OWCPA_BYTES: usize = OWCPA_BYTES;
     const OWCPA_MSGBYTES: usize = OWCPA_MSGBYTES;
 
-    fn sample_fg(f: &mut [u16; N], g: &mut [u16; N], seed: &[u8]) {
-        debug_assert_eq!(seed.len(), SAMPLE_FG_BYTES);
-        crate::public_key::ntru_pqc_shared::sample_iid::<N>(f, &seed[..SAMPLE_IID_BYTES]);
-        crate::public_key::ntru_pqc_shared::sample_fixed_type::<N>(
-            g,
-            &seed[SAMPLE_IID_BYTES..],
-            WEIGHT,
-        );
-    }
-
-    fn sample_rm(r: &mut [u16; N], m: &mut [u16; N], seed: &[u8]) {
-        debug_assert_eq!(seed.len(), SAMPLE_RM_BYTES);
-        crate::public_key::ntru_pqc_shared::sample_iid::<N>(r, &seed[..SAMPLE_IID_BYTES]);
-        crate::public_key::ntru_pqc_shared::sample_fixed_type::<N>(
-            m,
-            &seed[SAMPLE_IID_BYTES..],
-            WEIGHT,
-        );
-    }
-
-    fn update_g_after_z3_to_zq(g: &mut [u16; N]) {
-        for i in 0..N {
-            g[i] = g[i].wrapping_mul(3);
-        }
-    }
-
-    fn poly_lift(r: &mut [u16; N], a: &[u16; N]) {
-        crate::public_key::ntru_pqc_shared::poly_lift_hps::<N>(r, a, Q_MASK);
-    }
-
-    fn check_m(m: &[u16; N]) -> i32 {
-        crate::public_key::ntru_pqc_shared::owcpa_check_m::<N>(m, WEIGHT)
-    }
+    // HPS-default `sample_fg` / `sample_rm` / `update_g_after_z3_to_zq` /
+    // `poly_lift` / `check_m` are inherited from the trait — only the
+    // LOGQ-11 Sq packer is set here.
 
     fn poly_sq_tobytes(r: &mut [u8], a: &[u16; N]) {
         crate::public_key::ntru_pqc_shared::poly_sq_tobytes_logq11::<N>(r, a);
@@ -139,31 +105,6 @@ impl crate::public_key::ntru_pqc_shared::NtruVariant<N, LOGQ> for Hps509Variant 
     }
 }
 
-// ---- CCA KEM wrapper (delegated entirely to the shared FO transform) -------
-
-fn kem_keypair_seeded<R: Csprng>(pk: &mut [u8], sk: &mut [u8], rng: &mut R) {
-    crate::public_key::ntru_pqc_shared::kem_keypair_seeded::<Hps509Variant, R, N, LOGQ>(
-        pk, sk, rng,
-    );
-}
-
-fn kem_enc_seeded<R: Csprng>(
-    c: &mut [u8; CIPHERTEXT_BYTES],
-    k: &mut [u8; SHARED_SECRET_BYTES],
-    pk: &[u8; PUBLIC_KEY_BYTES],
-    rng: &mut R,
-) {
-    crate::public_key::ntru_pqc_shared::kem_enc_seeded::<Hps509Variant, R, N, LOGQ>(c, k, pk, rng);
-}
-
-fn kem_dec(
-    k: &mut [u8; SHARED_SECRET_BYTES],
-    c: &[u8; CIPHERTEXT_BYTES],
-    sk: &[u8; PRIVATE_KEY_BYTES],
-) {
-    crate::public_key::ntru_pqc_shared::kem_dec::<Hps509Variant, N, LOGQ>(k, c, sk);
-}
-
 // ---- public API + standard tests (macro-generated) -------------------------
 
 crate::public_key::ntru_pqc_shared::define_pqc_kem! {
@@ -172,5 +113,6 @@ crate::public_key::ntru_pqc_shared::define_pqc_kem! {
     private_key = NtruHps509PrivateKey,
     ciphertext = NtruHps509Ciphertext,
     shared_secret = NtruHps509SharedSecret,
+    variant = Hps509Variant,
     kat_path = "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhps2048509/PQCkemKAT_935.rsp",
 }

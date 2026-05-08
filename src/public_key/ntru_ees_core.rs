@@ -1249,9 +1249,7 @@ pub fn decrypt<const N: usize>(
 // paste! dependency) plus the parameter values; each per-set source file is
 // then a single macro invocation.
 
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __define_ees_set {
+macro_rules! define_ees_set {
     (
         namespace = $type_name:ident,
         public_key = $pk_ty:ident,
@@ -1515,5 +1513,4 @@ macro_rules! __define_ees_set {
     };
 }
 
-#[doc(hidden)]
-pub use crate::__define_ees_set as define_ees_set;
+pub(crate) use define_ees_set;

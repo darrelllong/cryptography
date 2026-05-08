@@ -74,7 +74,7 @@ pub mod ntru_ees1087ep1;
 pub mod ntru_ees1087ep2;
 pub mod ntru_ees1171ep1;
 pub mod ntru_ees1499ep1;
-pub mod ntru_ees_core;
+pub(crate) mod ntru_ees_core;
 pub mod ntru_hps509;
 pub mod ntru_hps677;
 pub mod ntru_hps821;

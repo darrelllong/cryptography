@@ -1,16 +1,24 @@
-//! Constant-time helpers shared by the NIST PQC NTRU modules
+//! Constant-time helpers, the OWCPA + FO-style KEM core, and the
+//! `NtruVariant` trait shared by the NIST PQC NTRU modules
 //! ([`crate::public_key::ntru_hps509`], `_hps677`, `_hps821`, `_hrss701`).
 //!
-//! Everything in this file is data-independent in its control flow: no
-//! branches on input, no array indexing by secrets, no early-exit on a
-//! sentinel value. The four NTRU sets each used to carry their own copies
-//! of these helpers — this module holds the single source of truth.
+//! Side-channel inventory (the per-set modules link here instead of
+//! repeating it):
 //!
-//! Note that the polynomial multiplication used by all four NTRU sets
-//! ([`crate::public_key::ntru_poly_mul`]) is *not* constant-time: its
-//! schoolbook base case has a data-dependent early-continue on zero
-//! coefficients. The NIST modules are exposed under [`crate::vt`] for that
-//! reason.
+//! - **Constant-time** (data-independent control flow / memory access):
+//!   the Bernstein–Yang $R_2$ and $S_3$ inverters, the four-round
+//!   Newton/Hensel lift to $R_q$, the Batcher fixed-weight sort
+//!   ([`crypto_sort_int32`], used by HPS only), [`cmov`], `mod3`,
+//!   `mod3_u8`, the trinary samplers, and the SHA3-256 + AES-256
+//!   CTR-DRBG implementations from this crate's `hash` and `cprng`
+//!   modules.
+//!
+//! - **Variable-time** (data-dependent): the polynomial multiplier in
+//!   [`crate::public_key::ntru_poly_mul`]. Its schoolbook base case has
+//!   an early-`continue` on zero coefficients, which leaks the zero
+//!   pattern of the secret operands `f`, `r`, and `m` whenever they pass
+//!   through it. The four NIST modules are exposed under [`crate::vt`]
+//!   for this reason.
 
 /// Branch-free conditional move. When `b == 1`, `r` is set to `x`; when
 /// `b == 0`, `r` is unchanged. The caller is responsible for keeping `b`
@@ -351,15 +359,14 @@ pub(crate) fn poly_r2_inv_to_rq_inv<const N: usize>(
 // them so each NIST module is just the algebra plus the parameter
 // constants.
 
-#[macro_export]
-#[doc(hidden)]
-macro_rules! __define_pqc_kem {
+macro_rules! define_pqc_kem {
     (
         namespace = $type_name:ident,
         public_key = $pk_ty:ident,
         private_key = $sk_ty:ident,
         ciphertext = $ct_ty:ident,
         shared_secret = $ss_ty:ident,
+        variant = $variant:ident,
         kat_path = $kat_path:literal $(,)?
     ) => {
         #[derive(Clone, Eq, PartialEq)]
@@ -468,7 +475,9 @@ macro_rules! __define_pqc_kem {
             pub fn keygen<R: $crate::Csprng>(rng: &mut R) -> ($pk_ty, $sk_ty) {
                 let mut pk = [0u8; PUBLIC_KEY_BYTES];
                 let mut sk = [0u8; PRIVATE_KEY_BYTES];
-                kem_keypair_seeded(&mut pk, &mut sk, rng);
+                $crate::public_key::ntru_pqc_shared::kem_keypair_seeded::<$variant, R, N, LOGQ>(
+                    &mut pk, &mut sk, rng,
+                );
                 ($pk_ty { bytes: pk }, $sk_ty { bytes: sk })
             }
 
@@ -478,13 +487,17 @@ macro_rules! __define_pqc_kem {
             ) -> ($ct_ty, $ss_ty) {
                 let mut ct = [0u8; CIPHERTEXT_BYTES];
                 let mut ss = [0u8; SHARED_SECRET_BYTES];
-                kem_enc_seeded(&mut ct, &mut ss, &pk.bytes, rng);
+                $crate::public_key::ntru_pqc_shared::kem_enc_seeded::<$variant, R, N, LOGQ>(
+                    &mut ct, &mut ss, &pk.bytes, rng,
+                );
                 ($ct_ty { bytes: ct }, $ss_ty { bytes: ss })
             }
 
             pub fn decaps(sk: &$sk_ty, ct: &$ct_ty) -> $ss_ty {
                 let mut ss = [0u8; SHARED_SECRET_BYTES];
-                kem_dec(&mut ss, &ct.bytes, &sk.bytes);
+                $crate::public_key::ntru_pqc_shared::kem_dec::<$variant, N, LOGQ>(
+                    &mut ss, &ct.bytes, &sk.bytes,
+                );
                 $ss_ty { bytes: ss }
             }
         }
@@ -602,8 +615,7 @@ macro_rules! __define_pqc_kem {
     };
 }
 
-#[doc(hidden)]
-pub use crate::__define_pqc_kem as define_pqc_kem;
+pub(crate) use define_pqc_kem;
 
 // ---- shared polynomial helpers (N- and LOGQ-parameterised) -----------------
 
@@ -697,6 +709,11 @@ pub(crate) fn poly_rq_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
 /// implement this trait. The `N` and `LOGQ` const generics carry the
 /// ring-degree and log-modulus into associated-constant expressions
 /// without `generic_const_exprs`.
+///
+/// The trait carries the HPS sampler / lift / message-check defaults so
+/// HPS-flavoured impls only need to set the parameter consts and the
+/// LOGQ-specific Sq packer; HRSS-701 overrides the variant-specific
+/// methods.
 pub(crate) trait NtruVariant<const N: usize, const LOGQ: usize> {
     const Q_MASK: u16;
     const SAMPLE_FG_BYTES: usize;
@@ -707,27 +724,49 @@ pub(crate) trait NtruVariant<const N: usize, const LOGQ: usize> {
     const OWCPA_BYTES: usize;
     const OWCPA_MSGBYTES: usize;
 
-    /// Sample $(f, g)$ from `seed`. HPS: $f$ via `sample_iid`, $g$ via
-    /// `sample_fixed_type`. HRSS: both via `sample_iid_plus`.
-    fn sample_fg(f: &mut [u16; N], g: &mut [u16; N], seed: &[u8]);
+    /// HPS-only fixed sampling weight. HRSS-701 ignores this; its
+    /// samplers do not consult it.
+    const WEIGHT: usize = 0;
 
-    /// Sample $(r, m)$ from `seed`. HPS: $r$ via `sample_iid`, $m$ via
-    /// `sample_fixed_type`. HRSS: both via `sample_iid`.
-    fn sample_rm(r: &mut [u16; N], m: &mut [u16; N], seed: &[u8]);
+    /// HPS default: $f$ via `sample_iid`, $g$ via `sample_fixed_type`
+    /// with `WEIGHT`. HRSS overrides to use `sample_iid_plus` for both.
+    fn sample_fg(f: &mut [u16; N], g: &mut [u16; N], seed: &[u8]) {
+        debug_assert_eq!(seed.len(), Self::SAMPLE_FG_BYTES);
+        let iid_bytes = N - 1;
+        sample_iid::<N>(f, &seed[..iid_bytes]);
+        let mut scratch = [0i32; N];
+        sample_fixed_type::<N>(g, &seed[iid_bytes..], Self::WEIGHT, &mut scratch);
+    }
 
-    /// Update $g$ in keygen *after* its $\mathbb{Z}_3 \to \mathbb{Z}_q$
-    /// remap. HPS multiplies by 3; HRSS multiplies by $3 (x - 1)$.
-    fn update_g_after_z3_to_zq(g: &mut [u16; N]);
+    /// HPS default: $r$ via `sample_iid`, $m$ via `sample_fixed_type`
+    /// with `WEIGHT`. HRSS overrides to use `sample_iid` for both.
+    fn sample_rm(r: &mut [u16; N], m: &mut [u16; N], seed: &[u8]) {
+        debug_assert_eq!(seed.len(), Self::SAMPLE_RM_BYTES);
+        let iid_bytes = N - 1;
+        sample_iid::<N>(r, &seed[..iid_bytes]);
+        let mut scratch = [0i32; N];
+        sample_fixed_type::<N>(m, &seed[iid_bytes..], Self::WEIGHT, &mut scratch);
+    }
 
-    /// Lift a trinary $m$ to $\mathbb{Z}_q$. HPS: trivial $\{0, 1, 2\}
-    /// \to \{0, 1, q - 1\}$ embedding. HRSS: $(x - 1) \cdot \big(m / (x - 1)
-    /// \bmod (3, \Phi_n)\big)$.
-    fn poly_lift(r: &mut [u16; N], a: &[u16; N]);
+    /// HPS default: $g \gets 3 g$. HRSS overrides to
+    /// $g \gets 3 (x - 1) g$.
+    fn update_g_after_z3_to_zq(g: &mut [u16; N]) {
+        for gi in g.iter_mut() {
+            *gi = gi.wrapping_mul(3);
+        }
+    }
 
-    /// Validate the recovered $m \in S_3$. HPS enforces the published
-    /// `WEIGHT` and balanced $\pm 1$ counts; HRSS returns 0 (any $S_3$
-    /// element is a legal message).
-    fn check_m(m: &[u16; N]) -> i32;
+    /// HPS default: trivial $\{0, 1, 2\} \to \{0, 1, q - 1\}$ embedding.
+    /// HRSS overrides with the $(x - 1)$-factor lift.
+    fn poly_lift(r: &mut [u16; N], a: &[u16; N]) {
+        poly_lift_hps::<N>(r, a, Self::Q_MASK);
+    }
+
+    /// HPS default: weight + balance check against `WEIGHT`. HRSS
+    /// overrides to return 0 (any $S_3$ element is a valid message).
+    fn check_m(m: &[u16; N]) -> i32 {
+        owcpa_check_m::<N>(m, Self::WEIGHT)
+    }
 
     fn poly_sq_tobytes(r: &mut [u8], a: &[u16; N]);
     fn poly_sq_frombytes(r: &mut [u16; N], a: &[u8]);
@@ -880,15 +919,20 @@ where
 
 /// Check that the high padding bits of a ciphertext's last byte are zero
 /// (a wire-format malleability check). Returns 0 on success, 1 on any
-/// non-zero bit.
+/// non-zero padding bit.
+///
+/// `bits_used` (= `(LOGQ * (N - 1)) mod 8`) is the number of valid
+/// low-order bits in the final byte; the high `8 - bits_used` bits are
+/// padding and must be zero. Mask `0xff << bits_used` selects exactly
+/// those high padding bits.
 pub(crate) fn owcpa_check_ciphertext<const N: usize, const LOGQ: usize>(
     ciphertext: &[u8],
 ) -> i32 {
     let pack_deg = N - 1;
     let bits_used = (LOGQ * pack_deg) & 7;
-    let mask: u16 = if bits_used == 0 { 0 } else { 0xff << (8 - bits_used) };
+    let mask: u8 = if bits_used == 0 { 0 } else { 0xffu8 << bits_used };
     let last = *ciphertext.last().expect("non-empty ciphertext");
-    let t = (last as u16) & mask;
+    let t = (last & mask) as u16;
     (1 & ((!t).wrapping_add(1) >> 15)) as i32
 }
 
@@ -1040,9 +1084,23 @@ pub(crate) fn sample_fixed_type<const N: usize>(
     r: &mut [u16; N],
     u: &[u8],
     weight: usize,
+    scratch: &mut [i32; N],
 ) {
     debug_assert_eq!(u.len(), (30 * (N - 1) + 7) / 8);
-    let mut s = vec![0i32; N - 1];
+    // All NIST round-3 parameter sets have $(N - 1) \equiv 0 \pmod 4$
+    // (508, 676, 820), so the input always lands on a block boundary
+    // and there is no tail to handle. The assertion below documents the
+    // assumption — flip it to a tail branch if a future parameter set
+    // breaks the alignment.
+    debug_assert_eq!((N - 1) % 4, 0, "sample_fixed_type assumes (N - 1) % 4 == 0");
+
+    // Use the first N - 1 slots of the caller's scratch buffer. Slot
+    // `N - 1` exists only because stable Rust can't size an inline
+    // array as `[i32; N - 1]` without `generic_const_exprs`.
+    let s = &mut scratch[..N - 1];
+    for slot in s.iter_mut() {
+        *slot = 0;
+    }
 
     let blocks = (N - 1) / 4;
     for i in 0..blocks {
@@ -1066,19 +1124,6 @@ pub(crate) fn sample_fixed_type<const N: usize>(
             | ((u[base + 13] as i32) << 16)
             | ((u[base + 14] as u32 as i32) << 24);
     }
-    if (N - 1) > blocks * 4 {
-        let i = blocks;
-        let base = 15 * i;
-        s[4 * i] = ((u[base] as i32) << 2)
-            | ((u[base + 1] as i32) << 10)
-            | ((u[base + 2] as i32) << 18)
-            | ((u[base + 3] as u32 as i32) << 26);
-        s[4 * i + 1] = (((u[base + 3] as i32) & 0xc0) >> 4)
-            | ((u[base + 4] as i32) << 4)
-            | ((u[base + 5] as i32) << 12)
-            | ((u[base + 6] as i32) << 20)
-            | ((u[base + 7] as u32 as i32) << 28);
-    }
 
     for i in 0..weight / 2 {
         s[i] |= 1;
@@ -1087,7 +1132,7 @@ pub(crate) fn sample_fixed_type<const N: usize>(
         s[i] |= 2;
     }
 
-    crypto_sort_int32(&mut s);
+    crypto_sort_int32(s);
 
     for i in 0..N - 1 {
         r[i] = (s[i] & 3) as u16;
@@ -1446,8 +1491,8 @@ pub(crate) struct KatEntry {
 }
 
 /// Decode an even-length hex string into bytes. Permissive about embedded
-/// whitespace so the same routine handles both `.rsp` lines and the legacy
-/// per-set `*.hex` fixtures.
+/// whitespace so the same routine handles `.rsp`-line hex fields, which
+/// don't always end at a fixed column.
 #[cfg(test)]
 pub(crate) fn hex_to_bytes(s: &str) -> Vec<u8> {
     let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
