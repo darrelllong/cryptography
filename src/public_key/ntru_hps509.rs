@@ -1,46 +1,13 @@
-//! NTRU-HPS-2048-509 implemented in safe, idiomatic Rust from the round-3
-//! NTRU specification (Chen, Chung, Hülsing, Lange, Lyubashevsky, Saito,
-//! Schanck, Schwabe, Stehlé, Whyte, Xagawa, Yamakawa, Zhang; NIST PQC,
-//! 2020-10-16).
+//! NTRU-HPS-2048-509 — round-3 NTRU parameter set $(N = 509, q = 2048,
+//! \text{weight} = q/8 - 2 = 254)$.
 //!
-//! This module provides:
-//! - the HPS-2048-509 parameter set ($N = 509$, $q = 2048$,
-//!   weight `= q/8 - 2 = 254`)
-//! - key generation, encapsulation, decapsulation (CCA KEM)
-//! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`
+//! Algorithmic core, OWCPA + FO-style KEM, and side-channel inventory
+//! are documented in [`crate::public_key::ntru_pqc_shared`]; this file
+//! is the parameter binding plus the LOGQ-11 Sq packer override.
 //!
-//! Construction:
-//! - Ring $\mathbb{Z}_q[x] / (x^N - 1)$ with operations projected onto
-//!   $\mathbb{Z}_q[x] / \Phi_n(x)$ where $\Phi_n(x) = (x^N - 1) / (x - 1)$ for the
-//!   `Sq` and `S3` views.
-//! - One-way CPA-secure encryption (OWCPA) under the trapdoor `(f, g)` with
-//!   public key $h = g/f$ in `R_q`, encryption `c = r·h + lift(m)`,
-//!   decryption recovering `(r, m)`.
-//! - CCA KEM via the SXY/Sch18 Fujisaki-Okamoto-style transform: shared key
-//!   `K = SHA3-256(r || m)`, with deterministic implicit rejection
-//!   `K = SHA3-256(prf || c)` on any decapsulation failure.
-//!
-//! Implementation notes:
-//! - polynomial arithmetic and packings are implemented in-tree
-//! - inversion in $R_2 = \mathbb{F}_2[x] / (x^N - 1)$ and in $S_3 = \mathbb{F}_3[x] / \Phi_n(x)$
-//!   uses the constant-time gcd recursion of Bernstein and Yang ("Fast
-//!   constant-time gcd computation and modular inversion", TCHES 2019)
-//! - the fixed-weight `T_fixed` sampler tags each candidate coefficient with
-//!   30 random bits and a 2-bit trinary intent, then sorts by tag using
-//!   Batcher's bitonic sorting network (Batcher, "Sorting networks and
-//!   their applications", AFIPS 1968)
-//! - SHA3-256 and AES-256 CTR-DRBG come from this crate's `hash` and `cprng`
-//!   modules; no C/FFI backends are used
-//!
-//! Validation:
-//! the `count = 0` entry of the round-3 KAT `PQCkemKAT_935.rsp` is reproduced
-//! byte-for-byte by the inline test, including the published `pk`, `sk`,
-//! `ct`, and `ss`.
-//!
-//! Side channels: see [`crate::public_key::ntru_pqc_shared`] for the
-//! per-primitive constant-time / variable-time analysis covering all four
-//! NIST PQC NTRU modules. This module is exposed under [`crate::vt`]
-//! because the shared polynomial multiplier is not constant-time.
+//! Validated against all 100 entries of the round-3 KAT file
+//! `PQCkemKAT_935.rsp` (sampled subset by default; full sweep under
+//! `--ignored`).
 
 
 

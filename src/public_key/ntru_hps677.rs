@@ -1,26 +1,13 @@
-//! NTRU-HPS-2048-677 implemented in safe, idiomatic Rust from the round-3
-//! NTRU specification (Chen, Chung, Hülsing, Lange, Lyubashevsky, Saito,
-//! Schanck, Schwabe, Stehlé, Whyte, Xagawa, Yamakawa, Zhang; NIST PQC,
-//! 2020-10-16).
+//! NTRU-HPS-2048-677 — round-3 NTRU parameter set $(N = 677, q = 2048,
+//! \text{weight} = q/8 - 2 = 254)$.
 //!
-//! This module provides:
-//! - the HPS-2048-677 parameter set ($N = 677$, $q = 2048$,
-//!   weight `= q/8 - 2 = 254`)
-//! - key generation, encapsulation, decapsulation (CCA KEM)
-//! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`
+//! Algorithmic core, OWCPA + FO-style KEM, and side-channel inventory
+//! are documented in [`crate::public_key::ntru_pqc_shared`]; this file
+//! is the parameter binding plus the LOGQ-11 Sq packer override.
 //!
-//! See [`crate::public_key::ntru_hps509`] for the full algorithmic
-//! description; HPS-2048-677 differs from HPS-2048-509 only in the ring
-//! degree and the resulting byte sizes. Polynomial inversion follows
-//! Bernstein–Yang (TCHES 2019); the fixed-weight sampler uses Batcher's
-//! bitonic sorting network (1968); SHA3-256 and AES-256 CTR-DRBG come from
-//! this crate's `hash` and `cprng` modules.
-//!
-//! Validation:
-//! the `count = 0` entry of the round-3 KAT `PQCkemKAT_1234.rsp` is
-//! reproduced byte-for-byte by the inline test.
-//!
-//! Side channels: see [`crate::public_key::ntru_pqc_shared`].
+//! Validated against all 100 entries of the round-3 KAT file
+//! `PQCkemKAT_1234.rsp` (sampled subset by default; full sweep under
+//! `--ignored`).
 
 
 

@@ -1,26 +1,15 @@
-//! NTRU-HPS-4096-821 implemented in safe, idiomatic Rust from the round-3
-//! NTRU specification (Chen, Chung, Hülsing, Lange, Lyubashevsky, Saito,
-//! Schanck, Schwabe, Stehlé, Whyte, Xagawa, Yamakawa, Zhang; NIST PQC,
-//! 2020-10-16).
+//! NTRU-HPS-4096-821 — round-3 NTRU parameter set $(N = 821, q = 4096,
+//! \text{weight} = q/8 - 2 = 510)$.
 //!
-//! This module provides:
-//! - the HPS-4096-821 parameter set ($N = 821$, $q = 4096$,
-//!   weight `= q/8 - 2 = 510`)
-//! - key generation, encapsulation, decapsulation (CCA KEM)
-//! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`
+//! Algorithmic core, OWCPA + FO-style KEM, and side-channel inventory
+//! are documented in [`crate::public_key::ntru_pqc_shared`]; this file
+//! is the parameter binding plus the LOGQ-12 Sq packer override (a
+//! 12-bit-per-coefficient packing rather than the 11-bit form used by
+//! HPS-509 / HPS-677).
 //!
-//! See [`crate::public_key::ntru_hps509`] for the full algorithmic
-//! description; HPS-4096-821 differs in ring degree, in the larger `q`
-//! (which selects a 12-bit-per-coefficient `Sq` packing rather than
-//! 11-bit), and in the doubled fixed-weight count. Polynomial inversion
-//! follows Bernstein–Yang (TCHES 2019); the fixed-weight sampler uses
-//! Batcher's bitonic sorting network (1968).
-//!
-//! Validation:
-//! the `count = 0` entry of the round-3 KAT `PQCkemKAT_1590.rsp` is
-//! reproduced byte-for-byte by the inline test.
-//!
-//! Side channels: see [`crate::public_key::ntru_pqc_shared`].
+//! Validated against all 100 entries of the round-3 KAT file
+//! `PQCkemKAT_1590.rsp` (sampled subset by default; full sweep under
+//! `--ignored`).
 
 
 

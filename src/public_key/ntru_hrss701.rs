@@ -1,34 +1,28 @@
-//! NTRU-HRSS-701 implemented in safe, idiomatic Rust from the round-3 NTRU
-//! specification (Chen, Chung, Hülsing, Lange, Lyubashevsky, Saito, Schanck,
-//! Schwabe, Stehlé, Whyte, Xagawa, Yamakawa, Zhang; NIST PQC, 2020-10-16).
+//! NTRU-HRSS-701 — round-3 NTRU parameter set $(N = 701, q = 8192)$.
 //!
-//! This module provides:
-//! - the HRSS-701 parameter set ($N = 701$, $q = 8192$)
-//! - key generation, encapsulation, decapsulation (CCA KEM)
-//! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`
+//! Algorithmic core, OWCPA + FO-style KEM, and side-channel inventory
+//! are documented in [`crate::public_key::ntru_pqc_shared`]; this file
+//! is the parameter binding plus the four HRSS-specific
+//! [`NtruVariant`](crate::public_key::ntru_pqc_shared::NtruVariant)
+//! method overrides:
 //!
-//! Differences from the HPS family (see [`crate::public_key::ntru_hps509`]):
-//! - both `f` and `g` are drawn from the `Sample_iid_plus` distribution
-//!   (sample IID, then conditionally negate even-indexed coefficients so
-//!   that `<x · r, r> >= 0`); HPS uses fixed-weight sampling for `g`.
-//! - the secret-key formula uses `g <- 3 · (x - 1) · g` instead of the HPS
-//!   `g <- 3 · g`; correspondingly `lift(m) = ((m / (x - 1)) mod (3, Phi_n))
-//!   · (x - 1)` rather than the trivial Z_3 → Z_q embedding.
-//! - the message-space check on `m` is dropped; any element of `S_3` is a
-//!   valid HRSS message.
-//! - $q = 8192$ selects a 13-bit-per-coefficient `Sq` packing.
+//! - `sample_fg` uses `Sample_iid_plus` for both `f` and `g` (sample
+//!   IID then conditionally negate even-indexed coefficients so that
+//!   $\langle x \cdot r, r \rangle \ge 0$); HPS uses fixed-weight
+//!   sampling for `g`.
+//! - `sample_rm` uses iid-only for both `r` and `m`; HPS uses
+//!   fixed-weight for `m`.
+//! - `update_g_after_z3_to_zq` computes $g \gets 3 (x - 1) g$; HPS
+//!   uses $g \gets 3 g$.
+//! - `poly_lift` uses the $(x - 1)$-factor lift; HPS uses the
+//!   trivial $\mathbb{Z}_3 \to \mathbb{Z}_q$ embedding.
+//! - `check_m` is a no-op; HRSS accepts any $S_3$ message.
 //!
-//! Inversion in `R_2` and `S_3` follows Bernstein and Yang (TCHES 2019);
-//! SHA3-256 and AES-256 CTR-DRBG come from this crate's `hash` and `cprng`
-//! modules; no C/FFI backends are used.
+//! HRSS also picks the LOGQ-13 Sq packer (13 bits per coefficient).
 //!
-//! Validation:
-//! the `count = 0` entry of the round-3 KAT `PQCkemKAT_1450.rsp` is
-//! reproduced byte-for-byte by the inline test.
-//!
-//! Side channels: see [`crate::public_key::ntru_pqc_shared`]. HRSS-701
-//! uses iid-only sampling, so the Batcher fixed-weight sort referenced
-//! there is not on its hot path.
+//! Validated against all 100 entries of the round-3 KAT file
+//! `PQCkemKAT_1450.rsp` (sampled subset by default; full sweep under
+//! `--ignored`).
 
 
 

@@ -2,6 +2,49 @@
 //! `NtruVariant` trait shared by the NIST PQC NTRU modules
 //! ([`crate::public_key::ntru_hps509`], `_hps677`, `_hps821`, `_hrss701`).
 //!
+//! This module hosts the algorithmic core that the four per-set NTRU
+//! PQC modules in this crate share. Each per-set file is the
+//! parameter constants plus a single `impl NtruVariant<N, LOGQ>` and
+//! a `define_pqc_kem!` invocation; everything else lives here.
+//!
+//! Reference: round-3 NTRU specification (Chen, Chung, Hülsing, Lange,
+//! Lyubashevsky, Saito, Schanck, Schwabe, Stehlé, Whyte, Xagawa,
+//! Yamakawa, Zhang; NIST PQC, 2020-10-16).
+//!
+//! Construction (HPS variants `Hps509Variant` / `Hps677Variant` /
+//! `Hps821Variant`; HRSS variant `Hrss701Variant`):
+//!
+//! - Ring $\mathbb{Z}_q[x] / (x^N - 1)$ with operations projected onto
+//!   $\mathbb{Z}_q[x] / \Phi_n(x)$ where
+//!   $\Phi_n(x) = (x^N - 1) / (x - 1)$ for the `Sq` and `S3` views.
+//! - One-way CPA-secure encryption (OWCPA) under the trapdoor
+//!   $(f, g)$ with public key $h = g / f$ in $R_q$, encryption
+//!   $c = r \cdot h + \text{lift}(m)$, decryption recovering
+//!   $(r, m)$. Variant-specific bits ($g$-update, $\text{lift}$,
+//!   message validation) come from [`NtruVariant`] methods.
+//! - CCA KEM via the SXY/Sch18 Fujisaki–Okamoto-style transform:
+//!   shared key $K = \text{SHA3-256}(r \mathbin\| m)$, with
+//!   deterministic implicit rejection
+//!   $K = \text{SHA3-256}(\text{prf} \mathbin\| c)$ on any
+//!   decapsulation failure. SHA3-256 and AES-256 CTR-DRBG come
+//!   from this crate's `hash` and `cprng` modules; no C/FFI
+//!   backends are used.
+//!
+//! Implementation notes shared by all four parameter sets:
+//!
+//! - inversion in $R_2 = \mathbb{F}_2[x] / (x^N - 1)$ and in
+//!   $S_3 = \mathbb{F}_3[x] / \Phi_n(x)$ uses the constant-time gcd
+//!   recursion of Bernstein and Yang ("Fast constant-time gcd
+//!   computation and modular inversion", TCHES 2019).
+//! - the fixed-weight `T_fixed` sampler ([`sample_fixed_type`], HPS
+//!   only) tags each candidate coefficient with 30 random bits and
+//!   a 2-bit trinary intent, then sorts by tag using Batcher's
+//!   bitonic sorting network (Batcher, "Sorting networks and their
+//!   applications", AFIPS 1968).
+//! - polynomial arithmetic and packings are implemented in-tree;
+//!   the cyclic multiplier ([`crate::public_key::ntru_poly_mul`])
+//!   uses Karatsuba over `u16` wrapping arithmetic.
+//!
 //! Side-channel inventory (the per-set modules link here instead of
 //! repeating it):
 //!
@@ -475,8 +518,12 @@ macro_rules! define_pqc_kem {
             pub fn keygen<R: $crate::Csprng>(rng: &mut R) -> ($pk_ty, $sk_ty) {
                 let mut pk = [0u8; PUBLIC_KEY_BYTES];
                 let mut sk = [0u8; PRIVATE_KEY_BYTES];
+                let mut seed_scratch = [0u8; SAMPLE_FG_BYTES];
                 $crate::public_key::ntru_pqc_shared::kem_keypair_seeded::<$variant, R, N, LOGQ>(
-                    &mut pk, &mut sk, rng,
+                    &mut pk,
+                    &mut sk,
+                    rng,
+                    &mut seed_scratch,
                 );
                 ($pk_ty { bytes: pk }, $sk_ty { bytes: sk })
             }
@@ -487,16 +534,27 @@ macro_rules! define_pqc_kem {
             ) -> ($ct_ty, $ss_ty) {
                 let mut ct = [0u8; CIPHERTEXT_BYTES];
                 let mut ss = [0u8; SHARED_SECRET_BYTES];
+                let mut rm_seed_scratch = [0u8; SAMPLE_RM_BYTES];
+                let mut rm_scratch = [0u8; OWCPA_MSGBYTES];
                 $crate::public_key::ntru_pqc_shared::kem_enc_seeded::<$variant, R, N, LOGQ>(
-                    &mut ct, &mut ss, &pk.bytes, rng,
+                    &mut ct,
+                    &mut ss,
+                    &pk.bytes,
+                    rng,
+                    &mut rm_seed_scratch,
+                    &mut rm_scratch,
                 );
                 ($ct_ty { bytes: ct }, $ss_ty { bytes: ss })
             }
 
             pub fn decaps(sk: &$sk_ty, ct: &$ct_ty) -> $ss_ty {
                 let mut ss = [0u8; SHARED_SECRET_BYTES];
+                let mut rm_scratch = [0u8; OWCPA_MSGBYTES];
                 $crate::public_key::ntru_pqc_shared::kem_dec::<$variant, N, LOGQ>(
-                    &mut ss, &ct.bytes, &sk.bytes,
+                    &mut ss,
+                    &ct.bytes,
+                    &sk.bytes,
+                    &mut rm_scratch,
                 );
                 $ss_ty { bytes: ss }
             }
@@ -986,47 +1044,57 @@ pub(crate) fn poly_rq_sum_zero_adjust<const N: usize>(r: &mut [u16; N]) {
 /// CCA KEM key generation: draw an OWCPA seed plus the implicit-rejection
 /// PRF key from `rng`, run [`owcpa_keypair`], and pack everything into the
 /// caller's wire-format buffers.
+///
+/// `seed_scratch` must be `V::SAMPLE_FG_BYTES` bytes long; the macro that
+/// invokes this function declares it as a stack array of the per-set
+/// size so no heap allocation appears on the keygen hot path.
 pub(crate) fn kem_keypair_seeded<V, R, const N: usize, const LOGQ: usize>(
     pk: &mut [u8],
     sk: &mut [u8],
     rng: &mut R,
+    seed_scratch: &mut [u8],
 ) where
     V: NtruVariant<N, LOGQ>,
     R: crate::Csprng,
 {
-    let mut seed = vec![0u8; V::SAMPLE_FG_BYTES];
-    rng.fill_bytes(&mut seed);
-    owcpa_keypair::<V, N, LOGQ>(pk, &mut sk[..V::OWCPA_SECRETKEYBYTES], &seed);
+    debug_assert_eq!(seed_scratch.len(), V::SAMPLE_FG_BYTES);
+    rng.fill_bytes(seed_scratch);
+    owcpa_keypair::<V, N, LOGQ>(pk, &mut sk[..V::OWCPA_SECRETKEYBYTES], seed_scratch);
     rng.fill_bytes(&mut sk[V::OWCPA_SECRETKEYBYTES..]);
 }
 
 /// CCA KEM encapsulation: draw fresh randomness for $(r, m)$, hash the
 /// resulting message into the shared secret, then OWCPA-encrypt against
 /// `pk`.
+///
+/// `rm_seed_scratch` must be `V::SAMPLE_RM_BYTES` long and `rm_scratch`
+/// must be `V::OWCPA_MSGBYTES` long; the macro stack-allocates both.
 pub(crate) fn kem_enc_seeded<V, R, const N: usize, const LOGQ: usize>(
     c: &mut [u8],
     k: &mut [u8],
     pk: &[u8],
     rng: &mut R,
+    rm_seed_scratch: &mut [u8],
+    rm_scratch: &mut [u8],
 ) where
     V: NtruVariant<N, LOGQ>,
     R: crate::Csprng,
 {
     use crate::hash::sha3::Sha3_256;
     debug_assert_eq!(k.len(), 32);
+    debug_assert_eq!(rm_seed_scratch.len(), V::SAMPLE_RM_BYTES);
+    debug_assert_eq!(rm_scratch.len(), V::OWCPA_MSGBYTES);
 
-    let mut rm_seed = vec![0u8; V::SAMPLE_RM_BYTES];
-    rng.fill_bytes(&mut rm_seed);
+    rng.fill_bytes(rm_seed_scratch);
 
     let mut r = [0u16; N];
     let mut m = [0u16; N];
-    V::sample_rm(&mut r, &mut m, &rm_seed);
+    V::sample_rm(&mut r, &mut m, rm_seed_scratch);
 
-    let mut rm = vec![0u8; V::OWCPA_MSGBYTES];
-    poly_s3_tobytes::<N>(&mut rm[..V::PACK_TRINARY_BYTES], &r);
-    poly_s3_tobytes::<N>(&mut rm[V::PACK_TRINARY_BYTES..], &m);
+    poly_s3_tobytes::<N>(&mut rm_scratch[..V::PACK_TRINARY_BYTES], &r);
+    poly_s3_tobytes::<N>(&mut rm_scratch[V::PACK_TRINARY_BYTES..], &m);
 
-    let digest = Sha3_256::new().chain(&rm).finalize();
+    let digest = Sha3_256::new().chain(rm_scratch).finalize();
     k.copy_from_slice(&digest);
 
     poly_z3_to_zq::<N>(&mut r, V::Q_MASK);
@@ -1038,19 +1106,23 @@ pub(crate) fn kem_enc_seeded<V, R, const N: usize, const LOGQ: usize>(
 /// CCA KEM decapsulation: run [`owcpa_dec`], hash $r \| m$ for the
 /// session key, hash `prf || c` for the implicit-rejection key, and
 /// `cmov` between them on the OWCPA failure flag.
+///
+/// `rm_scratch` must be `V::OWCPA_MSGBYTES` long; the macro
+/// stack-allocates it.
 pub(crate) fn kem_dec<V, const N: usize, const LOGQ: usize>(
     k: &mut [u8],
     c: &[u8],
     sk: &[u8],
+    rm_scratch: &mut [u8],
 ) where
     V: NtruVariant<N, LOGQ>,
 {
     use crate::hash::sha3::Sha3_256;
     debug_assert_eq!(k.len(), 32);
-    let mut rm = vec![0u8; V::OWCPA_MSGBYTES];
-    let fail = owcpa_dec::<V, N, LOGQ>(&mut rm, c, &sk[..V::OWCPA_SECRETKEYBYTES]);
+    debug_assert_eq!(rm_scratch.len(), V::OWCPA_MSGBYTES);
+    let fail = owcpa_dec::<V, N, LOGQ>(rm_scratch, c, &sk[..V::OWCPA_SECRETKEYBYTES]);
 
-    let digest = Sha3_256::new().chain(&rm).finalize();
+    let digest = Sha3_256::new().chain(rm_scratch).finalize();
     k.copy_from_slice(&digest);
 
     let reject = Sha3_256::new()
