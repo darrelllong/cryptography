@@ -1,0 +1,5 @@
+uname: Linux darby 6.12.62+rpt-rpi-2712 #1 SMP PREEMPT Debian 1:6.12.62-1+rpt1~bookworm (2026-01-19) aarch64 GNU/Linux
+date_utc: 2026-05-08T17:55:49Z
+git_crypto: eac8df08cdef59d0a9e7fb873d35225e90a1dc1a
+git_pilot: 097624d2d7d19fedb6412d325f6b9c824f33cf34
+preset: normal, confidence_level: 0.90

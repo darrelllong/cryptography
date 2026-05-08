@@ -1,0 +1,42 @@
+# Hash throughput — Wigner / Moore / Darby (2026-05-08)
+
+Pilot-bench `--preset normal --confidence-level 0.90`. Workload 256 KiB
+absorbed per round; XOFs squeeze 32 bytes per round so the per-byte input
+cost dominates.
+
+![Hash Kiviat (radar)](../../../assets/sweep-2026-05-08-hash-radar.svg)
+
+### MD5 / SHA-1 / RIPEMD-160 (legacy)
+
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| md5 | 128 | 265.5 | ±0.4472 | 80 | 407.6 | ±9.286 | 50 | 171.7 | ±0.8412 | 110 |
+| sha1 | 160 | 212.6 | ±0.3821 | 50 | 276 | ±10.76 | 52 | 127.9 | ±0.6307 | 115 |
+| ripemd160 | 160 | 276.1 | ±0.6673 | 85 | 135.1 | ±2.878 | 50 | 69.97 | ±0.2279 | 290 |
+
+### SHA-2 (FIPS 180-4)
+
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| sha224 | 224 | 194.5 | ±0.3132 | 50 | 210.8 | ±4.164 | 80 | 115.7 | ±0.5723 | 50 |
+| sha256 | 256 | 183.4 | ±9.603 | 170 | 213.4 | ±3.165 | 50 | 115.7 | ±0.4852 | 170 |
+| sha384 | 384 | 296.2 | ±0.2573 | 143 | 331.8 | ±5.48 | 80 | 183.3 | ±0.8976 | 140 |
+| sha512 | 512 | 295.7 | ±0.4227 | 50 | 330.8 | ±5.068 | 140 | 183.2 | ±1.346 | 50 |
+| sha512_224 | 224 | 282.5 | ±3.542 | 50 | 327.5 | ±10.29 | 50 | 183.2 | ±1.086 | 142 |
+| sha512_256 | 256 | 294.3 | ±2.018 | 170 | 332.5 | ±2.884 | 80 | 182.7 | ±1.394 | 80 |
+
+### SHA-3 (FIPS 202)
+
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| sha3_224 | 224 | 355.4 | ±1.02 | 140 | 321.1 | ±6.156 | 55 | 79.26 | ±0.2791 | 80 |
+| sha3_256 | 256 | 334.7 | ±0.5567 | 50 | 299.9 | ±6.291 | 54 | 94.73 | ±0.4218 | 170 |
+| sha3_384 | 384 | 258.5 | ±0.387 | 50 | 233.4 | ±4.093 | 80 | 72.56 | ±0.2045 | 200 |
+| sha3_512 | 512 | 180.7 | ±0.3678 | 50 | 164.3 | ±2.234 | 51 | 50.33 | ±0.1565 | 50 |
+
+### SHAKE XOFs (FIPS 202; 32-byte squeeze)
+
+| Hash | Out | Wigner (M1 Max) MB/s | Wigner (M1 Max) ±CI (90%) | Wigner (M1 Max) Runs | Moore (EPYC 7452) MB/s | Moore (EPYC 7452) ±CI (90%) | Moore (EPYC 7452) Runs | Darby (RPi5) MB/s | Darby (RPi5) ±CI (90%) | Darby (RPi5) Runs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| shake128 | xof | 413 | ±1.212 | 50 | 370.7 | ±4.559 | 140 | 116.2 | ±1.12 | 50 |
+| shake256 | xof | 336.3 | ±0.7572 | 50 | 302.2 | ±5.264 | 140 | 94.53 | ±0.5017 | 50 |
