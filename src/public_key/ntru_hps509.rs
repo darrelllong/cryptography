@@ -1153,9 +1153,6 @@ trait DigestChain: Digest + Sized {
 
 impl<D: Digest> DigestChain for D {}
 
-// Re-export DRBG so KAT tests can refer to it without leaking pub use.
-#[allow(dead_code)]
-type _Drbg = CtrDrbgAes256;
 
 #[cfg(test)]
 mod tests {

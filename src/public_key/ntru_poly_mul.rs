@@ -8,9 +8,9 @@
 //!
 //! Below a small base-case threshold the routine falls back to schoolbook;
 //! the recursive overhead otherwise outweighs the asymptotic
-//! $O(N^{\log_2 3}) \approx O(N^{1.585})$ gain for the operand sizes used here
-//! (N ≤ 821). Empirical crossover on Apple silicon and recent x86 lands in
-//! the 32–64 coefficient range.
+//! $O(N^{\log_2 3}) \approx O(N^{1.585})$ gain. Operand sizes used here run
+//! up to $N = 1499$ (the largest IEEE 1363.1 EES set). Empirical crossover on
+//! Apple silicon and recent x86 lands in the 32–64 coefficient range.
 //!
 //! All arithmetic is `u16` wrapping (mod 2^16). Karatsuba's algebraic
 //! identity holds in any commutative ring, including Z/2^16, so wrapping

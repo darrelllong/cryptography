@@ -393,37 +393,37 @@ pub mod vt {
         NtruHps821SharedSecret,
     };
     pub use crate::public_key::ntru_ees401ep1::{
-        NtruEes401Ep1, NtruEes401Ep1Ciphertext, NtruEes401Ep1Error, NtruEes401Ep1PrivateKey,
-        NtruEes401Ep1PublicKey,
+        NtruEes401Ep1, NtruEes401Ep1Ciphertext, NtruEes401Ep1PrivateKey, NtruEes401Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees443ep1::{
-        NtruEes443Ep1, NtruEes443Ep1Ciphertext, NtruEes443Ep1Error, NtruEes443Ep1PrivateKey,
-        NtruEes443Ep1PublicKey,
+        NtruEes443Ep1, NtruEes443Ep1Ciphertext, NtruEes443Ep1PrivateKey, NtruEes443Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees449ep1::{
-        NtruEes449Ep1, NtruEes449Ep1Ciphertext, NtruEes449Ep1Error, NtruEes449Ep1PrivateKey,
-        NtruEes449Ep1PublicKey,
+        NtruEes449Ep1, NtruEes449Ep1Ciphertext, NtruEes449Ep1PrivateKey, NtruEes449Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees541ep1::{
-        NtruEes541Ep1, NtruEes541Ep1Ciphertext, NtruEes541Ep1Error, NtruEes541Ep1PrivateKey,
-        NtruEes541Ep1PublicKey,
+        NtruEes541Ep1, NtruEes541Ep1Ciphertext, NtruEes541Ep1PrivateKey, NtruEes541Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees677ep1::{
-        NtruEes677Ep1, NtruEes677Ep1Ciphertext, NtruEes677Ep1Error, NtruEes677Ep1PrivateKey,
-        NtruEes677Ep1PublicKey,
+        NtruEes677Ep1, NtruEes677Ep1Ciphertext, NtruEes677Ep1PrivateKey, NtruEes677Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees1087ep1::{
-        NtruEes1087Ep1, NtruEes1087Ep1Ciphertext, NtruEes1087Ep1Error,
-        NtruEes1087Ep1PrivateKey, NtruEes1087Ep1PublicKey,
+        NtruEes1087Ep1, NtruEes1087Ep1Ciphertext, NtruEes1087Ep1PrivateKey,
+        NtruEes1087Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees1087ep2::{
-        NtruEes1087Ep2, NtruEes1087Ep2Ciphertext, NtruEes1087Ep2Error,
-        NtruEes1087Ep2PrivateKey, NtruEes1087Ep2PublicKey,
+        NtruEes1087Ep2, NtruEes1087Ep2Ciphertext, NtruEes1087Ep2PrivateKey,
+        NtruEes1087Ep2PublicKey,
+    };
+    pub use crate::public_key::ntru_ees1171ep1::{
+        NtruEes1171Ep1, NtruEes1171Ep1Ciphertext, NtruEes1171Ep1PrivateKey,
+        NtruEes1171Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees1499ep1::{
-        NtruEes1499Ep1, NtruEes1499Ep1Ciphertext, NtruEes1499Ep1Error,
-        NtruEes1499Ep1PrivateKey, NtruEes1499Ep1PublicKey,
+        NtruEes1499Ep1, NtruEes1499Ep1Ciphertext, NtruEes1499Ep1PrivateKey,
+        NtruEes1499Ep1PublicKey,
     };
+    pub use crate::public_key::ntru_ees_core::NtruEesError;
     pub use crate::public_key::ntru_hrss701::{
         NtruHrss701, NtruHrss701Ciphertext, NtruHrss701PrivateKey, NtruHrss701PublicKey,
         NtruHrss701SharedSecret,

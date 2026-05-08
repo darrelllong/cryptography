@@ -44,6 +44,7 @@
 ///   ntruees677ep1_keygen, ntruees677ep1_encrypt, ntruees677ep1_decrypt
 ///   ntruees1087ep1_keygen, ntruees1087ep1_encrypt, ntruees1087ep1_decrypt
 ///   ntruees1087ep2_keygen, ntruees1087ep2_encrypt, ntruees1087ep2_decrypt
+///   ntruees1171ep1_keygen, ntruees1171ep1_encrypt, ntruees1171ep1_decrypt
 ///   ntruees1499ep1_keygen, ntruees1499ep1_encrypt, ntruees1499ep1_decrypt
 ///
 /// Iteration scaling: set `PILOT_PK_ITERS_PERCENT` (1..=100). Default: 25.
@@ -55,7 +56,8 @@ use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
     ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, NtruEes1087Ep2, NtruEes401Ep1,
-    NtruEes1087Ep1, NtruEes1499Ep1, NtruEes443Ep1, NtruEes449Ep1, NtruEes541Ep1, NtruEes677Ep1,
+    NtruEes1087Ep1, NtruEes1171Ep1, NtruEes1499Ep1, NtruEes443Ep1, NtruEes449Ep1, NtruEes541Ep1,
+    NtruEes677Ep1,
     NtruHps509, NtruHps677, NtruHps821, NtruHrss701, Paillier, Rabin, Rsa, RsaOaep, RsaPss,
     SchmidtSamoa, X25519, X448,
 };
@@ -1048,6 +1050,34 @@ fn main() {
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(NtruEes1087Ep2::decrypt(&sk, &ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRUEncrypt EES1171EP1 (IEEE Std 1363.1-2008, SHA-256) ───────────
+        "ntruees1171ep1_keygen" => {
+            let n = pk_iters(8);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes1171Ep1::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees1171ep1_encrypt" => {
+            let (pk, _) = NtruEes1171Ep1::keygen(&mut rng);
+            let n = pk_iters(15);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes1171Ep1::encrypt(&pk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees1171ep1_decrypt" => {
+            let (pk, sk) = NtruEes1171Ep1::keygen(&mut rng);
+            let ct = NtruEes1171Ep1::encrypt(&pk, &MSG, &mut rng).unwrap();
+            let n = pk_iters(15);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes1171Ep1::decrypt(&sk, &ct).unwrap());
             }
             ms_per_op(t0.elapsed(), n)
         }
