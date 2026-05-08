@@ -928,27 +928,7 @@ mod tests {
     use super::*;
     use crate::CtrDrbgAes256;
 
-    fn hex_to_bytes(s: &str) -> Vec<u8> {
-        let s = s.trim();
-        assert!(s.len() % 2 == 0);
-        let mut out = Vec::with_capacity(s.len() / 2);
-        let bytes = s.as_bytes();
-        for i in (0..s.len()).step_by(2) {
-            let hi = hex_nibble(bytes[i]);
-            let lo = hex_nibble(bytes[i + 1]);
-            out.push((hi << 4) | lo);
-        }
-        out
-    }
 
-    fn hex_nibble(b: u8) -> u8 {
-        match b {
-            b'0'..=b'9' => b - b'0',
-            b'a'..=b'f' => b - b'a' + 10,
-            b'A'..=b'F' => b - b'A' + 10,
-            _ => panic!("bad hex digit"),
-        }
-    }
 
     #[test]
     fn parameter_byte_lengths() {
@@ -1020,53 +1000,47 @@ mod tests {
         assert_eq!(ct, ct2);
     }
 
-    /// Validates the `count = 0` entry of the official NIST PQC KAT file
+    /// Validates a sampled subset of the 100 entries in
     /// `KAT/ntruhps4096821/PQCkemKAT_1590.rsp` (round 3, 2020-10-16).
-    ///
-    /// The CTR-DRBG is initialised with the published 48-byte seed; running
-    /// `keygen` and `encaps` from that DRBG must produce the published
-    /// `pk`, `sk`, `ct`, and `ss`. `decaps` must recover the same `ss`.
+    /// See [`nist_kat_full`] for the full sweep.
     #[test]
-    fn nist_kat_count_zero() {
-        let seed_hex =
-            "061550234D158C5EC95595FE04EF7A25767F2E24CC2BC479D09D86DC9ABCFDE7\
-             056A8C266F9EF97ED08541DBD2E1FFA1";
-        let pk_hex = include_str!("ntru_hps821_kat_count0_pk.hex");
-        let sk_hex = include_str!("ntru_hps821_kat_count0_sk.hex");
-        let ct_hex = include_str!("ntru_hps821_kat_count0_ct.hex");
-        let ss_hex =
-            "293992000DC288E8152F9451F06DD835C75EA008662BACE0FB97A97B3AFB54E4";
+    fn nist_kat_sampled_counts() {
+        let rsp = include_str!(
+            "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhps4096821/PQCkemKAT_1590.rsp"
+        );
+        for &count in crate::public_key::ntru_pqc_shared::KAT_SAMPLED_COUNTS {
+            run_kat_count(rsp, count);
+        }
+    }
 
-        let seed = hex_to_bytes(seed_hex);
-        let mut seed_arr = [0u8; 48];
-        seed_arr.copy_from_slice(&seed);
-        let mut drbg = CtrDrbgAes256::new(&seed_arr);
+    #[test]
+    #[ignore]
+    fn nist_kat_full() {
+        let rsp = include_str!(
+            "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhps4096821/PQCkemKAT_1590.rsp"
+        );
+        for count in 0..100 {
+            run_kat_count(rsp, count);
+        }
+    }
+
+    fn run_kat_count(rsp: &str, count: usize) {
+        let entry = crate::public_key::ntru_pqc_shared::parse_kat_entry(rsp, count)
+            .unwrap_or_else(|| panic!("KAT count={count} missing"));
+        assert_eq!(entry.seed.len(), 48, "seed length");
+        let mut seed = [0u8; 48];
+        seed.copy_from_slice(&entry.seed);
+        let mut drbg = CtrDrbgAes256::new(&seed);
 
         let (pk, sk) = NtruHps821::keygen(&mut drbg);
-        assert_eq!(
-            pk.to_wire_bytes().as_slice(),
-            hex_to_bytes(pk_hex).as_slice(),
-            "public key matches KAT"
-        );
-        assert_eq!(
-            sk.to_wire_bytes().as_slice(),
-            hex_to_bytes(sk_hex).as_slice(),
-            "private key matches KAT"
-        );
+        assert_eq!(pk.to_wire_bytes().as_slice(), entry.pk.as_slice(), "pk @ count={count}");
+        assert_eq!(sk.to_wire_bytes().as_slice(), entry.sk.as_slice(), "sk @ count={count}");
 
         let (ct, ss) = NtruHps821::encaps(&pk, &mut drbg);
-        assert_eq!(
-            ct.to_wire_bytes().as_slice(),
-            hex_to_bytes(ct_hex).as_slice(),
-            "ciphertext matches KAT"
-        );
-        assert_eq!(
-            ss.to_wire_bytes().as_slice(),
-            hex_to_bytes(ss_hex).as_slice(),
-            "shared secret matches KAT"
-        );
+        assert_eq!(ct.to_wire_bytes().as_slice(), entry.ct.as_slice(), "ct @ count={count}");
+        assert_eq!(ss.to_wire_bytes().as_slice(), entry.ss.as_slice(), "ss @ count={count}");
 
         let ss2 = NtruHps821::decaps(&sk, &ct);
-        assert_eq!(ss.as_bytes(), ss2.as_bytes(), "decaps recovers ss");
+        assert_eq!(ss.as_bytes(), ss2.as_bytes(), "decaps @ count={count}");
     }
 }

@@ -158,6 +158,77 @@ pub(crate) fn mod3(a: u16) -> u16 {
     (((c as u16) & r) | ((!c as u16) & (t as u16))) & 0xffff
 }
 
+// ---- shared NIST PQC KAT parsing (test only) -------------------------------
+
+/// One entry of a NIST PQC `.rsp` KAT file: 48-byte seed plus the
+/// reference-implementation outputs.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct KatEntry {
+    pub seed: Vec<u8>,
+    pub pk: Vec<u8>,
+    pub sk: Vec<u8>,
+    pub ct: Vec<u8>,
+    pub ss: Vec<u8>,
+}
+
+/// Decode an even-length hex string into bytes. Permissive about embedded
+/// whitespace so the same routine handles both `.rsp` lines and the legacy
+/// per-set `*.hex` fixtures.
+#[cfg(test)]
+pub(crate) fn hex_to_bytes(s: &str) -> Vec<u8> {
+    let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(cleaned.len() % 2 == 0, "hex length must be even");
+    (0..cleaned.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex"))
+        .collect()
+}
+
+/// Parse the `count = N` entry out of a NIST PQC `.rsp` KAT file. Returns
+/// `None` if the count is absent (e.g. asking for entry 100 from a 100-entry
+/// file).
+#[cfg(test)]
+pub(crate) fn parse_kat_entry(rsp: &str, count: usize) -> Option<KatEntry> {
+    let target = format!("count = {count}");
+    let mut lines = rsp.lines();
+    while let Some(line) = lines.next() {
+        if line.trim() == target {
+            let mut seed = None;
+            let mut pk = None;
+            let mut sk = None;
+            let mut ct = None;
+            let mut ss = None;
+            for line in lines.by_ref().take(5) {
+                let (key, value) = line.split_once(" = ")?;
+                let bytes = hex_to_bytes(value.trim());
+                match key.trim() {
+                    "seed" => seed = Some(bytes),
+                    "pk" => pk = Some(bytes),
+                    "sk" => sk = Some(bytes),
+                    "ct" => ct = Some(bytes),
+                    "ss" => ss = Some(bytes),
+                    _ => {}
+                }
+            }
+            return Some(KatEntry {
+                seed: seed?,
+                pk: pk?,
+                sk: sk?,
+                ct: ct?,
+                ss: ss?,
+            });
+        }
+    }
+    None
+}
+
+/// Counts that span the full 0..100 range of the NIST round-3 KAT files.
+/// Picked to catch first-entry / state-rollover / final-entry bugs without
+/// running a full 30+-second 100-entry sweep on every `cargo test`.
+#[cfg(test)]
+pub(crate) const KAT_SAMPLED_COUNTS: &[usize] = &[0, 1, 7, 23, 42, 67, 83, 99];
+
 #[cfg(test)]
 mod tests {
     use super::*;
