@@ -2,7 +2,7 @@
 //!
 //! Algorithmic core, OWCPA + FO-style KEM, and side-channel inventory
 //! are documented in [`crate::public_key::ntru_pqc_shared`]; this file
-//! is the parameter binding plus the four HRSS-specific
+//! is the parameter binding plus the five HRSS-specific
 //! [`NtruVariant`](crate::public_key::ntru_pqc_shared::NtruVariant)
 //! method overrides:
 //!
