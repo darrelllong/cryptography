@@ -218,11 +218,18 @@ pub(crate) fn mod3(a: u16) -> u16 {
     (((c as u16) & r) | ((!c as u16) & (t as u16))) & 0xffff
 }
 
-/// Reduce $a \in [0, 5)$ modulo 3 without branches. Used inside the
-/// Bernstein–Yang $\mathbb{F}_3$ inverter to keep intermediate
-/// coefficients canonical after each `g[i] += sign * f[i]` step.
+/// Reduce $a \in [0, 14]$ modulo 3 without branches.
+///
+/// One round of $(a \gg 2) + (a \mathbin\& 3)$ shrinks the input
+/// to $[0, 5]$ for any $a \le 14$, which is then folded by a
+/// branchless "subtract 3 if non-negative" step. The Bernstein–Yang
+/// $\mathbb{F}_3$ inverter feeds in values up to 9
+/// (`(a[i] & 3) + 2 * (a[N - 1] & 3)`), so the bound is honoured at
+/// every call site. The function's output is wrong for $a \ge 15$
+/// (e.g. `mod3_u8(15) = 3`); use `mod3` for unbounded `u16` inputs.
 #[inline]
 pub(crate) fn mod3_u8(a: u8) -> u8 {
+    debug_assert!(a <= 14, "mod3_u8 input out of range: {a}");
     let a = (a >> 2) + (a & 3);
     let t = (a as i16) - 3;
     let c = t >> 5;
@@ -1719,7 +1726,6 @@ mod tests {
     fn digest_chain_matches_concat_then_update() {
         use crate::hash::sha2::Sha256;
         use crate::hash::sha3::Sha3_256;
-        use crate::hash::Digest;
 
         let parts: [&[u8]; 3] = [b"abc", b"defghij", b""];
         let concat: Vec<u8> = parts.iter().flat_map(|p| p.iter().copied()).collect();

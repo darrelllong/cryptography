@@ -1531,7 +1531,6 @@ macro_rules! define_ees_set {
             #[test]
             fn byte_format_regression_digest() {
                 use $crate::hash::sha2::Sha256;
-                use $crate::hash::Digest;
                 let mut drbg = CtrDrbgAes256::new(&[0xC0u8; 48]);
                 let (pk, sk) = $type_name::keygen(&mut drbg);
                 let ct = $type_name::encrypt(&pk, &[0xA5u8; 8], &mut drbg)
