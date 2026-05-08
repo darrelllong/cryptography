@@ -33,6 +33,13 @@
 ///   mldsa44_keygen, mldsa44_sign, mldsa44_verify
 ///   mldsa65_keygen, mldsa65_sign, mldsa65_verify
 ///   mldsa87_keygen, mldsa87_sign, mldsa87_verify
+///   ntruhps509_keygen, ntruhps509_encaps, ntruhps509_decaps
+///   ntruhps677_keygen, ntruhps677_encaps, ntruhps677_decaps
+///   ntruhps821_keygen, ntruhps821_encaps, ntruhps821_decaps
+///   ntruhrss701_keygen, ntruhrss701_encaps, ntruhrss701_decaps
+///   ntruees401ep1_keygen, ntruees401ep1_encrypt, ntruees401ep1_decrypt
+///   ntruees449ep1_keygen, ntruees449ep1_encrypt, ntruees449ep1_decrypt
+///   ntruees677ep1_keygen, ntruees677ep1_encrypt, ntruees677ep1_decrypt
 ///
 /// Iteration scaling: set `PILOT_PK_ITERS_PERCENT` (1..=100). Default: 25.
 use std::hint::black_box;
@@ -42,7 +49,8 @@ use std::time::Instant;
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
-    ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, Paillier, Rabin, Rsa, RsaOaep,
+    ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, NtruEes401Ep1, NtruEes449Ep1,
+    NtruEes677Ep1, NtruHps509, NtruHps677, NtruHps821, NtruHrss701, Paillier, Rabin, Rsa, RsaOaep,
     RsaPss, SchmidtSamoa, X25519, X448,
 };
 use cryptography::{Csprng, CtrDrbgAes256, Sha256};
@@ -726,6 +734,202 @@ fn main() {
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::verify(&pk, &MSG, &sig));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRU-HPS-2048-509 (NIST PQC round 3) ─────────────────────────────
+        "ntruhps509_keygen" => {
+            let n = pk_iters(80);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps509::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhps509_encaps" => {
+            let (pk, _) = NtruHps509::keygen(&mut rng);
+            let n = pk_iters(80);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps509::encaps(&pk, &mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhps509_decaps" => {
+            let (pk, sk) = NtruHps509::keygen(&mut rng);
+            let (ct, _) = NtruHps509::encaps(&pk, &mut rng);
+            let n = pk_iters(80);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps509::decaps(&sk, &ct));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRU-HPS-2048-677 (NIST PQC round 3) ─────────────────────────────
+        "ntruhps677_keygen" => {
+            let n = pk_iters(60);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps677::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhps677_encaps" => {
+            let (pk, _) = NtruHps677::keygen(&mut rng);
+            let n = pk_iters(60);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps677::encaps(&pk, &mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhps677_decaps" => {
+            let (pk, sk) = NtruHps677::keygen(&mut rng);
+            let (ct, _) = NtruHps677::encaps(&pk, &mut rng);
+            let n = pk_iters(60);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps677::decaps(&sk, &ct));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRU-HPS-4096-821 (NIST PQC round 3) ─────────────────────────────
+        "ntruhps821_keygen" => {
+            let n = pk_iters(40);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps821::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhps821_encaps" => {
+            let (pk, _) = NtruHps821::keygen(&mut rng);
+            let n = pk_iters(40);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps821::encaps(&pk, &mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhps821_decaps" => {
+            let (pk, sk) = NtruHps821::keygen(&mut rng);
+            let (ct, _) = NtruHps821::encaps(&pk, &mut rng);
+            let n = pk_iters(40);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHps821::decaps(&sk, &ct));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRU-HRSS-701 (NIST PQC round 3) ─────────────────────────────────
+        "ntruhrss701_keygen" => {
+            let n = pk_iters(60);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHrss701::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhrss701_encaps" => {
+            let (pk, _) = NtruHrss701::keygen(&mut rng);
+            let n = pk_iters(60);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHrss701::encaps(&pk, &mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruhrss701_decaps" => {
+            let (pk, sk) = NtruHrss701::keygen(&mut rng);
+            let (ct, _) = NtruHrss701::encaps(&pk, &mut rng);
+            let n = pk_iters(60);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruHrss701::decaps(&sk, &ct));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRUEncrypt EES401EP1 (IEEE Std 1363.1-2008, SHA-1) ──────────────
+        "ntruees401ep1_keygen" => {
+            let n = pk_iters(20);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes401Ep1::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees401ep1_encrypt" => {
+            let (pk, _) = NtruEes401Ep1::keygen(&mut rng);
+            let n = pk_iters(40);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes401Ep1::encrypt(&pk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees401ep1_decrypt" => {
+            let (pk, sk) = NtruEes401Ep1::keygen(&mut rng);
+            let ct = NtruEes401Ep1::encrypt(&pk, &MSG, &mut rng).unwrap();
+            let n = pk_iters(40);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes401Ep1::decrypt(&sk, &ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRUEncrypt EES449EP1 (IEEE Std 1363.1-2008, SHA-1) ──────────────
+        "ntruees449ep1_keygen" => {
+            let n = pk_iters(20);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes449Ep1::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees449ep1_encrypt" => {
+            let (pk, _) = NtruEes449Ep1::keygen(&mut rng);
+            let n = pk_iters(40);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes449Ep1::encrypt(&pk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees449ep1_decrypt" => {
+            let (pk, sk) = NtruEes449Ep1::keygen(&mut rng);
+            let ct = NtruEes449Ep1::encrypt(&pk, &MSG, &mut rng).unwrap();
+            let n = pk_iters(40);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes449Ep1::decrypt(&sk, &ct).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        // ── NTRUEncrypt EES677EP1 (IEEE Std 1363.1-2008, SHA-256) ────────────
+        "ntruees677ep1_keygen" => {
+            let n = pk_iters(15);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes677Ep1::keygen(&mut rng));
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees677ep1_encrypt" => {
+            let (pk, _) = NtruEes677Ep1::keygen(&mut rng);
+            let n = pk_iters(30);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes677Ep1::encrypt(&pk, &MSG, &mut rng).unwrap());
+            }
+            ms_per_op(t0.elapsed(), n)
+        }
+        "ntruees677ep1_decrypt" => {
+            let (pk, sk) = NtruEes677Ep1::keygen(&mut rng);
+            let ct = NtruEes677Ep1::encrypt(&pk, &MSG, &mut rng).unwrap();
+            let n = pk_iters(30);
+            let t0 = Instant::now();
+            for _ in 0..n {
+                black_box(NtruEes677Ep1::decrypt(&sk, &ct).unwrap());
             }
             ms_per_op(t0.elapsed(), n)
         }

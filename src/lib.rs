@@ -380,6 +380,34 @@ pub mod vt {
         MlKem, MlKemCiphertext, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
         MlKemSharedSecret,
     };
+    pub use crate::public_key::ntru_hps509::{
+        NtruHps509, NtruHps509Ciphertext, NtruHps509PrivateKey, NtruHps509PublicKey,
+        NtruHps509SharedSecret,
+    };
+    pub use crate::public_key::ntru_hps677::{
+        NtruHps677, NtruHps677Ciphertext, NtruHps677PrivateKey, NtruHps677PublicKey,
+        NtruHps677SharedSecret,
+    };
+    pub use crate::public_key::ntru_hps821::{
+        NtruHps821, NtruHps821Ciphertext, NtruHps821PrivateKey, NtruHps821PublicKey,
+        NtruHps821SharedSecret,
+    };
+    pub use crate::public_key::ntru_ees401ep1::{
+        NtruEes401Ep1, NtruEes401Ep1Ciphertext, NtruEes401Ep1Error, NtruEes401Ep1PrivateKey,
+        NtruEes401Ep1PublicKey,
+    };
+    pub use crate::public_key::ntru_ees449ep1::{
+        NtruEes449Ep1, NtruEes449Ep1Ciphertext, NtruEes449Ep1Error, NtruEes449Ep1PrivateKey,
+        NtruEes449Ep1PublicKey,
+    };
+    pub use crate::public_key::ntru_ees677ep1::{
+        NtruEes677Ep1, NtruEes677Ep1Ciphertext, NtruEes677Ep1Error, NtruEes677Ep1PrivateKey,
+        NtruEes677Ep1PublicKey,
+    };
+    pub use crate::public_key::ntru_hrss701::{
+        NtruHrss701, NtruHrss701Ciphertext, NtruHrss701PrivateKey, NtruHrss701PublicKey,
+        NtruHrss701SharedSecret,
+    };
     pub use crate::public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
     pub use crate::public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};
     pub use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};

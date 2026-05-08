@@ -9,3 +9,5 @@ Cargo.lock
 /scripts/.katex-validator/package-lock.json
 /scripts/.katex-validator/package.json
 /third_party/
+/.claude/
+/.ntru-upstream/

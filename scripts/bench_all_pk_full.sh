@@ -126,4 +126,29 @@ measure mldsa87_keygen
 measure mldsa87_sign
 measure mldsa87_verify
 
+hdr "NTRU (NIST PQC round 3)"
+measure ntruhps509_keygen
+measure ntruhps509_encaps
+measure ntruhps509_decaps
+measure ntruhps677_keygen
+measure ntruhps677_encaps
+measure ntruhps677_decaps
+measure ntruhps821_keygen
+measure ntruhps821_encaps
+measure ntruhps821_decaps
+measure ntruhrss701_keygen
+measure ntruhrss701_encaps
+measure ntruhrss701_decaps
+
+hdr "NTRUEncrypt (IEEE Std 1363.1-2008)"
+measure ntruees401ep1_keygen
+measure ntruees401ep1_encrypt
+measure ntruees401ep1_decrypt
+measure ntruees449ep1_keygen
+measure ntruees449ep1_encrypt
+measure ntruees449ep1_decrypt
+measure ntruees677ep1_keygen
+measure ntruees677ep1_encrypt
+measure ntruees677ep1_decrypt
+
 echo ""

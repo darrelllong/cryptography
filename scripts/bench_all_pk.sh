@@ -83,4 +83,18 @@ measure mldsa87_keygen
 measure mldsa87_sign
 measure mldsa87_verify
 
+hdr "NTRU (NIST PQC round 3)"
+measure ntruhps509_keygen
+measure ntruhps509_encaps
+measure ntruhps509_decaps
+measure ntruhps677_keygen
+measure ntruhps677_encaps
+measure ntruhps677_decaps
+measure ntruhps821_keygen
+measure ntruhps821_encaps
+measure ntruhps821_decaps
+measure ntruhrss701_keygen
+measure ntruhrss701_encaps
+measure ntruhrss701_decaps
+
 echo ""

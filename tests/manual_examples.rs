@@ -6,6 +6,7 @@ use cryptography::public_key::ec_edwards::ed25519;
 use cryptography::vt::{
     p256, BigUint, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh, ElGamal, MlDsa,
     MlDsaParameterSet, MlDsaSignature, MlKem, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
+    NtruHps509, NtruHps509Ciphertext, NtruHps509PublicKey, NtruHrss701, NtruHrss701PublicKey,
     Paillier, Rsa, RsaOaep, RsaPss,
 };
 use cryptography::{
@@ -364,4 +365,26 @@ fn manual_postquantum_examples() {
     let sig_round =
         MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa65, &sig_wire).expect("signature");
     assert!(MlDsa::verify(&dsa_pk, b"release manifest", &sig_round));
+
+    // NTRU-HPS-2048-509 (NIST PQC round-3 alternate KEM, KAT-validated).
+    let (ntru_pk, ntru_sk) = NtruHps509::keygen(&mut rng);
+    let (ntru_ct, ntru_ss_sender) = NtruHps509::encaps(&ntru_pk, &mut rng);
+    let ntru_ss_receiver = NtruHps509::decaps(&ntru_sk, &ntru_ct);
+    assert_eq!(ntru_ss_sender.as_bytes(), ntru_ss_receiver.as_bytes());
+
+    let ntru_pk_wire = ntru_pk.to_wire_bytes();
+    let ntru_ct_wire = ntru_ct.to_wire_bytes();
+    let ntru_pk_round = NtruHps509PublicKey::from_wire_bytes(&ntru_pk_wire).expect("ntru pk");
+    let ntru_ct_round = NtruHps509Ciphertext::from_wire_bytes(&ntru_ct_wire).expect("ntru ct");
+    assert_eq!(ntru_pk_round, ntru_pk);
+    assert_eq!(ntru_ct_round, ntru_ct);
+
+    // NTRU-HRSS-701 (sister parameter set in the same submission family).
+    let (hrss_pk, hrss_sk) = NtruHrss701::keygen(&mut rng);
+    let (hrss_ct, hrss_ss_sender) = NtruHrss701::encaps(&hrss_pk, &mut rng);
+    let hrss_ss_receiver = NtruHrss701::decaps(&hrss_sk, &hrss_ct);
+    assert_eq!(hrss_ss_sender.as_bytes(), hrss_ss_receiver.as_bytes());
+    let hrss_pk_round =
+        NtruHrss701PublicKey::from_wire_bytes(&hrss_pk.to_wire_bytes()).expect("hrss pk");
+    assert_eq!(hrss_pk_round, hrss_pk);
 }

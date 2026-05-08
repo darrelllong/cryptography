@@ -4,8 +4,10 @@
 
 This document covers the post-quantum lattice implementations in this repo:
 
-- `MlKem` (`ML-KEM-512/768/1024`) for key encapsulation
-- `MlDsa` (`ML-DSA-44/65/87`) for signatures
+- `MlKem` (`ML-KEM-512/768/1024`) for key encapsulation (FIPS 203)
+- `MlDsa` (`ML-DSA-44/65/87`) for signatures (FIPS 204)
+- `NtruHps509`, `NtruHps677`, `NtruHps821`, `NtruHrss701` for NIST PQC round-3
+  NTRU CCA-secure key encapsulation
 
 The implementations are pure Rust in-tree arithmetic (no C/FFI in production paths),
 with differential testing against vendored reference code.
@@ -42,6 +44,26 @@ module-LWE and module-SIS used by ML-KEM and ML-DSA.
   - `MlDsa::verify`, `MlDsa::verify_with_context`
 - Types:
   - `MlDsaPublicKey`, `MlDsaPrivateKey`, `MlDsaSignature`
+
+### NTRU (NIST PQC round 3, 2020-10-16 submission)
+
+- Parameter sets:
+  - `NtruHps509` (`ntruhps2048509`, NIST level 1)
+  - `NtruHps677` (`ntruhps2048677`, NIST level 3)
+  - `NtruHps821` (`ntruhps4096821`, NIST level 5)
+  - `NtruHrss701` (`ntruhrss701`, NIST level 1)
+- APIs (each `Ntru*` namespace):
+  - `keygen`, `encaps`, `decaps`
+- Types (per parameter set):
+  - `Ntru*PublicKey`, `Ntru*PrivateKey`, `Ntru*Ciphertext`, `Ntru*SharedSecret`
+
+NTRU here is a faithful Rust port of the official round-3 reference C
+distributed in `NIST-PQ-Submission-NTRU-20201016.tar.gz` from `ntru.org`. Each
+parameter set is validated byte-for-byte against the `count = 0` entry of the
+shipped `PQCkemKAT_*.rsp` known-answer file (`PQCkemKAT_935.rsp` for HPS-509,
+`PQCkemKAT_1234.rsp` for HPS-677, `PQCkemKAT_1590.rsp` for HPS-821, and
+`PQCkemKAT_1450.rsp` for HRSS-701). The vendored hex sidecars next to each
+module's source are the public KAT bytes, not derived data.
 
 ## Why This Design
 
@@ -94,6 +116,29 @@ At a high level:
 
 The optional context is part of the signed transcript and must match exactly at
 verification time.
+
+### NTRU (NIST PQC round 3)
+
+At a high level (HPS variants):
+
+1. `keygen` samples a trinary `f` (IID-uniform) and a trinary `g` of fixed
+   weight `q/8 - 2`, computes `f^{-1} mod 3` and `(g·f)^{-1} mod q`, and
+   derives the public polynomial `h = g · (g·f)^{-1} · g  mod (q, x^N - 1)`.
+   The private key bundles `f`, `f^{-1} mod 3`, `h^{-1} in S_q`, and a 32-byte
+   PRF key for implicit rejection.
+2. `encaps` samples `(r, m)` (IID for `r`, fixed-weight for `m`), derives the
+   shared secret `K = SHA3-256(pack3(r) || pack3(m))`, lifts `r` into `Z_q`,
+   and emits the ciphertext `c = r·h + lift(m)` packed sum-zero.
+3. `decaps` recovers `(r, m)` via the trapdoor `(f, f^{-1}_3, h^{-1})`,
+   re-validates `r` (and for HPS, the weight constraint on `m`), and returns
+   `K = SHA3-256(pack3(r) || pack3(m))` on success or
+   `K = SHA3-256(prf || c)` on any consistency failure (implicit rejection).
+
+HRSS-701 differs from the HPS sets in three places: `f` and `g` come from the
+`sample_iid_plus` distribution (post-conditioned to satisfy `<x·r, r> ≥ 0`),
+the keygen uses `g ← 3·(x − 1)·g` instead of `g ← 3·g`, the message-space
+check on `m` is dropped, and the encryption `lift` is the more elaborate
+`a / (x − 1) mod (3, Φ_n)` operator rather than the bare `Z_3 → Z_q` map.
 
 ## Working Examples
 
@@ -151,6 +196,28 @@ let sig_round =
 assert!(MlDsa::verify(&pk, b"release manifest", &sig_round));
 ```
 
+### NTRU end-to-end + wire roundtrip
+
+```rust
+use cryptography::vt::{NtruHps509, NtruHps509Ciphertext, NtruHps509PublicKey};
+use cryptography::CtrDrbgAes256;
+
+let mut rng = CtrDrbgAes256::new(&[11u8; 48]);
+
+let (pk, sk) = NtruHps509::keygen(&mut rng);
+let (ct, ss_sender) = NtruHps509::encaps(&pk, &mut rng);
+let ss_receiver = NtruHps509::decaps(&sk, &ct);
+assert_eq!(ss_sender.as_bytes(), ss_receiver.as_bytes());
+
+let pk_round = NtruHps509PublicKey::from_wire_bytes(&pk.to_wire_bytes()).expect("pk");
+let ct_round = NtruHps509Ciphertext::from_wire_bytes(&ct.to_wire_bytes()).expect("ct");
+assert_eq!(pk_round, pk);
+assert_eq!(ct_round, ct);
+```
+
+The other parameter sets (`NtruHps677`, `NtruHps821`, `NtruHrss701`) expose
+identical `keygen`, `encaps`, `decaps` shapes; only the byte sizes change.
+
 ## Parameter Comparison
 
 ### ML-KEM: Security vs. Cost
@@ -184,6 +251,17 @@ half-widths are in the benchmark tables below.
 
 ![ML-DSA throughput radar](assets/mldsa-platform-radar.svg)
 
+### NTRU: Security vs. Cost
+
+**Key and ciphertext sizes (bytes; round-3 submission Table 2.1)**
+
+| Parameter | Security | Public Key | Private Key | Ciphertext | Shared Secret |
+|---|:---:|---:|---:|---:|---:|
+| NtruHps509  | NIST 1 |   699 |   935 |   699 | 32 |
+| NtruHrss701 | NIST 1 | 1 138 | 1 450 | 1 138 | 32 |
+| NtruHps677  | NIST 3 |   930 | 1 234 |   930 | 32 |
+| NtruHps821  | NIST 5 | 1 230 | 1 590 | 1 230 | 32 |
+
 ### Cross-scheme comparison at NIST Level 3
 
 | Metric | ML-KEM-768 | ML-DSA-65 |
@@ -211,11 +289,11 @@ bash scripts/bench_all_pk_full.sh
 Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 
 - Apple M1 Max (`wigner.local`)
-- Intel Xeon 6740E (`ssh.soe.ucsc.edu`, single-core slice)
+- AMD EPYC 7452 (`moore.soe.ucsc.edu`, single-core slice)
 
 ### ML-KEM (Kyber)
 
-| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ± CI | Xeon 6740E Runs |
+| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mlkem512_keygen | 0.01947 | ±2.831e-05 | 90 | 0.02968 | ±9.867e-05 | 31 |
 | mlkem512_encaps | 0.01937 | ±0.0001085 | 61 | 0.03102 | ±0.0001033 | 60 |
@@ -229,7 +307,7 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 
 ### ML-DSA (Dilithium)
 
-| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | Xeon 6740E ms/op | Xeon 6740E ± CI | Xeon 6740E Runs |
+| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
 |---|---:|---:|---:|---:|---:|---:|
 | mldsa44_keygen | 0.07784 | ±0.002088 | 60 | 0.1142 | ±0.0002587 | 60 |
 | mldsa44_sign | 0.2071 | ±0.0006633 | 350 | 0.4592 | ±0.0006615 | 41 |
@@ -241,6 +319,37 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 | mldsa87_sign | 0.4731 | ±0.001884 | 156 | 1.019 | ±0.00348 | 30 |
 | mldsa87_verify | 0.207 | ±0.0003116 | 151 | 0.3107 | ±0.001124 | 40 |
 
+### NTRU (NIST PQC round 3)
+
+| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
+|---|---:|---:|---:|---:|---:|---:|
+| ntruhps509_keygen   | 0.9587  | ±0.007179  |  60 | 1.264  | ±0.00275   |  30 |
+| ntruhps509_encaps   | 0.07949 | ±0.000565  |  30 | 0.1064 | ±0.0003404 |  90 |
+| ntruhps509_decaps   | 0.1355  | ±0.003243  |  34 | 0.152  | ±0.0004813 |  42 |
+| ntruhps677_keygen   | 1.073   | ±0.009453  | 102 | 1.769  | ±0.004486  |  44 |
+| ntruhps677_encaps   | 0.08488 | ±0.0007114 |  94 | 0.135  | ±0.0004764 |  49 |
+| ntruhps677_decaps   | 0.1006  | ±0.002053  |  43 | 0.1537 | ±0.001519  |  30 |
+| ntruhps821_keygen   | 2.288   | ±0.003679  | 120 | 2.864  | ±0.1528    |  30 |
+| ntruhps821_encaps   | 0.159   | ±0.0006922 |  38 | 0.1969 | ±0.0004668 |  30 |
+| ntruhps821_decaps   | 0.2871  | ±0.001907  |  35 | 0.2822 | ±0.001327  |  30 |
+| ntruhrss701_keygen  | 1.198   | ±0.03817   |  90 | 1.843  | ±0.0879    |  30 |
+| ntruhrss701_encaps  | 0.04527 | ±0.0007903 |  53 | 0.06832 | ±0.001074 |  39 |
+| ntruhrss701_decaps  | 0.1123  | ±0.003495  |  30 | 0.1693 | ±0.001493  |  30 |
+
+### NTRUEncrypt (IEEE Std 1363.1-2008)
+
+| Operation | M1 Max ms/op | M1 Max ± CI | M1 Max Runs | EPYC 7452 ms/op | EPYC 7452 ± CI | EPYC 7452 Runs |
+|---|---:|---:|---:|---:|---:|---:|
+| ntruees401ep1_keygen  | 0.7387  | ±0.004256  |  90 | 0.9273 | ±0.001791  |  37 |
+| ntruees401ep1_encrypt | 0.09144 | ±0.0003451 | 128 | 0.09403 | ±0.0005089 | 30 |
+| ntruees401ep1_decrypt | 0.1281  | ±0.0002626 |  51 | 0.1447 | ±0.0007402 |  98 |
+| ntruees449ep1_keygen  | 0.8699  | ±0.002396  |  90 | 1.105  | ±0.001782  |  66 |
+| ntruees449ep1_encrypt | 0.1267  | ±0.0001983 |  80 | 0.1342 | ±0.0004829 |  30 |
+| ntruees449ep1_decrypt | 0.1583  | ±0.0002213 |  57 | 0.1859 | ±0.01549   |  66 |
+| ntruees677ep1_keygen  | 1.105   | ±0.007408  | 120 | 1.585  | ±0.01588   |  32 |
+| ntruees677ep1_encrypt | 0.1629  | ±0.0003894 |  83 | 0.1774 | ±0.0005738 |  39 |
+| ntruees677ep1_decrypt | 0.2565  | ±0.0001352 |  60 | 0.3007 | ±0.0005775 | 180 |
+
 ## Benchmark Discussion
 
 - `ML-KEM` scales roughly with parameter size and is stable across runs; CIs are
@@ -248,6 +357,17 @@ Numbers below are `ms/op`, with 95% CI half-width and rounds run.
 - `ML-DSA` verify is consistently cheaper than sign at each level, as expected.
 - `ML-DSA` signing variance is driven by rejection behavior in the signer loop;
   this is visible in the wider CI for `mldsa65_sign` on M1.
+- `NTRU` keygen costs are dominated by the polynomial inversion in `R_q`
+  (Hensel lift over the variable-time `F_2[x]` Euclidean inverse). Keygen is
+  the slowest operation on every parameter set, by 5–25× over encaps/decaps.
+- `NTRU-HRSS-701` encaps is the cheapest post-quantum encapsulation in the
+  table — at 0.045 ms on M1 it beats every ML-KEM size, because the HRSS
+  encryption is a single trinary-by-dense convolution (the Karatsuba split
+  amortizes well for sparse trinary inputs).
+- `NTRU-HPS` and `NTRUEncrypt-EES` show the schoolbook-vs-NTT gap clearly:
+  ML-KEM-512 keygen is ~50× faster than NTRU-HPS-509 keygen on the same host.
+  Adding an in-tree NTT for the NTRU rings would close most of that gap; the
+  AVX2 reference C does this on x86 only and we deliberately don't.
 
 Reference baselines (vendored C code) are available through:
 
@@ -259,10 +379,14 @@ integration.
 
 ## Validation
 
-- Full crate tests (`cargo test`) include ML-KEM and ML-DSA roundtrip/tamper
-  checks.
+- Full crate tests (`cargo test`) include ML-KEM, ML-DSA, and NTRU
+  roundtrip/tamper checks.
 - Differential tests compare against first-vector outputs from vendored
   reference implementations.
+- NTRU additionally validates byte-for-byte against the `count = 0` entry of
+  the official NIST PQC round-3 KAT files for each parameter set
+  (`PQCkemKAT_935.rsp`, `PQCkemKAT_1234.rsp`, `PQCkemKAT_1590.rsp`,
+  `PQCkemKAT_1450.rsp`).
 
 ## References
 
@@ -285,6 +409,14 @@ in [README.md](README.md).
   Signature Standard (FIPS 204)*, 2024.
   DOI: [10.6028/NIST.FIPS.204](https://doi.org/10.6028/NIST.FIPS.204)
   (local copy: `pubs/fips204-ml-dsa.pdf`)
+- Cong Chen, Oussama Danba, Jeffrey Hoffstein, Andreas Hülsing, Joost Rijneveld,
+  John M. Schanck, Peter Schwabe, William Whyte, Zhenfei Zhang, Tsunekazu Saito,
+  Takashi Yamakawa, and Keita Xagawa, *NTRU — Algorithm Specifications and
+  Supporting Documentation* (round-3 NIST PQC submission), 2020-10-16.
+  Submission package archived at
+  [`ntru.org/release/NIST-PQ-Submission-NTRU-20201016.tar.gz`](https://ntru.org/release/NIST-PQ-Submission-NTRU-20201016.tar.gz);
+  this crate's NTRU implementations are direct ports of that package's
+  reference C and validate against its KAT files.
 - Reference code (for differential testing / benchmark calibration) is
   fetched on demand into a gitignored `third_party/` directory by
   `scripts/fetch_mlkem_refs.sh` and `scripts/fetch_mldsa_refs.sh`. The
