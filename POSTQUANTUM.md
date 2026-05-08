@@ -262,6 +262,26 @@ half-widths are in the benchmark tables below.
 | NtruHps677  | NIST 3 |   930 | 1 234 |   930 | 32 |
 | NtruHps821  | NIST 5 | 1 230 | 1 590 | 1 230 | 32 |
 
+### NTRUEncrypt (IEEE 1363.1): Security vs. Cost
+
+**Key, ciphertext, and message sizes (bytes; IEEE Std 1363.1-2008, Annex A
+parameter tables)**
+
+| Parameter | Security | Public Key | Private Key | Ciphertext | Max Message |
+|---|:---:|---:|---:|---:|---:|
+| EES401EP1  | 112-bit |   552 |   653 |   552 |  60 |
+| EES449EP1  | 128-bit |   618 |   731 |   618 |  69 |
+| EES541EP1  | 112-bit |   744 |   880 |   744 |  86 |
+| EES677EP1  | 192-bit |   931 | 1 101 |   931 | 101 |
+| EES1087EP2 | 256-bit | 1 495 | 1 767 | 1 495 | 170 |
+
+The private-key length is `PRIVATE_KEY_BYTES + PUBLIC_KEY_BYTES`: this
+crate stores the trinary trapdoor `t` (compactly packed) alongside the
+public key, because SVES-3 decryption needs the public key for the
+re-encryption check that distinguishes legitimate ciphertexts from
+forgeries. Max-message bytes follow IEEE 1363.1 §11.4
+(`N · 3 / 16 − 1 − db / 8`).
+
 ### Cross-scheme comparison at NIST Level 3
 
 | Metric | ML-KEM-768 | ML-DSA-65 |
