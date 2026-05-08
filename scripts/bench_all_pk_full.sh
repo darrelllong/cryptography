@@ -147,6 +147,9 @@ measure ntruees401ep1_decrypt
 measure ntruees449ep1_keygen
 measure ntruees449ep1_encrypt
 measure ntruees449ep1_decrypt
+measure ntruees541ep1_keygen
+measure ntruees541ep1_encrypt
+measure ntruees541ep1_decrypt
 measure ntruees677ep1_keygen
 measure ntruees677ep1_encrypt
 measure ntruees677ep1_decrypt
