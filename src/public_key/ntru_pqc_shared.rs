@@ -669,6 +669,85 @@ pub(crate) fn poly_rq_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
     poly_r2_inv_to_rq_inv(r, &ai2, a);
 }
 
+// ---- IID and fixed-weight samplers -----------------------------------------
+
+/// $\text{Sample\_iid}$ from round-3 NTRU, §3.3.1: each output coefficient
+/// is the input byte reduced modulo 3. Output buffer is $N - 1$
+/// coefficients (the high coefficient is set to 0); input length must be
+/// $N - 1$ bytes.
+pub(crate) fn sample_iid<const N: usize>(r: &mut [u16; N], uniform_bytes: &[u8]) {
+    debug_assert_eq!(uniform_bytes.len(), N - 1);
+    for i in 0..N - 1 {
+        r[i] = mod3(uniform_bytes[i] as u16);
+    }
+    r[N - 1] = 0;
+}
+
+/// $\text{Sample\_fixed\_type}$ from round-3 NTRU, §3.3.4: pack 30
+/// random bits per word from `u` (4 words per 15 bytes), tag the bottom
+/// two bits with the intended trinary value (half $+1$ as `01`, half
+/// $-1$ as `10`, rest $0$), sort using the constant-time bitonic
+/// network, and read off the bottom-two-bit tag of each sorted slot.
+/// Used by HPS keygen for `g` and by HPS encryption for `r`.
+pub(crate) fn sample_fixed_type<const N: usize>(
+    r: &mut [u16; N],
+    u: &[u8],
+    weight: usize,
+) {
+    debug_assert_eq!(u.len(), (30 * (N - 1) + 7) / 8);
+    let mut s = vec![0i32; N - 1];
+
+    let blocks = (N - 1) / 4;
+    for i in 0..blocks {
+        let base = 15 * i;
+        s[4 * i] = ((u[base] as i32) << 2)
+            | ((u[base + 1] as i32) << 10)
+            | ((u[base + 2] as i32) << 18)
+            | ((u[base + 3] as u32 as i32) << 26);
+        s[4 * i + 1] = (((u[base + 3] as i32) & 0xc0) >> 4)
+            | ((u[base + 4] as i32) << 4)
+            | ((u[base + 5] as i32) << 12)
+            | ((u[base + 6] as i32) << 20)
+            | ((u[base + 7] as u32 as i32) << 28);
+        s[4 * i + 2] = (((u[base + 7] as i32) & 0xf0) >> 2)
+            | ((u[base + 8] as i32) << 6)
+            | ((u[base + 9] as i32) << 14)
+            | ((u[base + 10] as i32) << 22)
+            | ((u[base + 11] as u32 as i32) << 30);
+        s[4 * i + 3] = ((u[base + 11] as i32) & 0xfc)
+            | ((u[base + 12] as i32) << 8)
+            | ((u[base + 13] as i32) << 16)
+            | ((u[base + 14] as u32 as i32) << 24);
+    }
+    if (N - 1) > blocks * 4 {
+        let i = blocks;
+        let base = 15 * i;
+        s[4 * i] = ((u[base] as i32) << 2)
+            | ((u[base + 1] as i32) << 10)
+            | ((u[base + 2] as i32) << 18)
+            | ((u[base + 3] as u32 as i32) << 26);
+        s[4 * i + 1] = (((u[base + 3] as i32) & 0xc0) >> 4)
+            | ((u[base + 4] as i32) << 4)
+            | ((u[base + 5] as i32) << 12)
+            | ((u[base + 6] as i32) << 20)
+            | ((u[base + 7] as u32 as i32) << 28);
+    }
+
+    for i in 0..weight / 2 {
+        s[i] |= 1;
+    }
+    for i in weight / 2..weight {
+        s[i] |= 2;
+    }
+
+    crypto_sort_int32(&mut s);
+
+    for i in 0..N - 1 {
+        r[i] = (s[i] & 3) as u16;
+    }
+    r[N - 1] = 0;
+}
+
 // ---- ring multiplication wrappers ------------------------------------------
 
 /// Cyclic multiplication in $R = \mathbb{Z}[x] / (x^N - 1)$ over `u16`

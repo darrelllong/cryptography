@@ -82,12 +82,10 @@ impl Poly {
 }
 
 use crate::public_key::ntru_pqc_shared::{
-    cmov, crypto_sort_int32, mod3, DigestChain,
+    cmov, DigestChain,
+    sample_iid as shared_sample_iid,
+    sample_fixed_type as shared_sample_fixed_type,
     poly_lift_hps as shared_poly_lift_hps,
-    poly_mod_3_phi_n as shared_poly_mod_3_phi_n,
-    poly_mod_q_phi_n as shared_poly_mod_q_phi_n,
-    poly_r2_inv as shared_poly_r2_inv,
-    poly_r2_inv_to_rq_inv as shared_poly_r2_inv_to_rq_inv,
     poly_rq_inv as shared_poly_rq_inv,
     poly_rq_mul as shared_poly_rq_mul,
     poly_rq_to_s3 as shared_poly_rq_to_s3,
@@ -102,14 +100,8 @@ use crate::public_key::ntru_pqc_shared::{
     poly_z3_to_zq as shared_poly_z3_to_zq,
 };
 
-#[inline(always)]
-fn modq(x: u16) -> u16 {
-    x & Q_MASK
-}
 
-fn poly_mod_3_phi_n(r: &mut Poly) { shared_poly_mod_3_phi_n::<N>(&mut r.coeffs); }
 
-fn poly_mod_q_phi_n(r: &mut Poly) { shared_poly_mod_q_phi_n::<N>(&mut r.coeffs); }
 
 // ---- Z3 <-> Zq coefficient remapping ---------------------------------------
 
@@ -141,7 +133,6 @@ fn poly_lift(r: &mut Poly, a: &Poly) { shared_poly_lift_hps::<N>(&mut r.coeffs, 
 // (v, w) so v · a ≡ gcd (mod x^N - 1) at exit. The 2(N-1)-1 iteration count
 // is the worst-case bound from the cited paper.
 
-fn poly_r2_inv(r: &mut Poly, a: &Poly) { shared_poly_r2_inv::<N>(&mut r.coeffs, &a.coeffs); }
 
 // ---- constant-time inverse in S_3 = F_3[x] / Phi_n(x) ----------------------
 //
@@ -158,7 +149,6 @@ fn poly_s3_inv(r: &mut Poly, a: &Poly) { shared_poly_s3_inv::<N>(&mut r.coeffs, 
 // largest q in this NTRU family (q = 8192 = 2^13). All arithmetic is u16
 // wrapping; the final mod-q reduction happens at use sites.
 
-fn poly_r2_inv_to_rq_inv(r: &mut Poly, ai: &Poly, a: &Poly) { shared_poly_r2_inv_to_rq_inv::<N>(&mut r.coeffs, &ai.coeffs, &a.coeffs); }
 
 fn poly_rq_inv(r: &mut Poly, a: &Poly) { shared_poly_rq_inv::<N>(&mut r.coeffs, &a.coeffs); }
 
@@ -199,13 +189,7 @@ fn poly_rq_sum_zero_frombytes(r: &mut Poly, a: &[u8]) {
 // Pr[+1] = Pr[-1] = 85/256 — close enough to uniform for the spec's
 // security analysis.
 
-fn sample_iid(r: &mut Poly, uniform_bytes: &[u8]) {
-    debug_assert_eq!(uniform_bytes.len(), SAMPLE_IID_BYTES);
-    for i in 0..N - 1 {
-        r.coeffs[i] = mod3(uniform_bytes[i] as u16);
-    }
-    r.coeffs[N - 1] = 0;
-}
+fn sample_iid(r: &mut Poly, uniform_bytes: &[u8]) { shared_sample_iid::<N>(&mut r.coeffs, uniform_bytes); }
 
 // ---- T_fixed sampler: tag-and-sort for uniform fixed-weight ternary ---------
 //
@@ -215,66 +199,7 @@ fn sample_iid(r: &mut Poly, uniform_bytes: &[u8]) {
 // 32-bit tag value yields a uniform permutation of the assigned trinary
 // labels into the output positions.
 
-fn sample_fixed_type(r: &mut Poly, u: &[u8]) {
-    debug_assert_eq!(u.len(), SAMPLE_FT_BYTES);
-    let mut s = vec![0i32; N - 1];
-
-    // The reference packs 30 bits per word from the byte stream, in groups
-    // of four words per fifteen bytes.
-    let blocks = (N - 1) / 4;
-    for i in 0..blocks {
-        let base = 15 * i;
-        s[4 * i] = ((u[base] as i32) << 2)
-            | ((u[base + 1] as i32) << 10)
-            | ((u[base + 2] as i32) << 18)
-            | ((u[base + 3] as u32 as i32) << 26);
-        s[4 * i + 1] = (((u[base + 3] as i32) & 0xc0) >> 4)
-            | ((u[base + 4] as i32) << 4)
-            | ((u[base + 5] as i32) << 12)
-            | ((u[base + 6] as i32) << 20)
-            | ((u[base + 7] as u32 as i32) << 28);
-        s[4 * i + 2] = (((u[base + 7] as i32) & 0xf0) >> 2)
-            | ((u[base + 8] as i32) << 6)
-            | ((u[base + 9] as i32) << 14)
-            | ((u[base + 10] as i32) << 22)
-            | ((u[base + 11] as u32 as i32) << 30);
-        s[4 * i + 3] = ((u[base + 11] as i32) & 0xfc)
-            | ((u[base + 12] as i32) << 8)
-            | ((u[base + 13] as i32) << 16)
-            | ((u[base + 14] as u32 as i32) << 24);
-    }
-    // Tail when (N - 1) is not a multiple of 4. For N = 677, (N-1) = 676 has
-    // remainder 0, so the tail is empty — but leave the branch for clarity.
-    if (N - 1) > blocks * 4 {
-        let i = blocks;
-        let base = 15 * i;
-        s[4 * i] = ((u[base] as i32) << 2)
-            | ((u[base + 1] as i32) << 10)
-            | ((u[base + 2] as i32) << 18)
-            | ((u[base + 3] as u32 as i32) << 26);
-        s[4 * i + 1] = (((u[base + 3] as i32) & 0xc0) >> 4)
-            | ((u[base + 4] as i32) << 4)
-            | ((u[base + 5] as i32) << 12)
-            | ((u[base + 6] as i32) << 20)
-            | ((u[base + 7] as u32 as i32) << 28);
-    }
-
-    // Tag bottom two bits with the intended trinary value: half +1 (0b01),
-    // half -1 (0b10 = 2 mod 4), rest 0.
-    for i in 0..WEIGHT / 2 {
-        s[i] |= 1;
-    }
-    for i in WEIGHT / 2..WEIGHT {
-        s[i] |= 2;
-    }
-
-    crypto_sort_int32(&mut s);
-
-    for i in 0..N - 1 {
-        r.coeffs[i] = (s[i] & 3) as u16;
-    }
-    r.coeffs[N - 1] = 0;
-}
+fn sample_fixed_type(r: &mut Poly, u: &[u8]) { shared_sample_fixed_type::<N>(&mut r.coeffs, u, WEIGHT); }
 
 fn sample_fg(f: &mut Poly, g: &mut Poly, uniform_bytes: &[u8]) {
     debug_assert_eq!(uniform_bytes.len(), SAMPLE_FG_BYTES);

@@ -86,11 +86,9 @@ impl Poly {
 }
 
 use crate::public_key::ntru_pqc_shared::{
-    cmov, mod3, DigestChain,
+    cmov, DigestChain,
+    sample_iid as shared_sample_iid,
     poly_mod_3_phi_n as shared_poly_mod_3_phi_n,
-    poly_mod_q_phi_n as shared_poly_mod_q_phi_n,
-    poly_r2_inv as shared_poly_r2_inv,
-    poly_r2_inv_to_rq_inv as shared_poly_r2_inv_to_rq_inv,
     poly_rq_inv as shared_poly_rq_inv,
     poly_rq_mul as shared_poly_rq_mul,
     poly_rq_to_s3 as shared_poly_rq_to_s3,
@@ -105,14 +103,8 @@ use crate::public_key::ntru_pqc_shared::{
     poly_z3_to_zq as shared_poly_z3_to_zq,
 };
 
-#[inline(always)]
-fn modq(x: u16) -> u16 {
-    x & Q_MASK
-}
 
-fn poly_mod_3_phi_n(r: &mut Poly) { shared_poly_mod_3_phi_n::<N>(&mut r.coeffs); }
 
-fn poly_mod_q_phi_n(r: &mut Poly) { shared_poly_mod_q_phi_n::<N>(&mut r.coeffs); }
 
 // ---- Z3 <-> Zq coefficient remapping ---------------------------------------
 
@@ -176,7 +168,7 @@ fn poly_lift(r: &mut Poly, a: &Poly) {
         );
     }
 
-    poly_mod_3_phi_n(&mut b);
+    shared_poly_mod_3_phi_n::<N>(&mut b.coeffs);
     poly_z3_to_zq(&mut b);
 
     // r := (x - 1) * b
@@ -194,7 +186,6 @@ fn poly_lift(r: &mut Poly, a: &Poly) {
 // (v, w) so v · a ≡ gcd (mod x^N - 1) at exit. The 2(N-1)-1 iteration count
 // is the worst-case bound from the cited paper.
 
-fn poly_r2_inv(r: &mut Poly, a: &Poly) { shared_poly_r2_inv::<N>(&mut r.coeffs, &a.coeffs); }
 
 // ---- constant-time inverse in S_3 = F_3[x] / Phi_n(x) ----------------------
 //
@@ -212,7 +203,6 @@ fn poly_s3_inv(r: &mut Poly, a: &Poly) { shared_poly_s3_inv::<N>(&mut r.coeffs, 
 // largest q in this NTRU family (q = 8192 = 2^13). All arithmetic is u16
 // wrapping; the final mod-q reduction happens at use sites.
 
-fn poly_r2_inv_to_rq_inv(r: &mut Poly, ai: &Poly, a: &Poly) { shared_poly_r2_inv_to_rq_inv::<N>(&mut r.coeffs, &ai.coeffs, &a.coeffs); }
 
 fn poly_rq_inv(r: &mut Poly, a: &Poly) { shared_poly_rq_inv::<N>(&mut r.coeffs, &a.coeffs); }
 
@@ -253,13 +243,7 @@ fn poly_rq_sum_zero_frombytes(r: &mut Poly, a: &[u8]) {
 // Pr[+1] = Pr[-1] = 85/256 — close enough to uniform for the spec's
 // security analysis.
 
-fn sample_iid(r: &mut Poly, uniform_bytes: &[u8]) {
-    debug_assert_eq!(uniform_bytes.len(), SAMPLE_IID_BYTES);
-    for i in 0..N - 1 {
-        r.coeffs[i] = mod3(uniform_bytes[i] as u16);
-    }
-    r.coeffs[N - 1] = 0;
-}
+fn sample_iid(r: &mut Poly, uniform_bytes: &[u8]) { shared_sample_iid::<N>(&mut r.coeffs, uniform_bytes); }
 
 // ---- HRSS Sample_iid_plus distribution -------------------------------------
 //

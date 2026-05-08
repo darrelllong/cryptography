@@ -17,6 +17,18 @@
 //!
 //! Side channels: variable-time arithmetic. This module is only used from
 //! types under [`crate::vt`].
+//!
+//! Storage strategy: hot polynomial buffers (`Poly<N>::coeffs`) are inline
+//! `[u16; N]` arrays via the `const N: usize` parameter, so the
+//! Karatsuba multiplier and the IGF / MGF inner loops avoid heap
+//! traffic. Wire-format byte buffers (`pk`, `sk`, `ct`) stay on the heap
+//! as `Vec<u8>` because their lengths are derived from `N` and `logq`
+//! through `const fn` and embedding them as additional const generics
+//! ($\lceil N \log_2 q / 8 \rceil$, etc.) would require
+//! `generic_const_exprs` (unstable). Wire buffers are constructed once
+//! per operation and never appear on the inner-loop hot path, so the
+//! `Vec` allocation cost is negligible compared with the `Poly`
+//! arithmetic.
 
 use crate::hash::sha1::Sha1;
 use crate::hash::sha2::Sha256;
