@@ -38,9 +38,13 @@
 //! `ct`, and `ss`.
 //!
 //! Side channels:
-//! polynomial multiplication uses the variable-time Karatsuba split shared
-//! across all four NTRU parameter sets. This module is exposed under
-//! `crate::vt` to make that property explicit.
+//! the constant-time Bernstein–Yang inverters, the Batcher fixed-weight
+//! sort (HPS only), `cmov`, and the SHA3 / CTR-DRBG implementations are all
+//! data-independent. The polynomial multiplier in
+//! [`crate::public_key::ntru_poly_mul`] is *not*: its schoolbook base case
+//! has an early-`continue` on zero coefficients, which leaks the zero
+//! pattern of the secret operands `f`, `r`, and `m` whenever they pass
+//! through it. The module is exposed under [`crate::vt`] for that reason.
 
 
 use crate::hash::sha3::Sha3_256;
