@@ -4,7 +4,7 @@
 //! 2020-10-16).
 //!
 //! This module provides:
-//! - the HPS-4096-821 parameter set (`N = 821`, `q = 4096`,
+//! - the HPS-4096-821 parameter set ($N = 821$, $q = 4096$,
 //!   weight `= q/8 - 2 = 510`)
 //! - key generation, encapsulation, decapsulation (CCA KEM)
 //! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`

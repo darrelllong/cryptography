@@ -1,5 +1,5 @@
 //! Shared polynomial multiplication for the NTRU KEM modules in
-//! `Z[x] / (x^N - 1)` over `u16` wrapping arithmetic.
+//! $\mathbb{Z}[x] / (x^N - 1)$ over `u16` wrapping arithmetic.
 //!
 //! The construction is the classical Karatsuba split (Karatsuba and Ofman,
 //! "Multiplication of multidigit numbers on automata", Soviet Physics
@@ -8,7 +8,7 @@
 //!
 //! Below a small base-case threshold the routine falls back to schoolbook;
 //! the recursive overhead otherwise outweighs the asymptotic
-//! `O(N^{log_2 3}) ≈ O(N^{1.585})` gain for the operand sizes used here
+//! $O(N^{\log_2 3}) \approx O(N^{1.585})$ gain for the operand sizes used here
 //! (N ≤ 821). Empirical crossover on Apple silicon and recent x86 lands in
 //! the 32–64 coefficient range.
 //!

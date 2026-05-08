@@ -4,7 +4,7 @@
 //! 2020-10-16).
 //!
 //! This module provides:
-//! - the HPS-2048-677 parameter set (`N = 677`, `q = 2048`,
+//! - the HPS-2048-677 parameter set ($N = 677$, $q = 2048$,
 //!   weight `= q/8 - 2 = 254`)
 //! - key generation, encapsulation, decapsulation (CCA KEM)
 //! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`

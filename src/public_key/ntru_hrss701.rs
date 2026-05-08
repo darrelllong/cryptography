@@ -3,7 +3,7 @@
 //! Schwabe, Stehlé, Whyte, Xagawa, Yamakawa, Zhang; NIST PQC, 2020-10-16).
 //!
 //! This module provides:
-//! - the HRSS-701 parameter set (`N = 701`, `q = 8192`)
+//! - the HRSS-701 parameter set ($N = 701$, $q = 8192$)
 //! - key generation, encapsulation, decapsulation (CCA KEM)
 //! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`
 //!
@@ -16,7 +16,7 @@
 //!   · (x - 1)` rather than the trivial Z_3 → Z_q embedding.
 //! - the message-space check on `m` is dropped; any element of `S_3` is a
 //!   valid HRSS message.
-//! - `q = 8192` selects a 13-bit-per-coefficient `Sq` packing.
+//! - $q = 8192$ selects a 13-bit-per-coefficient `Sq` packing.
 //!
 //! Inversion in `R_2` and `S_3` follows Bernstein and Yang (TCHES 2019);
 //! SHA3-256 and AES-256 CTR-DRBG come from this crate's `hash` and `cprng`

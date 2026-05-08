@@ -5,26 +5,26 @@
 //! SVES-3 padding.
 //!
 //! This module provides:
-//! - the EES541EP1 parameter set (`N = 541`, `q = 2048`, `p = 3`,
-//!   `df = 49`, `dg = 180`, `dm0 = 49`, `db = 112` bits)
+//! - the EES541EP1 parameter set ($N = 541$, $q = 2048$, $p = 3$,
+//!   $df = 49$, $dg = 180$, $dm0 = 49$, $db = 112$ bits)
 //! - key generation, encrypt, decrypt
 //! - canonical wire-format byte encodings for `pk`, `sk`, `ct`
 //!
 //! Construction:
-//! - Ring `R_q = Z_q[x] / (x^N - 1)` with `q = 2048` and `p = 3`.
-//! - Private key form `f = 1 + p · t` where `t` is a uniform random trinary
+//! - Ring $R_q = \mathbb{Z}_q[x] / (x^N - 1)$ with $q = 2048$ and $p = 3$.
+//! - Private key form $f = 1 + p \cdot t$ where `t` is a uniform random trinary
 //!   polynomial with exactly `df` ones and `df` minus-ones, conditioned on
 //!   `f` being invertible modulo `q`. Storing `t` (rather than `f`) saves
 //!   space and allows a fast decryption variant: `(1 + 3t) · e ≡ 3·t·e + e
 //!   (mod q)`, so decryption is one trinary multiply and one addition.
-//! - Public key `h = p · g · f^{-1}  (mod q)` for trinary `g` with `dg`
+//! - Public key $h = p \cdot g \cdot f^{-1} \pmod{q}$ for trinary `g` with `dg`
 //!   ones and `dg` minus-ones.
 //! - SVES-3 encryption: build `M = b || octL(msg_len) || msg || zero_pad`,
 //!   encode `M` as a trinary polynomial `m'` via the SVES bit-to-trit map,
 //!   derive the blinding polynomial `r` from a hash-driven IGF over
-//!   `oid || msg || b || htrunc(h)`, compute `R = r · h  (mod q)`, derive a
+//!   `oid || msg || b || htrunc(h)`, compute $R = r \cdot h \pmod{q}$, derive a
 //!   masking trinary polynomial `mask = MGF(to_arr4(R))`, and emit
-//!   `c = R + ((m' + mask) mod 3)`. The "rep weight" check on `m' + mask`
+//!   $c = R + ((m' + \mathrm{mask}) \bmod 3)$. The "rep weight" check on `m' + mask`
 //!   re-randomizes `b` until each of the three coefficient values appears
 //!   at least `dm0` times.
 //! - SVES-3 decryption: recover `(R, m')` via the trapdoor, decode `M`,
@@ -34,9 +34,9 @@
 //! - Polynomial multiplication uses the shared Karatsuba helper
 //!   [`crate::public_key::ntru_poly_mul`].
 //! - Polynomial inversion modulo a power-of-two `q` is the textbook two-step
-//!   recipe: extended Euclidean in `F_2[x] / (x^N - 1)` to obtain the
+//!   recipe: extended Euclidean in $\mathbb{F}_2[x] / (x^N - 1)$ to obtain the
 //!   inverse modulo 2, then Newton-style 2-adic Hensel lifting
-//!   `b ← b · (2 - a · b)` to the target precision.
+//!   $b \leftarrow b \cdot (2 - a \cdot b)$ to the target precision.
 //! - SHA-1 (this parameter set's spec hash) and the AES-256 CTR-DRBG used
 //!   by callers come from this crate's `hash` and `cprng` modules.
 //! - The MGF1-style mask-generation table is the canonical 243-entry base-3
@@ -101,7 +101,7 @@ pub const MAX_MESSAGE_BYTES: usize = N / 2 * 3 / 8 - 1 - DB_BYTES;
 
 // ---- ring type --------------------------------------------------------------
 
-/// Polynomial in `Z_q[x] / (x^N - 1)` with `u16` coefficients. Storage is
+/// Polynomial in $\mathbb{Z}_q[x] / (x^N - 1)$ with `u16` coefficients. Storage is
 /// canonical (`coeffs[i]` is in `[0, q)`); centred-residue conversions are
 /// done at use sites.
 #[derive(Clone, Copy)]
@@ -195,7 +195,7 @@ impl TernaryPoly {
     }
 
     /// Multiply a dense polynomial by this sparse trinary on the left, in
-    /// `Z_q[x] / (x^N - 1)`. Output overwrites `out`.
+    /// $\mathbb{Z}_q[x] / (x^N - 1)$. Output overwrites `out`.
     fn mul_dense(&self, b: &Poly, out: &mut Poly) {
         for c in out.coeffs.iter_mut() {
             *c = 0;
@@ -759,7 +759,7 @@ pub struct NtruEes541Ep1PublicKey {
 /// bytes).
 #[derive(Clone, Eq, PartialEq)]
 pub struct NtruEes541Ep1PrivateKey {
-    /// Private trinary `t` such that `f = 1 + 3t`.
+    /// Private trinary `t` such that $f = 1 + 3t$.
     t: TernaryPoly,
     /// Public-key bytes, kept alongside `t` so decryption can re-encrypt
     /// the recovered `(m', r)` pair to verify ciphertext integrity.

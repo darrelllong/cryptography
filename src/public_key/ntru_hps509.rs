@@ -4,17 +4,17 @@
 //! 2020-10-16).
 //!
 //! This module provides:
-//! - the HPS-2048-509 parameter set (`N = 509`, `q = 2048`,
+//! - the HPS-2048-509 parameter set ($N = 509$, $q = 2048$,
 //!   weight `= q/8 - 2 = 254`)
 //! - key generation, encapsulation, decapsulation (CCA KEM)
 //! - strict wire-format byte encodings for `pk`, `sk`, `ct`, `ss`
 //!
 //! Construction:
-//! - Ring `Z_q[x] / (x^N - 1)` with operations projected onto
-//!   `Z_q[x] / Phi_n(x)` where `Phi_n(x) = (x^N - 1) / (x - 1)` for the
+//! - Ring $\mathbb{Z}_q[x] / (x^N - 1)$ with operations projected onto
+//!   $\mathbb{Z}_q[x] / \Phi_n(x)$ where $\Phi_n(x) = (x^N - 1) / (x - 1)$ for the
 //!   `Sq` and `S3` views.
 //! - One-way CPA-secure encryption (OWCPA) under the trapdoor `(f, g)` with
-//!   public key `h = g / f` in `R_q`, encryption `c = r·h + lift(m)`,
+//!   public key $h = g/f$ in `R_q`, encryption `c = r·h + lift(m)`,
 //!   decryption recovering `(r, m)`.
 //! - CCA KEM via the SXY/Sch18 Fujisaki-Okamoto-style transform: shared key
 //!   `K = SHA3-256(r || m)`, with deterministic implicit rejection
@@ -22,7 +22,7 @@
 //!
 //! Implementation notes:
 //! - polynomial arithmetic and packings are implemented in-tree
-//! - inversion in `R_2 = F_2[x] / (x^N - 1)` and in `S_3 = F_3[x] / Phi_n(x)`
+//! - inversion in $R_2 = \mathbb{F}_2[x] / (x^N - 1)$ and in $S_3 = \mathbb{F}_3[x] / \Phi_n(x)$
 //!   uses the constant-time gcd recursion of Bernstein and Yang ("Fast
 //!   constant-time gcd computation and modular inversion", TCHES 2019)
 //! - the fixed-weight `T_fixed` sampler tags each candidate coefficient with
