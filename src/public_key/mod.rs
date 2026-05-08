@@ -80,6 +80,7 @@ pub mod ntru_hps677;
 pub mod ntru_hps821;
 pub mod ntru_hrss701;
 mod ntru_poly_mul;
+mod ntru_pqc_shared;
 pub mod paillier;
 pub mod primes;
 pub mod rabin;

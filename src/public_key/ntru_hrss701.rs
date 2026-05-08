@@ -33,7 +33,6 @@
 
 use core::fmt;
 
-use crate::cprng::ctr_drbg::CtrDrbgAes256;
 use crate::hash::sha3::Sha3_256;
 use crate::hash::Digest;
 use crate::Csprng;
@@ -83,40 +82,11 @@ impl Poly {
     }
 }
 
+use crate::public_key::ntru_pqc_shared::{cmov, mod3, both_negative_mask_i16};
+
 #[inline(always)]
 fn modq(x: u16) -> u16 {
     x & Q_MASK
-}
-
-// ---- constant-time conditional move ----------------------------------------
-//
-// Standard branchless cmov: r ^= (-b) & (x ^ r). When b = 1 the mask is
-// all-ones and r becomes x; when b = 0 the mask is zero and r is unchanged.
-
-fn cmov(r: &mut [u8], x: &[u8], b: u8) {
-    debug_assert_eq!(r.len(), x.len());
-    // b = 1 → mask = 0xff;  b = 0 → mask = 0x00
-    let mask = (!b).wrapping_add(1);
-    for (ri, &xi) in r.iter_mut().zip(x.iter()) {
-        *ri ^= mask & (xi ^ *ri);
-    }
-}
-
-// HRSS does not use the fixed-weight sampler, so the bitonic sort that the
-// HPS variants use lives only in those modules.
-
-// ---- modular reductions in S_q and S_3 -------------------------------------
-
-#[inline]
-fn mod3(a: u16) -> u16 {
-    // Fold mod 255, then mod 15, then mod 3 twice; final correction.
-    let mut r = (a >> 8) + (a & 0xff);
-    r = (r >> 4) + (r & 0xf);
-    r = (r >> 2) + (r & 0x3);
-    r = (r >> 2) + (r & 0x3);
-    let t = (r as i16) - 3;
-    let c = t >> 15; // -1 if t<0 else 0
-    (((c as u16) & r) | ((!c as u16) & (t as u16))) & 0xffff
 }
 
 fn poly_mod_3_phi_n(r: &mut Poly) {
@@ -240,11 +210,6 @@ fn poly_lift(r: &mut Poly, a: &Poly) {
 // loop on (f, g) over F_2[x] that converges to (gcd, 0) while threading
 // (v, w) so v · a ≡ gcd (mod x^N - 1) at exit. The 2(N-1)-1 iteration count
 // is the worst-case bound from the cited paper.
-
-#[inline(always)]
-fn both_negative_mask_i16(x: i16, y: i16) -> i16 {
-    (x & y) >> 15
-}
 
 fn poly_r2_inv(r: &mut Poly, a: &Poly) {
     let mut f = [0u16; N];

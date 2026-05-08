@@ -44,7 +44,6 @@
 
 use core::fmt;
 
-use crate::cprng::ctr_drbg::CtrDrbgAes256;
 use crate::hash::sha3::Sha3_256;
 use crate::hash::Digest;
 use crate::Csprng;
@@ -96,146 +95,13 @@ impl Poly {
     }
 }
 
+use crate::public_key::ntru_pqc_shared::{
+    cmov, crypto_sort_int32, mod3, both_negative_mask_i16,
+};
+
 #[inline(always)]
 fn modq(x: u16) -> u16 {
     x & Q_MASK
-}
-
-// ---- constant-time conditional move ----------------------------------------
-//
-// Standard branchless cmov: r ^= (-b) & (x ^ r). When b = 1 the mask is
-// all-ones and r becomes x; when b = 0 the mask is zero and r is unchanged.
-
-fn cmov(r: &mut [u8], x: &[u8], b: u8) {
-    debug_assert_eq!(r.len(), x.len());
-    // b = 1 → mask = 0xff;  b = 0 → mask = 0x00
-    let mask = (!b).wrapping_add(1);
-    for (ri, &xi) in r.iter_mut().zip(x.iter()) {
-        *ri ^= mask & (xi ^ *ri);
-    }
-}
-
-// ---- Batcher bitonic sort on i32 keys --------------------------------------
-//
-// Standard merge-exchange network from Batcher ("Sorting networks and their
-// applications", AFIPS 1968). All comparators are data-independent on the
-// 30-bit random tag stored in the high bits of each key, so the resulting
-// permutation is uniform conditional on the tag values.
-
-#[inline(always)]
-fn int32_minmax(a: &mut i32, b: &mut i32) {
-    let ab = (*b) ^ (*a);
-    let mut c = ((*b) as i64).wrapping_sub((*a) as i64) as i32;
-    c ^= ab & (c ^ (*b));
-    c >>= 31;
-    c &= ab;
-    *a ^= c;
-    *b ^= c;
-}
-
-fn crypto_sort_int32(array: &mut [i32]) {
-    let n = array.len();
-    if n < 2 {
-        return;
-    }
-    let mut top: usize = 1;
-    while top < n - top {
-        top += top;
-    }
-
-    let mut p = top;
-    while p >= 1 {
-        let mut i = 0usize;
-        while i + 2 * p <= n {
-            for j in i..i + p {
-                let (lo, hi) = array.split_at_mut(j + p);
-                int32_minmax(&mut lo[j], &mut hi[0]);
-            }
-            i += 2 * p;
-        }
-        for j in i..n.saturating_sub(p) {
-            let (lo, hi) = array.split_at_mut(j + p);
-            int32_minmax(&mut lo[j], &mut hi[0]);
-        }
-
-        let mut i = 0usize;
-        let mut j = 0usize;
-        let mut q = top;
-        while q > p {
-            'outer: loop {
-                if j != i {
-                    loop {
-                        if j == n - q {
-                            break 'outer;
-                        }
-                        let mut a = array[j + p];
-                        let mut r = q;
-                        while r > p {
-                            let (lo, hi) = if j + r > j + p {
-                                array.split_at_mut(j + r)
-                            } else {
-                                unreachable!()
-                            };
-                            // After split, lo has length j+r and hi starts at j+r.
-                            // We want to minmax(a, x[j+r]) which is hi[0].
-                            // But `a` is owned. Rearrange:
-                            let _ = (lo, hi);
-                            int32_minmax(&mut a, &mut array[j + r]);
-                            r >>= 1;
-                        }
-                        array[j + p] = a;
-                        j += 1;
-                        if j == i + p {
-                            i += 2 * p;
-                            break;
-                        }
-                    }
-                }
-                while i + p <= n - q {
-                    for k in i..i + p {
-                        let mut a = array[k + p];
-                        let mut r = q;
-                        while r > p {
-                            int32_minmax(&mut a, &mut array[k + r]);
-                            r >>= 1;
-                        }
-                        array[k + p] = a;
-                    }
-                    i += 2 * p;
-                }
-                // now i + p > n - q
-                let mut k = i;
-                while k < n.saturating_sub(q) {
-                    let mut a = array[k + p];
-                    let mut r = q;
-                    while r > p {
-                        int32_minmax(&mut a, &mut array[k + r]);
-                        r >>= 1;
-                    }
-                    array[k + p] = a;
-                    k += 1;
-                }
-                break;
-            }
-            q >>= 1;
-        }
-
-        p >>= 1;
-    }
-}
-
-// ---- modular reductions in S_q and S_3 -------------------------------------
-
-#[inline]
-fn mod3(a: u16) -> u16 {
-    // Fold mod 255, then mod 15, then mod 3 twice; final correction.
-    let mut r = (a >> 8) + (a & 0xff);
-    r = (r >> 4) + (r & 0xf);
-    r = (r >> 2) + (r & 0x3);
-    r = (r >> 2) + (r & 0x3);
-    let t = (r as i16) - 3;
-    let c = t >> 15; // -1 if t<0 else 0
-    (((c as u16) & r) | ((!c as u16) & (t as u16))) & 0xffff
 }
 
 fn poly_mod_3_phi_n(r: &mut Poly) {
@@ -312,11 +178,6 @@ fn poly_lift(r: &mut Poly, a: &Poly) {
 // loop on (f, g) over F_2[x] that converges to (gcd, 0) while threading
 // (v, w) so v · a ≡ gcd (mod x^N - 1) at exit. The 2(N-1)-1 iteration count
 // is the worst-case bound from the cited paper.
-
-#[inline(always)]
-fn both_negative_mask_i16(x: i16, y: i16) -> i16 {
-    (x & y) >> 15
-}
 
 fn poly_r2_inv(r: &mut Poly, a: &Poly) {
     let mut f = [0u16; N];
