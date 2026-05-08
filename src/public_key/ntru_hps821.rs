@@ -586,11 +586,10 @@ fn kem_dec(
     let digest = Sha3_256::new().chain(&rm).finalize();
     k.copy_from_slice(&digest);
 
-    // Implicit-rejection key: SHA3-256(prf || c)
-    let mut buf = [0u8; PRFKEYBYTES + CIPHERTEXT_BYTES];
-    buf[..PRFKEYBYTES].copy_from_slice(&sk[OWCPA_SECRETKEYBYTES..]);
-    buf[PRFKEYBYTES..].copy_from_slice(c);
-    let reject = Sha3_256::new().chain(&buf).finalize();
+    let reject = Sha3_256::new()
+        .chain(&sk[OWCPA_SECRETKEYBYTES..])
+        .chain(c)
+        .finalize();
 
     cmov(k, &reject, fail as u8);
 }
