@@ -400,6 +400,10 @@ pub mod vt {
         NtruEes449Ep1, NtruEes449Ep1Ciphertext, NtruEes449Ep1Error, NtruEes449Ep1PrivateKey,
         NtruEes449Ep1PublicKey,
     };
+    pub use crate::public_key::ntru_ees541ep1::{
+        NtruEes541Ep1, NtruEes541Ep1Ciphertext, NtruEes541Ep1Error, NtruEes541Ep1PrivateKey,
+        NtruEes541Ep1PublicKey,
+    };
     pub use crate::public_key::ntru_ees677ep1::{
         NtruEes677Ep1, NtruEes677Ep1Ciphertext, NtruEes677Ep1Error, NtruEes677Ep1PrivateKey,
         NtruEes677Ep1PublicKey,
