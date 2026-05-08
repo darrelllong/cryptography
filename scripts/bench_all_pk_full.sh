@@ -144,6 +144,9 @@ hdr "NTRUEncrypt (IEEE Std 1363.1-2008)"
 measure ntruees401ep1_keygen
 measure ntruees401ep1_encrypt
 measure ntruees401ep1_decrypt
+measure ntruees443ep1_keygen
+measure ntruees443ep1_encrypt
+measure ntruees443ep1_decrypt
 measure ntruees449ep1_keygen
 measure ntruees449ep1_encrypt
 measure ntruees449ep1_decrypt

@@ -270,6 +270,7 @@ parameter tables)**
 | Parameter | Security | Public Key | Private Key | Ciphertext | Max Message |
 |---|:---:|---:|---:|---:|---:|
 | EES401EP1  | 112-bit |   552 |   653 |   552 |  60 |
+| EES443EP1  | 128-bit |   610 |   660 |   610 |  65 |
 | EES449EP1  | 128-bit |   618 |   731 |   618 |  69 |
 | EES541EP1  | 112-bit |   744 |   880 |   744 |  86 |
 | EES677EP1  | 192-bit |   931 | 1 101 |   931 | 101 |

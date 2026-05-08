@@ -66,6 +66,7 @@ mod io;
 pub mod ml_dsa;
 pub mod ml_kem;
 pub mod ntru_ees401ep1;
+pub mod ntru_ees443ep1;
 pub mod ntru_ees449ep1;
 pub mod ntru_ees541ep1;
 pub mod ntru_ees677ep1;
