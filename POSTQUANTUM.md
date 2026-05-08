@@ -292,14 +292,15 @@ forgeries. Max-message bytes follow IEEE 1363.1 §11.4
 | Public key (bytes) | 1 184 | 1 952 |
 | Private key (bytes) | 2 400 | 4 000 |
 | Payload (bytes) | 1 088 CT + 32 SS | 3 309 sig |
-| Keygen M1 (ms/op ± CI) | 0.03204 ± 0.000047 | 0.1379 ± 0.000273 |
-| Primary op M1 (ms/op ± CI) | 0.03123 ± 0.000030 encaps | 0.3587 ± 0.056070 sign |
-| Secondary op M1 (ms/op ± CI) | 0.03189 ± 0.000216 decaps | 0.1214 ± 0.001442 verify |
+| Keygen Wigner (ms/op ± 90% CI) | 0.02779 ± 7.227e-05 | 0.1179 ± 0.000256 |
+| Primary op Wigner (ms/op ± 90% CI) | 0.02594 ± 2.154e-05 encaps | 0.2659 ± 0.000453 sign |
+| Secondary op Wigner (ms/op ± 90% CI) | 0.02654 ± 9.472e-05 decaps | 0.02498 ± 0.000374 verify |
 
 ML-DSA signing is ~10× slower than ML-KEM encapsulation at Level 3 due to the
-rejection-sampling loop; verification is closer to ML-KEM decaps speed. The wide CI
-on ML-DSA-65 sign (±15.6%) reflects rejection-sampling variance, not measurement
-noise.
+rejection-sampling loop; verification has now drawn level with ML-KEM decaps
+on Wigner (0.025 ms vs 0.027 ms). Rejection-sampling variance shows up as
+non-monotone absolute sign timing across parameter sets — see the
+"Benchmark Discussion" notes below.
 
 ## Benchmarks
 
@@ -403,30 +404,37 @@ axis, outer ring = faster):
 ## Benchmark Discussion
 
 - `ML-KEM` scales roughly with parameter size and is stable across runs; CIs are
-  tight on both hosts.
+  tight on all three hosts.
 - `ML-DSA` verify is consistently cheaper than sign at each level, as expected.
-- `ML-DSA` signing variance is driven by rejection behavior in the signer loop;
-  this is visible in the wider CI for `mldsa65_sign` on M1.
+- `ML-DSA` signing variance is driven by rejection behavior in the signer loop.
+  In the 2026-05-08 sweep this manifests as *non-monotone absolute timings
+  across parameter sets* — `mldsa65_sign` lands at 0.266 ms on Wigner while
+  `mldsa87_sign` lands at 0.168 ms — even though the per-iteration cost
+  grows monotonically with parameter size. The CI on each individual
+  measurement is tight (≤ 0.2% half-width on Wigner), so the cross-level
+  ordering reflects an honest difference in expected-rejection-loop count
+  for these inputs, not measurement noise.
 - `NTRU` keygen costs are dominated by the polynomial inversion in `R_q`
   (Hensel lift over the variable-time `F_2[x]` Euclidean inverse). Keygen is
   the slowest operation on every parameter set, by 5–25× over encaps/decaps.
-- `NTRU-HRSS-701` encaps is the cheapest post-quantum encapsulation in the
-  table — at 0.045 ms on M1 it beats every ML-KEM size, because the HRSS
-  encryption is a single trinary-by-dense convolution (the Karatsuba split
-  amortizes well for sparse trinary inputs). `EES443EP1` encrypt/decrypt
-  match it (≈0.037 ms on M1) because the product-form `r = r_1 · r_2 + r_3`
+- `NTRU-HRSS-701` encaps is among the cheapest post-quantum encapsulations
+  in the table — at ≈0.048 ms on Wigner it beats most ML-KEM sizes (only
+  ML-KEM-512's 0.026 ms encaps is faster), because the HRSS encryption is
+  a single trinary-by-dense convolution (the Karatsuba split amortizes
+  well for sparse trinary inputs). `EES443EP1` encrypt/decrypt match it
+  (≈0.043 ms on Wigner) because the product-form `r = r_1 · r_2 + r_3`
   with `df_1, df_2, df_3 = 9, 8, 5` reduces each ciphertext convolution to
   three very sparse multiplies plus an addition.
 - `NTRU-HPS` and `NTRUEncrypt-EES` show the gap with NTT-friendly rings
-  clearly: ML-KEM-512 keygen is ~50× faster than NTRU-HPS-509 keygen on the
-  same host. The polynomial rings here are `Z_q[x] / (x^N − 1)` with prime
-  `N`, which do not admit a direct radix-2 NTT; an in-tree two-prime
-  Montgomery NTT at the smallest power-of-two length covering all
-  parameter sets (`M = 2048 ≥ 2 · 821 − 1`) was prototyped and discarded —
-  at `N ≤ 821` the length-2048 transform overhead exceeds Karatsuba's
-  `O(N^{log_2 3})` cost. A right-sized per-`N` NTT, Bluestein, or
-  Rader-style decomposition would close more of the gap; the AVX2
-  reference C avoids the question by going to assembly.
+  clearly: ML-KEM-512 keygen is ~60× faster than NTRU-HPS-509 keygen on
+  Wigner (0.017 ms vs 1.00 ms). The polynomial rings here are
+  `Z_q[x] / (x^N − 1)` with prime `N`, which do not admit a direct radix-2
+  NTT; an in-tree two-prime Montgomery NTT at the smallest power-of-two
+  length covering all parameter sets (`M = 2048 ≥ 2 · 821 − 1`) was
+  prototyped and discarded — at `N ≤ 821` the length-2048 transform
+  overhead exceeds Karatsuba's `O(N^{log_2 3})` cost. A right-sized per-`N`
+  NTT, Bluestein, or Rader-style decomposition would close more of the
+  gap; the AVX2 reference C avoids the question by going to assembly.
 
 Reference baselines (vendored C code) are available through:
 

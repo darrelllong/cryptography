@@ -94,7 +94,7 @@ python3 scripts/merge_three_pilot_tables.py \
 
 # 3. Extract per-radar CSVs and emit SVGs:
 python3 scripts/build_radar_csvs.py
-python3 assets/generate_three_platform_radar.py \
+python3 scripts/generate_three_platform_radar.py \
   --csv csv/symmetric.csv --out radar/symmetric-radar.svg \
   --title "Symmetric throughput" --units "MB/s"
 ```

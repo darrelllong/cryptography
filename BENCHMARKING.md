@@ -30,12 +30,16 @@ Override paths without editing scripts via:
 
 - `PILOT_BENCH_CLI` for the pilot-bench CLI path
 - `PILOT_CIPHER_BIN` for `pilot_cipher`
+- `PILOT_HASH_BIN` for `pilot_hash`
 - `PILOT_PK_BIN` for `pilot_pk`
 
 Tune run behavior without editing scripts via:
 
 - `PILOT_PRESET` (`quick`, `normal`, `strict`; default `quick`)
+- `PILOT_CONFIDENCE_LEVEL` (e.g. `0.90` for 90%; default unset, which leaves pilot-bench's 0.95 in place)
 - `PILOT_CIPHER_BYTES` (bytes per `pilot_cipher` invocation; default `262144`)
+- `PILOT_HASH_BYTES` (bytes per `pilot_hash` invocation; default `262144`)
+- `PILOT_HASH_XOF_OUT` (bytes squeezed per XOF round in `pilot_hash`; default `32`)
 - `PILOT_PK_ITERS_PERCENT` (scales per-invocation loop counts in `pilot_pk`; default `25`)
 
 For Apple Silicon optimization loops (no assembly, in-repo code only), use:
@@ -60,28 +64,34 @@ acceleration work is maintained as an explicit alternative path.
 ### Step 2 — build the Rust workload binaries
 
 ```bash
-cargo build --release --bin pilot_cipher --bin pilot_pk
+cargo build --release --bin pilot_cipher --bin pilot_hash --bin pilot_pk
 ```
 
 `pilot_cipher <name>` encrypts a fixed workload and prints MB/s.
+`pilot_hash <name>` absorbs a fixed workload (and squeezes a fixed number
+of bytes for XOFs) and prints MB/s.
 `pilot_pk <operation>` runs the named public-key operation N times
-and prints ms/op.  Both binaries accept a single argument so pilot-bench
+and prints ms/op. All three binaries accept a single argument so pilot-bench
 can drive them with `run_program`.
 
-By default, `pilot_cipher` processes `262144` bytes per invocation.
-Override with `PILOT_CIPHER_BYTES=<bytes>` to tune per-round runtime for a host.
+By default, `pilot_cipher` and `pilot_hash` process `262144` bytes per
+invocation. Override with `PILOT_CIPHER_BYTES=<bytes>` /
+`PILOT_HASH_BYTES=<bytes>` to tune per-round runtime for a host.
 
 ### Step 3 — run the suites
 
 ```bash
 bash scripts/bench_all.sh        # all symmetric ciphers — throughput (MB/s)
+bash scripts/bench_all_hash.sh   # all hashes / XOFs — throughput (MB/s)
 bash scripts/bench_all_pk.sh     # PK subset (EC/Edwards/PQ) — latency (ms/op)
 bash scripts/bench_all_pk_full.sh  # full PK suite (finite-field + EC + Edwards + PQ)
 ```
 
 Each script emits Markdown tables ready to paste into the docs.
-The `± CI` column is the 95% confidence-interval half-width reported by
-pilot-bench.
+The `± CI` column is the confidence-interval half-width reported by
+pilot-bench. By default it is **95%**; export `PILOT_CONFIDENCE_LEVEL=0.90`
+(or any value in `(0,1)`) before invoking the script to request a
+different level.
 
 ---
 
@@ -105,6 +115,15 @@ pilot-bench.
 | Speck | `speck32_64` … `speck128_256` |
 | Twofish | `twofish128`, `twofish192`, `twofish256` (+ `ct`) |
 | Stream | `chacha20`, `xchacha20`, `salsa20`, `rabbit`, `snow3g` (+ `ct`), `zuc128` (+ `ct`) |
+
+### `pilot_hash` — hash / XOF throughput
+
+| Family | Names |
+|--------|-------|
+| Legacy | `md5`, `sha1`, `ripemd160` |
+| SHA-2 | `sha224`, `sha256`, `sha384`, `sha512`, `sha512_224`, `sha512_256` |
+| SHA-3 | `sha3_224`, `sha3_256`, `sha3_384`, `sha3_512` |
+| SHAKE XOFs | `shake128`, `shake256` (squeeze `PILOT_HASH_XOF_OUT` bytes per round) |
 
 ### `pilot_pk` — public-key latency
 
