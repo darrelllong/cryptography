@@ -1254,7 +1254,8 @@ macro_rules! __define_ees_set {
         hash = $hash:expr,
         pk_bytes = $pk_bytes:expr,
         sk_packed_bytes = $sk_packed_bytes:expr,
-        ct_bytes = $ct_bytes:expr $(,)?
+        ct_bytes = $ct_bytes:expr,
+        regression_digest = $regression_digest:expr $(,)?
     ) => {
         use $crate::public_key::ntru_ees_core::{
             decrypt as __ees_core_decrypt, encrypt as __ees_core_encrypt,
@@ -1448,6 +1449,32 @@ macro_rules! __define_ees_set {
                     Err(NtruEesError::InvalidCiphertext) => {}
                     other => panic!("expected InvalidCiphertext, got {:?}", other),
                 }
+            }
+
+            /// Regression vector: locks in the byte-level encoding of pk,
+            /// sk, and ct under a fixed DRBG seed and message. Computed
+            /// once via `cargo run --bin ees_regression_gen`; a future
+            /// refactor that silently changes wire-format byte order or
+            /// padding will fail this digest check.
+            #[test]
+            fn byte_format_regression_digest() {
+                use $crate::hash::sha2::Sha256;
+                use $crate::hash::Digest;
+                let mut drbg = CtrDrbgAes256::new(&[0xC0u8; 48]);
+                let (pk, sk) = $type_name::keygen(&mut drbg);
+                let ct = $type_name::encrypt(&pk, &[0xA5u8; 8], &mut drbg)
+                    .expect("encrypt");
+                let mut h = Sha256::new();
+                h.update(&pk.to_wire_bytes());
+                h.update(&sk.to_wire_bytes());
+                h.update(&ct.to_wire_bytes());
+                let digest = h.finalize();
+                let mut hex = String::with_capacity(64);
+                for b in digest.iter() {
+                    use ::core::fmt::Write;
+                    write!(&mut hex, "{:02x}", b).unwrap();
+                }
+                assert_eq!(hex, $regression_digest, "byte-format regression");
             }
 
             #[test]

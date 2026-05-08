@@ -26,4 +26,5 @@ crate::public_key::ntru_ees_core::define_ees_set! {
     pk_bytes = 618,
     sk_packed_bytes = 113,
     ct_bytes = 618,
+    regression_digest = "e82c4681a1c022d4d20b4d3ffc25eded7cde977bca9ae31f5ddd98311cba9b1c",
 }
