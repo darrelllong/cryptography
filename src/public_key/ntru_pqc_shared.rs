@@ -669,6 +669,213 @@ pub(crate) fn poly_rq_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
     poly_r2_inv_to_rq_inv(r, &ai2, a);
 }
 
+// ---- per-set NTRU variant trait + shared OWCPA core ------------------------
+//
+// The HPS-509 / HPS-677 / HPS-821 / HRSS-701 modules differ in five
+// variant-specific behaviours plus an Sq packer that depends on `LOGQ`:
+//
+// - the joint $f, g$ sampler (HPS uses iid + fixed-weight; HRSS uses
+//   `Sample_iid_plus` for both)
+// - the joint $r, m$ sampler (HPS uses iid + fixed-weight; HRSS uses
+//   iid for both)
+// - the keygen $g$-update step ($g \gets 3g$ for HPS, $g \gets 3(x-1)g$
+//   for HRSS)
+// - the lift function (trivial $\mathbb{Z}_3 \to \mathbb{Z}_q$ embedding for
+//   HPS, $(x-1)$-factor lift for HRSS)
+// - the message-space check (weight + balance for HPS; HRSS accepts any
+//   $S_3$ element)
+// - the `Sq` packer / unpacker (11-bit, 12-bit, 13-bit)
+//
+// Everything else (Bernstein–Yang inversion, Hensel lift, Sq/S3
+// arithmetic, IGF/MGF-style sampling helpers, OWCPA validity checks,
+// the FO transform on top of OWCPA) is identical. The `NtruVariant`
+// trait names just the variant-specific bits, and the
+// [`owcpa_keypair`] / [`owcpa_enc`] / [`owcpa_dec`] free functions
+// in this module implement OWCPA on top of it.
+
+/// Per-set NTRU variant: HPS-509 / HPS-677 / HPS-821 / HRSS-701 each
+/// implement this trait. The `N` and `LOGQ` const generics carry the
+/// ring-degree and log-modulus into associated-constant expressions
+/// without `generic_const_exprs`.
+pub(crate) trait NtruVariant<const N: usize, const LOGQ: usize> {
+    const Q_MASK: u16;
+    const SAMPLE_FG_BYTES: usize;
+    const SAMPLE_RM_BYTES: usize;
+    const PACK_TRINARY_BYTES: usize;
+    const OWCPA_PUBLICKEYBYTES: usize;
+    const OWCPA_SECRETKEYBYTES: usize;
+    const OWCPA_BYTES: usize;
+    const OWCPA_MSGBYTES: usize;
+
+    /// Sample $(f, g)$ from `seed`. HPS: $f$ via `sample_iid`, $g$ via
+    /// `sample_fixed_type`. HRSS: both via `sample_iid_plus`.
+    fn sample_fg(f: &mut [u16; N], g: &mut [u16; N], seed: &[u8]);
+
+    /// Sample $(r, m)$ from `seed`. HPS: $r$ via `sample_iid`, $m$ via
+    /// `sample_fixed_type`. HRSS: both via `sample_iid`.
+    fn sample_rm(r: &mut [u16; N], m: &mut [u16; N], seed: &[u8]);
+
+    /// Update $g$ in keygen *after* its $\mathbb{Z}_3 \to \mathbb{Z}_q$
+    /// remap. HPS multiplies by 3; HRSS multiplies by $3 (x - 1)$.
+    fn update_g_after_z3_to_zq(g: &mut [u16; N]);
+
+    /// Lift a trinary $m$ to $\mathbb{Z}_q$. HPS: trivial $\{0, 1, 2\}
+    /// \to \{0, 1, q - 1\}$ embedding. HRSS: $(x - 1) \cdot \big(m / (x - 1)
+    /// \bmod (3, \Phi_n)\big)$.
+    fn poly_lift(r: &mut [u16; N], a: &[u16; N]);
+
+    /// Validate the recovered $m \in S_3$. HPS enforces the published
+    /// `WEIGHT` and balanced $\pm 1$ counts; HRSS returns 0 (any $S_3$
+    /// element is a legal message).
+    fn check_m(m: &[u16; N]) -> i32;
+
+    fn poly_sq_tobytes(r: &mut [u8], a: &[u16; N]);
+    fn poly_sq_frombytes(r: &mut [u16; N], a: &[u8]);
+}
+
+/// OWCPA key pair generation. Writes the canonical public-key wire
+/// bytes to `pk` and the canonical OWCPA secret-key bytes (without the
+/// FO implicit-rejection PRF tail) to `sk`. Uses `seed` for the joint
+/// $(f, g)$ sample.
+pub(crate) fn owcpa_keypair<V, const N: usize, const LOGQ: usize>(
+    pk: &mut [u8],
+    sk: &mut [u8],
+    seed: &[u8],
+) where
+    V: NtruVariant<N, LOGQ>,
+{
+    debug_assert_eq!(pk.len(), V::OWCPA_PUBLICKEYBYTES);
+    debug_assert_eq!(sk.len(), V::OWCPA_SECRETKEYBYTES);
+    debug_assert_eq!(seed.len(), V::SAMPLE_FG_BYTES);
+
+    let mut f = [0u16; N];
+    let mut g = [0u16; N];
+    V::sample_fg(&mut f, &mut g, seed);
+
+    let mut invf_mod3 = [0u16; N];
+    poly_s3_inv::<N>(&mut invf_mod3, &f);
+    poly_s3_tobytes::<N>(&mut sk[..V::PACK_TRINARY_BYTES], &f);
+    poly_s3_tobytes::<N>(
+        &mut sk[V::PACK_TRINARY_BYTES..2 * V::PACK_TRINARY_BYTES],
+        &invf_mod3,
+    );
+
+    poly_z3_to_zq::<N>(&mut f, V::Q_MASK);
+    poly_z3_to_zq::<N>(&mut g, V::Q_MASK);
+    V::update_g_after_z3_to_zq(&mut g);
+
+    let mut gf = [0u16; N];
+    poly_rq_mul::<N>(&mut gf, &g, &f);
+
+    let mut invgf = [0u16; N];
+    poly_rq_inv::<N>(&mut invgf, &gf);
+
+    let mut tmp = [0u16; N];
+    let mut invh = [0u16; N];
+    poly_rq_mul::<N>(&mut tmp, &invgf, &f);
+    poly_sq_mul::<N>(&mut invh, &tmp, &f);
+    V::poly_sq_tobytes(&mut sk[2 * V::PACK_TRINARY_BYTES..], &invh);
+
+    let mut h = [0u16; N];
+    poly_rq_mul::<N>(&mut tmp, &invgf, &g);
+    poly_rq_mul::<N>(&mut h, &tmp, &g);
+    V::poly_sq_tobytes(pk, &h);
+}
+
+/// OWCPA encryption. Computes $c = r \cdot h + \text{lift}(m)$ in
+/// $R_q$, packed via the variant's Sq packer.
+pub(crate) fn owcpa_enc<V, const N: usize, const LOGQ: usize>(
+    c: &mut [u8],
+    r: &[u16; N],
+    m: &[u16; N],
+    pk: &[u8],
+) where
+    V: NtruVariant<N, LOGQ>,
+{
+    debug_assert_eq!(c.len(), V::OWCPA_BYTES);
+    debug_assert_eq!(pk.len(), V::OWCPA_PUBLICKEYBYTES);
+
+    let mut h = [0u16; N];
+    V::poly_sq_frombytes(&mut h, pk);
+    poly_rq_sum_zero_adjust::<N>(&mut h);
+
+    let mut ct = [0u16; N];
+    poly_rq_mul::<N>(&mut ct, r, &h);
+
+    let mut liftm = [0u16; N];
+    V::poly_lift(&mut liftm, m);
+    for i in 0..N {
+        ct[i] = ct[i].wrapping_add(liftm[i]);
+    }
+
+    V::poly_sq_tobytes(c, &ct);
+}
+
+/// OWCPA decryption. Recovers $(r, m)$ from `ciphertext` under the
+/// trapdoor encoded in `secretkey`, packs them into `rm`, and returns
+/// 0 on success and 1 on any consistency failure (invalid ciphertext
+/// padding, $m$ outside the valid set, or recovered $r$ outside
+/// $\{0, 1, q - 1\}$).
+pub(crate) fn owcpa_dec<V, const N: usize, const LOGQ: usize>(
+    rm: &mut [u8],
+    ciphertext: &[u8],
+    secretkey: &[u8],
+) -> i32
+where
+    V: NtruVariant<N, LOGQ>,
+{
+    debug_assert_eq!(rm.len(), V::OWCPA_MSGBYTES);
+    debug_assert_eq!(ciphertext.len(), V::OWCPA_BYTES);
+    debug_assert_eq!(secretkey.len(), V::OWCPA_SECRETKEYBYTES);
+
+    let mut c = [0u16; N];
+    V::poly_sq_frombytes(&mut c, ciphertext);
+    poly_rq_sum_zero_adjust::<N>(&mut c);
+
+    let mut f = [0u16; N];
+    poly_s3_frombytes::<N>(&mut f, &secretkey[..V::PACK_TRINARY_BYTES]);
+    poly_z3_to_zq::<N>(&mut f, V::Q_MASK);
+
+    let mut cf = [0u16; N];
+    poly_rq_mul::<N>(&mut cf, &c, &f);
+
+    let mut mf = [0u16; N];
+    poly_rq_to_s3::<N, LOGQ>(&mut mf, &cf);
+
+    let mut finv3 = [0u16; N];
+    poly_s3_frombytes::<N>(
+        &mut finv3,
+        &secretkey[V::PACK_TRINARY_BYTES..2 * V::PACK_TRINARY_BYTES],
+    );
+
+    let mut m = [0u16; N];
+    poly_s3_mul::<N>(&mut m, &mf, &finv3);
+    poly_s3_tobytes::<N>(&mut rm[V::PACK_TRINARY_BYTES..], &m);
+
+    let mut fail = 0i32;
+    fail |= owcpa_check_ciphertext::<N, LOGQ>(ciphertext);
+    fail |= V::check_m(&m);
+
+    let mut liftm = [0u16; N];
+    V::poly_lift(&mut liftm, &m);
+    let mut b = [0u16; N];
+    for i in 0..N {
+        b[i] = c[i].wrapping_sub(liftm[i]);
+    }
+
+    let mut invh = [0u16; N];
+    V::poly_sq_frombytes(&mut invh, &secretkey[2 * V::PACK_TRINARY_BYTES..]);
+    let mut r = [0u16; N];
+    poly_sq_mul::<N>(&mut r, &b, &invh);
+
+    fail |= owcpa_check_r::<N, LOGQ>(&r);
+
+    poly_trinary_zq_to_z3::<N, LOGQ>(&mut r);
+    poly_s3_tobytes::<N>(&mut rm[..V::PACK_TRINARY_BYTES], &r);
+
+    fail
+}
+
 // ---- OWCPA validity checks -------------------------------------------------
 
 /// Check that the high padding bits of a ciphertext's last byte are zero
@@ -730,33 +937,80 @@ pub(crate) fn poly_rq_sum_zero_adjust<const N: usize>(r: &mut [u16; N]) {
     r[N - 1] = acc;
 }
 
+// ---- KEM key generation + encapsulation (FO-style transform) --------------
+
+/// CCA KEM key generation: draw an OWCPA seed plus the implicit-rejection
+/// PRF key from `rng`, run [`owcpa_keypair`], and pack everything into the
+/// caller's wire-format buffers.
+pub(crate) fn kem_keypair_seeded<V, R, const N: usize, const LOGQ: usize>(
+    pk: &mut [u8],
+    sk: &mut [u8],
+    rng: &mut R,
+) where
+    V: NtruVariant<N, LOGQ>,
+    R: crate::Csprng,
+{
+    let mut seed = vec![0u8; V::SAMPLE_FG_BYTES];
+    rng.fill_bytes(&mut seed);
+    owcpa_keypair::<V, N, LOGQ>(pk, &mut sk[..V::OWCPA_SECRETKEYBYTES], &seed);
+    rng.fill_bytes(&mut sk[V::OWCPA_SECRETKEYBYTES..]);
+}
+
+/// CCA KEM encapsulation: draw fresh randomness for $(r, m)$, hash the
+/// resulting message into the shared secret, then OWCPA-encrypt against
+/// `pk`.
+pub(crate) fn kem_enc_seeded<V, R, const N: usize, const LOGQ: usize>(
+    c: &mut [u8],
+    k: &mut [u8],
+    pk: &[u8],
+    rng: &mut R,
+) where
+    V: NtruVariant<N, LOGQ>,
+    R: crate::Csprng,
+{
+    use crate::hash::sha3::Sha3_256;
+    debug_assert_eq!(k.len(), 32);
+
+    let mut rm_seed = vec![0u8; V::SAMPLE_RM_BYTES];
+    rng.fill_bytes(&mut rm_seed);
+
+    let mut r = [0u16; N];
+    let mut m = [0u16; N];
+    V::sample_rm(&mut r, &mut m, &rm_seed);
+
+    let mut rm = vec![0u8; V::OWCPA_MSGBYTES];
+    poly_s3_tobytes::<N>(&mut rm[..V::PACK_TRINARY_BYTES], &r);
+    poly_s3_tobytes::<N>(&mut rm[V::PACK_TRINARY_BYTES..], &m);
+
+    let digest = Sha3_256::new().chain(&rm).finalize();
+    k.copy_from_slice(&digest);
+
+    poly_z3_to_zq::<N>(&mut r, V::Q_MASK);
+    owcpa_enc::<V, N, LOGQ>(c, &r, &m, pk);
+}
+
 // ---- KEM decapsulation (FO-style transform) --------------------------------
 
-/// CCA KEM decapsulation: run `owcpa_dec`, hash $r \| m$ for the
+/// CCA KEM decapsulation: run [`owcpa_dec`], hash $r \| m$ for the
 /// session key, hash `prf || c` for the implicit-rejection key, and
-/// `cmov` between them on the OWCPA failure flag. The byte-buffer
-/// lengths and the per-set `owcpa_dec` are passed in so the routine
-/// can serve all four NIST sets (HPS-509 / HPS-677 / HPS-821 /
-/// HRSS-701).
-pub(crate) fn kem_dec(
+/// `cmov` between them on the OWCPA failure flag.
+pub(crate) fn kem_dec<V, const N: usize, const LOGQ: usize>(
     k: &mut [u8],
     c: &[u8],
     sk: &[u8],
-    owcpa_msg_bytes: usize,
-    owcpa_secret_key_bytes: usize,
-    owcpa_dec: fn(&mut [u8], &[u8], &[u8]) -> i32,
-) {
+) where
+    V: NtruVariant<N, LOGQ>,
+{
     use crate::hash::sha3::Sha3_256;
-    use crate::hash::Digest;
     debug_assert_eq!(k.len(), 32);
-    let mut rm = vec![0u8; owcpa_msg_bytes];
-    let fail = owcpa_dec(&mut rm, c, &sk[..owcpa_secret_key_bytes]);
+    let mut rm = vec![0u8; V::OWCPA_MSGBYTES];
+    let fail = owcpa_dec::<V, N, LOGQ>(&mut rm, c, &sk[..V::OWCPA_SECRETKEYBYTES]);
 
     let digest = Sha3_256::new().chain(&rm).finalize();
     k.copy_from_slice(&digest);
 
     let reject = Sha3_256::new()
-        .chain(&sk[owcpa_secret_key_bytes..])
+        .chain(&sk[V::OWCPA_SECRETKEYBYTES..])
         .chain(c)
         .finalize();
     cmov(k, &reject, fail as u8);

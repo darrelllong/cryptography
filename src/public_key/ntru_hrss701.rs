@@ -37,7 +37,6 @@
 
 
 
-use crate::hash::sha3::Sha3_256;
 use crate::Csprng;
 
 // ---- parameter constants ---------------------------------------------------
@@ -45,7 +44,6 @@ use crate::Csprng;
 const N: usize = 701;
 const LOGQ: usize = 13;
 const Q: u32 = 1 << LOGQ;
-const Q16: u16 = Q as u16;
 const Q_MASK: u16 = (Q as u16).wrapping_sub(1);
 
 const PRFKEYBYTES: usize = 32;
@@ -72,65 +70,9 @@ pub const CIPHERTEXT_BYTES: usize = OWCPA_BYTES; // 1138
 /// Shared-secret length in bytes.
 pub const SHARED_SECRET_BYTES: usize = SHAREDKEYBYTES; // 32
 
-// ---- polynomial type -------------------------------------------------------
+// ---- lift(m) for HRSS: (x - 1) * (a / (x - 1) mod (3, Phi_n)) --------------
 
-#[derive(Clone, Copy)]
-struct Poly {
-    coeffs: [u16; N],
-}
-
-impl Poly {
-    fn zero() -> Self {
-        Self { coeffs: [0u16; N] }
-    }
-}
-
-use crate::public_key::ntru_pqc_shared::{
-    cmov, DigestChain,
-    kem_dec as shared_kem_dec,
-    owcpa_check_ciphertext as shared_owcpa_check_ciphertext,
-    owcpa_check_r as shared_owcpa_check_r,
-    poly_mod_3_phi_n as shared_poly_mod_3_phi_n,
-    poly_rq_inv as shared_poly_rq_inv,
-    poly_rq_mul as shared_poly_rq_mul,
-    poly_rq_sum_zero_adjust as shared_poly_rq_sum_zero_adjust,
-    poly_rq_to_s3 as shared_poly_rq_to_s3,
-    poly_s3_frombytes as shared_poly_s3_frombytes,
-    poly_s3_inv as shared_poly_s3_inv,
-    poly_s3_mul as shared_poly_s3_mul,
-    poly_s3_tobytes as shared_poly_s3_tobytes,
-    poly_sq_frombytes_logq13 as shared_poly_sq_frombytes_logq13,
-    poly_sq_mul as shared_poly_sq_mul,
-    poly_sq_tobytes_logq13 as shared_poly_sq_tobytes_logq13,
-    poly_trinary_zq_to_z3 as shared_poly_trinary_zq_to_z3,
-    poly_z3_to_zq as shared_poly_z3_to_zq,
-    sample_iid as shared_sample_iid,
-};
-
-
-
-
-// ---- Z3 <-> Zq coefficient remapping ---------------------------------------
-
-fn poly_z3_to_zq(r: &mut Poly) { shared_poly_z3_to_zq::<N>(&mut r.coeffs, Q_MASK); }
-
-fn poly_trinary_zq_to_z3(r: &mut Poly) { shared_poly_trinary_zq_to_z3::<N, LOGQ>(&mut r.coeffs); }
-
-// ---- multiplication in R_q -------------------------------------------------
-
-fn poly_rq_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_rq_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
-
-fn poly_sq_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_sq_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
-
-fn poly_s3_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_s3_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
-
-// ---- Rq -> S3 coefficient projection ---------------------------------------
-
-fn poly_rq_to_s3(r: &mut Poly, a: &Poly) { shared_poly_rq_to_s3::<N, LOGQ>(&mut r.coeffs, &a.coeffs); }
-
-// ---- lift(m) for HPS: trivial Z_3 -> Z_q embedding -------------------------
-
-fn poly_lift(r: &mut Poly, a: &Poly) {
+fn poly_lift_hrss(r: &mut [u16; N], a: &[u16; N]) {
     // HRSS lift: compute b = a / (x - 1) mod (3, Phi_n) and then r = (x-1)*b.
     //
     // Define z by <z * x^i, x - 1> = delta_{i,0} mod 3:
@@ -141,106 +83,42 @@ fn poly_lift(r: &mut Poly, a: &Poly) {
     // Then b[k] = <z * x^k, a>.
     let t: u16 = (3 - (N % 3)) as u16;
 
-    let mut b = Poly::zero();
-    b.coeffs[0] = a.coeffs[0]
+    let mut b = [0u16; N];
+    b[0] = a[0]
         .wrapping_mul(2u16.wrapping_sub(t))
-        .wrapping_add(a.coeffs[1].wrapping_mul(0))
-        .wrapping_add(a.coeffs[2].wrapping_mul(t));
-    b.coeffs[1] = a.coeffs[1]
+        .wrapping_add(a[1].wrapping_mul(0))
+        .wrapping_add(a[2].wrapping_mul(t));
+    b[1] = a[1]
         .wrapping_mul(2u16.wrapping_sub(t))
-        .wrapping_add(a.coeffs[2].wrapping_mul(0));
-    b.coeffs[2] = a.coeffs[2].wrapping_mul(2u16.wrapping_sub(t));
+        .wrapping_add(a[2].wrapping_mul(0));
+    b[2] = a[2].wrapping_mul(2u16.wrapping_sub(t));
 
     let mut zj: u16 = 0; // z[1]
     for i in 3..N {
-        b.coeffs[0] = b.coeffs[0].wrapping_add(a.coeffs[i].wrapping_mul(zj.wrapping_add(2 * t)));
-        b.coeffs[1] = b.coeffs[1].wrapping_add(a.coeffs[i].wrapping_mul(zj.wrapping_add(t)));
-        b.coeffs[2] = b.coeffs[2].wrapping_add(a.coeffs[i].wrapping_mul(zj));
+        b[0] = b[0].wrapping_add(a[i].wrapping_mul(zj.wrapping_add(2 * t)));
+        b[1] = b[1].wrapping_add(a[i].wrapping_mul(zj.wrapping_add(t)));
+        b[2] = b[2].wrapping_add(a[i].wrapping_mul(zj));
         zj = (zj.wrapping_add(t)) % 3;
     }
-    b.coeffs[1] = b.coeffs[1].wrapping_add(a.coeffs[0].wrapping_mul(zj.wrapping_add(t)));
-    b.coeffs[2] = b.coeffs[2].wrapping_add(a.coeffs[0].wrapping_mul(zj));
-    b.coeffs[2] = b.coeffs[2].wrapping_add(a.coeffs[1].wrapping_mul(zj.wrapping_add(t)));
+    b[1] = b[1].wrapping_add(a[0].wrapping_mul(zj.wrapping_add(t)));
+    b[2] = b[2].wrapping_add(a[0].wrapping_mul(zj));
+    b[2] = b[2].wrapping_add(a[1].wrapping_mul(zj.wrapping_add(t)));
 
     for i in 3..N {
-        b.coeffs[i] = b.coeffs[i - 3].wrapping_add(
-            2u16.wrapping_mul(
-                a.coeffs[i]
-                    .wrapping_add(a.coeffs[i - 1])
-                    .wrapping_add(a.coeffs[i - 2]),
-            ),
+        b[i] = b[i - 3].wrapping_add(
+            2u16.wrapping_mul(a[i].wrapping_add(a[i - 1]).wrapping_add(a[i - 2])),
         );
     }
 
-    shared_poly_mod_3_phi_n::<N>(&mut b.coeffs);
-    poly_z3_to_zq(&mut b);
+    crate::public_key::ntru_pqc_shared::poly_mod_3_phi_n::<N>(&mut b);
+    crate::public_key::ntru_pqc_shared::poly_z3_to_zq::<N>(&mut b, Q_MASK);
 
     // r := (x - 1) * b
-    r.coeffs[0] = 0u16.wrapping_sub(b.coeffs[0]);
+    r[0] = 0u16.wrapping_sub(b[0]);
     for i in 0..N - 1 {
-        r.coeffs[i + 1] = b.coeffs[i].wrapping_sub(b.coeffs[i + 1]);
+        r[i + 1] = b[i].wrapping_sub(b[i + 1]);
     }
 }
-
-// ---- constant-time inverse in R_2 = F_2[x] / (x^N - 1) ---------------------
-//
-// Bernstein and Yang's constant-time gcd recursion (TCHES 2019, "Fast
-// constant-time gcd computation and modular inversion"): a swap-and-shift
-// loop on (f, g) over F_2[x] that converges to (gcd, 0) while threading
-// (v, w) so v · a ≡ gcd (mod x^N - 1) at exit. The 2(N-1)-1 iteration count
-// is the worst-case bound from the cited paper.
-
-
-// ---- constant-time inverse in S_3 = F_3[x] / Phi_n(x) ----------------------
-//
-// Same Bernstein–Yang gcd recursion as poly_r2_inv but over F_3 instead of
-// F_2. `mod3_u8` (in `ntru_pqc_shared`) keeps coefficients canonical
-// after every step.
-
-fn poly_s3_inv(r: &mut Poly, a: &Poly) { shared_poly_s3_inv::<N>(&mut r.coeffs, &a.coeffs); }
-
-// ---- inverse in R_q = Z_q[x] / (x^N - 1) via Hensel lift from R_2 ----------
-//
-// Standard Newton-style 2-adic lift: given a · b ≡ 1 (mod 2^k), the update
-// b ← b · (2 - a · b) doubles the precision to (mod 2^{2k}). Four lift
-// iterations carry an R_2 inverse to precision 2^16, which subsumes the
-// largest q in this NTRU family (q = 8192 = 2^13). All arithmetic is u16
-// wrapping; the final mod-q reduction happens at use sites.
-
-
-fn poly_rq_inv(r: &mut Poly, a: &Poly) { shared_poly_rq_inv::<N>(&mut r.coeffs, &a.coeffs); }
-
-// ---- S_3 packing: 5 trits per byte in base 3 -------------------------------
-
-fn poly_s3_tobytes(msg: &mut [u8], a: &Poly) { shared_poly_s3_tobytes::<N>(msg, &a.coeffs); }
-
-fn poly_s3_frombytes(r: &mut Poly, msg: &[u8]) { shared_poly_s3_frombytes::<N>(&mut r.coeffs, msg); }
-
-// ---- S_q packing: 11 bits per coefficient ---------------------------------
-//
-// Eight 11-bit S_q coefficients pack into 11 bytes. The remainder of
-// PACK_DEG mod 8 is handled by the trailing match arms.
-
-fn poly_sq_tobytes(r: &mut [u8], a: &Poly) { shared_poly_sq_tobytes_logq13::<N>(r, &a.coeffs); }
-
-fn poly_sq_frombytes(r: &mut Poly, a: &[u8]) { shared_poly_sq_frombytes_logq13::<N>(&mut r.coeffs, a); }
-
-fn poly_rq_sum_zero_tobytes(r: &mut [u8], a: &Poly) {
-    poly_sq_tobytes(r, a);
-}
-
-fn poly_rq_sum_zero_frombytes(r: &mut Poly, a: &[u8]) {
-    poly_sq_frombytes(r, a);
-    shared_poly_rq_sum_zero_adjust::<N>(&mut r.coeffs);
-}
-
-// ---- IID-uniform-mod-3 sampler ---------------------------------------------
-//
-// Each input byte is reduced mod 3, giving Pr[0] = 86/256 and
-// Pr[+1] = Pr[-1] = 85/256 — close enough to uniform for the spec's
-// security analysis.
-
-fn sample_iid(r: &mut Poly, uniform_bytes: &[u8]) { shared_sample_iid::<N>(&mut r.coeffs, uniform_bytes); }
 
 // ---- HRSS Sample_iid_plus distribution -------------------------------------
 //
@@ -249,22 +127,20 @@ fn sample_iid(r: &mut Poly, uniform_bytes: &[u8]) { shared_sample_iid::<N>(&mut 
 // only sampling distribution HRSS uses (replacing the HPS mix of IID for f
 // and fixed-weight for g/m).
 
-fn sample_iid_plus(r: &mut Poly, uniform_bytes: &[u8]) {
+fn sample_iid_plus_arr(r: &mut [u16; N], uniform_bytes: &[u8]) {
     debug_assert_eq!(uniform_bytes.len(), SAMPLE_IID_BYTES);
-    sample_iid(r, uniform_bytes);
+    crate::public_key::ntru_pqc_shared::sample_iid::<N>(r, uniform_bytes);
 
     // Map {0, 1, 2} -> {0, 1, 2^16 - 1}
     for i in 0..N - 1 {
-        let c = r.coeffs[i];
-        r.coeffs[i] = c | (0u16.wrapping_sub(c >> 1));
+        let c = r[i];
+        r[i] = c | (0u16.wrapping_sub(c >> 1));
     }
 
     // s = <x * r, r>; r[N-1] is zero.
     let mut s: u16 = 0;
     for i in 0..N - 1 {
-        s = s.wrapping_add(
-            ((r.coeffs[i + 1] as u32).wrapping_mul(r.coeffs[i] as u32)) as u16,
-        );
+        s = s.wrapping_add(((r[i + 1] as u32).wrapping_mul(r[i] as u32)) as u16);
     }
 
     // sign(s) — sign(0) = 1; the C uses `1 | (-(s>>15))`.
@@ -272,167 +148,74 @@ fn sample_iid_plus(r: &mut Poly, uniform_bytes: &[u8]) {
 
     let mut i = 0;
     while i < N {
-        r.coeffs[i] = ((s_sign as u32).wrapping_mul(r.coeffs[i] as u32)) as u16;
+        r[i] = ((s_sign as u32).wrapping_mul(r[i] as u32)) as u16;
         i += 2;
     }
 
     // Map {0, 1, 2^16-1} -> {0, 1, 2}
     for i in 0..N {
-        r.coeffs[i] = 3 & (r.coeffs[i] ^ (r.coeffs[i] >> 15));
+        r[i] = 3 & (r[i] ^ (r[i] >> 15));
     }
 }
 
-fn sample_fg(f: &mut Poly, g: &mut Poly, uniform_bytes: &[u8]) {
-    debug_assert_eq!(uniform_bytes.len(), SAMPLE_FG_BYTES);
-    sample_iid_plus(f, &uniform_bytes[..SAMPLE_IID_BYTES]);
-    sample_iid_plus(g, &uniform_bytes[SAMPLE_IID_BYTES..]);
+// ---- variant marker -------------------------------------------------------
+
+struct Hrss701Variant;
+
+impl crate::public_key::ntru_pqc_shared::NtruVariant<N, LOGQ> for Hrss701Variant {
+    const Q_MASK: u16 = Q_MASK;
+    const SAMPLE_FG_BYTES: usize = SAMPLE_FG_BYTES;
+    const SAMPLE_RM_BYTES: usize = SAMPLE_RM_BYTES;
+    const PACK_TRINARY_BYTES: usize = PACK_TRINARY_BYTES;
+    const OWCPA_PUBLICKEYBYTES: usize = OWCPA_PUBLICKEYBYTES;
+    const OWCPA_SECRETKEYBYTES: usize = OWCPA_SECRETKEYBYTES;
+    const OWCPA_BYTES: usize = OWCPA_BYTES;
+    const OWCPA_MSGBYTES: usize = OWCPA_MSGBYTES;
+
+    fn sample_fg(f: &mut [u16; N], g: &mut [u16; N], seed: &[u8]) {
+        debug_assert_eq!(seed.len(), SAMPLE_FG_BYTES);
+        sample_iid_plus_arr(f, &seed[..SAMPLE_IID_BYTES]);
+        sample_iid_plus_arr(g, &seed[SAMPLE_IID_BYTES..]);
+    }
+
+    fn sample_rm(r: &mut [u16; N], m: &mut [u16; N], seed: &[u8]) {
+        debug_assert_eq!(seed.len(), SAMPLE_RM_BYTES);
+        crate::public_key::ntru_pqc_shared::sample_iid::<N>(r, &seed[..SAMPLE_IID_BYTES]);
+        crate::public_key::ntru_pqc_shared::sample_iid::<N>(m, &seed[SAMPLE_IID_BYTES..]);
+    }
+
+    fn update_g_after_z3_to_zq(g: &mut [u16; N]) {
+        // HRSS branch: g <- 3 * (x - 1) * g  (mod q)
+        for i in (1..N).rev() {
+            g[i] = (3u16).wrapping_mul(g[i - 1].wrapping_sub(g[i]));
+        }
+        g[0] = 0u16.wrapping_sub((3u16).wrapping_mul(g[0]));
+    }
+
+    fn poly_lift(r: &mut [u16; N], a: &[u16; N]) {
+        poly_lift_hrss(r, a);
+    }
+
+    fn check_m(_m: &[u16; N]) -> i32 {
+        // HRSS accepts any S_3 element.
+        0
+    }
+
+    fn poly_sq_tobytes(r: &mut [u8], a: &[u16; N]) {
+        crate::public_key::ntru_pqc_shared::poly_sq_tobytes_logq13::<N>(r, a);
+    }
+
+    fn poly_sq_frombytes(r: &mut [u16; N], a: &[u8]) {
+        crate::public_key::ntru_pqc_shared::poly_sq_frombytes_logq13::<N>(r, a);
+    }
 }
 
-fn sample_rm(r: &mut Poly, m: &mut Poly, uniform_bytes: &[u8]) {
-    debug_assert_eq!(uniform_bytes.len(), SAMPLE_RM_BYTES);
-    sample_iid(r, &uniform_bytes[..SAMPLE_IID_BYTES]);
-    sample_iid(m, &uniform_bytes[SAMPLE_IID_BYTES..]);
-}
+// ---- CCA KEM wrapper (delegated entirely to the shared FO transform) -------
 
-// ---- OWCPA validity checks -------------------------------------------------
-
-fn owcpa_check_ciphertext(ciphertext: &[u8]) -> i32 {
-    shared_owcpa_check_ciphertext::<N, LOGQ>(ciphertext)
-}
-
-fn owcpa_check_r(r: &Poly) -> i32 {
-    shared_owcpa_check_r::<N, LOGQ>(&r.coeffs)
-}
-
-// ---- OWCPA core: keygen, encrypt, decrypt ----------------------------------
-
-fn owcpa_keypair(pk: &mut [u8], sk: &mut [u8], seed: &[u8]) {
-    debug_assert_eq!(pk.len(), OWCPA_PUBLICKEYBYTES);
-    debug_assert_eq!(sk.len(), OWCPA_SECRETKEYBYTES);
-    debug_assert_eq!(seed.len(), SAMPLE_FG_BYTES);
-
-    let mut f = Poly::zero();
-    let mut g = Poly::zero();
-    sample_fg(&mut f, &mut g, seed);
-
-    let mut invf_mod3 = Poly::zero();
-    poly_s3_inv(&mut invf_mod3, &f);
-    poly_s3_tobytes(&mut sk[..PACK_TRINARY_BYTES], &f);
-    poly_s3_tobytes(
-        &mut sk[PACK_TRINARY_BYTES..2 * PACK_TRINARY_BYTES],
-        &invf_mod3,
+fn kem_keypair_seeded<R: Csprng>(pk: &mut [u8], sk: &mut [u8], rng: &mut R) {
+    crate::public_key::ntru_pqc_shared::kem_keypair_seeded::<Hrss701Variant, R, N, LOGQ>(
+        pk, sk, rng,
     );
-
-    poly_z3_to_zq(&mut f);
-    poly_z3_to_zq(&mut g);
-    // HRSS branch: g <- 3 * (x - 1) * g  (mod q)
-    for i in (1..N).rev() {
-        g.coeffs[i] = (3u16).wrapping_mul(g.coeffs[i - 1].wrapping_sub(g.coeffs[i]));
-    }
-    g.coeffs[0] = 0u16.wrapping_sub((3u16).wrapping_mul(g.coeffs[0]));
-
-    let mut gf = Poly::zero();
-    poly_rq_mul(&mut gf, &g, &f);
-
-    let mut invgf = Poly::zero();
-    poly_rq_inv(&mut invgf, &gf);
-
-    let mut tmp = Poly::zero();
-    let mut invh = Poly::zero();
-    poly_rq_mul(&mut tmp, &invgf, &f);
-    poly_sq_mul(&mut invh, &tmp, &f);
-    poly_sq_tobytes(&mut sk[2 * PACK_TRINARY_BYTES..], &invh);
-
-    let mut h = Poly::zero();
-    poly_rq_mul(&mut tmp, &invgf, &g);
-    poly_rq_mul(&mut h, &tmp, &g);
-    poly_rq_sum_zero_tobytes(pk, &h);
-}
-
-fn owcpa_enc(c: &mut [u8], r: &Poly, m: &Poly, pk: &[u8]) {
-    debug_assert_eq!(c.len(), OWCPA_BYTES);
-    debug_assert_eq!(pk.len(), OWCPA_PUBLICKEYBYTES);
-    let mut h = Poly::zero();
-    poly_rq_sum_zero_frombytes(&mut h, pk);
-
-    let mut ct = Poly::zero();
-    poly_rq_mul(&mut ct, r, &h);
-
-    let mut liftm = Poly::zero();
-    poly_lift(&mut liftm, m);
-    for i in 0..N {
-        ct.coeffs[i] = ct.coeffs[i].wrapping_add(liftm.coeffs[i]);
-    }
-
-    poly_rq_sum_zero_tobytes(c, &ct);
-}
-
-fn owcpa_dec(rm: &mut [u8], ciphertext: &[u8], secretkey: &[u8]) -> i32 {
-    debug_assert_eq!(rm.len(), OWCPA_MSGBYTES);
-    debug_assert_eq!(ciphertext.len(), CIPHERTEXT_BYTES);
-    debug_assert_eq!(secretkey.len(), OWCPA_SECRETKEYBYTES);
-
-    let mut c = Poly::zero();
-    poly_rq_sum_zero_frombytes(&mut c, ciphertext);
-
-    let mut f = Poly::zero();
-    poly_s3_frombytes(&mut f, &secretkey[..PACK_TRINARY_BYTES]);
-    poly_z3_to_zq(&mut f);
-
-    let mut cf = Poly::zero();
-    poly_rq_mul(&mut cf, &c, &f);
-
-    let mut mf = Poly::zero();
-    poly_rq_to_s3(&mut mf, &cf);
-
-    let mut finv3 = Poly::zero();
-    poly_s3_frombytes(&mut finv3, &secretkey[PACK_TRINARY_BYTES..2 * PACK_TRINARY_BYTES]);
-
-    let mut m = Poly::zero();
-    poly_s3_mul(&mut m, &mf, &finv3);
-    poly_s3_tobytes(&mut rm[PACK_TRINARY_BYTES..], &m);
-
-    let mut fail = 0i32;
-    fail |= owcpa_check_ciphertext(ciphertext);
-    // HRSS does not check m: any element of S3 is a valid message.
-
-    // b = c - lift(m)
-    let mut liftm = Poly::zero();
-    poly_lift(&mut liftm, &m);
-    let mut b = Poly::zero();
-    for i in 0..N {
-        b.coeffs[i] = c.coeffs[i].wrapping_sub(liftm.coeffs[i]);
-    }
-
-    // r = b / h mod (q, Phi_n)
-    let mut invh = Poly::zero();
-    poly_sq_frombytes(&mut invh, &secretkey[2 * PACK_TRINARY_BYTES..]);
-    let mut r = Poly::zero();
-    poly_sq_mul(&mut r, &b, &invh);
-
-    fail |= owcpa_check_r(&r);
-
-    poly_trinary_zq_to_z3(&mut r);
-    poly_s3_tobytes(&mut rm[..PACK_TRINARY_BYTES], &r);
-
-    fail
-}
-
-// ---- CCA KEM wrapper: SXY/Sch18 Fujisaki-Okamoto-style transform -----------
-
-fn kem_keypair_seeded<R: Csprng>(
-    pk: &mut [u8],
-    sk: &mut [u8],
-    rng: &mut R,
-) {
-    debug_assert_eq!(pk.len(), PUBLIC_KEY_BYTES);
-    debug_assert_eq!(sk.len(), PRIVATE_KEY_BYTES);
-
-    let mut seed = vec![0u8; SAMPLE_FG_BYTES];
-    rng.fill_bytes(&mut seed);
-    owcpa_keypair(pk, &mut sk[..OWCPA_SECRETKEYBYTES], &seed);
-
-    rng.fill_bytes(&mut sk[OWCPA_SECRETKEYBYTES..]);
 }
 
 fn kem_enc_seeded<R: Csprng>(
@@ -441,22 +224,7 @@ fn kem_enc_seeded<R: Csprng>(
     pk: &[u8; PUBLIC_KEY_BYTES],
     rng: &mut R,
 ) {
-    let mut rm_seed = vec![0u8; SAMPLE_RM_BYTES];
-    rng.fill_bytes(&mut rm_seed);
-
-    let mut r = Poly::zero();
-    let mut m = Poly::zero();
-    sample_rm(&mut r, &mut m, &rm_seed);
-
-    let mut rm = [0u8; OWCPA_MSGBYTES];
-    poly_s3_tobytes(&mut rm[..PACK_TRINARY_BYTES], &r);
-    poly_s3_tobytes(&mut rm[PACK_TRINARY_BYTES..], &m);
-
-    let digest = Sha3_256::new().chain(&rm).finalize();
-    k.copy_from_slice(&digest);
-
-    poly_z3_to_zq(&mut r);
-    owcpa_enc(c, &r, &m, pk);
+    crate::public_key::ntru_pqc_shared::kem_enc_seeded::<Hrss701Variant, R, N, LOGQ>(c, k, pk, rng);
 }
 
 fn kem_dec(
@@ -464,7 +232,7 @@ fn kem_dec(
     c: &[u8; CIPHERTEXT_BYTES],
     sk: &[u8; PRIVATE_KEY_BYTES],
 ) {
-    shared_kem_dec(k, c, sk, OWCPA_MSGBYTES, OWCPA_SECRETKEYBYTES, owcpa_dec);
+    crate::public_key::ntru_pqc_shared::kem_dec::<Hrss701Variant, N, LOGQ>(k, c, sk);
 }
 
 
