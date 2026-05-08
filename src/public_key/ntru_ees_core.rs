@@ -414,87 +414,91 @@ fn poly_inverse_mod_q_cyclic<const N: usize>(
 }
 
 // ---- bit-string accumulator (IEEE 1363.1 §9 BPGM3 / IGF helpers) -----------
+//
+// Bits are packed LSB-first within each byte; byte 0 holds the oldest 8 bits
+// (the "bottom") and the partial byte at `buf.len() - 1` holds the newest
+// (the "top"). The IGF only ever appends at the top, reads the top `c` bits,
+// and (when refilling) saves the unconsumed bottom slice into a fresh
+// `BitStr` that gets new hash output appended above. There are exactly four
+// supported operations; everything else is a hidden invariant. Track the
+// total bit count explicitly and derive the byte index / partial-bit count
+// from it on the fly so the invariants are obvious.
 
 #[derive(Clone)]
 struct BitStr {
     buf: Vec<u8>,
-    last_byte_bits: u8,
+    bit_len: usize,
 }
 
 impl BitStr {
     fn new() -> Self {
-        Self {
-            buf: Vec::new(),
-            last_byte_bits: 0,
-        }
+        Self { buf: Vec::new(), bit_len: 0 }
     }
+
+    /// Append 8 bits at the top of the stack.
     fn append_byte(&mut self, b: u8) {
-        if self.buf.is_empty() {
-            self.buf.push(b);
-            self.last_byte_bits = 8;
-        } else if self.last_byte_bits == 8 {
+        let off = self.bit_len % 8;
+        if off == 0 {
             self.buf.push(b);
         } else {
-            let lb = self.last_byte_bits;
-            let last = self.buf.last_mut().unwrap();
-            *last |= b << lb;
-            let high = b >> (8 - lb);
-            self.buf.push(high);
+            *self
+                .buf
+                .last_mut()
+                .expect("non-empty by `bit_len > 0`") |= b << off;
+            self.buf.push(b >> (8 - off));
         }
+        self.bit_len += 8;
     }
+
     fn append(&mut self, bytes: &[u8]) {
         for &b in bytes {
             self.append_byte(b);
         }
     }
+
+    /// Read the top `num_bits` (most recently appended) as a little-endian
+    /// `u32`; `num_bits` must be ≤ 32 and ≤ `bit_len`.
     fn leading(&self, num_bits: u8) -> u32 {
-        let total = (self.buf.len() - 1) * 8 + self.last_byte_bits as usize;
-        let start_bit = total - num_bits as usize;
-        let start_byte = start_bit / 8;
-        let start_bit_in_byte = start_bit % 8;
-        let mut sum: u32 = (self.buf[start_byte] as u32) >> start_bit_in_byte;
-        let mut shift = (8 - start_bit_in_byte) as u32;
-        for i in (start_byte + 1)..(self.buf.len() - 1) {
-            sum |= (self.buf[i] as u32) << shift;
-            shift += 8;
+        let n = num_bits as usize;
+        debug_assert!(n <= 32 && n <= self.bit_len);
+        let start = self.bit_len - n;
+        let mut v: u32 = 0;
+        for i in 0..n {
+            let p = start + i;
+            v |= u32::from((self.buf[p / 8] >> (p % 8)) & 1) << i;
         }
-        let final_bits = num_bits as u32 - shift;
-        let afin = self.buf[self.buf.len() - 1] as u32;
-        let mask = if final_bits == 0 {
-            0
-        } else {
-            (1u32 << final_bits) - 1
-        };
-        sum |= (afin & mask) << shift;
-        sum
+        v
     }
+
+    /// Drop the top `num_bits`; trims trailing bytes that are wholly above
+    /// the new bit length and clears any stale bits in the new top byte so
+    /// later appends OR cleanly into it.
     fn truncate(&mut self, num_bits: u8) {
-        let mut nb = num_bits;
-        let byte_drop = (nb / 8) as usize;
-        for _ in 0..byte_drop {
-            self.buf.pop();
+        let n = num_bits as usize;
+        debug_assert!(n <= self.bit_len);
+        self.bit_len -= n;
+        let needed = self.bit_len.div_ceil(8);
+        self.buf.truncate(needed);
+        let off = self.bit_len % 8;
+        if off != 0 {
+            let last = self.buf.last_mut().expect("non-empty by needed > 0");
+            *last &= (1u8 << off) - 1;
         }
-        nb %= 8;
-        let mut last = self.last_byte_bits as i16 - nb as i16;
-        if last < 0 {
-            last += 8;
-            self.buf.pop();
-        }
-        self.last_byte_bits = last as u8;
     }
+
+    /// Take the bottom `num_bits` (oldest, the unconsumed remainder) into
+    /// a fresh `BitStr`. Used at IGF refill time to preserve the residual
+    /// before stacking new hash output above it.
     fn trailing(&self, num_bits: u32) -> Self {
-        let n = ((num_bits + 7) / 8) as usize;
-        let mut out_buf = self.buf[..n].to_vec();
-        let last_bits = (num_bits % 8) as u8;
-        let last_bits = if last_bits == 0 { 8 } else { last_bits };
-        if last_bits < 8 {
-            let mask = (1u8 << last_bits) - 1;
-            *out_buf.last_mut().unwrap() &= mask;
+        let n = num_bits as usize;
+        debug_assert!(n <= self.bit_len);
+        let needed = n.div_ceil(8);
+        let mut buf = self.buf[..needed].to_vec();
+        let off = n % 8;
+        if off != 0 {
+            *buf.last_mut().expect("needed > 0") &= (1u8 << off) - 1;
         }
-        Self {
-            buf: out_buf,
-            last_byte_bits: last_bits,
-        }
+        Self { buf, bit_len: n }
     }
 }
 

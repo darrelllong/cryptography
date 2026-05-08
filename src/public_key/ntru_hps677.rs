@@ -83,9 +83,17 @@ impl Poly {
 
 use crate::public_key::ntru_pqc_shared::{
     cmov, crypto_sort_int32, mod3, DigestChain,
+    poly_mod_3_phi_n as shared_poly_mod_3_phi_n,
+    poly_mod_q_phi_n as shared_poly_mod_q_phi_n,
     poly_r2_inv as shared_poly_r2_inv,
     poly_r2_inv_to_rq_inv as shared_poly_r2_inv_to_rq_inv,
+    poly_rq_inv as shared_poly_rq_inv,
+    poly_rq_to_s3 as shared_poly_rq_to_s3,
+    poly_s3_frombytes as shared_poly_s3_frombytes,
     poly_s3_inv as shared_poly_s3_inv,
+    poly_s3_tobytes as shared_poly_s3_tobytes,
+    poly_trinary_zq_to_z3 as shared_poly_trinary_zq_to_z3,
+    poly_z3_to_zq as shared_poly_z3_to_zq,
 };
 
 #[inline(always)]
@@ -93,36 +101,15 @@ fn modq(x: u16) -> u16 {
     x & Q_MASK
 }
 
-fn poly_mod_3_phi_n(r: &mut Poly) {
-    let last = r.coeffs[N - 1];
-    for c in r.coeffs.iter_mut() {
-        *c = mod3(*c + 2 * last);
-    }
-}
+fn poly_mod_3_phi_n(r: &mut Poly) { shared_poly_mod_3_phi_n::<N>(&mut r.coeffs); }
 
-fn poly_mod_q_phi_n(r: &mut Poly) {
-    let last = r.coeffs[N - 1];
-    for c in r.coeffs.iter_mut() {
-        *c = c.wrapping_sub(last);
-    }
-}
+fn poly_mod_q_phi_n(r: &mut Poly) { shared_poly_mod_q_phi_n::<N>(&mut r.coeffs); }
 
 // ---- Z3 <-> Zq coefficient remapping ---------------------------------------
 
-fn poly_z3_to_zq(r: &mut Poly) {
-    // {0, 1, 2} -> {0, 1, q-1}
-    for c in r.coeffs.iter_mut() {
-        *c |= (0u16.wrapping_sub(*c >> 1)) & Q_MASK;
-    }
-}
+fn poly_z3_to_zq(r: &mut Poly) { shared_poly_z3_to_zq::<N>(&mut r.coeffs, Q_MASK); }
 
-fn poly_trinary_zq_to_z3(r: &mut Poly) {
-    // {0, 1, q-1} -> {0, 1, 2}
-    for c in r.coeffs.iter_mut() {
-        *c = modq(*c);
-        *c = 3 & (*c ^ (*c >> (LOGQ - 1)));
-    }
-}
+fn poly_trinary_zq_to_z3(r: &mut Poly) { shared_poly_trinary_zq_to_z3::<N, LOGQ>(&mut r.coeffs); }
 
 // ---- multiplication in R_q -------------------------------------------------
 
@@ -142,16 +129,7 @@ fn poly_s3_mul(r: &mut Poly, a: &Poly, b: &Poly) {
 
 // ---- Rq -> S3 coefficient projection ---------------------------------------
 
-fn poly_rq_to_s3(r: &mut Poly, a: &Poly) {
-    for i in 0..N {
-        let mut c = modq(a.coeffs[i]);
-        let flag = c >> (LOGQ - 1);
-        // -q mod 3 = -2^k mod 3 = 1 << (1 - (k & 1))
-        c = c.wrapping_add(flag << (1 - (LOGQ & 1)));
-        r.coeffs[i] = c;
-    }
-    poly_mod_3_phi_n(r);
-}
+fn poly_rq_to_s3(r: &mut Poly, a: &Poly) { shared_poly_rq_to_s3::<N, LOGQ>(&mut r.coeffs, &a.coeffs); }
 
 // ---- lift(m) for HPS: trivial Z_3 -> Z_q embedding -------------------------
 
@@ -187,61 +165,13 @@ fn poly_s3_inv(r: &mut Poly, a: &Poly) { shared_poly_s3_inv::<N>(&mut r.coeffs, 
 
 fn poly_r2_inv_to_rq_inv(r: &mut Poly, ai: &Poly, a: &Poly) { shared_poly_r2_inv_to_rq_inv::<N>(&mut r.coeffs, &ai.coeffs, &a.coeffs); }
 
-fn poly_rq_inv(r: &mut Poly, a: &Poly) {
-    let mut ai2 = Poly::zero();
-    poly_r2_inv(&mut ai2, a);
-    poly_r2_inv_to_rq_inv(r, &ai2, a);
-}
+fn poly_rq_inv(r: &mut Poly, a: &Poly) { shared_poly_rq_inv::<N>(&mut r.coeffs, &a.coeffs); }
 
 // ---- S_3 packing: 5 trits per byte in base 3 -------------------------------
 
-fn poly_s3_tobytes(msg: &mut [u8], a: &Poly) {
-    debug_assert_eq!(msg.len(), PACK_TRINARY_BYTES);
-    let full = PACK_DEG / 5;
-    for i in 0..full {
-        let mut c = (a.coeffs[5 * i + 4] & 0xff) as u8;
-        c = (3u8.wrapping_mul(c)).wrapping_add(a.coeffs[5 * i + 3] as u8);
-        c = (3u8.wrapping_mul(c)).wrapping_add(a.coeffs[5 * i + 2] as u8);
-        c = (3u8.wrapping_mul(c)).wrapping_add(a.coeffs[5 * i + 1] as u8);
-        c = (3u8.wrapping_mul(c)).wrapping_add(a.coeffs[5 * i] as u8);
-        msg[i] = c;
-    }
-    if PACK_DEG > full * 5 {
-        // tail: coefficients PACK_DEG - 5*full ..  go into msg[full]
-        let mut c: u8 = 0;
-        let start = 5 * full;
-        let mut j = (PACK_DEG - start) as isize - 1;
-        while j >= 0 {
-            c = (3u8.wrapping_mul(c)).wrapping_add(a.coeffs[start + j as usize] as u8);
-            j -= 1;
-        }
-        msg[full] = c;
-    }
-}
+fn poly_s3_tobytes(msg: &mut [u8], a: &Poly) { shared_poly_s3_tobytes::<N>(msg, &a.coeffs); }
 
-fn poly_s3_frombytes(r: &mut Poly, msg: &[u8]) {
-    debug_assert_eq!(msg.len(), PACK_TRINARY_BYTES);
-    let full = PACK_DEG / 5;
-    for i in 0..full {
-        let c = msg[i] as u32;
-        r.coeffs[5 * i] = c as u16;
-        r.coeffs[5 * i + 1] = ((c * 171) >> 9) as u16; // /3
-        r.coeffs[5 * i + 2] = ((c * 57) >> 9) as u16; // /9
-        r.coeffs[5 * i + 3] = ((c * 19) >> 9) as u16; // /27
-        r.coeffs[5 * i + 4] = ((c * 203) >> 14) as u16; // /81
-    }
-    if PACK_DEG > full * 5 {
-        let mut c = msg[full] as u32;
-        let mut j = 0;
-        while 5 * full + j < PACK_DEG {
-            r.coeffs[5 * full + j] = c as u16;
-            c = (c * 171) >> 9;
-            j += 1;
-        }
-    }
-    r.coeffs[N - 1] = 0;
-    poly_mod_3_phi_n(r);
-}
+fn poly_s3_frombytes(r: &mut Poly, msg: &[u8]) { shared_poly_s3_frombytes::<N>(&mut r.coeffs, msg); }
 
 // ---- S_q packing: 11 bits per coefficient ---------------------------------
 //

@@ -605,6 +605,126 @@ macro_rules! __define_pqc_kem {
 #[doc(hidden)]
 pub use crate::__define_pqc_kem as define_pqc_kem;
 
+// ---- shared polynomial helpers (N- and LOGQ-parameterised) -----------------
+
+/// $\Phi_n$-projection of a polynomial coefficient vector treated mod 3.
+/// Subtracts the constant term from every coefficient (with the standard
+/// "$2 \cdot \text{last}$" identity for mod-3 arithmetic), then reduces.
+pub(crate) fn poly_mod_3_phi_n<const N: usize>(r: &mut [u16; N]) {
+    let last = r[N - 1];
+    for c in r.iter_mut() {
+        *c = mod3(*c + 2 * last);
+    }
+}
+
+/// $\Phi_n$-projection of a polynomial coefficient vector mod $q$. The
+/// caller is responsible for masking with `Q_MASK` afterwards if it wants
+/// canonical values; the multiplications elsewhere already do so.
+pub(crate) fn poly_mod_q_phi_n<const N: usize>(r: &mut [u16; N]) {
+    let last = r[N - 1];
+    for c in r.iter_mut() {
+        *c = c.wrapping_sub(last);
+    }
+}
+
+/// Embed coefficients in $\{0, 1, 2\}$ into $\mathbb{Z}_q$ as
+/// $\{0, 1, q - 1\}$.
+pub(crate) fn poly_z3_to_zq<const N: usize>(r: &mut [u16; N], q_mask: u16) {
+    for c in r.iter_mut() {
+        *c |= (0u16.wrapping_sub(*c >> 1)) & q_mask;
+    }
+}
+
+/// Project $\mathbb{Z}_q$ coefficients in $\{0, 1, q - 1\}$ back to
+/// $\{0, 1, 2\}$.
+pub(crate) fn poly_trinary_zq_to_z3<const N: usize, const LOGQ: usize>(r: &mut [u16; N]) {
+    let q_mask = ((1u32 << LOGQ) - 1) as u16;
+    for c in r.iter_mut() {
+        *c = *c & q_mask;
+        *c = 3 & (*c ^ (*c >> (LOGQ - 1)));
+    }
+}
+
+/// Project an arbitrary $R_q$ coefficient vector onto $S_3$ (mod 3,
+/// mod $\Phi_n$).
+pub(crate) fn poly_rq_to_s3<const N: usize, const LOGQ: usize>(
+    r: &mut [u16; N],
+    a: &[u16; N],
+) {
+    let q_mask = ((1u32 << LOGQ) - 1) as u16;
+    for i in 0..N {
+        let mut c = a[i] & q_mask;
+        let flag = c >> (LOGQ - 1);
+        c = c.wrapping_add(flag << (1 - (LOGQ & 1)));
+        r[i] = c;
+    }
+    poly_mod_3_phi_n::<N>(r);
+}
+
+/// Inverse in $R_q = \mathbb{Z}_q[x] / (x^N - 1)$: F_2 inverse via
+/// Bernstein–Yang, then Hensel-lift to mod $q$.
+pub(crate) fn poly_rq_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
+    let mut ai2 = [0u16; N];
+    poly_r2_inv(&mut ai2, a);
+    poly_r2_inv_to_rq_inv(r, &ai2, a);
+}
+
+// ---- S_3 packing: 5 trits per byte in base 3 -------------------------------
+
+/// Pack `a`'s $N - 1$ trinary coefficients (in $\{0, 1, 2\}$) into bytes
+/// using base-3 encoding: each output byte holds 5 trits, with the
+/// least-significant trit at the bottom of the byte. The output buffer
+/// length must equal `((N - 1) + 4) / 5`.
+pub(crate) fn poly_s3_tobytes<const N: usize>(msg: &mut [u8], a: &[u16; N]) {
+    let pack_deg = N - 1;
+    debug_assert_eq!(msg.len(), (pack_deg + 4) / 5);
+    let full = pack_deg / 5;
+    for i in 0..full {
+        let mut c = (a[5 * i + 4] & 0xff) as u8;
+        c = (3u8.wrapping_mul(c)).wrapping_add(a[5 * i + 3] as u8);
+        c = (3u8.wrapping_mul(c)).wrapping_add(a[5 * i + 2] as u8);
+        c = (3u8.wrapping_mul(c)).wrapping_add(a[5 * i + 1] as u8);
+        c = (3u8.wrapping_mul(c)).wrapping_add(a[5 * i] as u8);
+        msg[i] = c;
+    }
+    if pack_deg > full * 5 {
+        let mut c: u8 = 0;
+        let start = 5 * full;
+        let mut j = (pack_deg - start) as isize - 1;
+        while j >= 0 {
+            c = (3u8.wrapping_mul(c)).wrapping_add(a[start + j as usize] as u8);
+            j -= 1;
+        }
+        msg[full] = c;
+    }
+}
+
+/// Inverse of [`poly_s3_tobytes`]. Reduces mod 3, mod $\Phi_n$ on the way out.
+pub(crate) fn poly_s3_frombytes<const N: usize>(r: &mut [u16; N], msg: &[u8]) {
+    let pack_deg = N - 1;
+    debug_assert_eq!(msg.len(), (pack_deg + 4) / 5);
+    let full = pack_deg / 5;
+    for i in 0..full {
+        let c = msg[i] as u32;
+        r[5 * i] = c as u16;
+        r[5 * i + 1] = ((c * 171) >> 9) as u16;
+        r[5 * i + 2] = ((c * 57) >> 9) as u16;
+        r[5 * i + 3] = ((c * 19) >> 9) as u16;
+        r[5 * i + 4] = ((c * 203) >> 14) as u16;
+    }
+    if pack_deg > full * 5 {
+        let mut c = msg[full] as u32;
+        let mut j = 0;
+        while 5 * full + j < pack_deg {
+            r[5 * full + j] = c as u16;
+            c = (c * 171) >> 9;
+            j += 1;
+        }
+    }
+    r[N - 1] = 0;
+    poly_mod_3_phi_n::<N>(r);
+}
+
 // ---- shared NIST PQC KAT parsing (test only) -------------------------------
 
 /// One entry of a NIST PQC `.rsp` KAT file: 48-byte seed plus the
