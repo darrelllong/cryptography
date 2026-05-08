@@ -784,6 +784,14 @@ fn mgf<const N: usize>(seed: &[u8], params: &EesParams) -> Poly<N> {
 
     let mut out = Poly::<N>::zero();
     let mut cur = 0usize;
+    // The IEEE 1363.1 IGF + MGF rejection-samples bytes < 243 at a
+    // density of 243/256 ≈ 95%, so the expected number of hash
+    // calls is at most $\lceil N / (5 \cdot 0.95 \cdot \text{hlen})
+    // \rceil$ — about 4 for $N = 1499, \text{hlen} = 32$. The bound
+    // below is a defensive ceiling against a pathological hash
+    // distribution; for the round-3-style SHA-1 / SHA-256 hashes
+    // shipped in this crate it is never reached.
+    let counter_ceiling = (params.min_calls_mask as u16).saturating_add(1024);
     'outer: loop {
         for &b in &buf {
             for &t in &MGF_TRIT_TABLE[b as usize] {
@@ -799,6 +807,10 @@ fn mgf<const N: usize>(seed: &[u8], params: &EesParams) -> Poly<N> {
                 }
             }
         }
+        assert!(
+            counter < counter_ceiling,
+            "MGF rejection sampler exceeded counter ceiling — hash output is pathologically biased"
+        );
         params
             .hash
             .digest_two_into(&z[..hlen], &counter.to_be_bytes(), &mut h[..hlen]);

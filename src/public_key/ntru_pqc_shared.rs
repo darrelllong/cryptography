@@ -1710,4 +1710,36 @@ mod tests {
             assert_eq!(mod3(a), a % 3);
         }
     }
+
+    /// `DigestChain::chain` is a blanket impl over every `Digest`; this
+    /// test exercises it on both `Sha3_256` (the FO-transform consumer)
+    /// and `Sha256` so the chained-update equivalence is locked in for
+    /// the whole `Digest` family rather than just the one in-use site.
+    #[test]
+    fn digest_chain_matches_concat_then_update() {
+        use crate::hash::sha2::Sha256;
+        use crate::hash::sha3::Sha3_256;
+        use crate::hash::Digest;
+
+        let parts: [&[u8]; 3] = [b"abc", b"defghij", b""];
+        let concat: Vec<u8> = parts.iter().flat_map(|p| p.iter().copied()).collect();
+
+        for &(a, b, c) in &[(parts[0], parts[1], parts[2])] {
+            let chained = Sha3_256::new().chain(a).chain(b).chain(c).finalize();
+            let oneshot = {
+                let mut h = Sha3_256::new();
+                h.update(&concat);
+                h.finalize()
+            };
+            assert_eq!(chained.as_slice(), oneshot.as_slice(), "Sha3_256 chain");
+
+            let chained = Sha256::new().chain(a).chain(b).chain(c).finalize();
+            let oneshot = {
+                let mut h = Sha256::new();
+                h.update(&concat);
+                h.finalize()
+            };
+            assert_eq!(chained.as_slice(), oneshot.as_slice(), "Sha256 chain");
+        }
+    }
 }
