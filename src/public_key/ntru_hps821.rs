@@ -83,11 +83,14 @@ impl Poly {
 
 use crate::public_key::ntru_pqc_shared::{
     cmov, DigestChain,
-    sample_iid as shared_sample_iid,
-    sample_fixed_type as shared_sample_fixed_type,
+    kem_dec as shared_kem_dec,
+    owcpa_check_ciphertext as shared_owcpa_check_ciphertext,
+    owcpa_check_m as shared_owcpa_check_m,
+    owcpa_check_r as shared_owcpa_check_r,
     poly_lift_hps as shared_poly_lift_hps,
     poly_rq_inv as shared_poly_rq_inv,
     poly_rq_mul as shared_poly_rq_mul,
+    poly_rq_sum_zero_adjust as shared_poly_rq_sum_zero_adjust,
     poly_rq_to_s3 as shared_poly_rq_to_s3,
     poly_s3_frombytes as shared_poly_s3_frombytes,
     poly_s3_inv as shared_poly_s3_inv,
@@ -98,6 +101,8 @@ use crate::public_key::ntru_pqc_shared::{
     poly_sq_tobytes_logq12 as shared_poly_sq_tobytes_logq12,
     poly_trinary_zq_to_z3 as shared_poly_trinary_zq_to_z3,
     poly_z3_to_zq as shared_poly_z3_to_zq,
+    sample_fixed_type as shared_sample_fixed_type,
+    sample_iid as shared_sample_iid,
 };
 
 
@@ -173,14 +178,7 @@ fn poly_rq_sum_zero_tobytes(r: &mut [u8], a: &Poly) {
 
 fn poly_rq_sum_zero_frombytes(r: &mut Poly, a: &[u8]) {
     poly_sq_frombytes(r, a);
-    // Restore r[N-1] so coefficient sum is zero mod q (the high bits of the
-    // last byte of `a` are also asserted zero by owcpa_check_ciphertext).
-    r.coeffs[N - 1] = 0;
-    let mut acc: u16 = 0;
-    for i in 0..PACK_DEG {
-        acc = acc.wrapping_sub(r.coeffs[i]);
-    }
-    r.coeffs[N - 1] = acc;
+    shared_poly_rq_sum_zero_adjust::<N>(&mut r.coeffs);
 }
 
 // ---- IID-uniform-mod-3 sampler ---------------------------------------------
@@ -216,46 +214,15 @@ fn sample_rm(r: &mut Poly, m: &mut Poly, uniform_bytes: &[u8]) {
 // ---- OWCPA validity checks -------------------------------------------------
 
 fn owcpa_check_ciphertext(ciphertext: &[u8]) -> i32 {
-    // The tail byte has 8 - ((LOGQ * PACK_DEG) & 7) high bits of padding that
-    // must be zero.
-    let bits_used = (LOGQ * PACK_DEG) & 7;
-    let mask: u16 = if bits_used == 0 {
-        0
-    } else {
-        0xff << (8 - bits_used)
-    };
-    let t = (ciphertext[CIPHERTEXT_BYTES - 1] as u16) & mask;
-    // Return 0 on success (t == 0), 1 on any non-zero bit.
-    (1 & ((!t).wrapping_add(1) >> 15)) as i32
+    shared_owcpa_check_ciphertext::<N, LOGQ>(ciphertext)
 }
 
 fn owcpa_check_r(r: &Poly) -> i32 {
-    // Valid r has r[i] in {0, 1, q-1} and r[N-1] == 0.
-    let mut t: u32 = 0;
-    for i in 0..N - 1 {
-        let c = r.coeffs[i];
-        // c+1 in {0,1,2,3} <=> c in {-1, 0, 1, 2}; AND with (q-4) tests for
-        // any out-of-range bit.
-        t |= ((c.wrapping_add(1)) & (Q16.wrapping_sub(4))) as u32;
-        // c+2 == 4 means c = 2; AND with 4 isolates that bit.
-        t |= (c.wrapping_add(2) & 4) as u32;
-    }
-    t |= r.coeffs[N - 1] as u32;
-    (1 & ((!t).wrapping_add(1) >> 31)) as i32
+    shared_owcpa_check_r::<N, LOGQ>(&r.coeffs)
 }
 
 fn owcpa_check_m(m: &Poly) -> i32 {
-    // m must be in S3 with weight WEIGHT, balanced +/- counts.
-    let mut ps: u16 = 0;
-    let mut ms: u16 = 0;
-    for i in 0..N {
-        ps = ps.wrapping_add(m.coeffs[i] & 1);
-        ms = ms.wrapping_add(m.coeffs[i] & 2);
-    }
-    let mut t: u32 = 0;
-    t |= (ps ^ (ms >> 1)) as u32;
-    t |= (ms ^ (WEIGHT as u16)) as u32;
-    (1 & ((!t).wrapping_add(1) >> 31)) as i32
+    shared_owcpa_check_m::<N>(&m.coeffs, WEIGHT)
 }
 
 // ---- OWCPA core: keygen, encrypt, decrypt ----------------------------------
@@ -417,18 +384,7 @@ fn kem_dec(
     c: &[u8; CIPHERTEXT_BYTES],
     sk: &[u8; PRIVATE_KEY_BYTES],
 ) {
-    let mut rm = [0u8; OWCPA_MSGBYTES];
-    let fail = owcpa_dec(&mut rm, c, &sk[..OWCPA_SECRETKEYBYTES]);
-
-    let digest = Sha3_256::new().chain(&rm).finalize();
-    k.copy_from_slice(&digest);
-
-    let reject = Sha3_256::new()
-        .chain(&sk[OWCPA_SECRETKEYBYTES..])
-        .chain(c)
-        .finalize();
-
-    cmov(k, &reject, fail as u8);
+    shared_kem_dec(k, c, sk, OWCPA_MSGBYTES, OWCPA_SECRETKEYBYTES, owcpa_dec);
 }
 
 

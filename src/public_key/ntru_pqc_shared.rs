@@ -669,6 +669,99 @@ pub(crate) fn poly_rq_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
     poly_r2_inv_to_rq_inv(r, &ai2, a);
 }
 
+// ---- OWCPA validity checks -------------------------------------------------
+
+/// Check that the high padding bits of a ciphertext's last byte are zero
+/// (a wire-format malleability check). Returns 0 on success, 1 on any
+/// non-zero bit.
+pub(crate) fn owcpa_check_ciphertext<const N: usize, const LOGQ: usize>(
+    ciphertext: &[u8],
+) -> i32 {
+    let pack_deg = N - 1;
+    let bits_used = (LOGQ * pack_deg) & 7;
+    let mask: u16 = if bits_used == 0 { 0 } else { 0xff << (8 - bits_used) };
+    let last = *ciphertext.last().expect("non-empty ciphertext");
+    let t = (last as u16) & mask;
+    (1 & ((!t).wrapping_add(1) >> 15)) as i32
+}
+
+/// Check that a recovered $r \in R_q$ is in the trinary set $\{0, 1, q-1\}$
+/// with `r[N - 1] == 0`. Returns 0 on success, 1 on any out-of-range
+/// coefficient.
+pub(crate) fn owcpa_check_r<const N: usize, const LOGQ: usize>(r: &[u16; N]) -> i32 {
+    let q16: u16 = if LOGQ < 16 { 1u16 << LOGQ } else { 0 };
+    let mut t: u32 = 0;
+    for i in 0..N - 1 {
+        let c = r[i];
+        t |= ((c.wrapping_add(1)) & q16.wrapping_sub(4)) as u32;
+        t |= (c.wrapping_add(2) & 4) as u32;
+    }
+    t |= r[N - 1] as u32;
+    (1 & ((!t).wrapping_add(1) >> 31)) as i32
+}
+
+/// Check that `m` is in $S_3$ with the given target weight, balanced
+/// $+1$ / $-1$ counts. Returns 0 on success, 1 on weight or balance
+/// mismatch. HPS-only — HRSS-701 accepts any $S_3$ message.
+pub(crate) fn owcpa_check_m<const N: usize>(m: &[u16; N], weight: usize) -> i32 {
+    let mut ps: u16 = 0;
+    let mut ms: u16 = 0;
+    for i in 0..N {
+        ps = ps.wrapping_add(m[i] & 1);
+        ms = ms.wrapping_add(m[i] & 2);
+    }
+    let mut t: u32 = 0;
+    t |= (ps ^ (ms >> 1)) as u32;
+    t |= (ms ^ (weight as u16)) as u32;
+    (1 & ((!t).wrapping_add(1) >> 31)) as i32
+}
+
+/// Restore the high coefficient of an $R_q$ polynomial whose $N - 1$
+/// low coefficients were just unpacked from an `Sq` byte stream, so the
+/// total coefficient sum is zero modulo $q$. The unpacker leaves
+/// `r[N - 1] == 0`; this routine sets it to the negated sum of the
+/// others.
+pub(crate) fn poly_rq_sum_zero_adjust<const N: usize>(r: &mut [u16; N]) {
+    r[N - 1] = 0;
+    let mut acc: u16 = 0;
+    for i in 0..(N - 1) {
+        acc = acc.wrapping_sub(r[i]);
+    }
+    r[N - 1] = acc;
+}
+
+// ---- KEM decapsulation (FO-style transform) --------------------------------
+
+/// CCA KEM decapsulation: run `owcpa_dec`, hash $r \| m$ for the
+/// session key, hash `prf || c` for the implicit-rejection key, and
+/// `cmov` between them on the OWCPA failure flag. The byte-buffer
+/// lengths and the per-set `owcpa_dec` are passed in so the routine
+/// can serve all four NIST sets (HPS-509 / HPS-677 / HPS-821 /
+/// HRSS-701).
+pub(crate) fn kem_dec(
+    k: &mut [u8],
+    c: &[u8],
+    sk: &[u8],
+    owcpa_msg_bytes: usize,
+    owcpa_secret_key_bytes: usize,
+    owcpa_dec: fn(&mut [u8], &[u8], &[u8]) -> i32,
+) {
+    use crate::hash::sha3::Sha3_256;
+    use crate::hash::Digest;
+    debug_assert_eq!(k.len(), 32);
+    let mut rm = vec![0u8; owcpa_msg_bytes];
+    let fail = owcpa_dec(&mut rm, c, &sk[..owcpa_secret_key_bytes]);
+
+    let digest = Sha3_256::new().chain(&rm).finalize();
+    k.copy_from_slice(&digest);
+
+    let reject = Sha3_256::new()
+        .chain(&sk[owcpa_secret_key_bytes..])
+        .chain(c)
+        .finalize();
+    cmov(k, &reject, fail as u8);
+}
+
 // ---- IID and fixed-weight samplers -----------------------------------------
 
 /// $\text{Sample\_iid}$ from round-3 NTRU, §3.3.1: each output coefficient
