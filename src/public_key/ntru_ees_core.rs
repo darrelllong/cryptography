@@ -125,7 +125,7 @@ impl EesParams {
         self.db_bits / 8
     }
     pub const fn pklen_bytes(&self) -> usize {
-        (self.pklen_bits + 7) / 8
+        self.pklen_bits.div_ceil(8)
     }
     pub const fn q(&self) -> u32 {
         1u32 << self.logq
@@ -135,17 +135,17 @@ impl EesParams {
     }
     /// Wire length of a public key in bytes: `ceil(N * logq / 8)`.
     pub const fn pk_wire_bytes(&self) -> usize {
-        (self.n * self.logq + 7) / 8
+        (self.n * self.logq).div_ceil(8)
     }
     /// Trapdoor section of the private key (does not include the embedded
     /// public key bytes).
     pub const fn trapdoor_wire_bytes(&self) -> usize {
         match self.trapdoor {
-            TrapdoorKind::Dense { .. } => (self.n * 2 + 7) / 8,
+            TrapdoorKind::Dense { .. } => (self.n * 2).div_ceil(8),
             TrapdoorKind::ProductForm { df1, df2, df3 } => {
                 let indices = 2 * (df1 + df2 + df3);
                 let bits = indices * Self::index_bits(self.n);
-                (bits + 7) / 8
+                bits.div_ceil(8)
             }
         }
     }
@@ -322,6 +322,118 @@ impl Trapdoor {
             Trapdoor::Product(p) => p.to_dense::<N>(q_mask),
         }
     }
+
+    /// Pack the trapdoor into the canonical IEEE 1363.1 wire bytes. The
+    /// output length must equal [`EesParams::trapdoor_wire_bytes`].
+    pub fn to_wire(&self, params: &EesParams, out: &mut [u8]) {
+        debug_assert_eq!(out.len(), params.trapdoor_wire_bytes());
+        for b in out.iter_mut() {
+            *b = 0;
+        }
+        match self {
+            Trapdoor::Dense(t) => {
+                // O(df) write at each non-zero index.
+                for &i in &t.ones {
+                    let bit_pos = 2 * (i as usize);
+                    out[bit_pos / 8] |= 1 << (bit_pos % 8);
+                }
+                for &i in &t.neg_ones {
+                    let bit_pos = 2 * (i as usize);
+                    out[bit_pos / 8] |= 3 << (bit_pos % 8);
+                }
+            }
+            Trapdoor::Product(p) => {
+                let mut bit_offset = 0usize;
+                let index_bits = EesParams::index_bits(params.n);
+                for poly in &[&p.f1, &p.f2, &p.f3] {
+                    pack_indices(&poly.ones, out, &mut bit_offset, index_bits)
+                        .expect("ones fit");
+                    pack_indices(&poly.neg_ones, out, &mut bit_offset, index_bits)
+                        .expect("neg_ones fit");
+                }
+            }
+        }
+    }
+
+    /// Inverse of [`Trapdoor::to_wire`]. Validates count and index ranges.
+    pub fn from_wire(bytes: &[u8], params: &EesParams) -> Option<Self> {
+        if bytes.len() != params.trapdoor_wire_bytes() {
+            return None;
+        }
+        match params.trapdoor {
+            TrapdoorKind::Dense { df } => {
+                let n = params.n;
+                let mut bit_pos = 0usize;
+                let mut ones = Vec::new();
+                let mut neg_ones = Vec::new();
+                for i in 0..n {
+                    let code = (bytes[bit_pos / 8] >> (bit_pos % 8)) & 0x3;
+                    bit_pos += 2;
+                    match code {
+                        0 => {}
+                        1 => ones.push(i as u16),
+                        3 => neg_ones.push(i as u16),
+                        _ => return None,
+                    }
+                }
+                if ones.len() != df || neg_ones.len() != df {
+                    return None;
+                }
+                if !padding_bits_clear(bytes, n * 2) {
+                    return None;
+                }
+                Some(Trapdoor::Dense(TernaryPoly { ones, neg_ones }))
+            }
+            TrapdoorKind::ProductForm { df1, df2, df3 } => {
+                let mut bit_offset = 0usize;
+                let index_bits = EesParams::index_bits(params.n);
+                let n = params.n;
+                let f1_ones = unpack_indices(bytes, df1, &mut bit_offset, index_bits, n)?;
+                let f1_neg = unpack_indices(bytes, df1, &mut bit_offset, index_bits, n)?;
+                let f2_ones = unpack_indices(bytes, df2, &mut bit_offset, index_bits, n)?;
+                let f2_neg = unpack_indices(bytes, df2, &mut bit_offset, index_bits, n)?;
+                let f3_ones = unpack_indices(bytes, df3, &mut bit_offset, index_bits, n)?;
+                let f3_neg = unpack_indices(bytes, df3, &mut bit_offset, index_bits, n)?;
+                if !padding_bits_clear(bytes, bit_offset) {
+                    return None;
+                }
+                Some(Trapdoor::Product(ProductPoly {
+                    f1: TernaryPoly { ones: f1_ones, neg_ones: f1_neg },
+                    f2: TernaryPoly { ones: f2_ones, neg_ones: f2_neg },
+                    f3: TernaryPoly { ones: f3_ones, neg_ones: f3_neg },
+                }))
+            }
+        }
+    }
+
+    /// Sample a trapdoor at IID-uniform via the rejection sampler in
+    /// [`sample_trinary`]; the variant is chosen by `params.trapdoor`.
+    /// This is the ordinary-keygen entry point.
+    fn sample_iid<R: Csprng>(rng: &mut R, params: &EesParams) -> Self {
+        match params.trapdoor {
+            TrapdoorKind::Dense { df } => {
+                Trapdoor::Dense(sample_trinary(rng, params.n, df, df))
+            }
+            TrapdoorKind::ProductForm { df1, df2, df3 } => Trapdoor::Product(ProductPoly {
+                f1: sample_trinary(rng, params.n, df1, df1),
+                f2: sample_trinary(rng, params.n, df2, df2),
+                f3: sample_trinary(rng, params.n, df3, df3),
+            }),
+        }
+    }
+
+    /// Sample a blinding trapdoor via the IGF state, used by SVES-3
+    /// encryption. The variant is chosen by the IGF's parameter set.
+    fn sample_via_igf(state: &mut IgfState<'_>) -> Self {
+        match state.params.trapdoor {
+            TrapdoorKind::Dense { df } => Trapdoor::Dense(igf_gen_ternary(state, df)),
+            TrapdoorKind::ProductForm { df1, df2, df3 } => Trapdoor::Product(ProductPoly {
+                f1: igf_gen_ternary(state, df1),
+                f2: igf_gen_ternary(state, df2),
+                f3: igf_gen_ternary(state, df3),
+            }),
+        }
+    }
 }
 
 // ---- inversion mod 2 in F_2[x] / (x^N - 1) ---------------------------------
@@ -409,6 +521,12 @@ fn poly_inverse_mod_q_cyclic<const N: usize>(
         b.coeffs[i] = inv2[i] as u16;
     }
 
+    // Newton-style Hensel lift: each pass squares `precision` (2 → 4
+    // → 16 → 256 → 65536). Four iterations suffice for every $q \le
+    // 2^{16}$, which covers every IEEE 1363.1 EES parameter set in
+    // this crate ($q = 2048$). `saturating_mul` caps the final pass at
+    // `u32::MAX` so the loop terminates cleanly even if a future
+    // parameter set raised `q` past 2^{16}.
     let mut precision: u32 = 2;
     while precision < q {
         let mut ab = Poly::<N>::zero();
@@ -527,6 +645,15 @@ struct IgfState<'a> {
 
 impl<'a> IgfState<'a> {
     fn new(seed: &[u8], params: &'a EesParams) -> Self {
+        // The IGF reads `c_bits` per index sample, accumulating into
+        // `BitStr::leading(num_bits: u8)` — so `c_bits` must fit in a
+        // u8. Every IEEE 1363.1 EES set this crate ships uses
+        // `c_bits ∈ {9, 11, 12, 13}`; the guard catches a future
+        // parameter set that violates the assumption.
+        debug_assert!(
+            params.c_bits <= u8::MAX as usize,
+            "IGF c_bits must fit in a u8"
+        );
         let hlen = params.hash.output_len();
         let mut s = Self {
             z: seed.to_vec(),
@@ -609,14 +736,7 @@ fn igf_gen_ternary(state: &mut IgfState<'_>, num_each: usize) -> TernaryPoly {
 }
 
 fn igf_gen_blinding(state: &mut IgfState<'_>) -> Trapdoor {
-    match state.params.trapdoor {
-        TrapdoorKind::Dense { df } => Trapdoor::Dense(igf_gen_ternary(state, df)),
-        TrapdoorKind::ProductForm { df1, df2, df3 } => Trapdoor::Product(ProductPoly {
-            f1: igf_gen_ternary(state, df1),
-            f2: igf_gen_ternary(state, df2),
-            f3: igf_gen_ternary(state, df3),
-        }),
-    }
+    Trapdoor::sample_via_igf(state)
 }
 
 // ---- MGF -------------------------------------------------------------------
@@ -733,7 +853,7 @@ fn sves_from_bytes<const N: usize>(m: &[u8], q_mask: u16) -> Poly<N> {
 
 fn sves_to_bytes<const N: usize>(p: &Poly<N>) -> Option<Vec<u8>> {
     let num_bits = (N * 3 + 1) / 2;
-    let num_bytes = (num_bits + 7) / 8;
+    let num_bytes = num_bits.div_ceil(8);
     let mut out = vec![0u8; num_bytes + 3];
     let end = N / 2 * 2;
     let mut d_idx = 0usize;
@@ -810,7 +930,7 @@ fn poly_to_arr4<const N: usize>(p: &Poly<N>, params: &EesParams) -> Vec<u8> {
     let q = params.q();
     let q_mask = params.q_mask();
     let nbits = N * 2;
-    let mut out = vec![0u8; (nbits + 7) / 8];
+    let mut out = vec![0u8; nbits.div_ceil(8)];
     let mut bit_pos = 0usize;
     for i in 0..N {
         let centred = {
@@ -891,96 +1011,15 @@ pub fn padding_bits_clear(bytes: &[u8], used_bits: usize) -> bool {
 }
 
 /// Pack the trapdoor portion of a private key into the `params`-defined
-/// trapdoor wire bytes. Output buffer length must equal
-/// [`EesParams::trapdoor_wire_bytes`].
+/// trapdoor wire bytes. Thin alias for [`Trapdoor::to_wire`].
 pub fn trapdoor_to_wire(t: &Trapdoor, params: &EesParams, out: &mut [u8]) {
-    debug_assert_eq!(out.len(), params.trapdoor_wire_bytes());
-    for b in out.iter_mut() {
-        *b = 0;
-    }
-    match t {
-        Trapdoor::Dense(t) => {
-            // Direct write at each non-zero index — O(df), not O(N · log df).
-            for &i in &t.ones {
-                let bit_pos = 2 * (i as usize);
-                out[bit_pos / 8] |= 1 << (bit_pos % 8);
-            }
-            for &i in &t.neg_ones {
-                let bit_pos = 2 * (i as usize);
-                out[bit_pos / 8] |= 3 << (bit_pos % 8);
-            }
-        }
-        Trapdoor::Product(p) => {
-            let mut bit_offset = 0usize;
-            let index_bits = EesParams::index_bits(params.n);
-            for poly in &[&p.f1, &p.f2, &p.f3] {
-                pack_indices(&poly.ones, out, &mut bit_offset, index_bits)
-                    .expect("ones fit");
-                pack_indices(&poly.neg_ones, out, &mut bit_offset, index_bits)
-                    .expect("neg_ones fit");
-            }
-        }
-    }
+    t.to_wire(params, out);
 }
 
-/// Inverse of [`trapdoor_to_wire`]. Validates index ranges and counts.
+/// Inverse of [`trapdoor_to_wire`]. Thin alias for
+/// [`Trapdoor::from_wire`].
 pub fn trapdoor_from_wire(bytes: &[u8], params: &EesParams) -> Option<Trapdoor> {
-    if bytes.len() != params.trapdoor_wire_bytes() {
-        return None;
-    }
-    match params.trapdoor {
-        TrapdoorKind::Dense { df } => {
-            let n = params.n;
-            let mut bit_pos = 0usize;
-            let mut ones = Vec::new();
-            let mut neg_ones = Vec::new();
-            for i in 0..n {
-                let code = (bytes[bit_pos / 8] >> (bit_pos % 8)) & 0x3;
-                bit_pos += 2;
-                match code {
-                    0 => {}
-                    1 => ones.push(i as u16),
-                    3 => neg_ones.push(i as u16),
-                    _ => return None,
-                }
-            }
-            if ones.len() != df || neg_ones.len() != df {
-                return None;
-            }
-            if !padding_bits_clear(bytes, n * 2) {
-                return None;
-            }
-            Some(Trapdoor::Dense(TernaryPoly { ones, neg_ones }))
-        }
-        TrapdoorKind::ProductForm { df1, df2, df3 } => {
-            let mut bit_offset = 0usize;
-            let index_bits = EesParams::index_bits(params.n);
-            let n = params.n;
-            let f1_ones = unpack_indices(bytes, df1, &mut bit_offset, index_bits, n)?;
-            let f1_neg = unpack_indices(bytes, df1, &mut bit_offset, index_bits, n)?;
-            let f2_ones = unpack_indices(bytes, df2, &mut bit_offset, index_bits, n)?;
-            let f2_neg = unpack_indices(bytes, df2, &mut bit_offset, index_bits, n)?;
-            let f3_ones = unpack_indices(bytes, df3, &mut bit_offset, index_bits, n)?;
-            let f3_neg = unpack_indices(bytes, df3, &mut bit_offset, index_bits, n)?;
-            if !padding_bits_clear(bytes, bit_offset) {
-                return None;
-            }
-            Some(Trapdoor::Product(ProductPoly {
-                f1: TernaryPoly {
-                    ones: f1_ones,
-                    neg_ones: f1_neg,
-                },
-                f2: TernaryPoly {
-                    ones: f2_ones,
-                    neg_ones: f2_neg,
-                },
-                f3: TernaryPoly {
-                    ones: f3_ones,
-                    neg_ones: f3_neg,
-                },
-            }))
-        }
-    }
+    Trapdoor::from_wire(bytes, params)
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -1018,14 +1057,7 @@ fn sample_trinary<R: Csprng>(
 }
 
 fn sample_trapdoor<R: Csprng>(rng: &mut R, params: &EesParams) -> Trapdoor {
-    match params.trapdoor {
-        TrapdoorKind::Dense { df } => Trapdoor::Dense(sample_trinary(rng, params.n, df, df)),
-        TrapdoorKind::ProductForm { df1, df2, df3 } => Trapdoor::Product(ProductPoly {
-            f1: sample_trinary(rng, params.n, df1, df1),
-            f2: sample_trinary(rng, params.n, df2, df2),
-            f3: sample_trinary(rng, params.n, df3, df3),
-        }),
-    }
+    Trapdoor::sample_iid(rng, params)
 }
 
 fn check_rep_weight<const N: usize>(p: &Poly<N>, params: &EesParams) -> bool {
@@ -1208,7 +1240,7 @@ pub fn decrypt<const N: usize>(
 
     let pad_start = db_bytes + 1 + cl;
     let pad_end = (params.n * 3 + 1) / 2;
-    let pad_end_bytes = (pad_end + 7) / 8;
+    let pad_end_bytes = pad_end.div_ceil(8);
     for &p in &cm[pad_start..pad_end_bytes.min(cm.len())] {
         if p != 0 {
             retcode_ok = false;

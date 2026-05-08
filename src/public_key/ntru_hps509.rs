@@ -81,5 +81,5 @@ crate::public_key::ntru_pqc_shared::define_pqc_kem! {
     ciphertext = NtruHps509Ciphertext,
     shared_secret = NtruHps509SharedSecret,
     variant = Hps509Variant,
-    kat_path = "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhps2048509/PQCkemKAT_935.rsp",
+    kat_path = "../../kat/ntruhps509.rsp",
 }

@@ -215,5 +215,5 @@ crate::public_key::ntru_pqc_shared::define_pqc_kem! {
     ciphertext = NtruHrss701Ciphertext,
     shared_secret = NtruHrss701SharedSecret,
     variant = Hrss701Variant,
-    kat_path = "../../.ntru-upstream/NIST-PQ-Submission-NTRU-20201016/KAT/ntruhrss701/PQCkemKAT_1450.rsp",
+    kat_path = "../../kat/ntruhrss701.rsp",
 }

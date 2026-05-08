@@ -21,6 +21,7 @@ exclude = [
     ".codex/**",
     "pubs/**",
     "cipher_plots/**",
+    ".ntru-upstream/**",
 ]
 autobenches = false
 

@@ -1195,7 +1195,7 @@ pub(crate) fn sample_fixed_type<const N: usize>(
     weight: usize,
     scratch: &mut [i32; N],
 ) {
-    debug_assert_eq!(u.len(), (30 * (N - 1) + 7) / 8);
+    debug_assert_eq!(u.len(), (30 * (N - 1)).div_ceil(8));
     // All NIST round-3 parameter sets have $(N - 1) \equiv 0 \pmod 4$
     // (508, 676, 820), so the input always lands on a block boundary
     // and there is no tail to handle. The assertion below documents the
@@ -1299,7 +1299,7 @@ pub(crate) fn poly_lift_hps<const N: usize>(r: &mut [u16; N], a: &[u16; N], q_ma
 pub(crate) fn poly_sq_tobytes_logq11<const N: usize>(r: &mut [u8], a: &[u16; N]) {
     const Q_MASK_11: u16 = (1u16 << 11) - 1;
     let pack_deg = N - 1;
-    debug_assert_eq!(r.len(), (pack_deg * 11 + 7) / 8);
+    debug_assert_eq!(r.len(), (pack_deg * 11).div_ceil(8));
     let mut t = [0u16; 8];
     let full = pack_deg / 8;
     for i in 0..full {
@@ -1348,10 +1348,10 @@ pub(crate) fn poly_sq_tobytes_logq11<const N: usize>(r: &mut [u8], a: &[u16; N])
 /// Inverse of [`poly_sq_tobytes_logq11`].
 pub(crate) fn poly_sq_frombytes_logq11<const N: usize>(r: &mut [u16; N], a: &[u8]) {
     let pack_deg = N - 1;
-    debug_assert!(a.len() >= (pack_deg * 11 + 7) / 8);
+    debug_assert!(a.len() >= (pack_deg * 11).div_ceil(8));
     let full = pack_deg / 8;
     for i in 0..full {
-        r[8 * i] = ((a[11 * i] as u16) >> 0) | (((a[11 * i + 1] as u16) & 0x07) << 8);
+        r[8 * i] = (a[11 * i] as u16) | (((a[11 * i + 1] as u16) & 0x07) << 8);
         r[8 * i + 1] =
             ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
         r[8 * i + 2] = ((a[11 * i + 2] as u16) >> 6)
@@ -1372,7 +1372,7 @@ pub(crate) fn poly_sq_frombytes_logq11<const N: usize>(r: &mut [u16; N], a: &[u8
     let i = full;
     match pack_deg & 0x07 {
         4 => {
-            r[8 * i] = ((a[11 * i] as u16) >> 0) | (((a[11 * i + 1] as u16) & 0x07) << 8);
+            r[8 * i] = (a[11 * i] as u16) | (((a[11 * i + 1] as u16) & 0x07) << 8);
             r[8 * i + 1] =
                 ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
             r[8 * i + 2] = ((a[11 * i + 2] as u16) >> 6)
@@ -1382,7 +1382,7 @@ pub(crate) fn poly_sq_frombytes_logq11<const N: usize>(r: &mut [u16; N], a: &[u8
                 ((a[11 * i + 4] as u16) >> 1) | (((a[11 * i + 5] as u16) & 0x0f) << 7);
         }
         2 => {
-            r[8 * i] = ((a[11 * i] as u16) >> 0) | (((a[11 * i + 1] as u16) & 0x07) << 8);
+            r[8 * i] = (a[11 * i] as u16) | (((a[11 * i + 1] as u16) & 0x07) << 8);
             r[8 * i + 1] =
                 ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
         }
@@ -1399,7 +1399,7 @@ pub(crate) fn poly_sq_frombytes_logq11<const N: usize>(r: &mut [u16; N], a: &[u8
 pub(crate) fn poly_sq_tobytes_logq12<const N: usize>(r: &mut [u8], a: &[u16; N]) {
     const Q_MASK_12: u16 = (1u16 << 12) - 1;
     let pack_deg = N - 1;
-    debug_assert_eq!(r.len(), (pack_deg * 12 + 7) / 8);
+    debug_assert_eq!(r.len(), (pack_deg * 12).div_ceil(8));
     for i in 0..pack_deg / 2 {
         let c0 = a[2 * i] & Q_MASK_12;
         let c1 = a[2 * i + 1] & Q_MASK_12;
@@ -1412,7 +1412,7 @@ pub(crate) fn poly_sq_tobytes_logq12<const N: usize>(r: &mut [u8], a: &[u16; N])
 /// Inverse of [`poly_sq_tobytes_logq12`].
 pub(crate) fn poly_sq_frombytes_logq12<const N: usize>(r: &mut [u16; N], a: &[u8]) {
     let pack_deg = N - 1;
-    debug_assert!(a.len() >= (pack_deg * 12 + 7) / 8);
+    debug_assert!(a.len() >= (pack_deg * 12).div_ceil(8));
     for i in 0..pack_deg / 2 {
         r[2 * i] = (a[3 * i] as u16) | (((a[3 * i + 1] as u16) & 0x0f) << 8);
         r[2 * i + 1] =
@@ -1428,7 +1428,7 @@ pub(crate) fn poly_sq_frombytes_logq12<const N: usize>(r: &mut [u16; N], a: &[u8
 pub(crate) fn poly_sq_tobytes_logq13<const N: usize>(r: &mut [u8], a: &[u16; N]) {
     const Q_MASK_13: u16 = (1u16 << 13) - 1;
     let pack_deg = N - 1;
-    debug_assert_eq!(r.len(), (pack_deg * 13 + 7) / 8);
+    debug_assert_eq!(r.len(), (pack_deg * 13).div_ceil(8));
     let mut t = [0u16; 8];
     let full = pack_deg / 8;
     for i in 0..full {
@@ -1481,7 +1481,7 @@ pub(crate) fn poly_sq_tobytes_logq13<const N: usize>(r: &mut [u8], a: &[u16; N])
 /// Inverse of [`poly_sq_tobytes_logq13`].
 pub(crate) fn poly_sq_frombytes_logq13<const N: usize>(r: &mut [u16; N], a: &[u8]) {
     let pack_deg = N - 1;
-    debug_assert!(a.len() >= (pack_deg * 13 + 7) / 8);
+    debug_assert!(a.len() >= (pack_deg * 13).div_ceil(8));
     let full = pack_deg / 8;
     for i in 0..full {
         r[8 * i] = (a[13 * i] as u16) | (((a[13 * i + 1] as u16) & 0x1f) << 8);
@@ -1537,7 +1537,7 @@ pub(crate) fn poly_sq_frombytes_logq13<const N: usize>(r: &mut [u16; N], a: &[u8
 /// length must equal `((N - 1) + 4) / 5`.
 pub(crate) fn poly_s3_tobytes<const N: usize>(msg: &mut [u8], a: &[u16; N]) {
     let pack_deg = N - 1;
-    debug_assert_eq!(msg.len(), (pack_deg + 4) / 5);
+    debug_assert_eq!(msg.len(), pack_deg.div_ceil(5));
     let full = pack_deg / 5;
     for i in 0..full {
         let mut c = (a[5 * i + 4] & 0xff) as u8;
@@ -1562,7 +1562,7 @@ pub(crate) fn poly_s3_tobytes<const N: usize>(msg: &mut [u8], a: &[u16; N]) {
 /// Inverse of [`poly_s3_tobytes`]. Reduces mod 3, mod $\Phi_n$ on the way out.
 pub(crate) fn poly_s3_frombytes<const N: usize>(r: &mut [u16; N], msg: &[u8]) {
     let pack_deg = N - 1;
-    debug_assert_eq!(msg.len(), (pack_deg + 4) / 5);
+    debug_assert_eq!(msg.len(), pack_deg.div_ceil(5));
     let full = pack_deg / 5;
     for i in 0..full {
         let c = msg[i] as u32;
@@ -1615,6 +1615,13 @@ pub(crate) fn hex_to_bytes(s: &str) -> Vec<u8> {
 /// Parse the `count = N` entry out of a NIST PQC `.rsp` KAT file. Returns
 /// `None` if the count is absent (e.g. asking for entry 100 from a 100-entry
 /// file).
+///
+/// The parser scans line-by-line for the literal `count = N` header
+/// (after `str::trim`), then collects every `key = hex` line that
+/// follows until either a blank line, the next `count =` header, or
+/// end-of-file. Unrecognised keys are ignored. This means an extra
+/// metadata line in a future `.rsp` (e.g. `mlen = 32`) does not
+/// silently truncate the entry.
 #[cfg(test)]
 pub(crate) fn parse_kat_entry(rsp: &str, count: usize) -> Option<KatEntry> {
     let target = format!("count = {count}");
@@ -1626,8 +1633,14 @@ pub(crate) fn parse_kat_entry(rsp: &str, count: usize) -> Option<KatEntry> {
             let mut sk = None;
             let mut ct = None;
             let mut ss = None;
-            for line in lines.by_ref().take(5) {
-                let (key, value) = line.split_once(" = ")?;
+            for line in lines.by_ref() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with("count = ") {
+                    break;
+                }
+                let Some((key, value)) = trimmed.split_once(" = ") else {
+                    continue;
+                };
                 let bytes = hex_to_bytes(value.trim());
                 match key.trim() {
                     "seed" => seed = Some(bytes),
@@ -1650,9 +1663,11 @@ pub(crate) fn parse_kat_entry(rsp: &str, count: usize) -> Option<KatEntry> {
     None
 }
 
-/// Counts that span the full 0..100 range of the NIST round-3 KAT files.
-/// Picked to catch first-entry / state-rollover / final-entry bugs without
-/// running a full 30+-second 100-entry sweep on every `cargo test`.
+/// Counts that span the full 0..100 range of the NIST round-3 KAT
+/// files (each contains exactly 100 entries). Chosen to catch
+/// first-entry / state-rollover / final-entry bugs without running a
+/// full 100-entry sweep on every `cargo test`. The full sweep is
+/// `nist_kat_full` per parameter set, behind `#[ignore]`.
 #[cfg(test)]
 pub(crate) const KAT_SAMPLED_COUNTS: &[usize] = &[0, 1, 7, 23, 42, 67, 83, 99];
 
