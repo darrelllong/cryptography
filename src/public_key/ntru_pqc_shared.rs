@@ -669,6 +669,286 @@ pub(crate) fn poly_rq_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
     poly_r2_inv_to_rq_inv(r, &ai2, a);
 }
 
+// ---- ring multiplication wrappers ------------------------------------------
+
+/// Cyclic multiplication in $R = \mathbb{Z}[x] / (x^N - 1)$ over `u16`
+/// wrapping arithmetic. Thin alias for the shared
+/// [`crate::public_key::ntru_poly_mul::poly_mul_cyclic`] entry point.
+pub(crate) fn poly_rq_mul<const N: usize>(
+    r: &mut [u16; N],
+    a: &[u16; N],
+    b: &[u16; N],
+) {
+    crate::public_key::ntru_poly_mul::poly_mul_cyclic(r, a, b);
+}
+
+/// $R_q$ multiplication followed by mod-$\Phi_n$ projection.
+pub(crate) fn poly_sq_mul<const N: usize>(
+    r: &mut [u16; N],
+    a: &[u16; N],
+    b: &[u16; N],
+) {
+    poly_rq_mul::<N>(r, a, b);
+    poly_mod_q_phi_n::<N>(r);
+}
+
+/// $R$ multiplication followed by mod-3, mod-$\Phi_n$ projection.
+pub(crate) fn poly_s3_mul<const N: usize>(
+    r: &mut [u16; N],
+    a: &[u16; N],
+    b: &[u16; N],
+) {
+    poly_rq_mul::<N>(r, a, b);
+    poly_mod_3_phi_n::<N>(r);
+}
+
+// ---- HPS lift: trivial Z_3 -> Z_q embedding --------------------------------
+
+/// HPS lift: copy `a`'s coefficients into `r` and remap $\{0, 1, 2\}$
+/// onto $\{0, 1, q - 1\}$. The HRSS variant (with the `(x - 1)` factor)
+/// is in `ntru_hrss701` because it has no other call site.
+pub(crate) fn poly_lift_hps<const N: usize>(r: &mut [u16; N], a: &[u16; N], q_mask: u16) {
+    *r = *a;
+    poly_z3_to_zq::<N>(r, q_mask);
+}
+
+// ---- S_q packing for q = 2^11 (HPS509, HPS677) -----------------------------
+
+/// Pack `a`'s 11-bit coefficients into bytes: 8 coefficients per 11-byte
+/// block. Output buffer must be `((N - 1) * 11 + 7) / 8` bytes.
+pub(crate) fn poly_sq_tobytes_logq11<const N: usize>(r: &mut [u8], a: &[u16; N]) {
+    const Q_MASK_11: u16 = (1u16 << 11) - 1;
+    let pack_deg = N - 1;
+    debug_assert_eq!(r.len(), (pack_deg * 11 + 7) / 8);
+    let mut t = [0u16; 8];
+    let full = pack_deg / 8;
+    for i in 0..full {
+        for j in 0..8 {
+            t[j] = a[8 * i + j] & Q_MASK_11;
+        }
+        r[11 * i] = (t[0] & 0xff) as u8;
+        r[11 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x1f) << 3)) as u8;
+        r[11 * i + 2] = ((t[1] >> 5) | ((t[2] & 0x03) << 6)) as u8;
+        r[11 * i + 3] = ((t[2] >> 2) & 0xff) as u8;
+        r[11 * i + 4] = ((t[2] >> 10) | ((t[3] & 0x7f) << 1)) as u8;
+        r[11 * i + 5] = ((t[3] >> 7) | ((t[4] & 0x0f) << 4)) as u8;
+        r[11 * i + 6] = ((t[4] >> 4) | ((t[5] & 0x01) << 7)) as u8;
+        r[11 * i + 7] = ((t[5] >> 1) & 0xff) as u8;
+        r[11 * i + 8] = ((t[5] >> 9) | ((t[6] & 0x3f) << 2)) as u8;
+        r[11 * i + 9] = ((t[6] >> 6) | ((t[7] & 0x07) << 5)) as u8;
+        r[11 * i + 10] = (t[7] >> 3) as u8;
+    }
+    let i = full;
+    let tail = pack_deg - 8 * i;
+    for j in 0..tail {
+        t[j] = a[8 * i + j] & Q_MASK_11;
+    }
+    for j in tail..8 {
+        t[j] = 0;
+    }
+    match pack_deg & 0x07 {
+        4 => {
+            r[11 * i] = (t[0] & 0xff) as u8;
+            r[11 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x1f) << 3)) as u8;
+            r[11 * i + 2] = ((t[1] >> 5) | ((t[2] & 0x03) << 6)) as u8;
+            r[11 * i + 3] = ((t[2] >> 2) & 0xff) as u8;
+            r[11 * i + 4] = ((t[2] >> 10) | ((t[3] & 0x7f) << 1)) as u8;
+            r[11 * i + 5] = ((t[3] >> 7) | ((t[4] & 0x0f) << 4)) as u8;
+        }
+        2 => {
+            r[11 * i] = (t[0] & 0xff) as u8;
+            r[11 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x1f) << 3)) as u8;
+            r[11 * i + 2] = ((t[1] >> 5) | ((t[2] & 0x03) << 6)) as u8;
+        }
+        0 => {}
+        _ => unreachable!(),
+    }
+}
+
+/// Inverse of [`poly_sq_tobytes_logq11`].
+pub(crate) fn poly_sq_frombytes_logq11<const N: usize>(r: &mut [u16; N], a: &[u8]) {
+    let pack_deg = N - 1;
+    debug_assert!(a.len() >= (pack_deg * 11 + 7) / 8);
+    let full = pack_deg / 8;
+    for i in 0..full {
+        r[8 * i] = ((a[11 * i] as u16) >> 0) | (((a[11 * i + 1] as u16) & 0x07) << 8);
+        r[8 * i + 1] =
+            ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
+        r[8 * i + 2] = ((a[11 * i + 2] as u16) >> 6)
+            | (((a[11 * i + 3] as u16) & 0xff) << 2)
+            | (((a[11 * i + 4] as u16) & 0x01) << 10);
+        r[8 * i + 3] =
+            ((a[11 * i + 4] as u16) >> 1) | (((a[11 * i + 5] as u16) & 0x0f) << 7);
+        r[8 * i + 4] =
+            ((a[11 * i + 5] as u16) >> 4) | (((a[11 * i + 6] as u16) & 0x7f) << 4);
+        r[8 * i + 5] = ((a[11 * i + 6] as u16) >> 7)
+            | (((a[11 * i + 7] as u16) & 0xff) << 1)
+            | (((a[11 * i + 8] as u16) & 0x03) << 9);
+        r[8 * i + 6] =
+            ((a[11 * i + 8] as u16) >> 2) | (((a[11 * i + 9] as u16) & 0x1f) << 6);
+        r[8 * i + 7] =
+            ((a[11 * i + 9] as u16) >> 5) | (((a[11 * i + 10] as u16) & 0xff) << 3);
+    }
+    let i = full;
+    match pack_deg & 0x07 {
+        4 => {
+            r[8 * i] = ((a[11 * i] as u16) >> 0) | (((a[11 * i + 1] as u16) & 0x07) << 8);
+            r[8 * i + 1] =
+                ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
+            r[8 * i + 2] = ((a[11 * i + 2] as u16) >> 6)
+                | (((a[11 * i + 3] as u16) & 0xff) << 2)
+                | (((a[11 * i + 4] as u16) & 0x01) << 10);
+            r[8 * i + 3] =
+                ((a[11 * i + 4] as u16) >> 1) | (((a[11 * i + 5] as u16) & 0x0f) << 7);
+        }
+        2 => {
+            r[8 * i] = ((a[11 * i] as u16) >> 0) | (((a[11 * i + 1] as u16) & 0x07) << 8);
+            r[8 * i + 1] =
+                ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
+        }
+        0 => {}
+        _ => unreachable!(),
+    }
+    r[N - 1] = 0;
+}
+
+// ---- S_q packing for q = 2^12 (HPS821) -------------------------------------
+
+/// Pack `a`'s 12-bit coefficients into bytes: 2 coefficients per 3-byte
+/// block. Output buffer must be `((N - 1) * 12 + 7) / 8` bytes.
+pub(crate) fn poly_sq_tobytes_logq12<const N: usize>(r: &mut [u8], a: &[u16; N]) {
+    const Q_MASK_12: u16 = (1u16 << 12) - 1;
+    let pack_deg = N - 1;
+    debug_assert_eq!(r.len(), (pack_deg * 12 + 7) / 8);
+    for i in 0..pack_deg / 2 {
+        let c0 = a[2 * i] & Q_MASK_12;
+        let c1 = a[2 * i + 1] & Q_MASK_12;
+        r[3 * i] = (c0 & 0xff) as u8;
+        r[3 * i + 1] = ((c0 >> 8) | ((c1 & 0x0f) << 4)) as u8;
+        r[3 * i + 2] = (c1 >> 4) as u8;
+    }
+}
+
+/// Inverse of [`poly_sq_tobytes_logq12`].
+pub(crate) fn poly_sq_frombytes_logq12<const N: usize>(r: &mut [u16; N], a: &[u8]) {
+    let pack_deg = N - 1;
+    debug_assert!(a.len() >= (pack_deg * 12 + 7) / 8);
+    for i in 0..pack_deg / 2 {
+        r[2 * i] = (a[3 * i] as u16) | (((a[3 * i + 1] as u16) & 0x0f) << 8);
+        r[2 * i + 1] =
+            ((a[3 * i + 1] as u16) >> 4) | (((a[3 * i + 2] as u16) & 0xff) << 4);
+    }
+    r[N - 1] = 0;
+}
+
+// ---- S_q packing for q = 2^13 (HRSS701) ------------------------------------
+
+/// Pack `a`'s 13-bit coefficients into bytes: 8 coefficients per 13-byte
+/// block. Output buffer must be `((N - 1) * 13 + 7) / 8` bytes.
+pub(crate) fn poly_sq_tobytes_logq13<const N: usize>(r: &mut [u8], a: &[u16; N]) {
+    const Q_MASK_13: u16 = (1u16 << 13) - 1;
+    let pack_deg = N - 1;
+    debug_assert_eq!(r.len(), (pack_deg * 13 + 7) / 8);
+    let mut t = [0u16; 8];
+    let full = pack_deg / 8;
+    for i in 0..full {
+        for j in 0..8 {
+            t[j] = a[8 * i + j] & Q_MASK_13;
+        }
+        r[13 * i] = (t[0] & 0xff) as u8;
+        r[13 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x07) << 5)) as u8;
+        r[13 * i + 2] = ((t[1] >> 3) & 0xff) as u8;
+        r[13 * i + 3] = ((t[1] >> 11) | ((t[2] & 0x3f) << 2)) as u8;
+        r[13 * i + 4] = ((t[2] >> 6) | ((t[3] & 0x01) << 7)) as u8;
+        r[13 * i + 5] = ((t[3] >> 1) & 0xff) as u8;
+        r[13 * i + 6] = ((t[3] >> 9) | ((t[4] & 0x0f) << 4)) as u8;
+        r[13 * i + 7] = ((t[4] >> 4) & 0xff) as u8;
+        r[13 * i + 8] = ((t[4] >> 12) | ((t[5] & 0x7f) << 1)) as u8;
+        r[13 * i + 9] = ((t[5] >> 7) | ((t[6] & 0x03) << 6)) as u8;
+        r[13 * i + 10] = ((t[6] >> 2) & 0xff) as u8;
+        r[13 * i + 11] = ((t[6] >> 10) | ((t[7] & 0x1f) << 3)) as u8;
+        r[13 * i + 12] = (t[7] >> 5) as u8;
+    }
+    let i = full;
+    let tail = pack_deg - 8 * i;
+    for j in 0..tail {
+        t[j] = a[8 * i + j] & Q_MASK_13;
+    }
+    for j in tail..8 {
+        t[j] = 0;
+    }
+    match pack_deg & 0x07 {
+        4 => {
+            r[13 * i] = (t[0] & 0xff) as u8;
+            r[13 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x07) << 5)) as u8;
+            r[13 * i + 2] = ((t[1] >> 3) & 0xff) as u8;
+            r[13 * i + 3] = ((t[1] >> 11) | ((t[2] & 0x3f) << 2)) as u8;
+            r[13 * i + 4] = ((t[2] >> 6) | ((t[3] & 0x01) << 7)) as u8;
+            r[13 * i + 5] = ((t[3] >> 1) & 0xff) as u8;
+            r[13 * i + 6] = ((t[3] >> 9) | ((t[4] & 0x0f) << 4)) as u8;
+        }
+        2 => {
+            r[13 * i] = (t[0] & 0xff) as u8;
+            r[13 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x07) << 5)) as u8;
+            r[13 * i + 2] = ((t[1] >> 3) & 0xff) as u8;
+            r[13 * i + 3] = ((t[1] >> 11) | ((t[2] & 0x3f) << 2)) as u8;
+        }
+        0 => {}
+        _ => unreachable!(),
+    }
+}
+
+/// Inverse of [`poly_sq_tobytes_logq13`].
+pub(crate) fn poly_sq_frombytes_logq13<const N: usize>(r: &mut [u16; N], a: &[u8]) {
+    let pack_deg = N - 1;
+    debug_assert!(a.len() >= (pack_deg * 13 + 7) / 8);
+    let full = pack_deg / 8;
+    for i in 0..full {
+        r[8 * i] = (a[13 * i] as u16) | (((a[13 * i + 1] as u16) & 0x1f) << 8);
+        r[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
+            | ((a[13 * i + 2] as u16) << 3)
+            | (((a[13 * i + 3] as u16) & 0x03) << 11);
+        r[8 * i + 2] =
+            ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
+        r[8 * i + 3] = ((a[13 * i + 4] as u16) >> 7)
+            | ((a[13 * i + 5] as u16) << 1)
+            | (((a[13 * i + 6] as u16) & 0x0f) << 9);
+        r[8 * i + 4] = ((a[13 * i + 6] as u16) >> 4)
+            | ((a[13 * i + 7] as u16) << 4)
+            | (((a[13 * i + 8] as u16) & 0x01) << 12);
+        r[8 * i + 5] =
+            ((a[13 * i + 8] as u16) >> 1) | (((a[13 * i + 9] as u16) & 0x3f) << 7);
+        r[8 * i + 6] = ((a[13 * i + 9] as u16) >> 6)
+            | ((a[13 * i + 10] as u16) << 2)
+            | (((a[13 * i + 11] as u16) & 0x07) << 10);
+        r[8 * i + 7] =
+            ((a[13 * i + 11] as u16) >> 3) | ((a[13 * i + 12] as u16) << 5);
+    }
+    let i = full;
+    match pack_deg & 0x07 {
+        4 => {
+            r[8 * i] = (a[13 * i] as u16) | (((a[13 * i + 1] as u16) & 0x1f) << 8);
+            r[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
+                | ((a[13 * i + 2] as u16) << 3)
+                | (((a[13 * i + 3] as u16) & 0x03) << 11);
+            r[8 * i + 2] =
+                ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
+            r[8 * i + 3] = ((a[13 * i + 4] as u16) >> 7)
+                | ((a[13 * i + 5] as u16) << 1)
+                | (((a[13 * i + 6] as u16) & 0x0f) << 9);
+        }
+        2 => {
+            r[8 * i] = (a[13 * i] as u16) | (((a[13 * i + 1] as u16) & 0x1f) << 8);
+            r[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
+                | ((a[13 * i + 2] as u16) << 3)
+                | (((a[13 * i + 3] as u16) & 0x03) << 11);
+        }
+        0 => {}
+        _ => unreachable!(),
+    }
+    r[N - 1] = 0;
+}
+
 // ---- S_3 packing: 5 trits per byte in base 3 -------------------------------
 
 /// Pack `a`'s $N - 1$ trinary coefficients (in $\{0, 1, 2\}$) into bytes

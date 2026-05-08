@@ -83,15 +83,21 @@ impl Poly {
 
 use crate::public_key::ntru_pqc_shared::{
     cmov, crypto_sort_int32, mod3, DigestChain,
+    poly_lift_hps as shared_poly_lift_hps,
     poly_mod_3_phi_n as shared_poly_mod_3_phi_n,
     poly_mod_q_phi_n as shared_poly_mod_q_phi_n,
     poly_r2_inv as shared_poly_r2_inv,
     poly_r2_inv_to_rq_inv as shared_poly_r2_inv_to_rq_inv,
     poly_rq_inv as shared_poly_rq_inv,
+    poly_rq_mul as shared_poly_rq_mul,
     poly_rq_to_s3 as shared_poly_rq_to_s3,
     poly_s3_frombytes as shared_poly_s3_frombytes,
     poly_s3_inv as shared_poly_s3_inv,
+    poly_s3_mul as shared_poly_s3_mul,
     poly_s3_tobytes as shared_poly_s3_tobytes,
+    poly_sq_frombytes_logq12 as shared_poly_sq_frombytes_logq12,
+    poly_sq_mul as shared_poly_sq_mul,
+    poly_sq_tobytes_logq12 as shared_poly_sq_tobytes_logq12,
     poly_trinary_zq_to_z3 as shared_poly_trinary_zq_to_z3,
     poly_z3_to_zq as shared_poly_z3_to_zq,
 };
@@ -113,19 +119,11 @@ fn poly_trinary_zq_to_z3(r: &mut Poly) { shared_poly_trinary_zq_to_z3::<N, LOGQ>
 
 // ---- multiplication in R_q -------------------------------------------------
 
-fn poly_rq_mul(r: &mut Poly, a: &Poly, b: &Poly) {
-    crate::public_key::ntru_poly_mul::poly_mul_cyclic(&mut r.coeffs, &a.coeffs, &b.coeffs);
-}
+fn poly_rq_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_rq_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
 
-fn poly_sq_mul(r: &mut Poly, a: &Poly, b: &Poly) {
-    poly_rq_mul(r, a, b);
-    poly_mod_q_phi_n(r);
-}
+fn poly_sq_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_sq_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
 
-fn poly_s3_mul(r: &mut Poly, a: &Poly, b: &Poly) {
-    poly_rq_mul(r, a, b);
-    poly_mod_3_phi_n(r);
-}
+fn poly_s3_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_s3_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
 
 // ---- Rq -> S3 coefficient projection ---------------------------------------
 
@@ -133,10 +131,7 @@ fn poly_rq_to_s3(r: &mut Poly, a: &Poly) { shared_poly_rq_to_s3::<N, LOGQ>(&mut 
 
 // ---- lift(m) for HPS: trivial Z_3 -> Z_q embedding -------------------------
 
-fn poly_lift(r: &mut Poly, a: &Poly) {
-    r.coeffs = a.coeffs;
-    poly_z3_to_zq(r);
-}
+fn poly_lift(r: &mut Poly, a: &Poly) { shared_poly_lift_hps::<N>(&mut r.coeffs, &a.coeffs, Q_MASK); }
 
 // ---- constant-time inverse in R_2 = F_2[x] / (x^N - 1) ---------------------
 //
@@ -178,26 +173,9 @@ fn poly_s3_frombytes(r: &mut Poly, msg: &[u8]) { shared_poly_s3_frombytes::<N>(&
 // Two 12-bit S_q coefficients pack into 3 bytes. PACK_DEG = 820 is even so
 // no tail handling is needed.
 
-fn poly_sq_tobytes(r: &mut [u8], a: &Poly) {
-    debug_assert_eq!(r.len(), OWCPA_PUBLICKEYBYTES);
-    for i in 0..PACK_DEG / 2 {
-        let c0 = modq(a.coeffs[2 * i]);
-        let c1 = modq(a.coeffs[2 * i + 1]);
-        r[3 * i] = (c0 & 0xff) as u8;
-        r[3 * i + 1] = ((c0 >> 8) | ((c1 & 0x0f) << 4)) as u8;
-        r[3 * i + 2] = (c1 >> 4) as u8;
-    }
-}
+fn poly_sq_tobytes(r: &mut [u8], a: &Poly) { shared_poly_sq_tobytes_logq12::<N>(r, &a.coeffs); }
 
-fn poly_sq_frombytes(r: &mut Poly, a: &[u8]) {
-    debug_assert!(a.len() >= OWCPA_PUBLICKEYBYTES);
-    for i in 0..PACK_DEG / 2 {
-        r.coeffs[2 * i] = (a[3 * i] as u16) | (((a[3 * i + 1] as u16) & 0x0f) << 8);
-        r.coeffs[2 * i + 1] =
-            ((a[3 * i + 1] as u16) >> 4) | (((a[3 * i + 2] as u16) & 0xff) << 4);
-    }
-    r.coeffs[N - 1] = 0;
-}
+fn poly_sq_frombytes(r: &mut Poly, a: &[u8]) { shared_poly_sq_frombytes_logq12::<N>(&mut r.coeffs, a); }
 
 fn poly_rq_sum_zero_tobytes(r: &mut [u8], a: &Poly) {
     poly_sq_tobytes(r, a);

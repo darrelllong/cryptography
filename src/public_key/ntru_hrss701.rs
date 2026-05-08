@@ -92,10 +92,15 @@ use crate::public_key::ntru_pqc_shared::{
     poly_r2_inv as shared_poly_r2_inv,
     poly_r2_inv_to_rq_inv as shared_poly_r2_inv_to_rq_inv,
     poly_rq_inv as shared_poly_rq_inv,
+    poly_rq_mul as shared_poly_rq_mul,
     poly_rq_to_s3 as shared_poly_rq_to_s3,
     poly_s3_frombytes as shared_poly_s3_frombytes,
     poly_s3_inv as shared_poly_s3_inv,
+    poly_s3_mul as shared_poly_s3_mul,
     poly_s3_tobytes as shared_poly_s3_tobytes,
+    poly_sq_frombytes_logq13 as shared_poly_sq_frombytes_logq13,
+    poly_sq_mul as shared_poly_sq_mul,
+    poly_sq_tobytes_logq13 as shared_poly_sq_tobytes_logq13,
     poly_trinary_zq_to_z3 as shared_poly_trinary_zq_to_z3,
     poly_z3_to_zq as shared_poly_z3_to_zq,
 };
@@ -117,19 +122,11 @@ fn poly_trinary_zq_to_z3(r: &mut Poly) { shared_poly_trinary_zq_to_z3::<N, LOGQ>
 
 // ---- multiplication in R_q -------------------------------------------------
 
-fn poly_rq_mul(r: &mut Poly, a: &Poly, b: &Poly) {
-    crate::public_key::ntru_poly_mul::poly_mul_cyclic(&mut r.coeffs, &a.coeffs, &b.coeffs);
-}
+fn poly_rq_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_rq_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
 
-fn poly_sq_mul(r: &mut Poly, a: &Poly, b: &Poly) {
-    poly_rq_mul(r, a, b);
-    poly_mod_q_phi_n(r);
-}
+fn poly_sq_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_sq_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
 
-fn poly_s3_mul(r: &mut Poly, a: &Poly, b: &Poly) {
-    poly_rq_mul(r, a, b);
-    poly_mod_3_phi_n(r);
-}
+fn poly_s3_mul(r: &mut Poly, a: &Poly, b: &Poly) { shared_poly_s3_mul::<N>(&mut r.coeffs, &a.coeffs, &b.coeffs); }
 
 // ---- Rq -> S3 coefficient projection ---------------------------------------
 
@@ -230,110 +227,9 @@ fn poly_s3_frombytes(r: &mut Poly, msg: &[u8]) { shared_poly_s3_frombytes::<N>(&
 // Eight 11-bit S_q coefficients pack into 11 bytes. The remainder of
 // PACK_DEG mod 8 is handled by the trailing match arms.
 
-fn poly_sq_tobytes(r: &mut [u8], a: &Poly) {
-    debug_assert_eq!(r.len(), OWCPA_PUBLICKEYBYTES);
-    let mut t = [0u16; 8];
-    let full = PACK_DEG / 8;
-    // 13-bit-per-coefficient packing: eight 13-bit values into thirteen bytes.
-    for i in 0..full {
-        for j in 0..8 {
-            t[j] = modq(a.coeffs[8 * i + j]);
-        }
-        r[13 * i] = (t[0] & 0xff) as u8;
-        r[13 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x07) << 5)) as u8;
-        r[13 * i + 2] = ((t[1] >> 3) & 0xff) as u8;
-        r[13 * i + 3] = ((t[1] >> 11) | ((t[2] & 0x3f) << 2)) as u8;
-        r[13 * i + 4] = ((t[2] >> 6) | ((t[3] & 0x01) << 7)) as u8;
-        r[13 * i + 5] = ((t[3] >> 1) & 0xff) as u8;
-        r[13 * i + 6] = ((t[3] >> 9) | ((t[4] & 0x0f) << 4)) as u8;
-        r[13 * i + 7] = ((t[4] >> 4) & 0xff) as u8;
-        r[13 * i + 8] = ((t[4] >> 12) | ((t[5] & 0x7f) << 1)) as u8;
-        r[13 * i + 9] = ((t[5] >> 7) | ((t[6] & 0x03) << 6)) as u8;
-        r[13 * i + 10] = ((t[6] >> 2) & 0xff) as u8;
-        r[13 * i + 11] = ((t[6] >> 10) | ((t[7] & 0x1f) << 3)) as u8;
-        r[13 * i + 12] = (t[7] >> 5) as u8;
-    }
-    let i = full;
-    let tail = PACK_DEG - 8 * i;
-    for j in 0..tail {
-        t[j] = modq(a.coeffs[8 * i + j]);
-    }
-    for j in tail..8 {
-        t[j] = 0;
-    }
-    match PACK_DEG & 0x07 {
-        4 => {
-            r[13 * i] = (t[0] & 0xff) as u8;
-            r[13 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x07) << 5)) as u8;
-            r[13 * i + 2] = ((t[1] >> 3) & 0xff) as u8;
-            r[13 * i + 3] = ((t[1] >> 11) | ((t[2] & 0x3f) << 2)) as u8;
-            r[13 * i + 4] = ((t[2] >> 6) | ((t[3] & 0x01) << 7)) as u8;
-            r[13 * i + 5] = ((t[3] >> 1) & 0xff) as u8;
-            r[13 * i + 6] = ((t[3] >> 9) | ((t[4] & 0x0f) << 4)) as u8;
-        }
-        2 => {
-            r[13 * i] = (t[0] & 0xff) as u8;
-            r[13 * i + 1] = ((t[0] >> 8) | ((t[1] & 0x07) << 5)) as u8;
-            r[13 * i + 2] = ((t[1] >> 3) & 0xff) as u8;
-            r[13 * i + 3] = ((t[1] >> 11) | ((t[2] & 0x3f) << 2)) as u8;
-        }
-        0 => {}
-        // 1, 3, 5, 6, 7 are impossible by N's structure.
-        _ => unreachable!(),
-    }
-}
+fn poly_sq_tobytes(r: &mut [u8], a: &Poly) { shared_poly_sq_tobytes_logq13::<N>(r, &a.coeffs); }
 
-fn poly_sq_frombytes(r: &mut Poly, a: &[u8]) {
-    debug_assert!(a.len() >= OWCPA_PUBLICKEYBYTES);
-    let full = PACK_DEG / 8;
-    for i in 0..full {
-        r.coeffs[8 * i] =
-            (a[13 * i] as u16) | (((a[13 * i + 1] as u16) & 0x1f) << 8);
-        r.coeffs[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
-            | ((a[13 * i + 2] as u16) << 3)
-            | (((a[13 * i + 3] as u16) & 0x03) << 11);
-        r.coeffs[8 * i + 2] =
-            ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
-        r.coeffs[8 * i + 3] = ((a[13 * i + 4] as u16) >> 7)
-            | ((a[13 * i + 5] as u16) << 1)
-            | (((a[13 * i + 6] as u16) & 0x0f) << 9);
-        r.coeffs[8 * i + 4] = ((a[13 * i + 6] as u16) >> 4)
-            | ((a[13 * i + 7] as u16) << 4)
-            | (((a[13 * i + 8] as u16) & 0x01) << 12);
-        r.coeffs[8 * i + 5] =
-            ((a[13 * i + 8] as u16) >> 1) | (((a[13 * i + 9] as u16) & 0x3f) << 7);
-        r.coeffs[8 * i + 6] = ((a[13 * i + 9] as u16) >> 6)
-            | ((a[13 * i + 10] as u16) << 2)
-            | (((a[13 * i + 11] as u16) & 0x07) << 10);
-        r.coeffs[8 * i + 7] =
-            ((a[13 * i + 11] as u16) >> 3) | ((a[13 * i + 12] as u16) << 5);
-    }
-    let i = full;
-    match PACK_DEG & 0x07 {
-        4 => {
-            r.coeffs[8 * i] =
-                (a[13 * i] as u16) | (((a[13 * i + 1] as u16) & 0x1f) << 8);
-            r.coeffs[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
-                | ((a[13 * i + 2] as u16) << 3)
-                | (((a[13 * i + 3] as u16) & 0x03) << 11);
-            r.coeffs[8 * i + 2] =
-                ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
-            r.coeffs[8 * i + 3] = ((a[13 * i + 4] as u16) >> 7)
-                | ((a[13 * i + 5] as u16) << 1)
-                | (((a[13 * i + 6] as u16) & 0x0f) << 9);
-        }
-        2 => {
-            r.coeffs[8 * i] =
-                (a[13 * i] as u16) | (((a[13 * i + 1] as u16) & 0x1f) << 8);
-            r.coeffs[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
-                | ((a[13 * i + 2] as u16) << 3)
-                | (((a[13 * i + 3] as u16) & 0x03) << 11);
-        }
-        0 => {}
-        _ => unreachable!(),
-    }
-    r.coeffs[N - 1] = 0;
-}
+fn poly_sq_frombytes(r: &mut Poly, a: &[u8]) { shared_poly_sq_frombytes_logq13::<N>(&mut r.coeffs, a); }
 
 fn poly_rq_sum_zero_tobytes(r: &mut [u8], a: &Poly) {
     poly_sq_tobytes(r, a);
