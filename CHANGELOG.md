@@ -9,6 +9,12 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-05-08
+
+### Added
+- `CHANGELOG.md` — backfilled release notes for 0.5.0, 0.6.0, and 0.6.1 in
+  Keep-a-Changelog format, plus this entry.
+
 ## [0.6.1] — 2026-05-08
 
 ### Added
@@ -80,7 +86,8 @@ First publish under the post-NTRU-refactor architecture. Validated against all
 
 Initial publish to crates.io under the `cryptography-rs` name.
 
-[Unreleased]: https://github.com/darrelllong/cryptography/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/darrelllong/cryptography/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/darrelllong/cryptography/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/darrelllong/cryptography/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/darrelllong/cryptography/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/darrelllong/cryptography/releases/tag/v0.5.0
