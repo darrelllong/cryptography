@@ -109,7 +109,7 @@ measure x448_agree
 measure x448_scalar_mult_base
 measure x448_scalar_mult
 
-hdr "ML-KEM (Kyber)"
+hdr "ML-KEM (FIPS 203)"
 measure mlkem512_keygen
 measure mlkem512_encaps
 measure mlkem512_decaps
@@ -120,7 +120,7 @@ measure mlkem1024_keygen
 measure mlkem1024_encaps
 measure mlkem1024_decaps
 
-hdr "ML-DSA (Dilithium)"
+hdr "ML-DSA (FIPS 204)"
 measure mldsa44_keygen
 measure mldsa44_sign
 measure mldsa44_verify
@@ -167,6 +167,9 @@ measure ntruees1087ep1_decrypt
 measure ntruees1087ep2_keygen
 measure ntruees1087ep2_encrypt
 measure ntruees1087ep2_decrypt
+measure ntruees1171ep1_keygen
+measure ntruees1171ep1_encrypt
+measure ntruees1171ep1_decrypt
 measure ntruees1499ep1_keygen
 measure ntruees1499ep1_encrypt
 measure ntruees1499ep1_decrypt

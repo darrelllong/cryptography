@@ -6,8 +6,9 @@ use cryptography::public_key::ec_edwards::ed25519;
 use cryptography::vt::{
     p256, BigUint, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh, ElGamal, MlDsa,
     MlDsaParameterSet, MlDsaSignature, MlKem, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
-    NtruHps509, NtruHps509Ciphertext, NtruHps509PublicKey, NtruHrss701, NtruHrss701PublicKey,
-    Paillier, Rsa, RsaOaep, RsaPss,
+    NtruEes443Ep1, NtruEes443Ep1Ciphertext, NtruEes443Ep1PublicKey, NtruEesError, NtruHps509,
+    NtruHps509Ciphertext, NtruHps509PublicKey, NtruHrss701, NtruHrss701PublicKey, Paillier, Rsa,
+    RsaOaep, RsaPss,
 };
 use cryptography::{
     Aes128, Aes256, Cbc, ChaCha20, Cmac, Csprng, Ctr, CtrDrbgAes256, Gcm, Gmac, Hmac, Rabbit,
@@ -387,4 +388,21 @@ fn manual_postquantum_examples() {
     let hrss_pk_round =
         NtruHrss701PublicKey::from_wire_bytes(&hrss_pk.to_wire_bytes()).expect("hrss pk");
     assert_eq!(hrss_pk_round, hrss_pk);
+
+    // NTRUEncrypt EES443EP1 (IEEE 1363.1-2008 SVES-3 public-key encryption).
+    let (ees_pk, ees_sk) = NtruEes443Ep1::keygen(&mut rng);
+    let msg: &[u8] = b"public-key encryption, not a KEM";
+    assert!(msg.len() <= NtruEes443Ep1::MAX_MESSAGE_BYTES);
+    let ees_ct = NtruEes443Ep1::encrypt(&ees_pk, msg, &mut rng).expect("ees encrypt");
+    let ees_pt = NtruEes443Ep1::decrypt(&ees_sk, &ees_ct).expect("ees decrypt");
+    assert_eq!(ees_pt, msg);
+    let ees_pk_round =
+        NtruEes443Ep1PublicKey::from_wire_bytes(&ees_pk.to_wire_bytes()).expect("ees pk");
+    let ees_ct_round =
+        NtruEes443Ep1Ciphertext::from_wire_bytes(&ees_ct.to_wire_bytes()).expect("ees ct");
+    assert_eq!(ees_pk_round, ees_pk);
+    assert_eq!(ees_ct_round, ees_ct);
+    let too_big = vec![0u8; NtruEes443Ep1::MAX_MESSAGE_BYTES + 1];
+    let err = NtruEes443Ep1::encrypt(&ees_pk, &too_big, &mut rng).unwrap_err();
+    assert_eq!(err, NtruEesError::MessageTooLong);
 }

@@ -9,6 +9,31 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
+### Fixed
+- `POSTQUANTUM.md` correctness sweep. NTRUEncrypt now appears in Scope, What
+  Is Implemented, Theory of Operation, Working Examples, and Validation
+  alongside ML-KEM, ML-DSA, and NTRU; the cross-scheme comparison covers all
+  four schemes. Other corrections: EES449EP1 max-message (was 69, actual
+  67); the NTRU Kiviat radar (was 8 axes, now 12); the HRSS-701-vs-ML-KEM
+  encaps comparison numbers; the NTRU keygen/encaps-decaps ratio range; the
+  `(f, h)` trapdoor mis-description and `h = 3·f^{-1}` (missing `g`) in the
+  NTRUEncrypt theory; the legacy `(Kyber)` / `(Dilithium)` section
+  parentheticals; the "vendored reference code" / "trees not vendored"
+  contradiction.
+- `scripts/build_radar_csvs.py::PK_NTRU` was missing keygen and decaps for
+  HPS-677 and HPS-821. The 2026-05-08 NTRU Kiviat
+  (`assets/sweep-2026-05-08-ntru-radar.svg`) is regenerated with all twelve
+  axes.
+- `scripts/bench_all_pk_full.sh` now measures EES1171EP1 (previously the
+  only exported NTRUEncrypt parameter set with no benchmark line).
+- `tests/manual_examples.rs::manual_postquantum_examples` now also
+  exercises NTRUEncrypt EES443EP1, restoring the doc's claim that every
+  working example is mirrored by a test.
+
+### Changed
+- `POSTQUANTUM.md` math notation now uses KaTeX-rendered LaTeX rather than
+  backtick ASCII, matching the module-docstring convention adopted in 0.6.0.
+
 ## [0.6.2] — 2026-05-08
 
 ### Added
