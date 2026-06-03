@@ -724,7 +724,7 @@ Homomorphic addition of two ciphertexts:
 ```
 
 The integer $m$ is recovered from $m \cdot G$ via baby-step giant-step
-(BSGS) with $O\!\left(\sqrt{m_{\max}}\right)$ precomputation.
+(BSGS) with $O\left(\sqrt{m_{\max}}\right)$ precomputation.
 
 So `EC-ElGamal` is intentionally the arithmetic-rich counterpart to `ECIES`:
 
