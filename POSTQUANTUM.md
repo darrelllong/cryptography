@@ -168,27 +168,27 @@ At a high level (HPS variants):
 1. `keygen` samples a trinary $f$ (IID-uniform) and a trinary $g$ of fixed
    weight $q/8 - 2$, computes $f^{-1} \bmod 3$ and $(g\cdot f)^{-1} \bmod q$,
    and derives the public polynomial
-   $h = g \cdot (g\cdot f)^{-1} \cdot g \bmod (q,\, x^N - 1)$. The private
+   $h = g \cdot (g\cdot f)^{-1} \cdot g \bmod (q, x^N - 1)$. The private
    key bundles $f$, $f^{-1} \bmod 3$, $h^{-1} \in S_q$, and a 32-byte PRF
    key for implicit rejection.
 2. `encaps` samples $(r, m)$ (IID for $r$, fixed-weight for $m$), derives
    the shared secret
-   $K = \text{SHA3-256}(\text{pack3}(r) \mathbin\| \text{pack3}(m))$, lifts
+   `K = SHA3-256(pack3(r) ‖ pack3(m))`, lifts
    $r$ into $\mathbb{Z}_q$, and emits the ciphertext
    $c = r\cdot h + \text{lift}(m)$ packed sum-zero.
-3. `decaps` recovers $(r, m)$ via the trapdoor $(f,\, f^{-1}_3,\, h^{-1})$,
+3. `decaps` recovers $(r, m)$ via the trapdoor $(f, f^{-1}_3, h^{-1})$,
    re-validates $r$ (and for HPS, the weight constraint on $m$), and returns
-   $K = \text{SHA3-256}(\text{pack3}(r) \mathbin\| \text{pack3}(m))$ on
-   success or $K = \text{SHA3-256}(\text{prf} \mathbin\| c)$ on any
+   `K = SHA3-256(pack3(r) ‖ pack3(m))` on
+   success or `K = SHA3-256(prf ‖ c)` on any
    consistency failure (implicit rejection).
 
 HRSS-701 differs from the HPS sets in four places: $f$ and $g$ come from the
 `sample_iid_plus` distribution (each polynomial $v$ is sampled IID-uniform
 mod 3 and then post-conditioned by conditionally negating its even-indexed
-coefficients to enforce $\langle x\cdot v,\, v \rangle \geq 0$), the keygen
+coefficients to enforce $\langle x\cdot v, v \rangle \geq 0$), the keygen
 uses $g \gets 3\cdot(x - 1)\cdot g$ instead of $g \gets 3\cdot g$, the
 message-space check on $m$ is dropped, and the encryption `lift` is the
-more elaborate $a / (x - 1) \bmod (3,\, \Phi_n)$ operator rather than the
+more elaborate $a / (x - 1) \bmod (3, \Phi_n)$ operator rather than the
 bare $\mathbb{Z}_3 \to \mathbb{Z}_q$ map.
 
 ### NTRUEncrypt (IEEE Std 1363.1-2008)
@@ -211,10 +211,10 @@ At a high level (SVES-3, the only padding mode this crate implements):
 2. `encrypt(pk, msg)` rejects inputs longer than `MAX_MESSAGE_BYTES` up
    front with `NtruEesError::MessageTooLong`. It then samples `db_bytes`
    random bytes $b$ and assembles the SVES-3 plaintext buffer
-   $m = b \mathbin\| \text{m\_len} \mathbin\| \text{msg} \mathbin\| \text{zero-padding}$,
-   lifts it into trinary $R/(3,\, x^N - 1)$ via `sves_from_bytes` to obtain
+   `m = b ‖ m_len ‖ msg ‖ zero-padding`,
+   lifts it into trinary $R/(3, x^N - 1)$ via `sves_from_bytes` to obtain
    $\text{mtrin}$. An IGF transcript over
-   $(\text{oid} \mathbin\| \text{msg} \mathbin\| b \mathbin\| \text{htrunc})$
+   `(oid ‖ msg ‖ b ‖ htrunc)`
    then samples the *blinding* polynomial $r$ (trinary for the eight
    dense-trapdoor sets, product form for `EES443EP1`, mirroring the
    trapdoor structure), and the encrypter computes
@@ -224,12 +224,12 @@ At a high level (SVES-3, the only padding mode this crate implements):
    checks $\text{mplus}$ against the SVES-3 representative-weight
    constraint; on failure it resamples $b$ and retries. On success the
    ciphertext is
-   $e = \text{bigr} + \text{signed\_lift}(\text{mplus}) \bmod q$, where
-   $\text{signed\_lift}$ maps trits $\{0, 1, 2\}$ to $\{0, 1, q - 1\}$.
+   `e = bigr + signed_lift(mplus) mod q`, where
+   `signed_lift` maps trits {0, 1, 2} to {0, 1, q - 1}.
 3. `decrypt(sk, e)` uses the trapdoor $t$ to recover the trinary plaintext
    directly: it computes $e + 3\cdot t\cdot e \bmod q$, reduces mod 3 to
    get the trinary $\text{ci} = \text{mplus}$, and recovers
-   $\text{bigr} = e - \text{signed\_lift}(\text{ci}) \bmod q$ so the same
+   `bigr = e - signed_lift(ci) mod q` so the same
    `MGF` call yields the same $\text{mask}$. Subtracting $\text{mask}$ and
    converting back via `sves_to_bytes` yields the candidate $m$ buffer.
    The decrypter then runs the SVES-3 *re-encryption check*, which
@@ -237,7 +237,7 @@ At a high level (SVES-3, the only padding mode this crate implements):
    (i) $\text{ci}$ satisfies the SVES-3 representative-weight constraint
    (the same check `encrypt` ran before emitting the ciphertext); (ii) the
    recovered zero-padding is all zero; (iii) replaying the IGF transcript
-   $(\text{oid} \mathbin\| \text{recovered\_msg} \mathbin\| \text{recovered\_b} \mathbin\| \text{htrunc})$
+   `(oid ‖ recovered_msg ‖ recovered_b ‖ htrunc)`
    to regenerate $r'$ reproduces the original $\text{bigr}$ (i.e.
    $r'\cdot h \bmod q = \text{bigr}$). Any failure returns
    `NtruEesError::InvalidCiphertext`; `MessageTooLong` is produced only by
