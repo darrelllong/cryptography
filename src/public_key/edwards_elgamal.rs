@@ -127,25 +127,23 @@ impl EdwardsElGamalPublicKey {
         }
     }
 
-    /// Encode in the crate-defined binary format: `[p, a, d, n, Gx, Gy, Qx, Qy]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[
-            &self.curve.p,
-            &self.curve.a,
-            &self.curve.d,
-            &self.curve.n,
-            &self.curve.gx,
-            &self.curve.gy,
-            &self.q.x,
-            &self.q.y,
-        ])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.d.clone(),
+            self.curve.n.clone(),
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.q.x.clone(),
+            self.q.y.clone(),
+        ]
     }
 
-    /// Decode from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
         let d_curve = fields.next()?;
@@ -154,65 +152,6 @@ impl EdwardsElGamalPublicKey {
         let gy = fields.next()?;
         let qx = fields.next()?;
         let qy = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
-        let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
-        let q = EdwardsPoint::new(qx, qy);
-        if !validate_public_point(&curve, &q) {
-            return None;
-        }
-        let q_table = curve.precompute_mul_table(&q);
-        Some(Self { curve, q, q_table })
-    }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(EDWARDS_ELGAMAL_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(EDWARDS_ELGAMAL_PUBLIC_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "EdwardsElGamalPublicKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("d", &self.curve.d),
-                ("n", &self.curve.n),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("qx", &self.q.x),
-                ("qy", &self.q.y),
-            ],
-        )
-    }
-
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EdwardsElGamalPublicKey",
-            &["p", "a", "d", "n", "gx", "gy", "qx", "qy"],
-            xml,
-        )?
-        .into_iter();
-        let p = fields.next()?;
-        let a = fields.next()?;
-        let d_curve = fields.next()?;
-        let n = fields.next()?;
-        let gx = fields.next()?;
-        let gy = fields.next()?;
-        let qx = fields.next()?;
-        let qy = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
         let q = EdwardsPoint::new(qx, qy);
         if !validate_public_point(&curve, &q) {
@@ -222,6 +161,17 @@ impl EdwardsElGamalPublicKey {
         Some(Self { curve, q, q_table })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EdwardsElGamalPublicKey,
+    "EdwardsElGamalPublicKey",
+    ["p", "a", "d", "n", "gx", "gy", "qx", "qy"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    EdwardsElGamalPublicKey,
+    EDWARDS_ELGAMAL_PUBLIC_LABEL,
+    ["p", "a", "d", "n", "gx", "gy", "qx", "qy"]
+);
 
 impl EdwardsElGamalPrivateKey {
     /// Return the curve parameters.
@@ -264,24 +214,22 @@ impl EdwardsElGamalPrivateKey {
         bsgs_dlog(&self.curve, &point, max_message)
     }
 
-    /// Encode in the crate-defined binary format: `[p, a, d, n, Gx, Gy, d_scalar]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[
-            &self.curve.p,
-            &self.curve.a,
-            &self.curve.d,
-            &self.curve.n,
-            &self.curve.gx,
-            &self.curve.gy,
-            &self.d,
-        ])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.d.clone(),
+            self.curve.n.clone(),
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.d.clone(),
+        ]
     }
 
-    /// Decode from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
         let d_curve = fields.next()?;
@@ -289,62 +237,6 @@ impl EdwardsElGamalPrivateKey {
         let gx = fields.next()?;
         let gy = fields.next()?;
         let d = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
-        let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
-        if d.is_zero() || d >= curve.n {
-            return None;
-        }
-        let q = curve.scalar_mul_base(&d);
-        Some(Self { curve, d, q })
-    }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(EDWARDS_ELGAMAL_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(EDWARDS_ELGAMAL_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "EdwardsElGamalPrivateKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("d", &self.curve.d),
-                ("n", &self.curve.n),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("scalar", &self.d),
-            ],
-        )
-    }
-
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EdwardsElGamalPrivateKey",
-            &["p", "a", "d", "n", "gx", "gy", "scalar"],
-            xml,
-        )?
-        .into_iter();
-        let p = fields.next()?;
-        let a = fields.next()?;
-        let d_curve = fields.next()?;
-        let n = fields.next()?;
-        let gx = fields.next()?;
-        let gy = fields.next()?;
-        let d = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
         if d.is_zero() || d >= curve.n {
             return None;
@@ -353,6 +245,17 @@ impl EdwardsElGamalPrivateKey {
         Some(Self { curve, d, q })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EdwardsElGamalPrivateKey,
+    "EdwardsElGamalPrivateKey",
+    ["p", "a", "d", "n", "gx", "gy", "scalar"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    EdwardsElGamalPrivateKey,
+    EDWARDS_ELGAMAL_PRIVATE_LABEL,
+    ["p", "a", "d", "n", "gx", "gy", "scalar"]
+);
 
 impl fmt::Debug for EdwardsElGamalPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

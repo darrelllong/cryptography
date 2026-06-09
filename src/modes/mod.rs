@@ -615,6 +615,10 @@ impl<C> Ecb<C> {
 
 impl<C: BlockCipher> Ecb<C> {
     /// Encrypt block-aligned data in place without padding.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len()` is not an exact multiple of the block size.
     pub fn encrypt_nopad(&self, data: &mut [u8]) {
         assert_block_multiple::<C>(data);
         for block in data.chunks_exact_mut(C::BLOCK_LEN) {
@@ -623,6 +627,10 @@ impl<C: BlockCipher> Ecb<C> {
     }
 
     /// Decrypt block-aligned data in place without padding.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len()` is not an exact multiple of the block size.
     pub fn decrypt_nopad(&self, data: &mut [u8]) {
         assert_block_multiple::<C>(data);
         for block in data.chunks_exact_mut(C::BLOCK_LEN) {
@@ -1011,12 +1019,27 @@ impl<C: BlockCipher> Xts<C> {
 /// Cipher-based Message Authentication Code (CMAC).
 pub struct Cmac<C> {
     cipher: C,
+    k1: Vec<u8>,
+    k2: Vec<u8>,
 }
 
-impl<C> Cmac<C> {
+impl<C: BlockCipher> Cmac<C> {
     /// Wrap a block cipher in SP 800-38B CMAC mode.
+    ///
+    /// The two SP 800-38B subkeys `K1`/`K2` are derived once here rather
+    /// than on every tag computation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cipher's block size is not 8 or 16 bytes; CMAC only
+    /// supports 64-bit or 128-bit block ciphers.
     pub fn new(cipher: C) -> Self {
-        Self { cipher }
+        let mut l = vec![0u8; C::BLOCK_LEN];
+        cipher.encrypt(&mut l);
+        let k1 = dbl(&l);
+        let k2 = dbl(&k1);
+        crate::ct::zeroize_slice(l.as_mut_slice());
+        Self { cipher, k1, k2 }
     }
 
     /// Borrow the wrapped block cipher.
@@ -1025,16 +1048,35 @@ impl<C> Cmac<C> {
     }
 }
 
+impl<C> Drop for Cmac<C> {
+    fn drop(&mut self) {
+        // The subkeys are key material derived from E_K(0); scrub them like
+        // the wrapped cipher scrubs its round keys.
+        crate::ct::zeroize_slice(self.k1.as_mut_slice());
+        crate::ct::zeroize_slice(self.k2.as_mut_slice());
+    }
+}
+
 /// Counter with CBC-MAC (CCM) with compile-time detached tag length.
 ///
 /// `TAG_LEN` must be one of RFC 3610's valid lengths:
 /// `{4, 6, 8, 10, 12, 14, 16}`.
+///
+/// # Nonce reuse
+///
+/// Reusing a nonce under the same key breaks both confidentiality and
+/// authenticity: the CTR keystream repeats and the CBC-MAC values become
+/// related. Never reuse a `(key, nonce)` pair.
 pub struct Ccm<C, const TAG_LEN: usize = 16> {
     cipher: C,
 }
 
 impl<C, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     /// Wrap a 128-bit block cipher in SP 800-38C CCM mode.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `TAG_LEN` is not one of `{4, 6, 8, 10, 12, 14, 16}`.
     pub fn new(cipher: C) -> Self {
         assert_ccm_tag_len(TAG_LEN);
         Self { cipher }
@@ -1053,6 +1095,12 @@ impl<C, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
 
 impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     /// Compute a detached CCM tag over `plaintext` and associated data.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, if `nonce.len()` is
+    /// outside `7..=13`, or if `plaintext.len()` does not fit in the
+    /// `L = 15 - nonce.len()` byte length field.
     #[must_use]
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> [u8; TAG_LEN] {
         let t = ccm_cbc_mac(&self.cipher, nonce, aad, plaintext, TAG_LEN);
@@ -1065,6 +1113,12 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     }
 
     /// Encrypt `data` in place and return the detached CCM authentication tag.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, if `nonce.len()` is
+    /// outside `7..=13`, or if `data.len()` does not fit in the
+    /// `L = 15 - nonce.len()` byte length field.
     #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; TAG_LEN] {
         assert_block_128::<C>();
@@ -1076,6 +1130,12 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     /// Verify `tag` and decrypt in place on success.
     ///
     /// Returns `false` and leaves `data` unchanged when verification fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, if `nonce.len()` is
+    /// outside `7..=13`, or if `data.len()` does not fit in the
+    /// `L = 15 - nonce.len()` byte length field.
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8; TAG_LEN]) -> bool {
         assert_block_128::<C>();
 
@@ -1107,6 +1167,12 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
 /// Callers must still ensure nonce uniqueness per key; this API is stateless and
 /// cannot enforce global `(key, nonce)` uniqueness.
 ///
+/// # Nonce reuse
+///
+/// Reusing a nonce under the same key is catastrophic: it leaks the XOR of
+/// the plaintexts and exposes the GHASH authentication key `H`, enabling
+/// forgeries. Never reuse a `(key, nonce)` pair.
+///
 /// # Examples
 ///
 /// ```rust
@@ -1135,6 +1201,7 @@ pub struct Gcm<C> {
 ///
 /// It enforces the same SP 800-38D payload bound as [`Gcm`]:
 /// `(2^32 - 2)` counter blocks (`68_719_476_704` bytes) per call.
+/// The nonce-reuse caveats documented on [`Gcm`] apply equally here.
 pub struct GcmVt<C> {
     cipher: C,
 }
@@ -1166,7 +1233,10 @@ impl<C> GcmVt<C> {
 impl<C: BlockCipher> Gcm<C> {
     /// Compute the GCM authentication tag over `aad` and `ciphertext`.
     ///
-    /// Panics if `ciphertext.len()` exceeds the SP 800-38D per-call bound of
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, or if
+    /// `ciphertext.len()` exceeds the SP 800-38D per-call bound of
     /// `68_719_476_704` bytes.
     #[must_use]
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
@@ -1175,8 +1245,10 @@ impl<C: BlockCipher> Gcm<C> {
 
     /// Encrypt in place and return the 128-bit authentication tag.
     ///
-    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
-    /// `68_719_476_704` bytes.
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, or if `data.len()`
+    /// exceeds the SP 800-38D per-call bound of `68_719_476_704` bytes.
     #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         assert_block_128::<C>();
@@ -1203,8 +1275,10 @@ impl<C: BlockCipher> Gcm<C> {
     ///
     /// Returns `false` and leaves `data` unchanged if tag verification fails.
     ///
-    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
-    /// `68_719_476_704` bytes.
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, or if `data.len()`
+    /// exceeds the SP 800-38D per-call bound of `68_719_476_704` bytes.
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
         assert_block_128::<C>();
         assert_gcm_payload_len(data.len());
@@ -1230,7 +1304,10 @@ impl<C: BlockCipher> Gcm<C> {
 impl<C: BlockCipher> GcmVt<C> {
     /// Compute the GCM authentication tag over `aad` and `ciphertext`.
     ///
-    /// Panics if `ciphertext.len()` exceeds the SP 800-38D per-call bound of
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, or if
+    /// `ciphertext.len()` exceeds the SP 800-38D per-call bound of
     /// `68_719_476_704` bytes.
     #[must_use]
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
@@ -1239,8 +1316,10 @@ impl<C: BlockCipher> GcmVt<C> {
 
     /// Encrypt in place and return the 128-bit authentication tag.
     ///
-    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
-    /// `68_719_476_704` bytes.
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, or if `data.len()`
+    /// exceeds the SP 800-38D per-call bound of `68_719_476_704` bytes.
     #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         assert_block_128::<C>();
@@ -1267,8 +1346,10 @@ impl<C: BlockCipher> GcmVt<C> {
     ///
     /// Returns `false` and leaves `data` unchanged if tag verification fails.
     ///
-    /// Panics if `data.len()` exceeds the SP 800-38D per-call bound of
-    /// `68_719_476_704` bytes.
+    /// # Panics
+    ///
+    /// Panics if the cipher block size is not 128 bits, or if `data.len()`
+    /// exceeds the SP 800-38D per-call bound of `68_719_476_704` bytes.
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
         assert_block_128::<C>();
         assert_gcm_payload_len(data.len());
@@ -1358,10 +1439,8 @@ impl<C: BlockCipher> Cmac<C> {
     /// Compute a CMAC tag over arbitrary-length input.
     pub fn compute(&self, data: &[u8]) -> Vec<u8> {
         let blk = C::BLOCK_LEN;
-        let mut l = vec![0u8; blk];
-        self.cipher.encrypt(&mut l);
-        let k1 = dbl(&l);
-        let k2 = dbl(&k1);
+        let k1 = &self.k1;
+        let k2 = &self.k2;
 
         let n = if data.is_empty() {
             1
@@ -1384,7 +1463,7 @@ impl<C: BlockCipher> Cmac<C> {
         if last_complete {
             let start = (n - 1) * blk;
             m_last.copy_from_slice(&data[start..start + blk]);
-            xor_in_place(&mut m_last, &k1);
+            xor_in_place(&mut m_last, k1);
         } else {
             let start = (n - 1) * blk;
             let rem = data.len().saturating_sub(start);
@@ -1392,7 +1471,7 @@ impl<C: BlockCipher> Cmac<C> {
                 m_last[..rem].copy_from_slice(&data[start..]);
             }
             m_last[rem] = 0x80;
-            xor_in_place(&mut m_last, &k2);
+            xor_in_place(&mut m_last, k2);
         }
 
         xor_in_place(&mut m_last, &x);

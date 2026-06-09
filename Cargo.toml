@@ -1,6 +1,6 @@
 [package]
 name = "cryptography-rs"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 license = "BSD-2-Clause"
 authors = ["Darrell Long"]
@@ -32,9 +32,12 @@ path = "src/lib.rs"
 [features]
 default = []
 ct_profile = []
+# Opt-in aarch64 FEAT_SHA3 hardware Keccak ("ARM go fast"). Uses `unsafe`
+# NEON intrinsics behind runtime feature detection. The default build is
+# pure safe Rust apart from the one audited volatile-zeroization helper.
+arm-sha3 = []
 
 # Benchmark targets live in the separate `benchmarks/` crate so ordinary
 # `cargo test` on this package does not need to resolve benchmark-only crates.
 
 [dependencies]
-quick-xml = "0.38"

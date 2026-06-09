@@ -9,9 +9,7 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
     gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_coprime_below, random_probable_prime,
 };
@@ -178,59 +176,17 @@ impl PaillierPublicKey {
         }
     }
 
-    /// Encode the public key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.n, &self.zeta])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.n.clone(), self.zeta.clone()]
     }
 
-    /// Decode the public key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let n = fields.next()?;
         let zeta = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
-            return None;
-        }
-        let n_squared = n.mul_ref(&n);
-        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
-        let zeta_mont = n_squared_ctx.as_ref().map(|ctx| ctx.encode(&zeta));
-        Some(Self {
-            n,
-            n_squared,
-            zeta,
-            zeta_mont,
-            n_squared_ctx,
-        })
-    }
-
-    /// Encode the public key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(PAILLIER_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the public key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap("PaillierPublicKey", &[("n", &self.n), ("zeta", &self.zeta)])
-    }
-
-    /// Decode the public key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(PAILLIER_PUBLIC_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the public key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("PaillierPublicKey", &["n", "zeta"], xml)?.into_iter();
-        let n = fields.next()?;
-        let zeta = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
+        if n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
             return None;
         }
         let n_squared = n.mul_ref(&n);
@@ -245,6 +201,17 @@ impl PaillierPublicKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    PaillierPublicKey,
+    "PaillierPublicKey",
+    ["n", "zeta"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    PaillierPublicKey,
+    PAILLIER_PUBLIC_LABEL,
+    ["n", "zeta"]
+);
 
 impl PaillierPrivateKey {
     /// Return the modulus `n = p * q`.
@@ -305,75 +272,18 @@ impl PaillierPrivateKey {
         Some(self.decrypt(&value))
     }
 
-    /// Encode the private key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.n, &self.lambda, &self.u])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.n.clone(), self.lambda.clone(), self.u.clone()]
     }
 
-    /// Decode the private key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let n = fields.next()?;
         let lambda = fields.next()?;
         let u = fields.next()?;
-        if fields.next().is_some()
-            || n <= BigUint::one()
-            || !n.is_odd()
-            || lambda.is_zero()
-            || u.is_zero()
-        {
-            return None;
-        }
-        let n_squared = n.mul_ref(&n);
-        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
-        let n_ctx = MontgomeryCtx::new(&n);
-        Some(Self {
-            n,
-            n_squared,
-            lambda,
-            u,
-            n_squared_ctx,
-            n_ctx,
-        })
-    }
-
-    /// Encode the private key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(PAILLIER_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the private key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "PaillierPrivateKey",
-            &[("n", &self.n), ("lambda", &self.lambda), ("u", &self.u)],
-        )
-    }
-
-    /// Decode the private key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(PAILLIER_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the private key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("PaillierPrivateKey", &["n", "lambda", "u"], xml)?.into_iter();
-        let n = fields.next()?;
-        let lambda = fields.next()?;
-        let u = fields.next()?;
-        if fields.next().is_some()
-            || n <= BigUint::one()
-            || !n.is_odd()
-            || lambda.is_zero()
-            || u.is_zero()
-        {
+        if n <= BigUint::one() || !n.is_odd() || lambda.is_zero() || u.is_zero() {
             return None;
         }
         let n_squared = n.mul_ref(&n);
@@ -389,6 +299,17 @@ impl PaillierPrivateKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    PaillierPrivateKey,
+    "PaillierPrivateKey",
+    ["n", "lambda", "u"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    PaillierPrivateKey,
+    PAILLIER_PRIVATE_LABEL,
+    ["n", "lambda", "u"]
+);
 
 impl fmt::Debug for PaillierPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

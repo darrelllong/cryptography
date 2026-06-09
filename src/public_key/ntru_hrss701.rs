@@ -42,12 +42,12 @@ const SAMPLE_FG_BYTES: usize = 2 * SAMPLE_IID_BYTES; // 1400
 const SAMPLE_RM_BYTES: usize = 2 * SAMPLE_IID_BYTES; // 1400
 
 const PACK_DEG: usize = N - 1; // 700
-const PACK_TRINARY_BYTES: usize = (PACK_DEG + 4) / 5; // 140
+const PACK_TRINARY_BYTES: usize = PACK_DEG.div_ceil(5); // 140
 
 const OWCPA_MSGBYTES: usize = 2 * PACK_TRINARY_BYTES; // 280
-const OWCPA_PUBLICKEYBYTES: usize = (LOGQ * PACK_DEG + 7) / 8; // 1138
+const OWCPA_PUBLICKEYBYTES: usize = (LOGQ * PACK_DEG).div_ceil(8); // 1138
 const OWCPA_SECRETKEYBYTES: usize = 2 * PACK_TRINARY_BYTES + OWCPA_PUBLICKEYBYTES; // 1418
-const OWCPA_BYTES: usize = (LOGQ * PACK_DEG + 7) / 8; // 1138
+const OWCPA_BYTES: usize = (LOGQ * PACK_DEG).div_ceil(8); // 1138
 
 /// Public-key length in bytes.
 pub const PUBLIC_KEY_BYTES: usize = OWCPA_PUBLICKEYBYTES; // 1138
@@ -80,10 +80,10 @@ fn poly_lift_hrss(r: &mut [u16; N], a: &[u16; N]) {
     b[2] = a[2].wrapping_mul(2u16.wrapping_sub(t));
 
     let mut zj: u16 = 0; // z[1]
-    for i in 3..N {
-        b[0] = b[0].wrapping_add(a[i].wrapping_mul(zj.wrapping_add(2 * t)));
-        b[1] = b[1].wrapping_add(a[i].wrapping_mul(zj.wrapping_add(t)));
-        b[2] = b[2].wrapping_add(a[i].wrapping_mul(zj));
+    for &ai in a.iter().skip(3) {
+        b[0] = b[0].wrapping_add(ai.wrapping_mul(zj.wrapping_add(2 * t)));
+        b[1] = b[1].wrapping_add(ai.wrapping_mul(zj.wrapping_add(t)));
+        b[2] = b[2].wrapping_add(ai.wrapping_mul(zj));
         // `t` and `zj` are public constants of the loop iteration, so a
         // hardware modulo is fine here; the rest of the file routes
         // mod-3 reductions through `crate::public_key::ntru_pqc_shared::mod3`
@@ -122,9 +122,8 @@ fn sample_iid_plus(r: &mut [u16; N], uniform_bytes: &[u8]) {
     crate::public_key::ntru_pqc_shared::sample_iid::<N>(r, uniform_bytes);
 
     // Map {0, 1, 2} -> {0, 1, 2^16 - 1}
-    for i in 0..N - 1 {
-        let c = r[i];
-        r[i] = c | (0u16.wrapping_sub(c >> 1));
+    for c in r.iter_mut().take(N - 1) {
+        *c |= 0u16.wrapping_sub(*c >> 1);
     }
 
     // s = <x * r, r>; r[N-1] is zero. All arithmetic is u16 wrapping;
@@ -145,8 +144,8 @@ fn sample_iid_plus(r: &mut [u16; N], uniform_bytes: &[u8]) {
     }
 
     // Map {0, 1, 2^16-1} -> {0, 1, 2}
-    for i in 0..N {
-        r[i] = 3 & (r[i] ^ (r[i] >> 15));
+    for c in r.iter_mut() {
+        *c = 3 & (*c ^ (*c >> 15));
     }
 }
 

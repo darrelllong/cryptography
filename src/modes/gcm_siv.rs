@@ -2,6 +2,13 @@
 //!
 //! This module provides fixed-profile AES-128-GCM-SIV and AES-256-GCM-SIV
 //! constructions with 96-bit nonces and 16-byte detached tags.
+//!
+//! # Nonce reuse
+//!
+//! GCM-SIV is misuse-resistant: encryption is deterministic, so repeating a
+//! nonce under the same key only reveals whether two messages are identical.
+//! It does not leak plaintext contents or the authentication key. Unique
+//! nonces are still preferred.
 
 use crate::{Aes128, Aes256, BlockCipher};
 
@@ -175,12 +182,12 @@ fn encrypt_core<C: BlockCipher>(
 
 fn aes_ctr_le32_enc(enc: &EncCipher, initial_counter: &[u8; 16], input: &[u8]) -> Vec<u8> {
     let mut block = *initial_counter;
-    let mut out = Vec::with_capacity(input.len());
-    for chunk in input.chunks(16) {
+    let mut out = input.to_vec();
+    for chunk in out.chunks_mut(16) {
         let mut stream = block;
         enc.encrypt_block(&mut stream);
-        for i in 0..chunk.len() {
-            out.push(chunk[i] ^ stream[i]);
+        for (byte, key) in chunk.iter_mut().zip(stream.iter()) {
+            *byte ^= key;
         }
         increment_le32(&mut block);
     }

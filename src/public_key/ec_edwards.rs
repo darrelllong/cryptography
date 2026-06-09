@@ -67,9 +67,9 @@ use std::sync::OnceLock;
 ///
 /// All constants are ordinary residues in `[0, p)`.  Two [`MontgomeryCtx`]
 /// values are pre-built at construction: one for field arithmetic mod `p` and
-/// one for scalar arithmetic mod `n`.  An additional `d2 = 2·d mod p` is
-/// cached because the unified addition formula multiplies by `2·d` in the hot
-/// path.
+/// one for scalar arithmetic mod `n`.  Montgomery encodings of `a` and
+/// `2·d mod p` are also cached because the extended-coordinate formulas
+/// multiply by them in the hot path.
 #[derive(Clone, Debug)]
 pub struct TwistedEdwardsCurve {
     /// Field prime `p`.
@@ -78,8 +78,11 @@ pub struct TwistedEdwardsCurve {
     pub a: BigUint,
     /// Curve coefficient `d`.
     pub d: BigUint,
-    /// `2·d mod p`, cached for the unified addition formula.
-    pub(crate) d2: BigUint,
+    /// Montgomery encodings of `a` and `2·d`, cached because the extended
+    /// point formulas run entirely in the Montgomery domain (`2·d` feeds the
+    /// unified addition formula).
+    pub(crate) a_mont: BigUint,
+    pub(crate) d2_mont: BigUint,
     /// Prime order of the base-point subgroup.
     pub n: BigUint,
     /// x-coordinate of the standard base point `G`.
@@ -170,12 +173,13 @@ impl EdwardsPoint {
 // ─── ExtendedPoint ──────────────────────────────────────────────────────────
 
 impl ExtendedPoint {
-    /// The neutral element `(0, 1, 1, 0)` in extended coordinates.
-    fn neutral() -> Self {
+    /// The neutral element `(0, 1, 1, 0)` in extended coordinates, with the
+    /// non-zero coordinates in the Montgomery domain of `ctx`.
+    fn neutral(ctx: &MontgomeryCtx) -> Self {
         Self {
             x: BigUint::zero(),
-            y: BigUint::one(),
-            z: BigUint::one(),
+            y: ctx.one_mont().clone(),
+            z: ctx.one_mont().clone(),
             t: BigUint::zero(),
         }
     }
@@ -184,24 +188,27 @@ impl ExtendedPoint {
         self.x.is_zero() && self.y == self.z
     }
 
-    /// Lift an affine point to extended coordinates with `Z = 1`.
+    /// Lift an affine point to extended coordinates with `Z = 1`, encoding
+    /// every coordinate into the Montgomery domain.
     ///
     /// For affine `(x, y)`: extended `(x, y, 1, x·y)`.
     /// For the neutral element `(0, 1)`: extended `(0, 1, 1, 0)`.
     fn from_affine(p: &EdwardsPoint, ctx: &MontgomeryCtx) -> Self {
         if p.neutral {
-            return Self::neutral();
+            return Self::neutral(ctx);
         }
-        let t = ctx.mul(&p.x, &p.y);
+        let x = ctx.encode(&p.x);
+        let y = ctx.encode(&p.y);
+        let t = ctx.mul_mont(&x, &y);
         Self {
-            x: p.x.clone(),
-            y: p.y.clone(),
-            z: BigUint::one(),
+            x,
+            y,
+            z: ctx.one_mont().clone(),
             t,
         }
     }
 
-    /// Convert back to affine coordinates.
+    /// Convert back to affine coordinates (and out of the Montgomery domain).
     ///
     /// Recovers `x = X/Z` and `y = Y/Z` via Fermat inversion
     /// `Z⁻¹ = Z^{p−2} mod p`.  The projective neutral `(0 : Z : Z : 0)` is
@@ -212,19 +219,24 @@ impl ExtendedPoint {
             return EdwardsPoint::neutral();
         }
 
+        let ctx = &curve.field;
+
         // Fast path: a freshly lifted affine point keeps `Z = 1` until it
         // actually goes through a non-trivial addition or doubling.  In that
         // case there is no need to pay for a Fermat inversion.
-        if self.z == BigUint::one() {
-            return EdwardsPoint::new(self.x.clone(), self.y.clone());
+        if self.z == *ctx.one_mont() {
+            return EdwardsPoint::new(ctx.decode(&self.x), ctx.decode(&self.y));
         }
 
-        let ctx = &curve.field;
-        let p_minus_2 = curve.p.sub_ref(&BigUint::from_u64(2));
-        let z_inv = ctx.pow(&self.z, &p_minus_2);
+        let x = ctx.decode(&self.x);
+        let y = ctx.decode(&self.y);
+        let z = ctx.decode(&self.z);
 
-        let x = ctx.mul(&self.x, &z_inv);
-        let y = ctx.mul(&self.y, &z_inv);
+        let p_minus_2 = curve.p.sub_ref(&BigUint::from_u64(2));
+        let z_inv = ctx.pow(&z, &p_minus_2);
+
+        let x = ctx.mul(&x, &z_inv);
+        let y = ctx.mul(&y, &z_inv);
 
         EdwardsPoint::new(x, y)
     }
@@ -292,19 +304,19 @@ fn point_add_extended(
     // A = (Y₁ − X₁)·(Y₂ − X₂)
     let y1_m_x1 = fsub(&p1.y, &p1.x, m);
     let y2_m_x2 = fsub(&p2.y, &p2.x, m);
-    let a = ctx.mul(&y1_m_x1, &y2_m_x2);
+    let a = ctx.mul_mont(&y1_m_x1, &y2_m_x2);
 
     // B = (Y₁ + X₁)·(Y₂ + X₂)
     let y1_p_x1 = fadd(&p1.y, &p1.x, m);
     let y2_p_x2 = fadd(&p2.y, &p2.x, m);
-    let b = ctx.mul(&y1_p_x1, &y2_p_x2);
+    let b = ctx.mul_mont(&y1_p_x1, &y2_p_x2);
 
-    // C = T₁·2d·T₂  (using the precomputed d2 = 2d mod p)
-    let t2_scaled = ctx.mul(&p2.t, &curve.d2);
-    let c = ctx.mul(&p1.t, &t2_scaled);
+    // C = T₁·2d·T₂  (using the precomputed Montgomery-form d2 = 2d mod p)
+    let t2_scaled = ctx.mul_mont(&p2.t, &curve.d2_mont);
+    let c = ctx.mul_mont(&p1.t, &t2_scaled);
 
     // D = Z₁·2·Z₂  =  2·(Z₁·Z₂)
-    let z1z2 = ctx.mul(&p1.z, &p2.z);
+    let z1z2 = ctx.mul_mont(&p1.z, &p2.z);
     let d = fadd(&z1z2, &z1z2, m);
 
     // E = B−A,  F = D−C,  G = D+C,  H = B+A
@@ -314,10 +326,10 @@ fn point_add_extended(
     let h = fadd(&b, &a, m); // correct for a = −1: H = B − a·A = B + A
 
     ExtendedPoint {
-        x: ctx.mul(&e, &f),
-        y: ctx.mul(&g, &h),
-        z: ctx.mul(&f, &g),
-        t: ctx.mul(&e, &h),
+        x: ctx.mul_mont(&e, &f),
+        y: ctx.mul_mont(&g, &h),
+        z: ctx.mul_mont(&f, &g),
+        t: ctx.mul_mont(&e, &h),
     }
 }
 
@@ -327,21 +339,21 @@ fn point_add_extended(
 /// coordinates. For the built-in Ed25519 domain (`a = -1`) this saves field
 /// multiplications compared with reusing the unified addition formula.
 fn point_double_extended(curve: &TwistedEdwardsCurve, p1: &ExtendedPoint) -> ExtendedPoint {
+    let ctx = &curve.field;
     if p1.is_neutral() {
-        return ExtendedPoint::neutral();
+        return ExtendedPoint::neutral(ctx);
     }
 
-    let ctx = &curve.field;
     let m = &curve.p;
 
-    let a = ctx.square(&p1.x);
-    let b = ctx.square(&p1.y);
-    let z2 = ctx.square(&p1.z);
+    let a = ctx.square_mont(&p1.x);
+    let b = ctx.square_mont(&p1.y);
+    let z2 = ctx.square_mont(&p1.z);
     let c = fadd(&z2, &z2, m);
-    let d = ctx.mul(&curve.a, &a);
+    let d = ctx.mul_mont(&curve.a_mont, &a);
     let x_plus_y = fadd(&p1.x, &p1.y, m);
     let e = {
-        let sum_sq = ctx.square(&x_plus_y);
+        let sum_sq = ctx.square_mont(&x_plus_y);
         fsub(&fsub(&sum_sq, &a, m), &b, m)
     };
     let g = fadd(&d, &b, m);
@@ -349,10 +361,10 @@ fn point_double_extended(curve: &TwistedEdwardsCurve, p1: &ExtendedPoint) -> Ext
     let h = fsub(&d, &b, m);
 
     ExtendedPoint {
-        x: ctx.mul(&e, &f),
-        y: ctx.mul(&g, &h),
-        t: ctx.mul(&e, &h),
-        z: ctx.mul(&f, &g),
+        x: ctx.mul_mont(&e, &f),
+        y: ctx.mul_mont(&g, &h),
+        t: ctx.mul_mont(&e, &h),
+        z: ctx.mul_mont(&f, &g),
     }
 }
 
@@ -375,7 +387,7 @@ fn precompute_window_table(
 ) -> Vec<ExtendedPoint> {
     let table_size = 1usize << window_bits;
     let mut table = Vec::with_capacity(table_size);
-    table.push(ExtendedPoint::neutral());
+    table.push(ExtendedPoint::neutral(&curve.field));
     table.push(point.clone());
     for _ in 2..table_size {
         let next = point_add_extended(curve, table.last().expect("table non-empty"), point);
@@ -394,7 +406,7 @@ fn scalar_mul_with_table(
         return EdwardsPoint::neutral();
     }
 
-    let mut result = ExtendedPoint::neutral();
+    let mut result = ExtendedPoint::neutral(&curve.field);
     let windows = k.bits().div_ceil(window_bits);
     for window_index in (0..windows).rev() {
         for _ in 0..window_bits {
@@ -485,11 +497,14 @@ impl TwistedEdwardsCurve {
                 v
             }
         };
+        let a_mont = field.encode(&a);
+        let d2_mont = field.encode(&d2);
         Some(Self {
             p,
             a,
             d,
-            d2,
+            a_mont,
+            d2_mont,
             n,
             gx,
             gy,

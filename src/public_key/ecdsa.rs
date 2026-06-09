@@ -37,9 +37,7 @@ use core::fmt;
 use crate::hash::Digest;
 use crate::public_key::bigint::BigUint;
 use crate::public_key::ec::{AffinePoint, CurveParams};
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::{mod_inverse, random_nonzero_below};
 use crate::Csprng;
 use crate::Hmac;
@@ -293,42 +291,32 @@ impl EcdsaPublicKey {
         Self::from_key_blob(&blob)
     }
 
-    /// # Panics
+    /// Schema fields for the crate-defined serialization formats.
     ///
     /// Panics only if a binary-field curve reports a degree that does not fit
     /// in `u64`, which would indicate malformed curve parameters.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
+    fn serial_fields(&self) -> Vec<BigUint> {
         let h = BigUint::from_u64(self.curve.h);
         let degree = BigUint::from_u64(
             u64::try_from(self.curve.gf2m_degree().unwrap_or(0)).expect("degree fits in u64"),
         );
-        xml_wrap(
-            "EcdsaPublicKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("b", &self.curve.b),
-                ("n", &self.curve.n),
-                ("h", &h),
-                ("degree", &degree),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("qx", &self.q.x),
-                ("qy", &self.q.y),
-            ],
-        )
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.b.clone(),
+            self.curve.n.clone(),
+            h,
+            degree,
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.q.x.clone(),
+            self.q.y.clone(),
+        ]
     }
 
-    /// Returns `None` if the XML root element, tag names, or integer encoding is invalid.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EcdsaPublicKey",
-            &["p", "a", "b", "n", "h", "degree", "gx", "gy", "qx", "qy"],
-            xml,
-        )?
-        .into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let field_prime = fields.next()?;
         let curve_a = fields.next()?;
         let curve_b = fields.next()?;
@@ -339,9 +327,6 @@ impl EcdsaPublicKey {
         let base_y = fields.next()?;
         let public_x = fields.next()?;
         let public_y = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let cofactor = biguint_to_u64(&cofactor_big)?;
         let field_degree = usize::try_from(biguint_to_u64(&degree_big)?).ok()?;
         let curve = if field_degree > 0 {
@@ -378,6 +363,12 @@ impl EcdsaPublicKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EcdsaPublicKey,
+    "EcdsaPublicKey",
+    ["p", "a", "b", "n", "h", "degree", "gx", "gy", "qx", "qy"]
+);
 
 // ─── EcdsaPrivateKey ──────────────────────────────────────────────────────────
 
@@ -609,41 +600,31 @@ impl EcdsaPrivateKey {
         Self::from_key_blob(&blob)
     }
 
-    /// # Panics
+    /// Schema fields for the crate-defined serialization formats.
     ///
     /// Panics only if a binary-field curve reports a degree that does not fit
     /// in `u64`, which would indicate malformed curve parameters.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
+    fn serial_fields(&self) -> Vec<BigUint> {
         let h = BigUint::from_u64(self.curve.h);
         let degree = BigUint::from_u64(
             u64::try_from(self.curve.gf2m_degree().unwrap_or(0)).expect("degree fits in u64"),
         );
-        xml_wrap(
-            "EcdsaPrivateKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("b", &self.curve.b),
-                ("n", &self.curve.n),
-                ("h", &h),
-                ("degree", &degree),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("d", &self.d),
-            ],
-        )
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.b.clone(),
+            self.curve.n.clone(),
+            h,
+            degree,
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.d.clone(),
+        ]
     }
 
-    /// Returns `None` if the XML root element, tag names, or integer encoding is invalid.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EcdsaPrivateKey",
-            &["p", "a", "b", "n", "h", "degree", "gx", "gy", "d"],
-            xml,
-        )?
-        .into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let field_prime = fields.next()?;
         let curve_a = fields.next()?;
         let curve_b = fields.next()?;
@@ -653,9 +634,6 @@ impl EcdsaPrivateKey {
         let base_x = fields.next()?;
         let base_y = fields.next()?;
         let private_scalar = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let cofactor = biguint_to_u64(&cofactor_big)?;
         let field_degree = usize::try_from(biguint_to_u64(&degree_big)?).ok()?;
         let curve = if field_degree > 0 {
@@ -690,6 +668,12 @@ impl EcdsaPrivateKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EcdsaPrivateKey,
+    "EcdsaPrivateKey",
+    ["p", "a", "b", "n", "h", "degree", "gx", "gy", "d"]
+);
 
 impl fmt::Debug for EcdsaPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

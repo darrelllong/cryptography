@@ -9,7 +9,8 @@ use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::primes::{
-    gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime,
+    gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_nonzero_below,
+    random_probable_prime,
 };
 use crate::Csprng;
 
@@ -127,6 +128,12 @@ impl RsaPrivateKey {
     /// private exponents (`dP`, `dQ`) and two CRT exponentiations to recover
     /// throughput. Even with CRT, public encrypt is usually faster because the
     /// public exponent is sparse.
+    ///
+    /// This operation is **unblinded**: the variable-time bigint stack sees
+    /// the raw ciphertext, so an adversary who can time many decryptions of
+    /// chosen ciphertexts learns information correlated with the private
+    /// CRT state. Prefer [`Self::decrypt_raw_blinded`] whenever a CSPRNG is
+    /// available.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &BigUint) -> BigUint {
         // RSA-CRT:
@@ -151,6 +158,37 @@ impl RsaPrivateKey {
         };
         let h = BigUint::mod_mul(&self.q_inv, &delta, &self.p);
         m2.add_ref(&self.q.mul_ref(&h))
+    }
+
+    /// Apply the raw private operation with multiplicative (base) blinding.
+    ///
+    /// Draws a fresh blinding factor `r`, computes
+    /// `m = (c · r^e)^d · r^{-1} mod n`, so the CRT exponentiation never
+    /// operates on the attacker-chosen ciphertext directly. This decorrelates
+    /// the timing of the variable-time bigint stack from the ciphertext;
+    /// the classic countermeasure to remote timing attacks on RSA
+    /// (Brumley–Boneh 2003, after Kocher 1996).
+    ///
+    /// The exponents themselves are still processed in variable time — this
+    /// is ciphertext blinding, not a constant-time exponentiation.
+    #[must_use]
+    pub fn decrypt_raw_blinded<R: Csprng>(&self, ciphertext: &BigUint, rng: &mut R) -> BigUint {
+        loop {
+            let Some(r) = random_nonzero_below(rng, &self.n) else {
+                // Only reachable for degenerate moduli (n <= 1); retry is
+                // harmless and keeps the API total for valid keys.
+                continue;
+            };
+            // gcd(r, n) != 1 would mean r shares a factor with n — for a
+            // well-formed key this has probability ~ 1/p + 1/q; retry.
+            let Some(r_inv) = mod_inverse(&r, &self.n) else {
+                continue;
+            };
+            let r_e = mod_pow(&r, &self.e, &self.n);
+            let blinded = BigUint::mod_mul(ciphertext, &r_e, &self.n);
+            let m_blinded = self.decrypt_raw(&blinded);
+            return BigUint::mod_mul(&m_blinded, &r_inv, &self.n);
+        }
     }
 }
 
@@ -339,6 +377,24 @@ mod tests {
         let ciphertext = public.encrypt_raw(&message);
         assert_eq!(ciphertext, BigUint::from_u64(2_790));
         assert_eq!(private.decrypt_raw(&ciphertext), message);
+    }
+
+    #[test]
+    fn blinded_decrypt_matches_unblinded() {
+        let seed = [0x21u8; 48];
+        let mut rng = crate::CtrDrbgAes256::new(&seed);
+        let p = BigUint::from_u64(61);
+        let q = BigUint::from_u64(53);
+        let (public, private) = Rsa::from_primes(&p, &q).expect("valid RSA key");
+
+        for msg in [0u64, 1, 2, 65, 123, 3_232] {
+            let message = BigUint::from_u64(msg);
+            let ciphertext = public.encrypt_raw(&message);
+            assert_eq!(
+                private.decrypt_raw_blinded(&ciphertext, &mut rng),
+                private.decrypt_raw(&ciphertext)
+            );
+        }
     }
 
     #[test]

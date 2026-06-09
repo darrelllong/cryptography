@@ -34,6 +34,10 @@
 //! The shared cyclic-multiply test cross-checks every output coefficient
 //! against the textbook double-loop reference at the production `N` values.
 
+// Empirically validated on Apple Silicon (2026-06): 32 is measurably slower
+// (deeper recursion overhead); 48, 64, and 96 are indistinguishable within
+// benchmark noise for the round-3 N values, so the schoolbook crossover
+// stays at 48.
 const KARA_THRESHOLD: usize = 48;
 
 /// Schoolbook polynomial multiply: `c = a * b` with `|c| = |a| + |b| - 1`.

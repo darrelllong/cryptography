@@ -9,9 +9,7 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
     generate_prime_order_group, is_probable_prime, mod_pow, random_nonzero_below,
 };
@@ -167,88 +165,24 @@ impl ElGamalPublicKey {
         Some(ciphertext.to_key_blob())
     }
 
-    /// Encode the public key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.exponent_bound, &self.g, &self.b])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.p.clone(),
+            self.exponent_bound.clone(),
+            self.g.clone(),
+            self.b.clone(),
+        ]
     }
 
-    /// Decode the public key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let exponent_bound = fields.next()?;
         let g = fields.next()?;
         let b = fields.next()?;
-        if fields.next().is_some()
-            || p <= BigUint::one()
-            || !p.is_odd()
-            || exponent_bound <= BigUint::one()
-            || exponent_bound >= p
-            || g <= BigUint::one()
-            || g >= p
-            || b.is_zero()
-            || b >= p
-        {
-            return None;
-        }
-        let p_ctx = MontgomeryCtx::new(&p);
-        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
-        let b_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&b));
-        Some(Self {
-            p,
-            exponent_bound,
-            g,
-            b,
-            g_mont,
-            b_mont,
-            p_ctx,
-        })
-    }
-
-    /// Encode the public key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(ELGAMAL_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the public key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "ElGamalPublicKey",
-            &[
-                ("p", &self.p),
-                ("exponent-bound", &self.exponent_bound),
-                ("generator", &self.g),
-                ("public-component", &self.b),
-            ],
-        )
-    }
-
-    /// Decode the public key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(ELGAMAL_PUBLIC_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the public key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "ElGamalPublicKey",
-            &["p", "exponent-bound", "generator", "public-component"],
-            xml,
-        )?
-        .into_iter();
-        let p = fields.next()?;
-        let exponent_bound = fields.next()?;
-        let g = fields.next()?;
-        let b = fields.next()?;
-        if fields.next().is_some()
-            || p <= BigUint::one()
+        if p <= BigUint::one()
             || !p.is_odd()
             || exponent_bound <= BigUint::one()
             || exponent_bound >= p
@@ -273,6 +207,17 @@ impl ElGamalPublicKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    ElGamalPublicKey,
+    "ElGamalPublicKey",
+    ["p", "exponent-bound", "generator", "public-component"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    ElGamalPublicKey,
+    ELGAMAL_PUBLIC_LABEL,
+    ["p", "exponent-bound", "generator", "public-component"]
+);
 
 impl ElGamalPrivateKey {
     /// Return the prime modulus.
@@ -338,74 +283,22 @@ impl ElGamalPrivateKey {
         Some(self.decrypt(&ciphertext))
     }
 
-    /// Encode the private key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.exponent_modulus, &self.a])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.p.clone(),
+            self.exponent_modulus.clone(),
+            self.a.clone(),
+        ]
     }
 
-    /// Decode the private key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let exponent_modulus = fields.next()?;
         let a = fields.next()?;
-        if fields.next().is_some()
-            || p <= BigUint::one()
-            || !p.is_odd()
-            || exponent_modulus <= BigUint::one()
-            || exponent_modulus >= p
-            || a.is_zero()
-            || a >= exponent_modulus
-        {
-            return None;
-        }
-        let p_ctx = MontgomeryCtx::new(&p);
-        Some(Self {
-            p,
-            exponent_modulus,
-            a,
-            p_ctx,
-        })
-    }
-
-    /// Encode the private key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(ELGAMAL_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the private key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "ElGamalPrivateKey",
-            &[
-                ("p", &self.p),
-                ("exponent-modulus", &self.exponent_modulus),
-                ("a", &self.a),
-            ],
-        )
-    }
-
-    /// Decode the private key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(ELGAMAL_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the private key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields =
-            xml_unwrap("ElGamalPrivateKey", &["p", "exponent-modulus", "a"], xml)?.into_iter();
-        let p = fields.next()?;
-        let exponent_modulus = fields.next()?;
-        let a = fields.next()?;
-        if fields.next().is_some()
-            || p <= BigUint::one()
+        if p <= BigUint::one()
             || !p.is_odd()
             || exponent_modulus <= BigUint::one()
             || exponent_modulus >= p
@@ -423,6 +316,17 @@ impl ElGamalPrivateKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    ElGamalPrivateKey,
+    "ElGamalPrivateKey",
+    ["p", "exponent-modulus", "a"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    ElGamalPrivateKey,
+    ELGAMAL_PRIVATE_LABEL,
+    ["p", "exponent-modulus", "a"]
+);
 
 impl fmt::Debug for ElGamalPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

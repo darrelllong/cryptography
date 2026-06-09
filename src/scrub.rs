@@ -108,6 +108,35 @@ mod tests {
     }
 
     #[test]
+    fn unsafe_code_stays_confined_to_audited_sites() {
+        // Policy gate:
+        // - the crate root must deny unsafe_code;
+        // - ct.rs may contain exactly one unsafe block (volatile zeroization);
+        // - sha3.rs unsafe is allowed only behind the opt-in `arm-sha3`
+        //   feature, so a default build is pure safe Rust besides ct.rs.
+        let lib = include_str!("lib.rs");
+        assert!(
+            lib.contains("#![deny(unsafe_code)]"),
+            "lib.rs must enforce #![deny(unsafe_code)]"
+        );
+
+        let ct = include_str!("ct.rs");
+        assert_eq!(
+            ct.matches("unsafe {").count(),
+            1,
+            "ct.rs must contain exactly one unsafe block (zeroize_slice)"
+        );
+        assert!(!ct.contains("unsafe fn"), "ct.rs must not add unsafe fns");
+
+        let sha3 = include_str!("hash/sha3.rs");
+        let gate = "#[cfg(all(target_arch = \"aarch64\", feature = \"arm-sha3\"))]";
+        assert!(
+            sha3.matches(gate).count() >= 2,
+            "sha3.rs hardware path must be gated on the arm-sha3 feature (dispatch + impl)"
+        );
+    }
+
+    #[test]
     fn cipher_modules_are_classified_for_ct_policy() {
         // Policy gate:
         // - each public cipher module must be explicitly categorized as either

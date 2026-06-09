@@ -45,9 +45,7 @@ use core::fmt;
 
 use crate::public_key::bigint::BigUint;
 use crate::public_key::ec::{AffinePoint, CurveParams};
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::random_nonzero_below;
 use crate::Csprng;
 
@@ -294,42 +292,32 @@ impl EcElGamalPublicKey {
         Self::from_key_blob(&pem_unwrap(EC_ELGAMAL_PUBLIC_LABEL, pem)?)
     }
 
-    /// # Panics
+    /// Schema fields for the crate-defined serialization formats.
     ///
     /// Panics only if a malformed binary-field degree exceeds `u64`. That
     /// cannot happen for valid curve parameters in this crate.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
+    fn serial_fields(&self) -> Vec<BigUint> {
         let cofactor = BigUint::from_u64(self.curve.h);
         let degree = BigUint::from_u64(
             u64::try_from(self.curve.gf2m_degree().unwrap_or(0)).expect("degree fits in u64"),
         );
-        xml_wrap(
-            "EcElGamalPublicKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("b", &self.curve.b),
-                ("n", &self.curve.n),
-                ("h", &cofactor),
-                ("degree", &degree),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("qx", &self.q.x),
-                ("qy", &self.q.y),
-            ],
-        )
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.b.clone(),
+            self.curve.n.clone(),
+            cofactor,
+            degree,
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.q.x.clone(),
+            self.q.y.clone(),
+        ]
     }
 
-    /// Returns `None` if the XML root element, tag names, or integer encoding is invalid.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EcElGamalPublicKey",
-            &["p", "a", "b", "n", "h", "degree", "gx", "gy", "qx", "qy"],
-            xml,
-        )?
-        .into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let field_prime = fields.next()?;
         let curve_a = fields.next()?;
         let curve_b = fields.next()?;
@@ -340,9 +328,6 @@ impl EcElGamalPublicKey {
         let base_y = fields.next()?;
         let public_x = fields.next()?;
         let public_y = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let cofactor = biguint_to_u64(&cofactor_big)?;
         let field_degree = usize::try_from(biguint_to_u64(&degree_big)?).ok()?;
         let curve = if field_degree > 0 {
@@ -376,6 +361,12 @@ impl EcElGamalPublicKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EcElGamalPublicKey,
+    "EcElGamalPublicKey",
+    ["p", "a", "b", "n", "h", "degree", "gx", "gy", "qx", "qy"]
+);
 
 // ─── EcElGamalPrivateKey ──────────────────────────────────────────────────────
 
@@ -519,41 +510,31 @@ impl EcElGamalPrivateKey {
         Self::from_key_blob(&pem_unwrap(EC_ELGAMAL_PRIVATE_LABEL, pem)?)
     }
 
-    /// # Panics
+    /// Schema fields for the crate-defined serialization formats.
     ///
     /// Panics only if a malformed binary-field degree exceeds `u64`. That
     /// cannot happen for valid curve parameters in this crate.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
+    fn serial_fields(&self) -> Vec<BigUint> {
         let cofactor = BigUint::from_u64(self.curve.h);
         let degree = BigUint::from_u64(
             u64::try_from(self.curve.gf2m_degree().unwrap_or(0)).expect("degree fits in u64"),
         );
-        xml_wrap(
-            "EcElGamalPrivateKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("b", &self.curve.b),
-                ("n", &self.curve.n),
-                ("h", &cofactor),
-                ("degree", &degree),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("d", &self.d),
-            ],
-        )
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.b.clone(),
+            self.curve.n.clone(),
+            cofactor,
+            degree,
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.d.clone(),
+        ]
     }
 
-    /// Returns `None` if the XML root element, tag names, or integer encoding is invalid.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EcElGamalPrivateKey",
-            &["p", "a", "b", "n", "h", "degree", "gx", "gy", "d"],
-            xml,
-        )?
-        .into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let field_prime = fields.next()?;
         let curve_a = fields.next()?;
         let curve_b = fields.next()?;
@@ -563,9 +544,6 @@ impl EcElGamalPrivateKey {
         let base_x = fields.next()?;
         let base_y = fields.next()?;
         let private_scalar = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let cofactor = biguint_to_u64(&cofactor_big)?;
         let field_degree = usize::try_from(biguint_to_u64(&degree_big)?).ok()?;
         let curve = if field_degree > 0 {
@@ -601,6 +579,12 @@ impl EcElGamalPrivateKey {
     }
 }
 
+crate::public_key::io::impl_xml_serialization!(
+    EcElGamalPrivateKey,
+    "EcElGamalPrivateKey",
+    ["p", "a", "b", "n", "h", "degree", "gx", "gy", "d"]
+);
+
 impl fmt::Debug for EcElGamalPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("EcElGamalPrivateKey(<redacted>)")
@@ -622,76 +606,43 @@ impl EcElGamalCiphertext {
         &self.c2
     }
 
-    /// Encode as `[C1x, C1y, C2x, C2y]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.c1.x, &self.c1.y, &self.c2.x, &self.c2.y])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.c1.x.clone(),
+            self.c1.y.clone(),
+            self.c2.x.clone(),
+            self.c2.y.clone(),
+        ]
     }
 
-    /// Decode from binary format.  Does not check that points are on any
-    /// particular curve (that would require curve parameters).
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
-        let c1x = fields.next()?;
-        let c1y = fields.next()?;
-        let c2x = fields.next()?;
-        let c2y = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
-        Some(Self {
-            c1: AffinePoint::new(c1x, c1y),
-            c2: AffinePoint::new(c2x, c2y),
-        })
-    }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(EC_ELGAMAL_CT_LABEL, &self.to_key_blob())
-    }
-
-    /// Returns `None` if the PEM label does not match or the payload is malformed.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_key_blob(&pem_unwrap(EC_ELGAMAL_CT_LABEL, pem)?)
-    }
-
-    /// # Panics
+    /// Validate schema fields and rebuild the ciphertext.
     ///
-    /// Panics only if an internal XML field name is malformed, which cannot
-    /// happen for the fixed schema used by this type.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "EcElGamalCiphertext",
-            &[
-                ("c1x", &self.c1.x),
-                ("c1y", &self.c1.y),
-                ("c2x", &self.c2.x),
-                ("c2y", &self.c2.y),
-            ],
-        )
-    }
-
-    /// Returns `None` if the XML root element, tag names, or integer encoding is invalid.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields =
-            xml_unwrap("EcElGamalCiphertext", &["c1x", "c1y", "c2x", "c2y"], xml)?.into_iter();
+    /// Does not check that points are on any particular curve (that would
+    /// require curve parameters).
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let c1x = fields.next()?;
         let c1y = fields.next()?;
         let c2x = fields.next()?;
         let c2y = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         Some(Self {
             c1: AffinePoint::new(c1x, c1y),
             c2: AffinePoint::new(c2x, c2y),
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EcElGamalCiphertext,
+    "EcElGamalCiphertext",
+    ["c1x", "c1y", "c2x", "c2y"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    EcElGamalCiphertext,
+    EC_ELGAMAL_CT_LABEL,
+    ["c1x", "c1y", "c2x", "c2y"]
+);
 
 // ─── EcElGamal namespace ─────────────────────────────────────────────────────
 

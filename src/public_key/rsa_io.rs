@@ -10,7 +10,7 @@
 //! interop with older tooling.
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::io::{pem_unwrap, pem_wrap, xml_unwrap, xml_wrap};
+use crate::public_key::io::{pem_unwrap, pem_wrap};
 use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
 
 const RSA_ENCRYPTION_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
@@ -49,19 +49,6 @@ impl RsaPublicKey {
     #[must_use]
     pub fn to_spki_pem(&self) -> String {
         pem_wrap("PUBLIC KEY", &self.to_spki_der())
-    }
-
-    /// Encode the public key as the crate's flat XML form.
-    ///
-    /// This is a convenience export that mirrors the in-memory Rust fields
-    /// directly. Standards-based interchange should still prefer PKCS #1 or
-    /// SPKI.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "RsaPublicKey",
-            &[("e", self.exponent()), ("n", self.modulus())],
-        )
     }
 
     /// Decode a PKCS #1 `RSAPublicKey` structure from DER.
@@ -123,19 +110,24 @@ impl RsaPublicKey {
         Self::from_spki_der(&der)
     }
 
-    /// Decode the public key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("RsaPublicKey", &["e", "n"], xml)?.into_iter();
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.exponent().clone(), self.modulus().clone()]
+    }
+
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let public_exponent = fields.next()?;
         let modulus = fields.next()?;
-        if fields.next().is_some() || public_exponent <= BigUint::one() || modulus <= BigUint::one()
-        {
+        if public_exponent <= BigUint::one() || modulus <= BigUint::one() {
             return None;
         }
         Some(Self::from_components(public_exponent, modulus))
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(RsaPublicKey, "RsaPublicKey", ["e", "n"]);
 
 impl RsaPrivateKey {
     /// Encode the private key as the PKCS #1 `RSAPrivateKey` structure in DER.
@@ -184,24 +176,6 @@ impl RsaPrivateKey {
     #[must_use]
     pub fn to_pkcs8_pem(&self) -> String {
         pem_wrap("PRIVATE KEY", &self.to_pkcs8_der())
-    }
-
-    /// Encode the private key as the crate's flat XML form.
-    ///
-    /// The XML form mirrors the stored key fields directly. PKCS #1 / PKCS #8
-    /// remain the preferred interoperable formats.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "RsaPrivateKey",
-            &[
-                ("e", self.public_exponent()),
-                ("d", self.exponent()),
-                ("n", self.modulus()),
-                ("p", self.prime1()),
-                ("q", self.prime2()),
-            ],
-        )
     }
 
     /// Decode a PKCS #1 `RSAPrivateKey` structure from DER.
@@ -291,18 +265,25 @@ impl RsaPrivateKey {
         Self::from_pkcs8_der(&der)
     }
 
-    /// Decode the private key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("RsaPrivateKey", &["e", "d", "n", "p", "q"], xml)?.into_iter();
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.public_exponent().clone(),
+            self.exponent().clone(),
+            self.modulus().clone(),
+            self.prime1().clone(),
+            self.prime2().clone(),
+        ]
+    }
+
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let public_exponent = fields.next()?;
         let private_exponent = fields.next()?;
         let modulus = fields.next()?;
         let prime1 = fields.next()?;
         let prime2 = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
 
         let (public, private) = Rsa::from_primes_with_exponent(&prime1, &prime2, &public_exponent)?;
         if public.modulus() != &modulus || private.exponent() != &private_exponent {
@@ -311,6 +292,12 @@ impl RsaPrivateKey {
         Some(private)
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    RsaPrivateKey,
+    "RsaPrivateKey",
+    ["e", "d", "n", "p", "q"]
+);
 
 fn der_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(2 + content.len() + 5);

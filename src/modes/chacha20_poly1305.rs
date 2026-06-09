@@ -31,6 +31,12 @@ fn build_poly1305_input(aad: &[u8], ciphertext: &[u8]) -> Vec<u8> {
 
 /// ChaCha20-Poly1305 AEAD (RFC 8439).
 ///
+/// # Nonce reuse
+///
+/// Reusing a nonce under the same key leaks the XOR of the plaintexts and
+/// repeats the one-time Poly1305 key for that nonce, enabling forgeries.
+/// Never reuse a `(key, nonce)` pair.
+///
 /// # Examples
 ///
 /// ```rust

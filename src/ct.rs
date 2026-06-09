@@ -193,6 +193,7 @@ fn eq_mask_u8(a: u8, b: u8) -> u8 {
 ///
 /// Called by `Drop` implementations and `new_wiping` constructors to ensure
 /// expanded round keys do not linger in memory.
+#[allow(unsafe_code)] // sole audited exception to the crate-wide deny: volatile scrub
 pub fn zeroize_slice<T: Copy + Default>(slice: &mut [T]) {
     for item in slice.iter_mut() {
         unsafe { ptr::write_volatile(std::ptr::from_mut::<T>(item), T::default()) };

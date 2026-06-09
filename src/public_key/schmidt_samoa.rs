@@ -9,9 +9,7 @@
 use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
     is_probable_prime, lcm, mod_inverse, mod_pow, random_probable_prime,
 };
@@ -86,55 +84,33 @@ impl SchmidtSamoaPublicKey {
         Some(encode_biguints(&[&ciphertext]))
     }
 
-    /// Encode the public key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.n])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.n.clone()]
     }
 
-    /// Decode the public key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let n = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() {
-            return None;
-        }
-        let n_ctx = MontgomeryCtx::new(&n);
-        Some(Self { n, n_ctx })
-    }
-
-    /// Encode the public key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(SCHMIDT_SAMOA_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the public key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap("SchmidtSamoaPublicKey", &[("n", &self.n)])
-    }
-
-    /// Decode the public key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(SCHMIDT_SAMOA_PUBLIC_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the public key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("SchmidtSamoaPublicKey", &["n"], xml)?.into_iter();
-        let n = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() {
+        if n <= BigUint::one() {
             return None;
         }
         let n_ctx = MontgomeryCtx::new(&n);
         Some(Self { n, n_ctx })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    SchmidtSamoaPublicKey,
+    "SchmidtSamoaPublicKey",
+    ["n"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    SchmidtSamoaPublicKey,
+    SCHMIDT_SAMOA_PUBLIC_LABEL,
+    ["n"]
+);
 
 impl SchmidtSamoaPrivateKey {
     /// Return the private exponent.
@@ -180,58 +156,17 @@ impl SchmidtSamoaPrivateKey {
         Some(self.decrypt(&value))
     }
 
-    /// Encode the private key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.d, &self.gamma])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.d.clone(), self.gamma.clone()]
     }
 
-    /// Decode the private key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let d = fields.next()?;
         let gamma = fields.next()?;
-        if fields.next().is_some() || d.is_zero() || gamma <= BigUint::one() {
-            return None;
-        }
-        let gamma_ctx = MontgomeryCtx::new(&gamma);
-        Some(Self {
-            d,
-            gamma,
-            gamma_ctx,
-        })
-    }
-
-    /// Encode the private key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(SCHMIDT_SAMOA_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the private key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "SchmidtSamoaPrivateKey",
-            &[("d", &self.d), ("gamma", &self.gamma)],
-        )
-    }
-
-    /// Decode the private key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(SCHMIDT_SAMOA_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the private key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("SchmidtSamoaPrivateKey", &["d", "gamma"], xml)?.into_iter();
-        let d = fields.next()?;
-        let gamma = fields.next()?;
-        if fields.next().is_some() || d.is_zero() || gamma <= BigUint::one() {
+        if d.is_zero() || gamma <= BigUint::one() {
             return None;
         }
         let gamma_ctx = MontgomeryCtx::new(&gamma);
@@ -242,6 +177,17 @@ impl SchmidtSamoaPrivateKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    SchmidtSamoaPrivateKey,
+    "SchmidtSamoaPrivateKey",
+    ["d", "gamma"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    SchmidtSamoaPrivateKey,
+    SCHMIDT_SAMOA_PRIVATE_LABEL,
+    ["d", "gamma"]
+);
 
 impl fmt::Debug for SchmidtSamoaPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

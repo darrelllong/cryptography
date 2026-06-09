@@ -165,6 +165,13 @@ fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; 16], data: &mut 
 }
 
 /// RFC 5297 SIV construction parameterized by two block-cipher instances.
+///
+/// # Nonce reuse
+///
+/// SIV is misuse-resistant: encryption is deterministic, so repeating a nonce
+/// (or omitting one) only reveals whether two messages are identical. It does
+/// not leak plaintext contents or authentication keys. Unique nonces are
+/// still preferred.
 pub struct Siv<C> {
     mac_cipher: C,
     ctr_cipher: C,

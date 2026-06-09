@@ -10,9 +10,7 @@ use core::fmt;
 
 use crate::hash::Digest;
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
     generate_prime_order_group, is_probable_prime, mod_inverse, mod_pow, random_nonzero_below,
 };
@@ -181,77 +179,24 @@ impl DsaPublicKey {
         self.verify(digest, &signature)
     }
 
-    /// Encode the public key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.q, &self.g, &self.y])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.p.clone(),
+            self.q.clone(),
+            self.g.clone(),
+            self.y.clone(),
+        ]
     }
 
-    /// Decode the public key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
         let g = fields.next()?;
         let y = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p
-        {
-            return None;
-        }
-        let p_ctx = MontgomeryCtx::new(&p);
-        let q_ctx = MontgomeryCtx::new(&q);
-        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
-        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&y));
-        Some(Self {
-            p,
-            q,
-            g,
-            y,
-            g_mont,
-            y_mont,
-            p_ctx,
-            q_ctx,
-        })
-    }
-
-    /// Encode the public key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(DSA_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the public key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "DsaPublicKey",
-            &[
-                ("p", &self.p),
-                ("q", &self.q),
-                ("g", &self.g),
-                ("y", &self.y),
-            ],
-        )
-    }
-
-    /// Decode the public key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(DSA_PUBLIC_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the public key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("DsaPublicKey", &["p", "q", "g", "y"], xml)?.into_iter();
-        let p = fields.next()?;
-        let q = fields.next()?;
-        let g = fields.next()?;
-        let y = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p
-        {
+        if !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p {
             return None;
         }
         let p_ctx = MontgomeryCtx::new(&p);
@@ -270,6 +215,13 @@ impl DsaPublicKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(DsaPublicKey, "DsaPublicKey", ["p", "q", "g", "y"]);
+crate::public_key::io::impl_blob_pem_serialization!(
+    DsaPublicKey,
+    DSA_PUBLIC_LABEL,
+    ["p", "q", "g", "y"]
+);
 
 impl DsaPrivateKey {
     /// Return the prime modulus.
@@ -433,77 +385,24 @@ impl DsaPrivateKey {
         Some(signature.to_key_blob())
     }
 
-    /// Encode the private key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.q, &self.g, &self.x])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.p.clone(),
+            self.q.clone(),
+            self.g.clone(),
+            self.x.clone(),
+        ]
     }
 
-    /// Decode the private key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
         let g = fields.next()?;
         let x = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
-            return None;
-        }
-        let y = mod_pow(&g, &x, &p);
-        let p_ctx = MontgomeryCtx::new(&p);
-        let q_ctx = MontgomeryCtx::new(&q);
-        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
-        let y_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&y));
-        Some(Self {
-            p,
-            q,
-            g,
-            x,
-            y,
-            g_mont,
-            y_mont,
-            p_ctx,
-            q_ctx,
-        })
-    }
-
-    /// Encode the private key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(DSA_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the private key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "DsaPrivateKey",
-            &[
-                ("p", &self.p),
-                ("q", &self.q),
-                ("g", &self.g),
-                ("x", &self.x),
-            ],
-        )
-    }
-
-    /// Decode the private key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(DSA_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the private key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("DsaPrivateKey", &["p", "q", "g", "x"], xml)?.into_iter();
-        let p = fields.next()?;
-        let q = fields.next()?;
-        let g = fields.next()?;
-        let x = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
+        if !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
         let y = mod_pow(&g, &x, &p);
@@ -524,6 +423,13 @@ impl DsaPrivateKey {
         })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(DsaPrivateKey, "DsaPrivateKey", ["p", "q", "g", "x"]);
+crate::public_key::io::impl_blob_pem_serialization!(
+    DsaPrivateKey,
+    DSA_PRIVATE_LABEL,
+    ["p", "q", "g", "x"]
+);
 
 impl fmt::Debug for DsaPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

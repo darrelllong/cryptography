@@ -24,9 +24,7 @@ use core::fmt;
 use crate::hash::Digest;
 use crate::public_key::bigint::BigUint;
 use crate::public_key::ec_edwards::{EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::Csprng;
 
 const EDDSA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY EDDSA PUBLIC KEY";
@@ -152,27 +150,23 @@ impl EdDsaPublicKey {
         self.verify_message::<H>(message, &signature)
     }
 
-    /// Encode the public key in the crate-defined binary format.
-    ///
-    /// Field layout: `[p, a, d, n, Gx, Gy, Ax, Ay]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[
-            &self.curve.p,
-            &self.curve.a,
-            &self.curve.d,
-            &self.curve.n,
-            &self.curve.gx,
-            &self.curve.gy,
-            &self.a_point.x,
-            &self.a_point.y,
-        ])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.d.clone(),
+            self.curve.n.clone(),
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.a_point.x.clone(),
+            self.a_point.y.clone(),
+        ]
     }
 
-    /// Decode a public key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
         let d = fields.next()?;
@@ -181,9 +175,6 @@ impl EdDsaPublicKey {
         let gy = fields.next()?;
         let ax = fields.next()?;
         let ay = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let curve = TwistedEdwardsCurve::new(p, a, d, n, gx, gy)?;
         // Reject non-canonical coordinates: is_on_curve reduces mod p, so a
         // coordinate of p+k passes the curve equation.  Enforce ax, ay < p.
@@ -201,70 +192,18 @@ impl EdDsaPublicKey {
             a_table,
         })
     }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(EDDSA_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(EDDSA_PUBLIC_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "EdDsaPublicKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("d", &self.curve.d),
-                ("n", &self.curve.n),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("ax", &self.a_point.x),
-                ("ay", &self.a_point.y),
-            ],
-        )
-    }
-
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EdDsaPublicKey",
-            &["p", "a", "d", "n", "gx", "gy", "ax", "ay"],
-            xml,
-        )?
-        .into_iter();
-        let p = fields.next()?;
-        let a = fields.next()?;
-        let d = fields.next()?;
-        let n = fields.next()?;
-        let gx = fields.next()?;
-        let gy = fields.next()?;
-        let ax = fields.next()?;
-        let ay = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
-        let curve = TwistedEdwardsCurve::new(p, a, d, n, gx, gy)?;
-        if ax >= curve.p || ay >= curve.p {
-            return None;
-        }
-        let a_point = EdwardsPoint::new(ax, ay);
-        if !validate_public_point(&curve, &a_point) {
-            return None;
-        }
-        let a_table = curve.precompute_mul_table(&a_point);
-        Some(Self {
-            curve,
-            a_point,
-            a_table,
-        })
-    }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EdDsaPublicKey,
+    "EdDsaPublicKey",
+    ["p", "a", "d", "n", "gx", "gy", "ax", "ay"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    EdDsaPublicKey,
+    EDDSA_PUBLIC_LABEL,
+    ["p", "a", "d", "n", "gx", "gy", "ax", "ay"]
+);
 
 impl EdDsaPrivateKey {
     /// Return the curve parameters.
@@ -346,26 +285,22 @@ impl EdDsaPrivateKey {
         Some(signature.to_key_blob())
     }
 
-    /// Encode the private key in the crate-defined binary format.
-    ///
-    /// Field layout: `[p, a, d, n, Gx, Gy, private]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[
-            &self.curve.p,
-            &self.curve.a,
-            &self.curve.d,
-            &self.curve.n,
-            &self.curve.gx,
-            &self.curve.gy,
-            &self.d,
-        ])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.curve.p.clone(),
+            self.curve.a.clone(),
+            self.curve.d.clone(),
+            self.curve.n.clone(),
+            self.curve.gx.clone(),
+            self.curve.gy.clone(),
+            self.d.clone(),
+        ]
     }
 
-    /// Decode a private key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let a = fields.next()?;
         let d_curve = fields.next()?;
@@ -373,62 +308,6 @@ impl EdDsaPrivateKey {
         let gx = fields.next()?;
         let gy = fields.next()?;
         let d = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
-        let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
-        if d.is_zero() || d >= curve.n {
-            return None;
-        }
-        let a_point = curve.scalar_mul_base(&d);
-        Some(Self { curve, d, a_point })
-    }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(EDDSA_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(EDDSA_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "EdDsaPrivateKey",
-            &[
-                ("p", &self.curve.p),
-                ("a", &self.curve.a),
-                ("d", &self.curve.d),
-                ("n", &self.curve.n),
-                ("gx", &self.curve.gx),
-                ("gy", &self.curve.gy),
-                ("private", &self.d),
-            ],
-        )
-    }
-
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap(
-            "EdDsaPrivateKey",
-            &["p", "a", "d", "n", "gx", "gy", "private"],
-            xml,
-        )?
-        .into_iter();
-        let p = fields.next()?;
-        let a = fields.next()?;
-        let d_curve = fields.next()?;
-        let n = fields.next()?;
-        let gx = fields.next()?;
-        let gy = fields.next()?;
-        let d = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
         if d.is_zero() || d >= curve.n {
             return None;
@@ -437,6 +316,17 @@ impl EdDsaPrivateKey {
         Some(Self { curve, d, a_point })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(
+    EdDsaPrivateKey,
+    "EdDsaPrivateKey",
+    ["p", "a", "d", "n", "gx", "gy", "private"]
+);
+crate::public_key::io::impl_blob_pem_serialization!(
+    EdDsaPrivateKey,
+    EDDSA_PRIVATE_LABEL,
+    ["p", "a", "d", "n", "gx", "gy", "private"]
+);
 
 impl fmt::Debug for EdDsaPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

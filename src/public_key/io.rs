@@ -37,8 +37,6 @@
 //! callers need a tagged interchange format.
 
 use crate::public_key::bigint::BigUint;
-use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
-use quick_xml::{Reader, Writer};
 
 const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
 
@@ -207,33 +205,111 @@ pub(crate) fn pem_unwrap(label: &str, pem: &str) -> Option<Vec<u8>> {
     None
 }
 
+/// Emit `to_xml` / `from_xml` for a key or ciphertext type from its schema.
+///
+/// The type must provide two inherent methods that own the scheme-specific
+/// logic exactly once:
+///
+/// - `fn serial_fields(&self) -> Vec<BigUint>` — the schema fields in order
+///   (owned values, so synthesized fields like cofactors are fine);
+/// - `fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self>` — validate
+///   the fields and rebuild the type (including any derived state). It is
+///   always called with exactly the schema's field count.
+///
+/// Usage: `impl_xml_serialization!(DsaPublicKey, "DsaPublicKey", ["p", "q", "g", "y"]);`
+macro_rules! impl_xml_serialization {
+    ($ty:ident, $root:literal, [$($field:literal),+ $(,)?]) => {
+        impl $ty {
+            /// Encode as the crate's flat XML form (fixed field order,
+            /// uppercase hexadecimal values; see `public_key::io`).
+            #[must_use]
+            pub fn to_xml(&self) -> String {
+                let values = self.serial_fields();
+                let pairs: ::std::vec::Vec<(&str, &crate::public_key::bigint::BigUint)> =
+                    [$($field),+].iter().copied().zip(values.iter()).collect();
+                crate::public_key::io::xml_wrap($root, &pairs)
+            }
+
+            /// Decode from the crate's flat XML form, validating the fields.
+            #[must_use]
+            pub fn from_xml(xml: &str) -> Option<Self> {
+                let fields = crate::public_key::io::xml_unwrap($root, &[$($field),+], xml)?;
+                Self::from_serial_fields(fields)
+            }
+        }
+    };
+}
+pub(crate) use impl_xml_serialization;
+
+/// Emit `to_key_blob` / `from_key_blob` / `to_pem` / `from_pem` for a key
+/// type from its schema. Requires the same `serial_fields` /
+/// `from_serial_fields` pair as [`impl_xml_serialization`]; the field list is
+/// only used for its length (DER bodies are positional).
+macro_rules! impl_blob_pem_serialization {
+    ($ty:ident, $label:expr, [$($field:literal),+ $(,)?]) => {
+        impl $ty {
+            /// Encode as the crate's bare DER `SEQUENCE` of positive `INTEGER`s.
+            #[must_use]
+            pub fn to_key_blob(&self) -> ::std::vec::Vec<u8> {
+                let values = self.serial_fields();
+                let refs: ::std::vec::Vec<&crate::public_key::bigint::BigUint> =
+                    values.iter().collect();
+                crate::public_key::io::encode_biguints(&refs)
+            }
+
+            /// Decode from the crate's bare DER form, validating the fields.
+            #[must_use]
+            pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
+                let fields = crate::public_key::io::decode_biguints(blob)?;
+                if fields.len() != [$($field),+].len() {
+                    return None;
+                }
+                Self::from_serial_fields(fields)
+            }
+
+            /// Encode as PEM text armor over the DER body, using the
+            /// crate-defined label.
+            #[must_use]
+            pub fn to_pem(&self) -> String {
+                crate::public_key::io::pem_wrap($label, &self.to_key_blob())
+            }
+
+            /// Decode from the crate-defined PEM label.
+            #[must_use]
+            pub fn from_pem(pem: &str) -> Option<Self> {
+                let blob = crate::public_key::io::pem_unwrap($label, pem)?;
+                Self::from_key_blob(&blob)
+            }
+        }
+    };
+}
+pub(crate) use impl_blob_pem_serialization;
+
 /// Encode the crate's flat XML representation for one key or ciphertext.
 ///
 /// `root` is the outer element name and `fields` supplies the fixed child
 /// elements in order.
 pub(crate) fn xml_wrap(root: &str, fields: &[(&str, &BigUint)]) -> String {
-    let mut writer = Writer::new(Vec::new());
-    writer
-        .write_event(Event::Start(BytesStart::new(root)))
-        .expect("in-memory XML write cannot fail");
-
+    // Tag names are crate-controlled identifiers and the field values are
+    // uppercase hexadecimal, so no XML escaping is ever required and the
+    // document can be emitted by simple concatenation.
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(root);
+    out.push('>');
     for (name, value) in fields {
-        writer
-            .write_event(Event::Start(BytesStart::new(*name)))
-            .expect("in-memory XML write cannot fail");
-        writer
-            .write_event(Event::Text(BytesText::new(&hex_encode_upper(value))))
-            .expect("in-memory XML write cannot fail");
-        writer
-            .write_event(Event::End(BytesEnd::new(*name)))
-            .expect("in-memory XML write cannot fail");
+        out.push('<');
+        out.push_str(name);
+        out.push('>');
+        out.push_str(&hex_encode_upper(value));
+        out.push_str("</");
+        out.push_str(name);
+        out.push('>');
     }
-
-    writer
-        .write_event(Event::End(BytesEnd::new(root)))
-        .expect("in-memory XML write cannot fail");
-
-    String::from_utf8(writer.into_inner()).expect("XML output is valid UTF-8")
+    out.push_str("</");
+    out.push_str(root);
+    out.push('>');
+    out
 }
 
 /// Parse the crate's flat XML representation for one key or ciphertext.
@@ -242,56 +318,79 @@ pub(crate) fn xml_wrap(root: &str, fields: &[(&str, &BigUint)]) -> String {
 /// names must appear in the expected order, and extra trailing content is
 /// rejected.
 pub(crate) fn xml_unwrap(root: &str, field_names: &[&str], xml: &str) -> Option<Vec<BigUint>> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    let mut scanner = XmlScanner::new(xml);
 
-    let mut buf = Vec::new();
-
-    match reader.read_event_into(&mut buf).ok()? {
-        Event::Start(start) if start.name().as_ref() == root.as_bytes() => {
-            if start.attributes().with_checks(false).next().is_some() {
-                return None;
-            }
-        }
-        _ => return None,
-    }
-    buf.clear();
+    scanner.skip_whitespace();
+    scanner.expect_start_tag(root)?;
 
     let mut out = Vec::with_capacity(field_names.len());
     for &field_name in field_names {
-        match reader.read_event_into(&mut buf).ok()? {
-            Event::Start(start) if start.name().as_ref() == field_name.as_bytes() => {
-                if start.attributes().with_checks(false).next().is_some() {
-                    return None;
-                }
-            }
-            _ => return None,
-        }
-        buf.clear();
-
-        let text = match reader.read_event_into(&mut buf).ok()? {
-            Event::Text(text) => text.decode().ok()?.into_owned(),
-            _ => return None,
-        };
+        scanner.skip_whitespace();
+        scanner.expect_start_tag(field_name)?;
+        let text = scanner.take_text()?;
         out.push(hex_decode_biguint(text.trim())?);
-        buf.clear();
-
-        match reader.read_event_into(&mut buf).ok()? {
-            Event::End(end) if end.name().as_ref() == field_name.as_bytes() => {}
-            _ => return None,
-        }
-        buf.clear();
+        scanner.expect_end_tag(field_name)?;
     }
 
-    match reader.read_event_into(&mut buf).ok()? {
-        Event::End(end) if end.name().as_ref() == root.as_bytes() => {}
-        _ => return None,
+    scanner.skip_whitespace();
+    scanner.expect_end_tag(root)?;
+    scanner.skip_whitespace();
+    if scanner.at_end() {
+        Some(out)
+    } else {
+        None
     }
-    buf.clear();
+}
 
-    match reader.read_event_into(&mut buf).ok()? {
-        Event::Eof => Some(out),
-        _ => None,
+/// Strict cursor over the crate's flat XML key documents.
+///
+/// The format has no attributes, comments, declarations, CDATA, or escaped
+/// text, so tags are matched literally (`<name>` / `</name>`) and anything
+/// else is a parse failure. This deliberately accepts only what `xml_wrap`
+/// emits, modulo whitespace between elements and around field values.
+struct XmlScanner<'a> {
+    rest: &'a str,
+}
+
+impl<'a> XmlScanner<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { rest: input }
+    }
+
+    fn skip_whitespace(&mut self) {
+        self.rest = self.rest.trim_start();
+    }
+
+    /// Consume an exact `<name>` start tag with no attributes.
+    fn expect_start_tag(&mut self, name: &str) -> Option<()> {
+        self.rest = self
+            .rest
+            .strip_prefix('<')?
+            .strip_prefix(name)?
+            .strip_prefix('>')?;
+        Some(())
+    }
+
+    /// Consume an exact `</name>` end tag.
+    fn expect_end_tag(&mut self, name: &str) -> Option<()> {
+        self.rest = self
+            .rest
+            .strip_prefix("</")?
+            .strip_prefix(name)?
+            .strip_prefix('>')?;
+        Some(())
+    }
+
+    /// Take the raw text up to (not including) the next `<`.
+    fn take_text(&mut self) -> Option<&'a str> {
+        let end = self.rest.find('<')?;
+        let (text, rest) = self.rest.split_at(end);
+        self.rest = rest;
+        Some(text)
+    }
+
+    fn at_end(&self) -> bool {
+        self.rest.is_empty()
     }
 }
 

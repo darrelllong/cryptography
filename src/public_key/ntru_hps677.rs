@@ -24,17 +24,17 @@ const PRFKEYBYTES: usize = 32;
 const SHAREDKEYBYTES: usize = 32;
 
 const SAMPLE_IID_BYTES: usize = N - 1;
-const SAMPLE_FT_BYTES: usize = (30 * (N - 1) + 7) / 8;
+const SAMPLE_FT_BYTES: usize = (30 * (N - 1)).div_ceil(8);
 const SAMPLE_FG_BYTES: usize = SAMPLE_IID_BYTES + SAMPLE_FT_BYTES;
 const SAMPLE_RM_BYTES: usize = SAMPLE_IID_BYTES + SAMPLE_FT_BYTES;
 
 const PACK_DEG: usize = N - 1;
-const PACK_TRINARY_BYTES: usize = (PACK_DEG + 4) / 5;
+const PACK_TRINARY_BYTES: usize = PACK_DEG.div_ceil(5);
 
 const OWCPA_MSGBYTES: usize = 2 * PACK_TRINARY_BYTES;
-const OWCPA_PUBLICKEYBYTES: usize = (LOGQ * PACK_DEG + 7) / 8;
+const OWCPA_PUBLICKEYBYTES: usize = (LOGQ * PACK_DEG).div_ceil(8);
 const OWCPA_SECRETKEYBYTES: usize = 2 * PACK_TRINARY_BYTES + OWCPA_PUBLICKEYBYTES;
-const OWCPA_BYTES: usize = (LOGQ * PACK_DEG + 7) / 8;
+const OWCPA_BYTES: usize = (LOGQ * PACK_DEG).div_ceil(8);
 
 /// Public-key length in bytes.
 pub const PUBLIC_KEY_BYTES: usize = OWCPA_PUBLICKEYBYTES;

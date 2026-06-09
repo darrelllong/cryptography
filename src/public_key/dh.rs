@@ -38,9 +38,6 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
 use crate::public_key::primes::{
     generate_prime_order_group, is_probable_prime, mod_pow, random_nonzero_below,
 };
@@ -92,59 +89,26 @@ pub struct Dh;
 // ─── DhParams ─────────────────────────────────────────────────────────────────
 
 impl DhParams {
-    /// Encode in binary format: `[p, q, g]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.q, &self.g])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.p.clone(), self.q.clone(), self.g.clone()]
     }
 
-    /// Decode from binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
         let g = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) {
-            return None;
-        }
-        Some(Self { p, q, g })
-    }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(DH_PARAMS_LABEL, &self.to_key_blob())
-    }
-
-    /// Returns `None` if the PEM label does not match, the payload is malformed,
-    /// or the decoded parameters fail primality / subgroup checks.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_key_blob(&pem_unwrap(DH_PARAMS_LABEL, pem)?)
-    }
-
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "DhParams",
-            &[("p", &self.p), ("q", &self.q), ("g", &self.g)],
-        )
-    }
-
-    /// Returns `None` if the XML is malformed or the decoded parameters fail
-    /// primality / subgroup checks.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("DhParams", &["p", "q", "g"], xml)?.into_iter();
-        let p = fields.next()?;
-        let q = fields.next()?;
-        let g = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) {
+        if !validate_domain(&p, &q, &g) {
             return None;
         }
         Some(Self { p, q, g })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(DhParams, "DhParams", ["p", "q", "g"]);
+crate::public_key::io::impl_blob_pem_serialization!(DhParams, DH_PARAMS_LABEL, ["p", "q", "g"]);
 
 // ─── DhPublicKey ──────────────────────────────────────────────────────────────
 
@@ -181,66 +145,36 @@ impl DhPublicKey {
 
     // ── Serialization ────────────────────────────────────────────────────────
 
-    /// Encode in binary format: `[p, q, g, y]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.q, &self.g, &self.y])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.p.clone(),
+            self.q.clone(),
+            self.g.clone(),
+            self.y.clone(),
+        ]
     }
 
-    /// Decode from binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
         let g = fields.next()?;
         let y = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p
-        {
-            return None;
-        }
-        Some(Self { p, q, g, y })
-    }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(DH_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    /// Returns `None` if the PEM label does not match or the payload is malformed.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_key_blob(&pem_unwrap(DH_PUBLIC_LABEL, pem)?)
-    }
-
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "DhPublicKey",
-            &[
-                ("p", &self.p),
-                ("q", &self.q),
-                ("g", &self.g),
-                ("y", &self.y),
-            ],
-        )
-    }
-
-    /// Returns `None` if the XML is malformed or `y` is out of range.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("DhPublicKey", &["p", "q", "g", "y"], xml)?.into_iter();
-        let p = fields.next()?;
-        let q = fields.next()?;
-        let g = fields.next()?;
-        let y = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p
-        {
+        if !validate_domain(&p, &q, &g) || y <= BigUint::one() || y >= p {
             return None;
         }
         Some(Self { p, q, g, y })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(DhPublicKey, "DhPublicKey", ["p", "q", "g", "y"]);
+crate::public_key::io::impl_blob_pem_serialization!(
+    DhPublicKey,
+    DH_PUBLIC_LABEL,
+    ["p", "q", "g", "y"]
+);
 
 // ─── DhPrivateKey ─────────────────────────────────────────────────────────────
 
@@ -313,66 +247,37 @@ impl DhPrivateKey {
 
     // ── Serialization ────────────────────────────────────────────────────────
 
-    /// Encode in binary format: `[p, q, g, x]`.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.p, &self.q, &self.g, &self.x])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![
+            self.p.clone(),
+            self.q.clone(),
+            self.g.clone(),
+            self.x.clone(),
+        ]
     }
 
-    /// Decode from binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let p = fields.next()?;
         let q = fields.next()?;
         let g = fields.next()?;
         let x = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
-            return None;
-        }
-        let y = mod_pow(&g, &x, &p);
-        Some(Self { p, q, g, x, y })
-    }
-
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(DH_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    /// Returns `None` if the PEM label does not match or the payload is malformed.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        Self::from_key_blob(&pem_unwrap(DH_PRIVATE_LABEL, pem)?)
-    }
-
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap(
-            "DhPrivateKey",
-            &[
-                ("p", &self.p),
-                ("q", &self.q),
-                ("g", &self.g),
-                ("x", &self.x),
-            ],
-        )
-    }
-
-    /// Returns `None` if the XML is malformed or `x` is zero or ≥ `q`.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("DhPrivateKey", &["p", "q", "g", "x"], xml)?.into_iter();
-        let p = fields.next()?;
-        let q = fields.next()?;
-        let g = fields.next()?;
-        let x = fields.next()?;
-        if fields.next().is_some() || !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
+        if !validate_domain(&p, &q, &g) || x.is_zero() || x >= q {
             return None;
         }
         let y = mod_pow(&g, &x, &p);
         Some(Self { p, q, g, x, y })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(DhPrivateKey, "DhPrivateKey", ["p", "q", "g", "x"]);
+crate::public_key::io::impl_blob_pem_serialization!(
+    DhPrivateKey,
+    DH_PRIVATE_LABEL,
+    ["p", "q", "g", "x"]
+);
 
 impl fmt::Debug for DhPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

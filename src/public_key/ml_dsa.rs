@@ -778,7 +778,9 @@ impl MlDsa {
         shake256_absorb_squeeze(&[&mu, packed_w1], c2);
         // WHAT: recompute challenge from reconstructed w1 and compare to signature c.
         // WHY: this is the core FS consistency check that binds (z, h) to the message and public key.
-        c.as_slice() == c2
+        // The comparison is constant-time as side-channel hygiene, even though
+        // verification inputs are public.
+        crate::ct::constant_time_eq_mask(c.as_slice(), c2) == u8::MAX
     }
 
     /// Verify with empty context.

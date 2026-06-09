@@ -13,6 +13,13 @@
 //! and optional additional input. That keeps the implementation small and easy
 //! to audit, but it also means this module intentionally does not try to be a
 //! generic entropy conditioner.
+//!
+//! # Fork safety
+//!
+//! DRBG state is process-local. After `fork()`, parent and child hold
+//! identical state and will generate identical output until one of them
+//! reseeds. Callers that fork must reseed in the child before generating any
+//! further output.
 
 use crate::ct::zeroize_slice;
 use crate::{Aes256, BlockCipher, Csprng};
@@ -91,8 +98,9 @@ impl CtrDrbgAes256 {
     ///
     /// # Panics
     ///
-    /// Panics if the request exceeds the SP 800-90A per-call limit or if the
-    /// reseed counter has reached the mandated reseed interval.
+    /// Panics if `out.len()` exceeds the SP 800-90A per-call limit of 2^16
+    /// bytes, or if the reseed counter has exceeded the mandated reseed
+    /// interval of 2^48 calls without a [`reseed`](Self::reseed).
     pub fn generate(&mut self, out: &mut [u8], additional_input: Option<&[u8; SEED_LEN]>) {
         assert!(
             self.reseed_counter <= RESEED_INTERVAL,

@@ -10,6 +10,16 @@
 //! - [`CtrDrbgAes256`] is a deterministic DRBG, not a seed generator.
 //! - Callers must provide high-entropy external seed material for all
 //!   randomness-dependent operations.
+//!
+//! Safety policy:
+//! - `#![deny(unsafe_code)]` is enforced crate-wide. The only exception in a
+//!   default build is the audited volatile-write zeroization helper
+//!   [`zeroize_slice`], which cannot be expressed in safe Rust.
+//! - The opt-in `arm-sha3` cargo feature additionally enables an `unsafe`
+//!   NEON Keccak path on aarch64 (FEAT_SHA3, runtime-detected). Builds
+//!   without that feature contain no other `unsafe`.
+
+#![deny(unsafe_code)]
 
 mod ct;
 #[cfg(test)]

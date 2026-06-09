@@ -112,6 +112,12 @@ fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; 16], data: &mut 
 }
 
 /// EAX AEAD with a full 16-byte detached tag.
+///
+/// # Nonce reuse
+///
+/// Reusing a nonce under the same key breaks both confidentiality and
+/// authenticity: the CTR keystream repeats and the OMAC tags become related.
+/// Never reuse a `(key, nonce)` pair.
 pub struct Eax<C> {
     cipher: C,
 }

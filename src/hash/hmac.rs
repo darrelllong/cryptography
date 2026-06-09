@@ -54,17 +54,28 @@ impl<H: Digest> Hmac<H> {
 
     #[must_use]
     /// Finalize the MAC and return the authentication tag.
-    pub fn finalize(mut self) -> Vec<u8> {
+    pub fn finalize(self) -> Vec<u8> {
+        let mut out = vec![0u8; H::OUTPUT_LEN];
+        self.finalize_into(&mut out);
+        out
+    }
+
+    /// Finalize the MAC into a caller-provided buffer of `H::OUTPUT_LEN`
+    /// bytes, avoiding the return-value allocation of [`Self::finalize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `out.len() != H::OUTPUT_LEN`.
+    pub fn finalize_into(mut self, out: &mut [u8]) {
+        assert_eq!(out.len(), H::OUTPUT_LEN, "HMAC output buffer length");
         let mut inner_digest = vec![0u8; H::OUTPUT_LEN];
         // `finalize_reset` is used here for two reasons: it produces the
         // standard inner digest and it actively wipes the live keyed hash state
         // instead of leaving the ipad-derived chaining value behind until drop.
         self.inner.finalize_reset(&mut inner_digest);
         self.outer.update(&inner_digest);
-        let mut out = vec![0u8; H::OUTPUT_LEN];
-        self.outer.finalize_reset(&mut out);
+        self.outer.finalize_reset(out);
         crate::ct::zeroize_slice(inner_digest.as_mut_slice());
-        out
     }
 
     #[must_use]

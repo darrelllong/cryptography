@@ -56,14 +56,18 @@ const RC: [u64; 24] = [
     0x8000_0000_8000_8008,
 ];
 
-// Runtime-dispatching entry point: hardware on aarch64 + FEAT_SHA3, else soft.
+// Runtime-dispatching entry point: hardware on aarch64 + FEAT_SHA3 when the
+// opt-in `arm-sha3` cargo feature is enabled, else the portable soft path.
 #[inline]
 fn keccak_f1600(state: &mut [u64; 25]) {
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", feature = "arm-sha3"))]
     {
         if std::arch::is_aarch64_feature_detected!("sha3") {
             // SAFETY: feature detection confirms FEAT_SHA3 is present.
-            unsafe { return keccak_f1600_sha3(state); }
+            #[allow(unsafe_code)]
+            unsafe {
+                return keccak_f1600_sha3(state);
+            }
         }
     }
     keccak_f1600_soft(state);
@@ -116,8 +120,9 @@ fn keccak_f1600_soft(state: &mut [u64; 25]) {
 // triple with a single BCAX per lane pair.  Rho+Pi remain scalar (each of
 // the 24 non-zero lanes has a distinct rotation, so XAR offers no advantage
 // when lanes are processed sequentially).
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", feature = "arm-sha3"))]
 #[target_feature(enable = "sha3")]
+#[allow(unsafe_code)]
 unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
     use core::arch::aarch64::*;
 

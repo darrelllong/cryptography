@@ -11,9 +11,7 @@
 use core::fmt;
 
 use crate::public_key::bigint::BigUint;
-use crate::public_key::io::{
-    decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
-};
+use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
 
@@ -89,53 +87,24 @@ impl CocksPublicKey {
         Some(encode_biguints(&[&ciphertext]))
     }
 
-    /// Encode the public key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.n])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.n.clone()]
     }
 
-    /// Decode the public key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let n = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() {
-            return None;
-        }
-        Some(Self { n })
-    }
-
-    /// Encode the public key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(COCKS_PUBLIC_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the public key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap("CocksPublicKey", &[("n", &self.n)])
-    }
-
-    /// Decode the public key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(COCKS_PUBLIC_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the public key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("CocksPublicKey", &["n"], xml)?.into_iter();
-        let n = fields.next()?;
-        if fields.next().is_some() || n <= BigUint::one() {
+        if n <= BigUint::one() {
             return None;
         }
         Some(Self { n })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(CocksPublicKey, "CocksPublicKey", ["n"]);
+crate::public_key::io::impl_blob_pem_serialization!(CocksPublicKey, COCKS_PUBLIC_LABEL, ["n"]);
 
 impl fmt::Debug for CocksPrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -183,55 +152,29 @@ impl CocksPrivateKey {
         Some(self.decrypt(&value))
     }
 
-    /// Encode the private key in the crate-defined binary format.
-    #[must_use]
-    pub fn to_key_blob(&self) -> Vec<u8> {
-        encode_biguints(&[&self.pi, &self.q])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![self.pi.clone(), self.q.clone()]
     }
 
-    /// Decode the private key from the crate-defined binary format.
-    #[must_use]
-    pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
-        let mut fields = decode_biguints(blob)?.into_iter();
+    /// Validate schema fields and rebuild the key with its derived state.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let pi = fields.next()?;
         let q = fields.next()?;
-        if fields.next().is_some() || pi.is_zero() || q <= BigUint::one() {
-            return None;
-        }
-        Some(Self { pi, q })
-    }
-
-    /// Encode the private key in PEM using the crate-defined label.
-    #[must_use]
-    pub fn to_pem(&self) -> String {
-        pem_wrap(COCKS_PRIVATE_LABEL, &self.to_key_blob())
-    }
-
-    /// Encode the private key as the crate's flat XML form.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        xml_wrap("CocksPrivateKey", &[("pi", &self.pi), ("q", &self.q)])
-    }
-
-    /// Decode the private key from the crate-defined PEM label.
-    #[must_use]
-    pub fn from_pem(pem: &str) -> Option<Self> {
-        let blob = pem_unwrap(COCKS_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&blob)
-    }
-
-    /// Decode the private key from the crate's flat XML form.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("CocksPrivateKey", &["pi", "q"], xml)?.into_iter();
-        let pi = fields.next()?;
-        let q = fields.next()?;
-        if fields.next().is_some() || pi.is_zero() || q <= BigUint::one() {
+        if pi.is_zero() || q <= BigUint::one() {
             return None;
         }
         Some(Self { pi, q })
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(CocksPrivateKey, "CocksPrivateKey", ["pi", "q"]);
+crate::public_key::io::impl_blob_pem_serialization!(
+    CocksPrivateKey,
+    COCKS_PRIVATE_LABEL,
+    ["pi", "q"]
+);
 
 impl Cocks {
     /// Derive a raw key pair from explicit primes `p` and `q`.

@@ -445,12 +445,7 @@ fn poly_trim(p: &mut Vec<u8>) {
 }
 
 fn poly_deg(p: &[u8]) -> Option<usize> {
-    for i in (0..p.len()).rev() {
-        if p[i] != 0 {
-            return Some(i);
-        }
-    }
-    None
+    (0..p.len()).rev().find(|&i| p[i] != 0)
 }
 
 fn poly_inverse_mod2_cyclic(a_coeffs: &[u8]) -> Option<Vec<u8>> {
@@ -463,11 +458,7 @@ fn poly_inverse_mod2_cyclic(a_coeffs: &[u8]) -> Option<Vec<u8>> {
     let mut t0 = vec![0u8; 1];
     let mut t1 = vec![1u8; 1];
 
-    loop {
-        let d1 = match poly_deg(&r1) {
-            Some(d) => d,
-            None => break,
-        };
+    while let Some(d1) = poly_deg(&r1) {
         let d0 = match poly_deg(&r0) {
             Some(d) => d,
             None => {
@@ -517,8 +508,8 @@ fn poly_inverse_mod_q_cyclic<const N: usize>(
     let inv2 = poly_inverse_mod2_cyclic(&a_mod2)?;
 
     let mut b = Poly::<N>::zero();
-    for i in 0..N {
-        b.coeffs[i] = inv2[i] as u16;
+    for (bc, &ic) in b.coeffs.iter_mut().zip(inv2.iter()) {
+        *bc = ic as u16;
     }
 
     // Newton-style Hensel lift: each pass squares `precision` (2 → 4
@@ -843,7 +834,7 @@ fn sves_from_bytes<const N: usize>(m: &[u8], q_mask: u16) -> Poly<N> {
     let mut out = Poly::<N>::zero();
     let mut coeff_idx: usize = 0;
     let mut i = 0usize;
-    while i + 3 <= ((m.len() + 2) / 3) * 3 && coeff_idx < N - 1 {
+    while i + 3 <= m.len().div_ceil(3) * 3 && coeff_idx < N - 1 {
         let b0 = if i < m.len() { m[i] } else { 0 } as u32;
         let b1 = if i + 1 < m.len() { m[i + 1] } else { 0 } as u32;
         let b2 = if i + 2 < m.len() { m[i + 2] } else { 0 } as u32;
@@ -864,7 +855,7 @@ fn sves_from_bytes<const N: usize>(m: &[u8], q_mask: u16) -> Poly<N> {
 }
 
 fn sves_to_bytes<const N: usize>(p: &Poly<N>) -> Option<Vec<u8>> {
-    let num_bits = (N * 3 + 1) / 2;
+    let num_bits = (N * 3).div_ceil(2);
     let num_bytes = num_bits.div_ceil(8);
     let mut out = vec![0u8; num_bytes + 3];
     let end = N / 2 * 2;
@@ -1251,7 +1242,7 @@ pub fn decrypt<const N: usize>(
     let msg = cm[db_bytes + 1..db_bytes + 1 + cl].to_vec();
 
     let pad_start = db_bytes + 1 + cl;
-    let pad_end = (params.n * 3 + 1) / 2;
+    let pad_end = (params.n * 3).div_ceil(2);
     let pad_end_bytes = pad_end.div_ceil(8);
     for &p in &cm[pad_start..pad_end_bytes.min(cm.len())] {
         if p != 0 {
@@ -1274,11 +1265,15 @@ pub fn decrypt<const N: usize>(
     cr_priv.mul_dense::<N>(&h, &mut bigr_prime);
     poly_mod_q::<N>(&mut bigr_prime, q_mask);
 
+    // Constant-time re-encryption check: accumulate the XOR difference over
+    // every coefficient instead of breaking on the first mismatch, so the
+    // comparison cost never depends on where a tampered ciphertext diverges.
+    let mut diff: u16 = 0;
     for i in 0..N {
-        if bigr_prime.coeffs[i] != c_r.coeffs[i] {
-            retcode_ok = false;
-            break;
-        }
+        diff |= bigr_prime.coeffs[i] ^ c_r.coeffs[i];
+    }
+    if diff != 0 {
+        retcode_ok = false;
     }
 
     if !retcode_ok {

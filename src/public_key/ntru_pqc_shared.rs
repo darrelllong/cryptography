@@ -138,7 +138,9 @@ pub(crate) fn crypto_sort_int32(array: &mut [i32]) {
         let mut j = 0usize;
         let mut q = top;
         while q > p {
-            'outer: loop {
+            // Labeled block emulating the reference C `goto done` once the
+            // partial-block scan hits `n - q`.
+            'outer: {
                 if j != i {
                     loop {
                         if j == n - q {
@@ -184,7 +186,6 @@ pub(crate) fn crypto_sort_int32(array: &mut [i32]) {
                     array[k + p] = a;
                     k += 1;
                 }
-                break;
             }
             q >>= 1;
         }
@@ -215,7 +216,7 @@ pub(crate) fn mod3(a: u16) -> u16 {
     r = (r >> 2) + (r & 0x3);
     let t = (r as i16) - 3;
     let c = t >> 15;
-    (((c as u16) & r) | ((!c as u16) & (t as u16))) & 0xffff
+    ((c as u16) & r) | ((!c as u16) & (t as u16))
 }
 
 /// Reduce $a \in [0, 14]$ modulo 3 without branches.
@@ -358,7 +359,7 @@ pub(crate) fn poly_s3_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
         g[N - 1] = 0;
     }
 
-    let sign = f[0] as u16;
+    let sign = f[0];
     for i in 0..N - 1 {
         r[i] = mod3_u8((sign * v[N - 2 - i]) as u8) as u16;
     }
@@ -751,7 +752,7 @@ pub(crate) fn poly_z3_to_zq<const N: usize>(r: &mut [u16; N], q_mask: u16) {
 pub(crate) fn poly_trinary_zq_to_z3<const N: usize, const LOGQ: usize>(r: &mut [u16; N]) {
     let q_mask = ((1u32 << LOGQ) - 1) as u16;
     for c in r.iter_mut() {
-        *c = *c & q_mask;
+        *c &= q_mask;
         *c = 3 & (*c ^ (*c >> (LOGQ - 1)));
     }
 }
@@ -1044,8 +1045,7 @@ pub(crate) fn owcpa_check_ciphertext<const N: usize, const LOGQ: usize>(
 pub(crate) fn owcpa_check_r<const N: usize, const LOGQ: usize>(r: &[u16; N]) -> i32 {
     let q16: u16 = if LOGQ < 16 { 1u16 << LOGQ } else { 0 };
     let mut t: u32 = 0;
-    for i in 0..N - 1 {
-        let c = r[i];
+    for &c in r.iter().take(N - 1) {
         t |= ((c.wrapping_add(1)) & q16.wrapping_sub(4)) as u32;
         t |= (c.wrapping_add(2) & 4) as u32;
     }
@@ -1059,9 +1059,9 @@ pub(crate) fn owcpa_check_r<const N: usize, const LOGQ: usize>(r: &[u16; N]) -> 
 pub(crate) fn owcpa_check_m<const N: usize>(m: &[u16; N], weight: usize) -> i32 {
     let mut ps: u16 = 0;
     let mut ms: u16 = 0;
-    for i in 0..N {
-        ps = ps.wrapping_add(m[i] & 1);
-        ms = ms.wrapping_add(m[i] & 2);
+    for &c in m.iter() {
+        ps = ps.wrapping_add(c & 1);
+        ms = ms.wrapping_add(c & 2);
     }
     let mut t: u32 = 0;
     t |= (ps ^ (ms >> 1)) as u32;
@@ -1077,8 +1077,8 @@ pub(crate) fn owcpa_check_m<const N: usize>(m: &[u16; N], weight: usize) -> i32 
 pub(crate) fn poly_rq_sum_zero_adjust<const N: usize>(r: &mut [u16; N]) {
     r[N - 1] = 0;
     let mut acc: u16 = 0;
-    for i in 0..(N - 1) {
-        acc = acc.wrapping_sub(r[i]);
+    for &c in r.iter().take(N - 1) {
+        acc = acc.wrapping_sub(c);
     }
     r[N - 1] = acc;
 }
@@ -1241,11 +1241,11 @@ pub(crate) fn sample_fixed_type<const N: usize>(
             | ((u[base + 14] as u32 as i32) << 24);
     }
 
-    for i in 0..weight / 2 {
-        s[i] |= 1;
+    for c in s.iter_mut().take(weight / 2) {
+        *c |= 1;
     }
-    for i in weight / 2..weight {
-        s[i] |= 2;
+    for c in s.iter_mut().take(weight).skip(weight / 2) {
+        *c |= 2;
     }
 
     crypto_sort_int32(s);
@@ -1330,8 +1330,8 @@ pub(crate) fn poly_sq_tobytes_logq11<const N: usize>(r: &mut [u8], a: &[u16; N])
     for j in 0..tail {
         t[j] = a[8 * i + j] & Q_MASK_11;
     }
-    for j in tail..8 {
-        t[j] = 0;
+    for c in t.iter_mut().skip(tail) {
+        *c = 0;
     }
     match pack_deg & 0x07 {
         4 => {
@@ -1461,8 +1461,8 @@ pub(crate) fn poly_sq_tobytes_logq13<const N: usize>(r: &mut [u8], a: &[u16; N])
     for j in 0..tail {
         t[j] = a[8 * i + j] & Q_MASK_13;
     }
-    for j in tail..8 {
-        t[j] = 0;
+    for c in t.iter_mut().skip(tail) {
+        *c = 0;
     }
     match pack_deg & 0x07 {
         4 => {

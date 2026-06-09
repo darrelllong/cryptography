@@ -72,17 +72,21 @@ impl<H: Digest> Hkdf<H> {
             return false;
         }
 
-        let mut t = Vec::<u8>::new();
+        // T(i) is streamed directly into the keyed HMAC and written into one
+        // reused buffer — no per-round concatenation or allocation churn.
+        let mut t = vec![0u8; H::OUTPUT_LEN];
         let mut generated = 0usize;
         let mut counter = 1u8;
 
         while generated < out.len() {
-            let mut data = Vec::with_capacity(t.len() + info.len() + 1);
-            data.extend_from_slice(&t);
-            data.extend_from_slice(info);
-            data.push(counter);
+            let mut mac = Hmac::<H>::new(&self.prk);
+            if counter > 1 {
+                mac.update(&t);
+            }
+            mac.update(info);
+            mac.update(&[counter]);
+            mac.finalize_into(&mut t);
 
-            t = Hmac::<H>::compute(&self.prk, &data);
             let take = core::cmp::min(out.len() - generated, t.len());
             out[generated..generated + take].copy_from_slice(&t[..take]);
             generated += take;

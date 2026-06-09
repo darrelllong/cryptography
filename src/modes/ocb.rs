@@ -122,6 +122,13 @@ fn hash_associated_data<C: BlockCipher>(
 }
 
 /// OCB3 authenticated encryption with a 16-byte detached tag.
+///
+/// # Nonce reuse
+///
+/// Reusing a nonce under the same key breaks both confidentiality and
+/// authenticity. Never reuse a `(key, nonce)` pair. RFC 7253 additionally
+/// caps the total data protected by one key at 2^48 blocks; rekey before
+/// reaching that bound.
 pub struct Ocb<C> {
     cipher: C,
 }

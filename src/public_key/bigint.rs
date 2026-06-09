@@ -827,28 +827,100 @@ impl MontgomeryCtx {
             return BigUint::zero();
         }
 
-        let mut result = self.one_mont.clone();
-        let mut power = base_mont.clone();
+        let bits = exponent.bits();
 
-        for bit in 0..exponent.bits() {
-            if exponent.bit(bit) {
-                result = BigUint::montgomery_mul_odd_with_workspace(
-                    &result,
+        // Short exponents (e.g. F4 public exponents): plain right-to-left
+        // binary avoids the window table setup cost.
+        if bits <= 64 {
+            let mut result = self.one_mont.clone();
+            let mut power = base_mont.clone();
+
+            for bit in 0..bits {
+                if exponent.bit(bit) {
+                    result = BigUint::montgomery_mul_odd_with_workspace(
+                        &result,
+                        &power,
+                        &self.modulus,
+                        self.n0_inv,
+                        workspace,
+                    );
+                }
+                power = BigUint::montgomery_mul_odd_with_workspace(
+                    &power,
                     &power,
                     &self.modulus,
                     self.n0_inv,
                     workspace,
                 );
             }
-            power = BigUint::montgomery_mul_odd_with_workspace(
-                &power,
-                &power,
+
+            return self.decode_with_workspace(&result, workspace);
+        }
+
+        // Fixed 4-bit window, scanned left to right: per window 4 squarings
+        // plus at most one multiply out of a 16-entry power table, versus one
+        // multiply every other bit for the binary ladder (~1.23 vs ~1.5
+        // multiplies per exponent bit; the 14-multiply table amortizes over
+        // any exponent long enough to reach this path).
+        //
+        // Like the rest of the public-key stack this is variable-time: zero
+        // windows skip their multiply, which is why the variable-time lattice
+        // of callers lives under `vt::`.
+        const WINDOW: usize = 4;
+        let mut table = Vec::with_capacity(1 << WINDOW);
+        table.push(self.one_mont.clone());
+        table.push(base_mont.clone());
+        for i in 2..(1 << WINDOW) {
+            let next = BigUint::montgomery_mul_odd_with_workspace(
+                &table[i - 1],
+                base_mont,
                 &self.modulus,
                 self.n0_inv,
                 workspace,
             );
+            table.push(next);
         }
 
+        let windows = bits.div_ceil(WINDOW);
+        let mut result: Option<BigUint> = None;
+        for w in (0..windows).rev() {
+            if let Some(acc) = result.as_mut() {
+                for _ in 0..WINDOW {
+                    *acc = BigUint::montgomery_mul_odd_with_workspace(
+                        acc,
+                        acc,
+                        &self.modulus,
+                        self.n0_inv,
+                        workspace,
+                    );
+                }
+            }
+
+            let mut idx = 0usize;
+            for j in (0..WINDOW).rev() {
+                idx = (idx << 1) | usize::from(exponent.bit(w * WINDOW + j));
+            }
+
+            match result.as_mut() {
+                // Top window: seed the accumulator directly instead of
+                // squaring up from one (the top window is non-zero because
+                // `bits` counts up to the most significant set bit).
+                None => result = Some(table[idx].clone()),
+                Some(acc) => {
+                    if idx != 0 {
+                        *acc = BigUint::montgomery_mul_odd_with_workspace(
+                            acc,
+                            &table[idx],
+                            &self.modulus,
+                            self.n0_inv,
+                            workspace,
+                        );
+                    }
+                }
+            }
+        }
+
+        let result = result.unwrap_or_else(|| self.one_mont.clone());
         self.decode_with_workspace(&result, workspace)
     }
 
@@ -932,6 +1004,38 @@ impl MontgomeryCtx {
             &mut workspace,
         );
         self.decode_with_workspace(&square_mont, &mut workspace)
+    }
+
+    /// Multiply two residues that are **already in Montgomery form**, staying
+    /// in Montgomery form.
+    ///
+    /// One Montgomery reduction instead of the encode/multiply/decode round
+    /// trip of [`Self::mul`]; the workhorse for callers (such as elliptic
+    /// curve point arithmetic) that keep whole computations in the Montgomery
+    /// domain and convert only at the boundaries.
+    #[must_use]
+    pub fn mul_mont(&self, lhs: &BigUint, rhs: &BigUint) -> BigUint {
+        let mut workspace = Vec::new();
+        BigUint::montgomery_mul_odd_with_workspace(
+            lhs,
+            rhs,
+            &self.modulus,
+            self.n0_inv,
+            &mut workspace,
+        )
+    }
+
+    /// Square a residue that is already in Montgomery form, staying in
+    /// Montgomery form.
+    #[must_use]
+    pub fn square_mont(&self, value: &BigUint) -> BigUint {
+        self.mul_mont(value, value)
+    }
+
+    /// The Montgomery encoding of one (`R mod n`).
+    #[must_use]
+    pub fn one_mont(&self) -> &BigUint {
+        &self.one_mont
     }
 
     /// Compute `base^exponent mod modulus` inside the context.

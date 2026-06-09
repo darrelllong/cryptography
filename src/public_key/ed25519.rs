@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 
 use crate::public_key::bigint::BigUint;
 use crate::public_key::ec_edwards::{ed25519, EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
-use crate::public_key::io::{pem_unwrap, pem_wrap, xml_unwrap, xml_wrap};
+use crate::public_key::io::{pem_unwrap, pem_wrap};
 use crate::Csprng;
 use crate::Sha512;
 
@@ -116,21 +116,15 @@ impl Ed25519PublicKey {
         Self::from_key_blob(&bytes)
     }
 
-    /// XML wrapper around the standard 32-byte public key.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        let public = BigUint::from_be_bytes(&self.to_key_blob());
-        xml_wrap("Ed25519PublicKey", &[("public", &public)])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![BigUint::from_be_bytes(&self.to_key_blob())]
     }
 
-    /// Parse the XML-wrapped public key.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("Ed25519PublicKey", &["public"], xml)?.into_iter();
+    /// Validate the schema field and rebuild the key.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let public = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let bytes = biguint_to_fixed_be(&public, 32)?;
         Self::from_key_blob(&bytes)
     }
@@ -171,6 +165,8 @@ impl fmt::Debug for Ed25519PublicKey {
             .finish()
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(Ed25519PublicKey, "Ed25519PublicKey", ["public"]);
 
 impl PartialEq for Ed25519PublicKey {
     fn eq(&self, other: &Self) -> bool {
@@ -237,21 +233,15 @@ impl Ed25519PrivateKey {
         Self::from_key_blob(&bytes)
     }
 
-    /// XML wrapper around the standard 32-byte seed.
-    #[must_use]
-    pub fn to_xml(&self) -> String {
-        let seed = BigUint::from_be_bytes(&self.seed);
-        xml_wrap("Ed25519PrivateKey", &[("seed", &seed)])
+    /// Schema fields for the crate-defined serialization formats.
+    fn serial_fields(&self) -> Vec<BigUint> {
+        vec![BigUint::from_be_bytes(&self.seed)]
     }
 
-    /// Parse the XML-wrapped private key.
-    #[must_use]
-    pub fn from_xml(xml: &str) -> Option<Self> {
-        let mut fields = xml_unwrap("Ed25519PrivateKey", &["seed"], xml)?.into_iter();
+    /// Validate the schema field and rebuild the key.
+    fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
+        let mut fields = fields.into_iter();
         let seed = fields.next()?;
-        if fields.next().is_some() {
-            return None;
-        }
         let bytes = biguint_to_fixed_be(&seed, 32)?;
         Self::from_key_blob(&bytes)
     }
@@ -276,6 +266,8 @@ impl Ed25519PrivateKey {
         self.sign_message(message).to_key_blob()
     }
 }
+
+crate::public_key::io::impl_xml_serialization!(Ed25519PrivateKey, "Ed25519PrivateKey", ["seed"]);
 
 impl fmt::Debug for Ed25519PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
