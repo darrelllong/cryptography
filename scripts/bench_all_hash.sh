@@ -12,6 +12,13 @@ PILOT_HASH_XOF_OUT="${PILOT_HASH_XOF_OUT:-32}"
 PILOT_CONFIDENCE_LEVEL="${PILOT_CONFIDENCE_LEVEL:-}"
 export PILOT_HASH_BYTES PILOT_HASH_XOF_OUT
 
+# Displayed confidence percent: pilot-bench defaults to 95% unless the env
+# var overrides it.
+CI_PCT=95
+if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
+    CI_PCT=$(awk -v c="${PILOT_CONFIDENCE_LEVEL}" 'BEGIN { printf "%g", c * 100 }')
+fi
+
 measure() {
     local name=$1 outbits=$2
     local out mean ci rounds
@@ -35,7 +42,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Hash         |  Out  |   MB/s   | ±CI      | Runs  |"
+    echo "| Hash         |  Out  |   MB/s   | ±CI (${CI_PCT}%) | Runs  |"
     sep
 }
 

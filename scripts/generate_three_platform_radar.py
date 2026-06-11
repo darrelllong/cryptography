@@ -97,7 +97,14 @@ def scale_labels(lo: float, hi: float) -> list[float]:
     return out
 
 
-def parse_csv(path: Path) -> tuple[list[str], list[float], list[float], list[float]]:
+def parse_csv(
+    path: Path,
+) -> tuple[list[str], list[str], list[float], list[float], list[float]]:
+    """Return (platform_names, axis_labels, a, b, c).
+
+    The header must be `label,<p1>,<p2>,<p3>`; the three platform column
+    names are returned so legends can be derived from the CSV itself.
+    """
     labels: list[str] = []
     a: list[float] = []
     b: list[float] = []
@@ -105,8 +112,10 @@ def parse_csv(path: Path) -> tuple[list[str], list[float], list[float], list[flo
     with path.open(newline="") as fh:
         reader = csv.reader(fh)
         header = next(reader)
-        if [h.strip().lower() for h in header[:4]] != ["label", "wigner", "moore", "darby"]:
-            raise SystemExit(f"expected header label,wigner,moore,darby; got {header}")
+        cols = [h.strip() for h in header[:4]]
+        if len(cols) != 4 or cols[0].lower() != "label":
+            raise SystemExit(f"expected header label,<p1>,<p2>,<p3>; got {header}")
+        platforms = cols[1:]
         for row in reader:
             if not row or not row[0].strip():
                 continue
@@ -114,11 +123,11 @@ def parse_csv(path: Path) -> tuple[list[str], list[float], list[float], list[flo
             a.append(float(row[1]) if row[1].strip() else float("nan"))
             b.append(float(row[2]) if row[2].strip() else float("nan"))
             c.append(float(row[3]) if row[3].strip() else float("nan"))
-    return labels, a, b, c
+    return platforms, labels, a, b, c
 
 
 def generate_svg(args) -> str:
-    labels, wigner_v, moore_v, darby_v = parse_csv(Path(args.csv))
+    platforms, labels, wigner_v, moore_v, darby_v = parse_csv(Path(args.csv))
     n = len(labels)
     if n < 3:
         raise SystemExit("need >=3 axes for a radar")
@@ -222,12 +231,26 @@ def generate_svg(args) -> str:
             f'{entry["label"]}</text>'
         )
 
-    # Legend.
+    # Legend: --legend "a;b;c" wins, then the historical wigner/moore/darby
+    # descriptions for the 2026-05-08 sweep, then the bare CSV column names.
+    if args.legend:
+        legend_texts = [t.strip() for t in args.legend.split(";")]
+        if len(legend_texts) != 3:
+            raise SystemExit("--legend needs three ';'-separated entries")
+    elif [p.lower() for p in platforms] == ["wigner", "moore", "darby"]:
+        legend_texts = [
+            "Wigner (M1 Max, macOS)",
+            "Moore (EPYC 7452, single-core)",
+            "Darby (RPi5, aarch64)",
+        ]
+    else:
+        legend_texts = platforms
+
     legend_y = HEIGHT - 60
     swatches = [
-        ("Wigner (M1 Max, macOS)", WIGNER_COLOR),
-        ("Moore (EPYC 7452, single-core)", MOORE_COLOR),
-        ("Darby (RPi5, aarch64)", DARBY_COLOR),
+        (legend_texts[0], WIGNER_COLOR),
+        (legend_texts[1], MOORE_COLOR),
+        (legend_texts[2], DARBY_COLOR),
     ]
     for i, (text, color) in enumerate(swatches):
         ly = legend_y + i * 18
@@ -251,6 +274,11 @@ def main() -> None:
     p.add_argument("--units", default="MB/s")
     p.add_argument("--min", type=float, default=None)
     p.add_argument("--max", type=float, default=None)
+    p.add_argument(
+        "--legend",
+        default="",
+        help="three ';'-separated legend entries (default: derived from CSV header)",
+    )
     args = p.parse_args()
 
     svg = generate_svg(args)

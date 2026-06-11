@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run the publication-facing EC / Edwards public-key operations through
 # pilot-bench and emit a Markdown table.
-# Columns: operation, ms/op mean, ±CI (95%), runs-to-CI
+# Columns: operation, ms/op mean, ±CI, runs-to-CI.
+# The CI column header reflects PILOT_CONFIDENCE_LEVEL (pilot-bench's
+# default of 95% when unset).
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,12 +11,24 @@ BENCH="${PILOT_BENCH_CLI:-$HOME/pilot-bench/build/cli/bench}"
 PK="${PILOT_PK_BIN:-$ROOT_DIR/target/release/pilot_pk}"
 PILOT_PRESET="${PILOT_PRESET:-quick}"
 PILOT_PK_ITERS_PERCENT="${PILOT_PK_ITERS_PERCENT:-25}"
+PILOT_CONFIDENCE_LEVEL="${PILOT_CONFIDENCE_LEVEL:-}"
 export PILOT_PK_ITERS_PERCENT
+
+# Displayed confidence percent: pilot-bench defaults to 95% unless the env
+# var overrides it.
+CI_PCT=95
+if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
+    CI_PCT=$(awk -v c="${PILOT_CONFIDENCE_LEVEL}" 'BEGIN { printf "%g", c * 100 }')
+fi
 
 measure() {
     local name=$1
     local out mean ci rounds
-    out=$("$BENCH" run_program --preset "$PILOT_PRESET" \
+    local extra=()
+    if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
+        extra+=(--confidence-level "${PILOT_CONFIDENCE_LEVEL}")
+    fi
+    out=$("$BENCH" run_program --preset "$PILOT_PRESET" "${extra[@]}" \
           --pi "${name},ms/op,0,1,1" \
           -- "$PK" "$name" 2>&1)
     mean=$(echo  "$out" | awk '/Reading mean/{print $5}')
@@ -30,7 +44,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Operation                        |   ms/op    | ±CI (95%)  | Runs  |"
+    echo "| Operation                        |   ms/op    | ±CI (${CI_PCT}%)  | Runs  |"
     sep
 }
 

@@ -1,0 +1,6 @@
+uname: Linux dennard 5.15.0-179-generic #189-Ubuntu SMP Tue May 5 18:20:56 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+date_utc: 2026-06-11T18:47:10Z
+git_crypto: 1aae1dff55ddd933ef8aa771ad121b0ed6e45ff6 (rsync of tolkien working tree)
+cpu: AMD EPYC 7452 32-Core Processor, 128 cores
+git_pilot: 097624d2d7d19fedb6412d325f6b9c824f33cf34 (+ reconstructed cmake/patch_twitter_bd.sh)
+preset: normal, confidence_level: 0.90

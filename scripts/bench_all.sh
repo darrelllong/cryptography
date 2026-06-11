@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run every cipher through pilot-bench and emit a Markdown table.
-# Columns: cipher, block bits, key bits, MB/s mean, ±CI (95%), runs-to-CI
+# Columns: cipher, block bits, key bits, MB/s mean, ±CI, runs-to-CI.
+# The CI column header reflects PILOT_CONFIDENCE_LEVEL (pilot-bench's
+# default of 95% when unset).
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,6 +12,13 @@ PILOT_PRESET="${PILOT_PRESET:-quick}"
 PILOT_CIPHER_BYTES="${PILOT_CIPHER_BYTES:-262144}"
 PILOT_CONFIDENCE_LEVEL="${PILOT_CONFIDENCE_LEVEL:-}"
 export PILOT_CIPHER_BYTES
+
+# Displayed confidence percent: pilot-bench defaults to 95% unless the env
+# var overrides it.
+CI_PCT=95
+if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
+    CI_PCT=$(awk -v c="${PILOT_CONFIDENCE_LEVEL}" 'BEGIN { printf "%g", c * 100 }')
+fi
 
 measure() {
     local name=$1 block=$2 key=$3
@@ -34,7 +43,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Cipher               | Block |   Key |   MB/s   | ±CI (95%) | Runs  |"
+    echo "| Cipher               | Block |   Key |   MB/s   | ±CI (${CI_PCT}%) | Runs  |"
     sep
 }
 
@@ -128,7 +137,7 @@ measure speck128_256 128 256
 echo ""
 echo "### Stream ciphers"
 echo ""
-echo "| Cipher               | Block |   Key |   MB/s   | ±CI (95%) | Runs  |"
+echo "| Cipher               | Block |   Key |   MB/s   | ±CI (${CI_PCT}%) | Runs  |"
 sep
 measure chacha20  stream 256
 measure xchacha20 stream 256

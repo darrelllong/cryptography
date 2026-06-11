@@ -11,3 +11,4 @@ Cargo.lock
 /third_party/
 /.claude/
 /.ntru-upstream/
+__pycache__/

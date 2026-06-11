@@ -14,16 +14,14 @@ generate_three_platform_radar.py.
 
 from __future__ import annotations
 
+import argparse
 import csv
 import re
 from pathlib import Path
 from typing import Iterable
 
 
-SWEEP_DIR = Path(__file__).resolve().parent.parent / "bench" / "sweep-2026-05-08"
-MERGED = SWEEP_DIR / "merged"
-CSV_DIR = SWEEP_DIR / "csv"
-CSV_DIR.mkdir(parents=True, exist_ok=True)
+BENCH_DIR = Path(__file__).resolve().parent.parent / "bench"
 
 
 def parse_merged(path: Path) -> dict[str, dict[str, float]]:
@@ -74,12 +72,18 @@ def parse_merged(path: Path) -> dict[str, dict[str, float]]:
     return rows
 
 
-def write_csv(name: str, rows: list[tuple[str, dict[str, float]]], platforms: list[str]) -> Path:
-    path = CSV_DIR / f"{name}.csv"
+def write_csv(
+    csv_dir: Path,
+    name: str,
+    rows: list[tuple[str, dict[str, float]]],
+    platforms: list[str],
+    columns: list[str],
+) -> Path:
+    path = csv_dir / f"{name}.csv"
     with path.open("w", newline="") as fh:
         w = csv.writer(fh)
-        # Hardcode the column order matching the radar generator's expectation.
-        w.writerow(["label"] + ["wigner", "moore", "darby"])
+        # Column order matches the radar generator's curve order.
+        w.writerow(["label"] + columns)
         for label, vals in rows:
             v_w = vals.get(platforms[0], float("nan"))
             v_m = vals.get(platforms[1], float("nan"))
@@ -210,13 +214,37 @@ def select(rows: dict[str, dict[str, float]], pairs: Iterable[tuple[str, str]]) 
 
 
 def main() -> None:
-    sym = parse_merged(MERGED / "symmetric.md")
-    hsh = parse_merged(MERGED / "hash.md")
-    pk = parse_merged(MERGED / "pk.md")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--sweep",
+        default="sweep-2026-05-08",
+        help="sweep directory name under bench/ (default: sweep-2026-05-08)",
+    )
+    parser.add_argument(
+        "--platforms",
+        default="Wigner (M1 Max),Moore (EPYC 7452),Darby (RPi5)",
+        help="comma-separated platform labels as they appear in the merged table headers",
+    )
+    parser.add_argument(
+        "--columns",
+        default="wigner,moore,darby",
+        help="comma-separated short column tokens for the CSV header",
+    )
+    args = parser.parse_args()
 
-    # Platform labels from the merged tables look like "Wigner (M1 Max)" etc.
-    # The CSV writer collapses to short tokens for the radar generator.
-    PLATFORMS = ["Wigner (M1 Max)", "Moore (EPYC 7452)", "Darby (RPi5)"]
+    sweep_dir = BENCH_DIR / args.sweep
+    merged = sweep_dir / "merged"
+    csv_dir = sweep_dir / "csv"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    sym = parse_merged(merged / "symmetric.md")
+    hsh = parse_merged(merged / "hash.md")
+    pk = parse_merged(merged / "pk.md")
+
+    PLATFORMS = [p.strip() for p in args.platforms.split(",")]
+    columns = [c.strip() for c in args.columns.split(",")]
+    if len(PLATFORMS) != 3 or len(columns) != 3:
+        raise SystemExit("--platforms and --columns each need exactly three entries")
 
     print("Symmetric rows:", len(sym))
     print("Hash rows:", len(hsh))
@@ -232,15 +260,15 @@ def main() -> None:
             out.append((label, inv))
         return out
 
-    write_csv("symmetric", select(sym, SYM_REPRESENTATIVE), PLATFORMS)
-    write_csv("hash", select(hsh, HASH_REPRESENTATIVE), PLATFORMS)
-    write_csv("pk_rsa_ec", invert_to_ops_per_sec(select(pk, PK_RSA_DSA_EC)), PLATFORMS)
-    write_csv("pk_pq", invert_to_ops_per_sec(select(pk, PK_PQ)), PLATFORMS)
-    write_csv("pk_mlkem", invert_to_ops_per_sec(select(pk, PK_MLKEM)), PLATFORMS)
-    write_csv("pk_mldsa", invert_to_ops_per_sec(select(pk, PK_MLDSA)), PLATFORMS)
-    write_csv("pk_ntru", invert_to_ops_per_sec(select(pk, PK_NTRU)), PLATFORMS)
+    write_csv(csv_dir, "symmetric", select(sym, SYM_REPRESENTATIVE), PLATFORMS, columns)
+    write_csv(csv_dir, "hash", select(hsh, HASH_REPRESENTATIVE), PLATFORMS, columns)
+    write_csv(csv_dir, "pk_rsa_ec", invert_to_ops_per_sec(select(pk, PK_RSA_DSA_EC)), PLATFORMS, columns)
+    write_csv(csv_dir, "pk_pq", invert_to_ops_per_sec(select(pk, PK_PQ)), PLATFORMS, columns)
+    write_csv(csv_dir, "pk_mlkem", invert_to_ops_per_sec(select(pk, PK_MLKEM)), PLATFORMS, columns)
+    write_csv(csv_dir, "pk_mldsa", invert_to_ops_per_sec(select(pk, PK_MLDSA)), PLATFORMS, columns)
+    write_csv(csv_dir, "pk_ntru", invert_to_ops_per_sec(select(pk, PK_NTRU)), PLATFORMS, columns)
 
-    print("CSVs written to", CSV_DIR)
+    print("CSVs written to", csv_dir)
 
 
 if __name__ == "__main__":

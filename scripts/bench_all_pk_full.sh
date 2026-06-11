@@ -11,6 +11,13 @@ PILOT_PK_ITERS_PERCENT="${PILOT_PK_ITERS_PERCENT:-25}"
 PILOT_CONFIDENCE_LEVEL="${PILOT_CONFIDENCE_LEVEL:-}"
 export PILOT_PK_ITERS_PERCENT
 
+# Displayed confidence percent: pilot-bench defaults to 95% unless the env
+# var overrides it.
+CI_PCT=95
+if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
+    CI_PCT=$(awk -v c="${PILOT_CONFIDENCE_LEVEL}" 'BEGIN { printf "%g", c * 100 }')
+fi
+
 measure() {
     local name=$1
     local out mean ci rounds
@@ -34,7 +41,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Operation                        |   ms/op    | ±CI (95%)  | Runs  |"
+    echo "| Operation                        |   ms/op    | ±CI (${CI_PCT}%)  | Runs  |"
     sep
 }
 
