@@ -675,11 +675,12 @@ fn polyvec_basemul_acc_montgomery(a: &PolyVec, b: &PolyVec) -> Poly {
 
 fn map_coeff_to_nonnegative(mut x: i16) -> u16 {
     x = barrett_reduce(x);
-    if x < 0 {
-        (x as i32 + Q_I32) as u16
-    } else {
-        x as u16
-    }
+    // Branch-free conditional add of Q: `mask` is all-ones iff x is negative
+    // (arithmetic shift of the sign bit), so this never branches on the secret
+    // coefficient during decapsulation re-encryption.
+    let x = i32::from(x);
+    let mask = x >> 31;
+    (x + (Q_I32 & mask)) as u16
 }
 
 fn compress_coeff(x: i16, d: usize) -> u16 {
@@ -966,9 +967,8 @@ fn poly_to_message(poly: &Poly) -> [u8; SYM_BYTES] {
         let mut byte = 0u8;
         for j in 0..8 {
             let mut t = i32::from(barrett_reduce(poly[8 * i + j]));
-            if t < 0 {
-                t += Q_I32;
-            }
+            // Branch-free conditional add of Q on the secret decrypted message.
+            t += Q_I32 & (t >> 31);
             let bit = (((t << 1) + Q_I32 / 2) / Q_I32) & 1;
             byte |= (bit as u8) << j;
         }

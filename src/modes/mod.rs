@@ -86,10 +86,11 @@ fn dbl(block: &[u8]) -> Vec<u8> {
         *o = (b << 1) | carry;
         carry = b >> 7;
     }
-    if carry != 0 {
-        let last = out.len() - 1;
-        out[last] ^= rb_for(block.len());
-    }
+    // Fold in the reduction constant without branching on the (secret) carry
+    // bit: `mask` is 0xFF iff the shift overflowed, 0x00 otherwise.
+    let mask = 0u8.wrapping_sub(carry);
+    let last = out.len() - 1;
+    out[last] ^= rb_for(block.len()) & mask;
     out
 }
 
@@ -157,9 +158,9 @@ fn gf_mul_x_xts(tweak: &mut [u8; 16]) {
         *b = (*b << 1) | carry;
         carry = next;
     }
-    if carry != 0 {
-        tweak[0] ^= 0x87;
-    }
+    // Branch-free reduction: `mask` is 0xFF iff a carry left the top bit.
+    let mask = 0u8.wrapping_sub(carry);
+    tweak[0] ^= 0x87 & mask;
 }
 
 #[inline]
@@ -274,6 +275,11 @@ fn ghash(h: u128, aad: &[u8], ciphertext: &[u8], mul: GhashMulFn) -> u128 {
 
 #[inline]
 fn ghash_iv(h: u128, iv: &[u8], mul: GhashMulFn) -> [u8; 16] {
+    // SP 800-38D requires 1 ≤ len(IV). An empty IV would take the GHASH path
+    // below and reduce to J0 = 0^128 for every key, silently reusing the same
+    // counter sequence and tag mask across all empty-IV messages under a key.
+    // Reject it rather than emit an insecure, nonce-independent keystream.
+    assert!(!iv.is_empty(), "GCM IV must be non-empty (SP 800-38D)");
     // SP 800-38D §7.1 fast path: for 96-bit IVs, J0 = IV || 0^31 || 1.
     if iv.len() == 12 {
         let mut j0 = [0u8; 16];
@@ -2031,6 +2037,17 @@ mod tests {
         assert_eq!(data, Vec::<u8>::new());
         assert_eq!(tag, parse::<16>("58e2fccefa7e3061367f1d57a4e7455a"));
         assert!(mode.decrypt(&iv, &[], &mut data, &tag));
+    }
+
+    #[test]
+    #[should_panic(expected = "GCM IV must be non-empty")]
+    fn gcm_empty_iv_is_rejected() {
+        // An empty IV would yield J0 = 0^128 for every key, silently reusing
+        // the keystream and tag mask across messages. It must be rejected.
+        let key = [0u8; 16];
+        let mut data = [0u8; 16];
+        let mode = Gcm::new(Aes128::new(&key));
+        let _ = mode.encrypt(&[], &[], &mut data);
     }
 
     #[test]

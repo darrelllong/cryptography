@@ -36,12 +36,11 @@ fn ghash_mul(x: u128, y: u128) -> u128 {
 #[inline]
 fn mulx_ghash(v: u128) -> u128 {
     // Multiply by x in the reflected GHASH field representation.
+    // Branch-free: `mask` is all-ones iff the low bit is set, so the reduction
+    // constant is folded in without conditioning on the secret bit.
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
-    if (v & 1) != 0 {
-        (v >> 1) ^ R
-    } else {
-        v >> 1
-    }
+    let mask = 0u128.wrapping_sub(v & 1);
+    (v >> 1) ^ (R & mask)
 }
 
 #[inline]
@@ -127,27 +126,32 @@ fn derive_keys<C: BlockCipher>(
     auth_key[..8].copy_from_slice(&outs[0][..8]);
     auth_key[8..].copy_from_slice(&outs[1][..8]);
 
-    if aes256_enc {
+    let result = if aes256_enc {
         let mut enc_key = [0u8; 32];
         enc_key[..8].copy_from_slice(&outs[2][..8]);
         enc_key[8..16].copy_from_slice(&outs[3][..8]);
         enc_key[16..24].copy_from_slice(&outs[4][..8]);
         enc_key[24..32].copy_from_slice(&outs[5][..8]);
-        (
-            auth_key,
-            enc_key.to_vec(),
-            EncCipher::Aes256(Aes256::new(&enc_key)),
-        )
+        let cipher = EncCipher::Aes256(Aes256::new(&enc_key));
+        let enc_key_vec = enc_key.to_vec();
+        crate::ct::zeroize_slice(enc_key.as_mut_slice());
+        (auth_key, enc_key_vec, cipher)
     } else {
         let mut enc_key = [0u8; 16];
         enc_key[..8].copy_from_slice(&outs[2][..8]);
         enc_key[8..].copy_from_slice(&outs[3][..8]);
-        (
-            auth_key,
-            enc_key.to_vec(),
-            EncCipher::Aes128(Aes128::new(&enc_key)),
-        )
+        let cipher = EncCipher::Aes128(Aes128::new(&enc_key));
+        let enc_key_vec = enc_key.to_vec();
+        crate::ct::zeroize_slice(enc_key.as_mut_slice());
+        (auth_key, enc_key_vec, cipher)
+    };
+
+    // Wipe the raw per-nonce key-derivation blocks; they contain both the
+    // POLYVAL auth key and the message-encryption key.
+    for slot in &mut outs {
+        crate::ct::zeroize_slice(slot.as_mut_slice());
     }
+    result
 }
 
 fn encrypt_core<C: BlockCipher>(
@@ -157,13 +161,19 @@ fn encrypt_core<C: BlockCipher>(
     aad: &[u8],
     plaintext: &[u8],
 ) -> (Vec<u8>, [u8; 16], [u8; 16], EncCipher) {
-    assert!(aad.len() <= (1usize << 36), "AAD exceeds RFC 8452 limit");
+    // Compare as u64 so the `1 << 36` constant does not overflow `usize` on
+    // 32-bit targets (where it would be a compile-time error). On such targets
+    // the RFC 8452 limit is unreachable anyway since `len` maxes out at 2^32-1.
+    assert!(aad.len() as u64 <= (1u64 << 36), "AAD exceeds RFC 8452 limit");
     assert!(
-        plaintext.len() <= (1usize << 36),
+        plaintext.len() as u64 <= (1u64 << 36),
         "plaintext exceeds RFC 8452 limit"
     );
 
-    let (auth_key, _enc_key, enc_cipher) = derive_keys(keygen, nonce, aes256_enc);
+    let (auth_key, mut enc_key, enc_cipher) = derive_keys(keygen, nonce, aes256_enc);
+    // The derived encryption key is already baked into `enc_cipher`; wipe the
+    // spare copy rather than dropping it on the heap unscrubbed.
+    crate::ct::zeroize_slice(enc_key.as_mut_slice());
     let s_input = gcm_siv_s_input(aad, plaintext);
     let mut s = polyval(auth_key, &s_input);
     for i in 0..12 {

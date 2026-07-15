@@ -101,6 +101,14 @@ impl EcdhPublicKey {
     #[must_use]
     pub fn from_wire_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
+        // Reject points outside the prime-order subgroup. On curves with
+        // cofactor h > 1 (the binary curves here have h = 2 or 4) an on-curve
+        // low-order point would otherwise let a peer mount a small-subgroup
+        // attack against a static key, leaking `d mod ord(Q)`. This matches the
+        // check `EcdsaPublicKey::from_wire_bytes` already performs.
+        if !curve.scalar_mul(&q, &curve.n).is_infinity() {
+            return None;
+        }
         Some(Self { curve, q })
     }
 

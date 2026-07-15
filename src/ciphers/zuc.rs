@@ -207,7 +207,12 @@ fn lfsr_feedback(s: &[u32; 16]) -> u32 {
 #[inline]
 fn lfsr_clock(s: &mut [u32; 16], new_val: u32) {
     s.copy_within(1..16, 0);
-    s[15] = if new_val == 0 { 0x7FFF_FFFF } else { new_val };
+    // 0 and 2^31-1 are congruent mod 2^31-1, so map a zero feedback word to
+    // 0x7FFF_FFFF without branching on the secret `new_val`. `is_zero` is
+    // all-ones iff `new_val == 0` (`new_val < 2^31`, so its top bit is clear
+    // and the standard `x | -x` sign trick applies).
+    let is_zero = ((new_val | new_val.wrapping_neg()) >> 31).wrapping_sub(1);
+    s[15] = new_val | (is_zero & 0x7FFF_FFFF);
 }
 
 fn init_core<const CT: bool>(key: &[u8; 16], iv: &[u8; 16]) -> ZucCore {

@@ -39,10 +39,10 @@ fn dbl(block: &[u8]) -> Vec<u8> {
         *o = (b << 1) | carry;
         carry = b >> 7;
     }
-    if carry != 0 {
-        let last = out.len() - 1;
-        out[last] ^= rb_for(block.len());
-    }
+    // Branch-free reduction: `mask` is 0xFF iff the shift overflowed.
+    let mask = 0u8.wrapping_sub(carry);
+    let last = out.len() - 1;
+    out[last] ^= rb_for(block.len()) & mask;
     out
 }
 

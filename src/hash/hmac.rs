@@ -20,7 +20,15 @@ impl<H: Digest> Hmac<H> {
             // HMAC hashes oversize keys down to one digest-width block first so
             // the actual ipad/opad processing always starts from exactly one
             // block of key material, regardless of caller input length.
-            let mut digest = H::digest(key);
+            //
+            // Use an explicit hasher and wipe it rather than the consuming
+            // `H::digest`, whose `finalize_into` drops the key-derived chaining
+            // state and block buffer un-zeroized.
+            let mut h = H::new();
+            h.update(key);
+            let mut digest = vec![0u8; H::OUTPUT_LEN];
+            h.finalize_reset(&mut digest);
+            h.zeroize();
             key_block[..H::OUTPUT_LEN].copy_from_slice(&digest);
             crate::ct::zeroize_slice(digest.as_mut_slice());
         } else {

@@ -22,9 +22,9 @@ fn dbl_block(block: [u8; 16]) -> [u8; 16] {
         out[i] = (block[i] << 1) | carry;
         carry = block[i] >> 7;
     }
-    if carry != 0 {
-        out[15] ^= 0x87;
-    }
+    // Branch-free reduction: `mask` is 0xFF iff a carry left the top bit.
+    let mask = 0u8.wrapping_sub(carry);
+    out[15] ^= 0x87 & mask;
     out
 }
 

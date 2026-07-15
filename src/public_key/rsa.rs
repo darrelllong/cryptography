@@ -156,7 +156,10 @@ impl RsaPrivateKey {
         } else {
             m1.add_ref(&self.p).sub_ref(&m2_mod_p)
         };
-        let h = BigUint::mod_mul(&self.q_inv, &delta, &self.p);
+        // Reuse the cached Montgomery context for `p` instead of the standalone
+        // `BigUint::mod_mul`, which would rebuild `R mod p` / `R^2 mod p` via two
+        // full-width divisions on every private operation.
+        let h = self.p_ctx.mul(&self.q_inv, &delta);
         m2.add_ref(&self.q.mul_ref(&h))
     }
 

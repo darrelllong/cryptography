@@ -240,6 +240,15 @@ impl PaillierPrivateKey {
         } else {
             mod_pow(ciphertext, &self.lambda, &self.n_squared)
         };
+        // A valid ciphertext lies in Z*_{n^2}, so `c^lambda mod n^2` is always
+        // of the form `1 + k*n` and is never zero. An invalid ciphertext with
+        // `c ≡ 0 (mod n)` (e.g. `c ∈ {0, n, 2n, …}`, which an attacker can
+        // submit freely) collapses to `value = 0`, and `paillier_l` would then
+        // underflow on `value - 1` and panic. Reject that case up front so a
+        // malformed ciphertext cannot crash the decryptor.
+        if value.is_zero() {
+            return BigUint::zero();
+        }
         // Valid Paillier ciphertexts produce values of the form `1 + k*n`
         // here, so `L(value)` is defined and extracts the linear term that
         // still carries the plaintext. `u` was precomputed as
@@ -474,6 +483,21 @@ mod tests {
             .expect("valid Paillier nonce");
         assert_eq!(ciphertext, BigUint::from_u64(83));
         assert_eq!(private.decrypt_raw(&ciphertext), message);
+    }
+
+    #[test]
+    fn decrypt_rejects_zero_congruent_ciphertext_without_panicking() {
+        // A ciphertext with c ≡ 0 (mod n) is invalid but attacker-submittable;
+        // it drives `c^lambda mod n^2` to zero, which previously underflowed in
+        // `paillier_l`. Decryption must now return a defined value, not panic.
+        let p = BigUint::from_u64(3);
+        let q = BigUint::from_u64(5);
+        let (_public, private) = Paillier::from_primes(&p, &q).expect("valid Paillier key");
+        for c in [0u64, 15, 30, 225] {
+            // c ∈ {0, n, 2n, n^2}
+            let plaintext = private.decrypt_raw(&BigUint::from_u64(c));
+            assert_eq!(plaintext, BigUint::from_u64(0));
+        }
     }
 
     #[test]

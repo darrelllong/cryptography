@@ -181,7 +181,13 @@ fn present_decrypt_ct(state: u64, round_keys: &[u64; 32]) -> u64 {
     s
 }
 
-fn expand_round_keys_80(key: &[u8; 10]) -> [u64; 32] {
+/// Fast-path key-schedule S-box: a direct secret-indexed table lookup.
+#[inline]
+fn sbox_fast_nibble(input: u8) -> u8 {
+    SBOX[(input & 0x0f) as usize]
+}
+
+fn expand_round_keys_80(key: &[u8; 10], sbox: fn(u8) -> u8) -> [u64; 32] {
     let mut reg = 0u128;
     for &b in key {
         reg = (reg << 8) | u128::from(b);
@@ -197,16 +203,16 @@ fn expand_round_keys_80(key: &[u8; 10]) -> [u64; 32] {
         }
 
         reg = ((reg << 61) | (reg >> 19)) & mask80;
-        let top = ((reg >> 76) & 0x0f) as usize;
+        let top = ((reg >> 76) & 0x0f) as u8;
         reg &= !(0x0fu128 << 76);
-        reg |= u128::from(SBOX[top]) << 76;
+        reg |= u128::from(sbox(top)) << 76;
         reg ^= u128::from(round) << 15;
     }
 
     out
 }
 
-fn expand_round_keys_128(key: &[u8; 16]) -> [u64; 32] {
+fn expand_round_keys_128(key: &[u8; 16], sbox: fn(u8) -> u8) -> [u64; 32] {
     let mut reg = u128::from_be_bytes(*key);
     let mut out = [0u64; 32];
 
@@ -218,13 +224,13 @@ fn expand_round_keys_128(key: &[u8; 16]) -> [u64; 32] {
 
         reg = reg.rotate_left(61);
 
-        let top = ((reg >> 124) & 0x0f) as usize;
+        let top = ((reg >> 124) & 0x0f) as u8;
         reg &= !(0x0fu128 << 124);
-        reg |= u128::from(SBOX[top]) << 124;
+        reg |= u128::from(sbox(top)) << 124;
 
-        let next = ((reg >> 120) & 0x0f) as usize;
+        let next = ((reg >> 120) & 0x0f) as u8;
         reg &= !(0x0fu128 << 120);
-        reg |= u128::from(SBOX[next]) << 120;
+        reg |= u128::from(sbox(next)) << 120;
 
         reg ^= u128::from(round) << 62;
     }
@@ -241,7 +247,7 @@ impl Present80 {
     #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
         Self {
-            round_keys: expand_round_keys_80(key),
+            round_keys: expand_round_keys_80(key, sbox_fast_nibble),
         }
     }
 
@@ -271,7 +277,7 @@ impl Present80Ct {
     #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
         Self {
-            round_keys: expand_round_keys_80(key),
+            round_keys: expand_round_keys_80(key, sbox_ct_nibble),
         }
     }
 
@@ -301,7 +307,7 @@ impl Present128 {
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
-            round_keys: expand_round_keys_128(key),
+            round_keys: expand_round_keys_128(key, sbox_fast_nibble),
         }
     }
 
@@ -331,7 +337,7 @@ impl Present128Ct {
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
-            round_keys: expand_round_keys_128(key),
+            round_keys: expand_round_keys_128(key, sbox_ct_nibble),
         }
     }
 

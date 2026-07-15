@@ -216,7 +216,11 @@ const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
 }
 
 /// Apply the P permutation to a (possibly sparse) 32-bit S-output word.
-/// Used at compile time to build the fused S+P table.
+///
+/// Used at compile time to build the fused S+P table, and at runtime by the
+/// constant-time f-function (`f_ct`) on the secret S-box output. The bit move
+/// is written branch-free — no `if` on secret data — so the runtime use never
+/// conditions control flow on `s`.
 const fn apply_p_to_partial(s: u32) -> u32 {
     let mut out = 0u32;
     let mut i = 0u32;
@@ -225,9 +229,7 @@ const fn apply_p_to_partial(s: u32) -> u32 {
         // FIPS bit k ↔ u32 bit (32−k).
         let src_bit = 32u32 - P[i as usize] as u32; // 0 = LSB
         let dst_bit = 31u32 - i;
-        if (s >> src_bit) & 1 == 1 {
-            out |= 1u32 << dst_bit;
-        }
+        out |= ((s >> src_bit) & 1) << dst_bit;
         i += 1;
     }
     out
