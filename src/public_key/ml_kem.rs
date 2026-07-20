@@ -12,6 +12,7 @@
 //! - no C/FFI backends are used
 
 use core::fmt;
+use std::sync::OnceLock;
 
 use crate::hash::sha3::{Sha3_256, Sha3_512, Shake128, Shake256};
 use crate::hash::Xof;
@@ -166,18 +167,67 @@ impl MlKemParameterSet {
 }
 
 /// ML-KEM public key.
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MlKemPublicKey {
     params: MlKemParameterSet,
     bytes: Vec<u8>,
+    // Lazily-expanded transposed matrix A^T (deterministic in the public `rho`),
+    // cached so repeated encapsulations to this key do not re-run SHAKE128
+    // rejection sampling. Ignored by Clone/Eq (it is derived state).
+    at: OnceLock<[PolyVec; MAX_K]>,
+}
+
+impl Clone for MlKemPublicKey {
+    fn clone(&self) -> Self {
+        Self {
+            params: self.params,
+            bytes: self.bytes.clone(),
+            at: OnceLock::new(),
+        }
+    }
+}
+
+impl PartialEq for MlKemPublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.params == other.params && self.bytes == other.bytes
+    }
+}
+
+impl Eq for MlKemPublicKey {}
+
+impl fmt::Debug for MlKemPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MlKemPublicKey")
+            .field("params", &self.params)
+            .finish_non_exhaustive()
+    }
 }
 
 /// ML-KEM private key.
-#[derive(Clone, Eq, PartialEq)]
 pub struct MlKemPrivateKey {
     params: MlKemParameterSet,
     bytes: Vec<u8>,
+    // Cached A^T for the embedded public key, used by the decapsulation
+    // re-encryption. Ignored by Clone/Eq. See [`MlKemPublicKey::at`].
+    at: OnceLock<[PolyVec; MAX_K]>,
 }
+
+impl Clone for MlKemPrivateKey {
+    fn clone(&self) -> Self {
+        Self {
+            params: self.params,
+            bytes: self.bytes.clone(),
+            at: OnceLock::new(),
+        }
+    }
+}
+
+impl PartialEq for MlKemPrivateKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.params == other.params && self.bytes == other.bytes
+    }
+}
+
+impl Eq for MlKemPrivateKey {}
 
 /// ML-KEM ciphertext.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -207,6 +257,18 @@ impl MlKemPublicKey {
         self.params
     }
 
+    /// Expand (once) and return the cached transposed matrix A^T. `rho` is the
+    /// trailing `SYM_BYTES` of the packed public key.
+    fn matrix_at(&self) -> &[PolyVec; MAX_K] {
+        self.at.get_or_init(|| {
+            let p = self.params.profile();
+            let start = p.k * POLY_BYTES;
+            let mut rho = [0u8; SYM_BYTES];
+            rho.copy_from_slice(&self.bytes[start..start + SYM_BYTES]);
+            gen_matrix(p, &rho, true)
+        })
+    }
+
     #[must_use]
     pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.bytes.clone()
@@ -233,6 +295,7 @@ impl MlKemPublicKey {
         Some(Self {
             params,
             bytes: bytes.to_vec(),
+            at: OnceLock::new(),
         })
     }
 
@@ -253,6 +316,21 @@ impl MlKemPublicKey {
 }
 
 impl MlKemPrivateKey {
+    /// Expand (once) and return the cached A^T for the embedded public key,
+    /// used by the decapsulation re-encryption.
+    fn matrix_at(&self) -> &[PolyVec; MAX_K] {
+        self.at.get_or_init(|| {
+            let p = self.params.profile();
+            let sk_pke_len = p.k * POLY_BYTES;
+            let pk_len = p.k * POLY_BYTES + SYM_BYTES;
+            // rho is the last SYM_BYTES of the embedded public key.
+            let rho_start = sk_pke_len + pk_len - SYM_BYTES;
+            let mut rho = [0u8; SYM_BYTES];
+            rho.copy_from_slice(&self.bytes[rho_start..rho_start + SYM_BYTES]);
+            gen_matrix(p, &rho, true)
+        })
+    }
+
     #[must_use]
     pub fn parameter_set(&self) -> MlKemParameterSet {
         self.params
@@ -296,6 +374,7 @@ impl MlKemPrivateKey {
         Some(Self {
             params,
             bytes: bytes.to_vec(),
+            at: OnceLock::new(),
         })
     }
 
@@ -385,10 +464,12 @@ impl MlKem {
         let pk = MlKemPublicKey {
             params,
             bytes: pk_bytes,
+            at: OnceLock::new(),
         };
         let sk = MlKemPrivateKey {
             params,
             bytes: sk_bytes,
+            at: OnceLock::new(),
         };
         Some((pk, sk))
     }
@@ -425,7 +506,8 @@ impl MlKem {
         let mut coins = [0u8; SYM_BYTES];
         coins.copy_from_slice(&kr[SYM_BYTES..]);
 
-        let ct_bytes = indcpa_encrypt(p, randomness, &public_key.bytes, &coins)?;
+        let ct_bytes =
+            indcpa_encrypt(p, randomness, &public_key.bytes, &coins, public_key.matrix_at())?;
         let mut ss = [0u8; SS_BYTES];
         ss.copy_from_slice(&kr[..SS_BYTES]);
         Some((
@@ -481,7 +563,7 @@ impl MlKem {
         let mut coins = [0u8; SYM_BYTES];
         coins.copy_from_slice(&kr[SYM_BYTES..]);
 
-        let cmp = indcpa_encrypt(p, &m_prime, pk, &coins)?;
+        let cmp = indcpa_encrypt(p, &m_prime, pk, &coins, private_key.matrix_at())?;
 
         let mut rk_in = Vec::with_capacity(SYM_BYTES + ciphertext.bytes.len());
         rk_in.extend_from_slice(z);
@@ -1170,11 +1252,11 @@ fn indcpa_encrypt(
     msg: &[u8; SYM_BYTES],
     pk_bytes: &[u8],
     coins: &[u8; SYM_BYTES],
+    at: &[PolyVec; MAX_K],
 ) -> Option<Vec<u8>> {
-    let (t_hat, rho) = unpack_public_key(p, pk_bytes)?;
-    // WHAT: expand the transposed public matrix from `rho`.
-    // WHY: Kyber encapsulation multiplies by A^T as specified.
-    let at = gen_matrix(p, &rho, true);
+    // The transposed public matrix A^T is deterministic in `rho` and supplied by
+    // the caller (cached on the key), so it is not re-expanded per call here.
+    let (t_hat, _rho) = unpack_public_key(p, pk_bytes)?;
     let m_poly = poly_from_message(msg);
 
     let mut sp = PolyVec::zero(p.k);
