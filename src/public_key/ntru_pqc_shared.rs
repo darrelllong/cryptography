@@ -463,6 +463,20 @@ macro_rules! define_pqc_kem {
             bytes: [u8; SHARED_SECRET_BYTES],
         }
 
+        impl Drop for $sk_ty {
+            fn drop(&mut self) {
+                // The packed private key holds the trinary trapdoor `f`, the
+                // inverse `h^-1` / `g`, and the implicit-rejection PRF key.
+                $crate::ct::zeroize_slice(self.bytes.as_mut_slice());
+            }
+        }
+
+        impl Drop for $ss_ty {
+            fn drop(&mut self) {
+                $crate::ct::zeroize_slice(self.bytes.as_mut_slice());
+            }
+        }
+
         impl $pk_ty {
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
@@ -922,6 +936,20 @@ pub(crate) fn owcpa_keypair<V, const N: usize, const LOGQ: usize>(
     poly_rq_mul::<N>(&mut tmp, &invgf, &g);
     poly_rq_mul::<N>(&mut h, &tmp, &g);
     V::poly_sq_tobytes(pk, &h);
+
+    // Wipe the secret-derived working polynomials; the caller keeps only the
+    // packed `sk`/`pk` byte buffers.
+    for buf in [
+        &mut f,
+        &mut g,
+        &mut invf_mod3,
+        &mut gf,
+        &mut invgf,
+        &mut tmp,
+        &mut invh,
+    ] {
+        crate::ct::zeroize_slice(buf.as_mut_slice());
+    }
 }
 
 /// OWCPA encryption. Computes $c = r \cdot h + \text{lift}(m)$ in
@@ -1014,6 +1042,14 @@ where
 
     poly_trinary_zq_to_z3::<N, LOGQ>(&mut r);
     poly_s3_tobytes::<N>(&mut rm[..V::PACK_TRINARY_BYTES], &r);
+
+    // Wipe the unpacked trapdoor and the recovered secret polynomials. `c` is
+    // the public ciphertext and `rm` is the caller-owned output buffer.
+    for buf in [
+        &mut f, &mut finv3, &mut invh, &mut cf, &mut mf, &mut m, &mut liftm, &mut b, &mut r,
+    ] {
+        crate::ct::zeroize_slice(buf.as_mut_slice());
+    }
 
     fail
 }
@@ -1143,6 +1179,13 @@ pub(crate) fn kem_enc_seeded<V, R, const N: usize, const LOGQ: usize>(
 
     poly_z3_to_zq::<N>(&mut r, V::Q_MASK);
     owcpa_enc::<V, N, LOGQ>(c, &r, &m, pk);
+
+    // Wipe the secret message polynomials and the scratch that held `r || m`
+    // and its seed; `c`/`k` are the intended outputs.
+    crate::ct::zeroize_slice(&mut r);
+    crate::ct::zeroize_slice(&mut m);
+    crate::ct::zeroize_slice(rm_scratch);
+    crate::ct::zeroize_slice(rm_seed_scratch);
 }
 
 // ---- KEM decapsulation (FO-style transform) --------------------------------
@@ -1174,6 +1217,10 @@ pub(crate) fn kem_dec<V, const N: usize, const LOGQ: usize>(
         .chain(c)
         .finalize();
     cmov(k, &reject, fail as u8);
+
+    // `rm_scratch` held the recovered `r || m`; wipe it now that it has been
+    // hashed into the session key.
+    crate::ct::zeroize_slice(rm_scratch);
 }
 
 // ---- IID and fixed-weight samplers -----------------------------------------

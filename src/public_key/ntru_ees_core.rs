@@ -241,6 +241,16 @@ pub struct TernaryPoly {
     pub neg_ones: Vec<u16>,
 }
 
+impl Drop for TernaryPoly {
+    fn drop(&mut self) {
+        // The non-zero index lists ARE the secret trapdoor `f`; wipe them so a
+        // dropped private key (`Trapdoor` -> `ProductPoly`/`TernaryPoly`) does
+        // not leave key material in freed memory. Cascades through every owner.
+        crate::ct::zeroize_slice(self.ones.as_mut_slice());
+        crate::ct::zeroize_slice(self.neg_ones.as_mut_slice());
+    }
+}
+
 impl TernaryPoly {
     pub fn to_dense<const N: usize>(&self, q_mask: u16) -> Poly<N> {
         let mut p = Poly::<N>::zero();
@@ -854,11 +864,22 @@ fn sves_from_bytes<const N: usize>(m: &[u8], q_mask: u16) -> Poly<N> {
     out
 }
 
-fn sves_to_bytes<const N: usize>(p: &Poly<N>) -> Option<Vec<u8>> {
+/// Decode the trit-pair packing back to bytes, returning `(bytes, valid)`.
+///
+/// The forbidden pair `(2, 2)` (which does not fit the 3-bit packing) is
+/// flagged in `valid` rather than short-circuiting with an early return. This
+/// keeps decryption on a single code path regardless of *why* a ciphertext is
+/// rejected, which is what closes the classic NTRU decryption-failure /
+/// reaction oracle: an attacker cannot distinguish a structural-decode failure
+/// here from a re-encryption mismatch later. For a well-formed message no
+/// `(2, 2)` occurs, so masking `c` to three bits leaves the output identical to
+/// a strict decoder.
+fn sves_to_bytes<const N: usize>(p: &Poly<N>) -> (Vec<u8>, bool) {
     let num_bits = (N * 3).div_ceil(2);
     let num_bytes = num_bits.div_ceil(8);
     let mut out = vec![0u8; num_bytes + 3];
     let end = N / 2 * 2;
+    let mut invalid = 0u32;
     let mut d_idx = 0usize;
     let mut i = 0usize;
     while i < end {
@@ -868,13 +889,14 @@ fn sves_to_bytes<const N: usize>(p: &Poly<N>) -> Option<Vec<u8>> {
             if i >= end {
                 break;
             }
-            let c1 = p.coeffs[i] as i32;
-            let c2 = p.coeffs[i + 1] as i32;
+            let c1 = u32::from(p.coeffs[i]);
+            let c2 = u32::from(p.coeffs[i + 1]);
             i += 2;
-            if c1 == 2 && c2 == 2 {
-                return None;
-            }
-            let c = (c1 * 3 + c2) as u32;
+            // Flag the forbidden (2,2) pair without leaving the loop.
+            invalid |= u32::from(c1 == 2) & u32::from(c2 == 2);
+            // Mask to three bits so (2,2) -> 8 cannot corrupt the packing of a
+            // rejected ciphertext (its bytes are discarded anyway).
+            let c = (c1 * 3 + c2) & 0x7;
             acc |= c << bits_in_acc;
             bits_in_acc += 3;
             while bits_in_acc >= 8 && d_idx < out.len() {
@@ -889,7 +911,7 @@ fn sves_to_bytes<const N: usize>(p: &Poly<N>) -> Option<Vec<u8>> {
         }
     }
     out.truncate(num_bytes);
-    Some(out)
+    (out, invalid == 0)
 }
 
 // ---- byte encodings of polynomials -----------------------------------------
@@ -1230,15 +1252,21 @@ pub fn decrypt<const N: usize>(
     poly_sub::<N>(&mut cmtrin, &mask);
     poly_mod3::<N>(&mut cmtrin, params);
 
-    let cm = sves_to_bytes::<N>(&cmtrin).ok_or(NtruEesError::InvalidCiphertext)?;
+    // Decode without an early return; fold a decode failure into `retcode_ok`
+    // so every rejection reason funnels through the single constant-time exit
+    // at the end (no decryption-failure / reaction oracle).
+    let (cm, sves_ok) = sves_to_bytes::<N>(&cmtrin);
+    retcode_ok &= sves_ok;
 
     let db_bytes = params.db_bytes();
     let max_msg = params.max_message_bytes();
     let cb = &cm[..db_bytes];
-    let cl = cm[db_bytes] as usize;
-    if cl > max_msg {
-        return Err(NtruEesError::InvalidCiphertext);
-    }
+    let cl_raw = cm[db_bytes] as usize;
+    // Fold the length-byte range check into the flag too, and clamp so the
+    // message/padding slices below can never go out of bounds on a tampered
+    // ciphertext (the clamped bytes are discarded when `retcode_ok` is false).
+    retcode_ok &= cl_raw <= max_msg;
+    let cl = cl_raw.min(max_msg);
     let msg = cm[db_bytes + 1..db_bytes + 1 + cl].to_vec();
 
     let pad_start = db_bytes + 1 + cl;
