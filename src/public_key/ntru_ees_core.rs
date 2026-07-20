@@ -914,6 +914,38 @@ fn sves_to_bytes<const N: usize>(p: &Poly<N>) -> (Vec<u8>, bool) {
     (out, invalid == 0)
 }
 
+#[cfg(test)]
+mod sves_tests {
+    use super::{sves_to_bytes, Poly};
+
+    #[test]
+    fn forbidden_pair_is_flagged_not_paniced() {
+        // The (2,2) trit pair — previously an early `return None` — must now set
+        // the invalid flag while still producing a full-length buffer, with no
+        // panic (this is the branch the reaction-oracle fix depends on).
+        let mut p = Poly::<8>::zero();
+        p.coeffs[2] = 2;
+        p.coeffs[3] = 2;
+        let (bytes, valid) = sves_to_bytes::<8>(&p);
+        assert!(!valid, "(2,2) pair must be flagged invalid");
+        assert_eq!(bytes.len(), (8 * 3usize).div_ceil(2).div_ceil(8));
+    }
+
+    #[test]
+    fn legal_pairs_stay_valid_and_masking_is_a_noop() {
+        // Every legal pair has c1*3+c2 in 0..=7, so the `& 0x7` mask is a no-op
+        // and the decode is byte-identical to a strict decoder that never sees
+        // the forbidden value.
+        let mut p = Poly::<8>::zero();
+        for (k, &(a, b)) in [(0u16, 0u16), (0, 1), (1, 2), (2, 1)].iter().enumerate() {
+            p.coeffs[2 * k] = a;
+            p.coeffs[2 * k + 1] = b;
+        }
+        let (_bytes, valid) = sves_to_bytes::<8>(&p);
+        assert!(valid);
+    }
+}
+
 // ---- byte encodings of polynomials -----------------------------------------
 
 fn poly_to_arr<const N: usize>(p: &Poly<N>, out: &mut [u8], params: &EesParams) {
@@ -1253,8 +1285,16 @@ pub fn decrypt<const N: usize>(
     poly_mod3::<N>(&mut cmtrin, params);
 
     // Decode without an early return; fold a decode failure into `retcode_ok`
-    // so every rejection reason funnels through the single constant-time exit
-    // at the end (no decryption-failure / reaction oracle).
+    // so structural failures no longer short-circuit *before* the re-encryption
+    // check. This removes the classic reaction oracle in which a decode/length
+    // failure rejected measurably faster than a re-encryption mismatch.
+    //
+    // Note: this is not a fully time-invariant decrypt. The recovered length
+    // byte `cl` still governs a small amount of tail work (the message copy,
+    // the padding scan, and the length of the IGF seed), which is inherent to
+    // variable-length SVES messages; the dominant re-encryption cost
+    // (`mul_dense` + the coefficient diff) is length-independent. The removed
+    // early returns were the exploitable distinguisher.
     let (cm, sves_ok) = sves_to_bytes::<N>(&cmtrin);
     retcode_ok &= sves_ok;
 

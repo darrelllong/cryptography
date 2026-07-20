@@ -232,7 +232,14 @@ fn ghash_mul_vt(x: u128, y: u128) -> u128 {
 /// residue are XOR-combined, then each is masked to its group and OR-ed
 /// together.  The result is the low 64 bits of the 128-bit carryless product;
 /// the high half is obtained by feeding bit-reversed operands (see
-/// [`ghash_mul_ct`]).  Every step is data-independent, so this is constant-time.
+/// [`ghash_mul_ct`]).  Every step is data-independent (no secret-dependent
+/// branches or memory indices).
+///
+/// Constant-time caveat: like BearSSL's `ctmul64`, this assumes the target's
+/// 64-bit integer multiply is itself data-independent, which holds on the
+/// mainstream x86-64 and aarch64 targets. On a core with a variable-latency
+/// multiplier the `wrapping_mul`s would leak; such targets would need the
+/// 32-bit (`ctmul32`) decomposition instead.
 #[inline]
 fn bmul64(x: u64, y: u64) -> u64 {
     const M0: u64 = 0x1111_1111_1111_1111;

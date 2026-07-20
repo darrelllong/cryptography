@@ -165,11 +165,18 @@ impl RsaPrivateKey {
         // Bellcore / Boneh–DeMillo–Lipton fault check. A transient fault in
         // either CRT half (m1 or m2) yields an `m` with `m^e != c (mod n)`, and
         // releasing such a value lets an attacker recover a prime factor from
-        // `gcd(m^e - c, n)`. Verifying `m^e == c (mod n)` costs one extra public
-        // exponentiation (cheap: `e` is sparse). On mismatch we fall back to the
-        // non-CRT exponentiation `c^d mod n`, which is fault-isolated (it never
-        // exposes p or q individually) and total, so a detected fault degrades
-        // to a correct-but-slower result rather than a key-leaking one.
+        // `gcd(m^e - c, n)`. Verifying `m^e == c (mod n)` costs one extra
+        // public exponentiation — negligible for the usual near-2^16 exponent,
+        // but up to ~modulus-width work for a key built with a large custom `e`.
+        // On mismatch we fall back to the non-CRT exponentiation `c^d mod n`,
+        // which is fault-isolated (it never exposes p or q individually) and
+        // total, so a detected fault degrades to a correct-but-slower result
+        // rather than a key-leaking one.
+        //
+        // Scope: this guards the CRT exponentiation only. A fault in the
+        // `decrypt_raw_blinded` mask/unmask `mod_mul`s is not covered here and
+        // does not need to be — such a fault has no single-prime `gcd`
+        // structure and so does not leak a factor.
         let c_mod_n = ciphertext.modulo(&self.n);
         if mod_pow(&m, &self.e, &self.n) == c_mod_n {
             m

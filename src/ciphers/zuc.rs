@@ -209,8 +209,8 @@ fn lfsr_clock(s: &mut [u32; 16], new_val: u32) {
     s.copy_within(1..16, 0);
     // 0 and 2^31-1 are congruent mod 2^31-1, so map a zero feedback word to
     // 0x7FFF_FFFF without branching on the secret `new_val`. `is_zero` is
-    // all-ones iff `new_val == 0` (`new_val < 2^31`, so its top bit is clear
-    // and the standard `x | -x` sign trick applies).
+    // all-ones iff `new_val == 0`: for any non-zero u32, `x | -x` has its top
+    // bit set, so `>> 31` gives 1 and `- 1` gives 0; for zero it gives all-ones.
     let is_zero = ((new_val | new_val.wrapping_neg()) >> 31).wrapping_sub(1);
     s[15] = new_val | (is_zero & 0x7FFF_FFFF);
 }
