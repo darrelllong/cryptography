@@ -72,14 +72,16 @@ impl<H: Digest> Hkdf<H> {
             return false;
         }
 
-        // T(i) is streamed directly into the keyed HMAC and written into one
-        // reused buffer — no per-round concatenation or allocation churn.
+        // Derive the keyed HMAC state (ipad/opad absorbed) once, then clone it
+        // per block. This avoids re-running the two-block key schedule and its
+        // allocations for every T(i). T(i) streams into one reused buffer.
+        let base = Hmac::<H>::new(&self.prk);
         let mut t = vec![0u8; H::OUTPUT_LEN];
         let mut generated = 0usize;
         let mut counter = 1u8;
 
         while generated < out.len() {
-            let mut mac = Hmac::<H>::new(&self.prk);
+            let mut mac = base.clone();
             if counter > 1 {
                 mac.update(&t);
             }

@@ -192,6 +192,12 @@ pub struct MlKemSharedSecret {
     bytes: [u8; SS_BYTES],
 }
 
+impl Drop for MlKemSharedSecret {
+    fn drop(&mut self) {
+        crate::ct::zeroize_slice(self.bytes.as_mut_slice());
+    }
+}
+
 /// Namespace for ML-KEM operations.
 pub struct MlKem;
 
@@ -533,9 +539,11 @@ fn montgomery_reduce(a: i32) -> i16 {
 
 #[inline(always)]
 fn barrett_reduce(a: i16) -> i16 {
-    let v: i16 = (((1i32 << 26) + Q_I32 / 2) / Q_I32) as i16;
-    let t = (((v as i32) * (a as i32) + (1i32 << 25)) >> 26) as i16;
-    a - t * Q
+    // Keep the multiply/subtract in i32 so `t * Q` cannot overflow i16 for
+    // larger `|a|`; the reduced result always fits i16.
+    let v: i32 = ((1i32 << 26) + Q_I32 / 2) / Q_I32;
+    let t = (v * i32::from(a) + (1i32 << 25)) >> 26;
+    (i32::from(a) - t * Q_I32) as i16
 }
 
 #[inline(always)]
@@ -1334,6 +1342,30 @@ mod tests {
             let ss_recv = MlKem::decaps(&sk, &ct).expect("decaps");
             assert_eq!(ss, ss_recv, "{params:?}");
         }
+    }
+
+    #[test]
+    fn implicit_rejection_is_deterministic_and_distinct() {
+        // FIPS 203 decapsulation never fails on a well-formed-length ciphertext:
+        // a tampered ciphertext yields the deterministic implicit-rejection key
+        // K̄ = J(z || c), not the true shared secret and not an error.
+        let params = MlKemParameterSet::MlKem768;
+        let seed = [0x42u8; 64];
+        let (pk, sk) = MlKem::keygen_from_seed(params, &seed).expect("keygen");
+        let msg = [0x24u8; 32];
+        let (ct, ss) = MlKem::encaps_with_randomness(&pk, &msg).expect("encaps");
+
+        // Flip a bit; length stays valid so this exercises implicit rejection,
+        // not the length check.
+        let mut bad = ct.to_wire_bytes();
+        bad[0] ^= 1;
+        let bad_ct = MlKemCiphertext::from_wire_bytes(params, &bad).expect("valid length");
+
+        let rej1 = MlKem::decaps(&sk, &bad_ct).expect("decaps returns a key, never None");
+        let rej2 = MlKem::decaps(&sk, &bad_ct).expect("decaps");
+
+        assert_eq!(rej1, rej2, "rejection key must be deterministic in (z, c)");
+        assert_ne!(rej1, ss, "rejection key must differ from the true shared secret");
     }
 
     #[test]

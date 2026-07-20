@@ -15,6 +15,16 @@
 //! 4. sign with `r = H(prefix || M) mod n`
 //! 5. challenge `k = H(R || A || M) mod n`
 //! 6. response `S = r + k·a mod n`
+//!
+//! # Side channels
+//!
+//! Despite Ed25519's reputation as a side-channel-hardened scheme, this
+//! implementation is **variable-time**: signing derives `R = r·B` and the key
+//! `A = a·B` through the generic Edwards scalar multiplication in
+//! [`crate::public_key::ec_edwards`], which is not constant-time in the secret
+//! scalar (see that module's note). It lives under [`crate::vt`] for that
+//! reason and is unsuitable where an attacker can observe signing timing or
+//! cache behavior. Verification operates only on public data.
 
 use core::fmt;
 use std::sync::OnceLock;

@@ -571,17 +571,22 @@ fn strip_parity_bits(key: &[u8; 8]) -> [u8; 8] {
 }
 
 /// Return `true` when `key` is weak or semi-weak under DES.
+///
+/// The comparison against every known weak/semi-weak key is accumulated without
+/// short-circuiting, so the running time does not depend on how many leading
+/// bytes of the secret key match a pattern.
 #[must_use]
 pub fn is_weak_or_semi_weak_key(key: &[u8; 8]) -> bool {
     let normalized = strip_parity_bits(key);
-    WEAK_KEYS
-        .iter()
-        .any(|wk| strip_parity_bits(wk) == normalized)
-        || SEMI_WEAK_KEY_PAIRS.iter().any(|(a, b)| {
-            let a_norm = strip_parity_bits(a);
-            let b_norm = strip_parity_bits(b);
-            normalized == a_norm || normalized == b_norm
-        })
+    let mut hit = 0u8;
+    for wk in WEAK_KEYS.iter() {
+        hit |= crate::ct::constant_time_eq_mask(&strip_parity_bits(wk), &normalized);
+    }
+    for (a, b) in SEMI_WEAK_KEY_PAIRS.iter() {
+        hit |= crate::ct::constant_time_eq_mask(&strip_parity_bits(a), &normalized);
+        hit |= crate::ct::constant_time_eq_mask(&strip_parity_bits(b), &normalized);
+    }
+    hit != 0
 }
 
 impl Des {

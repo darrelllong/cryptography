@@ -6,6 +6,12 @@
 use super::Digest;
 
 /// Streaming HMAC state over an arbitrary in-tree digest.
+///
+/// `Clone` captures the keyed inner/outer states after ipad/opad absorption, so
+/// callers that authenticate many messages under one key (e.g. HKDF-Expand) can
+/// derive the key schedule once and clone it per message instead of rebuilding
+/// it every time.
+#[derive(Clone)]
 pub struct Hmac<H: Digest> {
     inner: H,
     outer: H,
@@ -97,7 +103,12 @@ impl<H: Digest> Hmac<H> {
     #[must_use]
     /// Compute and compare the tag in constant time.
     pub fn verify(key: &[u8], data: &[u8], tag: &[u8]) -> bool {
-        crate::ct::constant_time_eq_mask(&Self::compute(key, data), tag) == u8::MAX
+        // Compute the genuine tag into a local so it can be wiped: otherwise the
+        // valid tag for an attacker-chosen message would be freed unscrubbed.
+        let mut expected = Self::compute(key, data);
+        let ok = crate::ct::constant_time_eq_mask(&expected, tag) == u8::MAX;
+        crate::ct::zeroize_slice(expected.as_mut_slice());
+        ok
     }
 }
 

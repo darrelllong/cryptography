@@ -46,6 +46,11 @@ pub trait Digest: Clone {
     /// This exists primarily so keyed constructions such as `Hmac<H>` can
     /// consume intermediate hash state without leaving key-derived chaining
     /// values behind in memory.
+    ///
+    /// Note: unlike the same-named method in some other libraries, this does
+    /// **not** re-initialize the hasher to a fresh, reusable state — it wipes to
+    /// a zeroed (dead) state. Do not continue to `update`/`finalize` after
+    /// calling it; construct a new hasher instead.
     fn finalize_reset(&mut self, out: &mut [u8]);
 
     /// Best-effort zeroization of the internal state.
@@ -77,6 +82,11 @@ pub trait Xof {
     /// Subsequent calls continue producing output from the same stream. This
     /// models sponge-based XOFs such as SHAKE, where the caller may not know
     /// the required output length up front.
+    ///
+    /// # Panics
+    ///
+    /// Implementations may panic if [`Self::update`] is called after squeezing
+    /// has begun (a sponge cannot absorb more input once it is in output mode).
     fn squeeze(&mut self, out: &mut [u8]);
 }
 

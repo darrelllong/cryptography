@@ -128,16 +128,21 @@ impl EciesPublicKey {
                 // Negligible: retry with a different k.
                 continue;
             }
-            let sx = pad_coord(&s.x.to_be_bytes(), self.curve.coord_len);
+            let mut sx = pad_coord(&s.x.to_be_bytes(), self.curve.coord_len);
 
             // KDF: key = SHA-256(0x01 || S.x), nonce = SHA-256(0x02 || S.x)[0..12].
-            let key = kdf_key(&sx);
+            let mut key = kdf_key(&sx);
             let nonce = kdf_nonce(&sx);
 
             // AES-256-GCM: encrypt in-place, AAD = R_bytes.
             let gcm = Gcm::new(Aes256::new(&key));
             let mut ciphertext = message.to_vec();
             let tag = gcm.encrypt(&nonce, &r_bytes, &mut ciphertext);
+
+            // Wipe the derived key and shared-secret bytes. (The ephemeral
+            // scalar `k` is a BigUint and is wiped by its own Drop.)
+            crate::ct::zeroize_slice(&mut key);
+            crate::ct::zeroize_slice(sx.as_mut_slice());
 
             // Wire: R_bytes || ciphertext || tag.
             let mut out = r_bytes;
@@ -362,16 +367,22 @@ impl EciesPrivateKey {
         if s.is_infinity() {
             return None;
         }
-        let sx = pad_coord(&s.x.to_be_bytes(), self.curve.coord_len);
+        let mut sx = pad_coord(&s.x.to_be_bytes(), self.curve.coord_len);
 
         // Re-derive key and nonce.
-        let key = kdf_key(&sx);
+        let mut key = kdf_key(&sx);
         let nonce = kdf_nonce(&sx);
 
         // AES-256-GCM decrypt; AAD = r_bytes.
         let gcm = Gcm::new(Aes256::new(&key));
         let mut plaintext = ct.to_vec();
-        if gcm.decrypt(&nonce, r_bytes, &mut plaintext, tag) {
+        let ok = gcm.decrypt(&nonce, r_bytes, &mut plaintext, tag);
+
+        // Wipe the derived key and shared-secret bytes before returning.
+        crate::ct::zeroize_slice(&mut key);
+        crate::ct::zeroize_slice(sx.as_mut_slice());
+
+        if ok {
             Some(plaintext)
         } else {
             None

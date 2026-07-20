@@ -965,14 +965,18 @@ impl MontgomeryCtx {
     #[must_use]
     pub fn encode(&self, value: &BigUint) -> BigUint {
         let mut workspace = Vec::new();
-        self.encode_with_workspace(value, &mut workspace)
+        let result = self.encode_with_workspace(value, &mut workspace);
+        crate::ct::zeroize_slice(workspace.as_mut_slice());
+        result
     }
 
     /// Convert a Montgomery residue back to the ordinary representation.
     #[must_use]
     pub fn decode(&self, value: &BigUint) -> BigUint {
         let mut workspace = Vec::new();
-        self.decode_with_workspace(value, &mut workspace)
+        let result = self.decode_with_workspace(value, &mut workspace);
+        crate::ct::zeroize_slice(workspace.as_mut_slice());
+        result
     }
 
     /// Multiply two ordinary residues modulo the context modulus.
@@ -988,7 +992,9 @@ impl MontgomeryCtx {
             self.n0_inv,
             &mut workspace,
         );
-        self.decode_with_workspace(&product_mont, &mut workspace)
+        let result = self.decode_with_workspace(&product_mont, &mut workspace);
+        crate::ct::zeroize_slice(workspace.as_mut_slice());
+        result
     }
 
     /// Square one ordinary residue modulo the context modulus.
@@ -1003,7 +1009,9 @@ impl MontgomeryCtx {
             self.n0_inv,
             &mut workspace,
         );
-        self.decode_with_workspace(&square_mont, &mut workspace)
+        let result = self.decode_with_workspace(&square_mont, &mut workspace);
+        crate::ct::zeroize_slice(workspace.as_mut_slice());
+        result
     }
 
     /// Multiply two residues that are **already in Montgomery form**, staying
@@ -1043,7 +1051,11 @@ impl MontgomeryCtx {
     pub fn pow(&self, base: &BigUint, exponent: &BigUint) -> BigUint {
         let mut workspace = Vec::new();
         let base_mont = self.encode_with_workspace(&base.modulo(&self.modulus), &mut workspace);
-        self.pow_encoded_with_workspace(&base_mont, exponent, &mut workspace)
+        let result = self.pow_encoded_with_workspace(&base_mont, exponent, &mut workspace);
+        // The workspace held Montgomery intermediates of a (possibly secret)
+        // exponentiation; wipe it before the buffer is freed.
+        crate::ct::zeroize_slice(workspace.as_mut_slice());
+        result
     }
 
     /// Compute `base^exponent mod modulus` with `base` already in Montgomery form.
@@ -1053,7 +1065,9 @@ impl MontgomeryCtx {
     #[must_use]
     pub fn pow_encoded(&self, base_mont: &BigUint, exponent: &BigUint) -> BigUint {
         let mut workspace = Vec::new();
-        self.pow_encoded_with_workspace(base_mont, exponent, &mut workspace)
+        let result = self.pow_encoded_with_workspace(base_mont, exponent, &mut workspace);
+        crate::ct::zeroize_slice(workspace.as_mut_slice());
+        result
     }
 }
 
