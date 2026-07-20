@@ -1659,7 +1659,7 @@ pub(crate) struct KatEntry {
 #[cfg(test)]
 pub(crate) fn hex_to_bytes(s: &str) -> Vec<u8> {
     let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    assert!(cleaned.len() % 2 == 0, "hex length must be even");
+    assert!(cleaned.len().is_multiple_of(2), "hex length must be even");
     (0..cleaned.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex"))
@@ -1777,7 +1777,8 @@ mod tests {
         let parts: [&[u8]; 3] = [b"abc", b"defghij", b""];
         let concat: Vec<u8> = parts.iter().flat_map(|p| p.iter().copied()).collect();
 
-        for &(a, b, c) in &[(parts[0], parts[1], parts[2])] {
+        {
+            let &(a, b, c) = &(parts[0], parts[1], parts[2]);
             let chained = Sha3_256::new().chain(a).chain(b).chain(c).finalize();
             let oneshot = {
                 let mut h = Sha3_256::new();

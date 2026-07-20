@@ -660,7 +660,7 @@ mod tests {
             assert_eq!(
                 eval_nibble_sbox(coeffs, x),
                 PRESENT_SBOX[x as usize],
-                "ANF mismatch at input {x:#03x}"
+                "ANF mismatch at input {x:#x}"
             );
         }
     }
