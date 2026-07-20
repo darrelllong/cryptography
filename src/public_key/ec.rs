@@ -111,9 +111,6 @@ pub struct CurveParams {
     /// Used for fixed-length point encoding; coordinates are zero-padded to
     /// this length so that every encoded coordinate has the same width.
     pub coord_len: usize,
-    /// Whether `a ≡ −3 (mod p)`, true for all the NIST prime curves; cached
-    /// so point doubling can select its specialised `B` formula cheaply.
-    pub(crate) a_is_minus_3: bool,
 }
 
 /// An affine curve point, or the point at infinity.
@@ -194,25 +191,22 @@ impl JacobianPoint {
         self.z.is_zero()
     }
 
-    /// Lift an affine point into Jacobian coordinates with `Z = 1`, encoding
-    /// every coordinate into the **Montgomery domain** of the field context.
+    /// Lift an affine point to Jacobian coordinates with `Z = 1`.
     ///
-    /// All Jacobian arithmetic in this module operates on Montgomery-form
-    /// coordinates so each field multiplication costs a single Montgomery
-    /// reduction; [`Self::to_affine`] converts back out.
-    fn from_affine(p: &AffinePoint, curve: &CurveParams) -> Self {
+    /// Setting `Z = 1` means `X = x·1² = x` and `Y = y·1³ = y`, so the
+    /// Jacobian coordinates are just the affine coordinates unchanged.
+    fn from_affine(p: &AffinePoint) -> Self {
         if p.infinity {
             return Self::infinity();
         }
-        let ctx = curve.prime_ctx();
         Self {
-            x: ctx.encode(&p.x),
-            y: ctx.encode(&p.y),
-            z: ctx.one_mont().clone(),
+            x: p.x.clone(),
+            y: p.y.clone(),
+            z: BigUint::one(),
         }
     }
 
-    /// Project back to affine coordinates (and out of the Montgomery domain).
+    /// Project back to affine coordinates.
     ///
     /// Recovers `x = X/Z²` and `y = Y/Z³` by computing the field inverse of
     /// `Z` via Fermat's little theorem: `Z⁻¹ = Z^{p−2} mod p` (valid because
@@ -223,31 +217,24 @@ impl JacobianPoint {
         if self.is_infinity() {
             return AffinePoint::infinity();
         }
+        // Fast path: if Z = 1 (as set by from_affine) no inversion is needed.
+        if self.z == BigUint::one() {
+            return AffinePoint::new(self.x.clone(), self.y.clone());
+        }
 
         let ctx = curve.prime_ctx();
         let p = &curve.p;
 
-        // Fast path: if Z = 1 (as set by from_affine) no inversion is needed.
-        if self.z == *ctx.one_mont() {
-            return AffinePoint::new(ctx.decode(&self.x), ctx.decode(&self.y));
-        }
-
-        // Leave the Montgomery domain once, then run the inversion on
-        // ordinary residues.
-        let x = ctx.decode(&self.x);
-        let y = ctx.decode(&self.y);
-        let z = ctx.decode(&self.z);
-
         // z_inv = Z^{p-2} mod p  (Fermat inversion over a prime field)
         let p_minus_2 = p.sub_ref(&BigUint::from_u64(2));
-        let z_inv = ctx.pow(&z, &p_minus_2);
+        let z_inv = ctx.pow(&self.z, &p_minus_2);
 
         // z_inv2 = Z^{-2}  and  z_inv3 = Z^{-3}
         let z_inv2 = ctx.square(&z_inv);
         let z_inv3 = ctx.mul(&z_inv2, &z_inv);
 
-        let x = ctx.mul(&x, &z_inv2);
-        let y = ctx.mul(&y, &z_inv3);
+        let x = ctx.mul(&self.x, &z_inv2);
+        let y = ctx.mul(&self.y, &z_inv3);
 
         AffinePoint::new(x, y)
     }
@@ -322,14 +309,9 @@ fn pad_to(bytes: Vec<u8>, len: usize) -> Vec<u8> {
 /// Z' = 2·Y·Z
 /// ```
 ///
-/// Coordinates are in the Montgomery domain (see [`JacobianPoint::from_affine`]);
-/// every `mul_mont`/`square_mont` is a single Montgomery reduction, and the
-/// modular additions/subtractions are domain-agnostic because the Montgomery
-/// map is linear.
-///
-/// For the NIST curves' `a = −3`, `B` is computed as `3·(X − Z²)·(X + Z²)`,
-/// trading the `Z⁴` squaring and the `a·Z⁴` multiplication for one
-/// multiplication.
+/// This handles any curve coefficient `a`, including the common `a = −3` of
+/// the NIST curves (no special case is needed for `a = −3` for correctness,
+/// though a specialised formula would be marginally faster).
 fn point_double_jacobian(curve: &CurveParams, p: &JacobianPoint) -> JacobianPoint {
     if p.is_infinity() {
         return JacobianPoint::infinity();
@@ -339,47 +321,39 @@ fn point_double_jacobian(curve: &CurveParams, p: &JacobianPoint) -> JacobianPoin
     let m = &curve.p;
 
     // Y² and Y⁴
-    let y2 = ctx.square_mont(&p.y);
-    let y4 = ctx.square_mont(&y2);
+    let y2 = ctx.square(&p.y);
+    let y4 = ctx.square(&y2);
 
     // A = 4·X·Y²
-    let xy2 = ctx.mul_mont(&p.x, &y2);
+    let xy2 = ctx.mul(&p.x, &y2);
     let two_xy2 = field_add(&xy2, &xy2, m);
     let a = field_add(&two_xy2, &two_xy2, m);
 
-    // Z²
-    let z2 = ctx.square_mont(&p.z);
+    // X²; Z² and Z⁴
+    let x2 = ctx.square(&p.x);
+    let z2 = ctx.square(&p.z);
+    let z4 = ctx.square(&z2);
 
-    // B = 3·X² + a·Z⁴, with the a = −3 factored form when applicable.
-    let b = if curve.a_is_minus_3 {
-        // B = 3·(X − Z²)·(X + Z²)
-        let t1 = field_sub(&p.x, &z2, m);
-        let t2 = field_add(&p.x, &z2, m);
-        let prod = ctx.mul_mont(&t1, &t2);
-        field_add(&field_add(&prod, &prod, m), &prod, m)
-    } else {
-        let x2 = ctx.square_mont(&p.x);
-        let three_x2 = field_add(&field_add(&x2, &x2, m), &x2, m);
-        let z4 = ctx.square_mont(&z2);
-        let a_coeff_z4 = ctx.mul_mont(&ctx.encode(&curve.a), &z4);
-        field_add(&three_x2, &a_coeff_z4, m)
-    };
+    // B = 3·X² + a·Z⁴
+    let three_x2 = field_add(&field_add(&x2, &x2, m), &x2, m);
+    let a_coeff_z4 = ctx.mul(&curve.a, &z4);
+    let b = field_add(&three_x2, &a_coeff_z4, m);
 
     // X' = B² − 2·A
-    let b2 = ctx.square_mont(&b);
+    let b2 = ctx.square(&b);
     let two_a = field_add(&a, &a, m);
     let x_new = field_sub(&b2, &two_a, m);
 
     // Y' = B·(A − X') − 8·Y⁴
     let a_minus_x = field_sub(&a, &x_new, m);
-    let b_times = ctx.mul_mont(&b, &a_minus_x);
+    let b_times = ctx.mul(&b, &a_minus_x);
     let two_y4 = field_add(&y4, &y4, m);
     let four_y4 = field_add(&two_y4, &two_y4, m);
     let eight_y4 = field_add(&four_y4, &four_y4, m);
     let y_new = field_sub(&b_times, &eight_y4, m);
 
     // Z' = 2·Y·Z
-    let yz = ctx.mul_mont(&p.y, &p.z);
+    let yz = ctx.mul(&p.y, &p.z);
     let z_new = field_add(&yz, &yz, m);
 
     JacobianPoint {
@@ -427,15 +401,15 @@ fn point_add_jacobian(
     let ctx = curve.prime_ctx();
     let m = &curve.p;
 
-    let z1_2 = ctx.square_mont(&p1.z);
-    let z2_2 = ctx.square_mont(&p2.z);
-    let z1_3 = ctx.mul_mont(&z1_2, &p1.z);
-    let z2_3 = ctx.mul_mont(&z2_2, &p2.z);
+    let z1_2 = ctx.square(&p1.z);
+    let z2_2 = ctx.square(&p2.z);
+    let z1_3 = ctx.mul(&z1_2, &p1.z);
+    let z2_3 = ctx.mul(&z2_2, &p2.z);
 
-    let u1 = ctx.mul_mont(&p1.x, &z2_2);
-    let u2 = ctx.mul_mont(&p2.x, &z1_2);
-    let s1 = ctx.mul_mont(&p1.y, &z2_3);
-    let s2 = ctx.mul_mont(&p2.y, &z1_3);
+    let u1 = ctx.mul(&p1.x, &z2_2);
+    let u2 = ctx.mul(&p2.x, &z1_2);
+    let s1 = ctx.mul(&p1.y, &z2_3);
+    let s2 = ctx.mul(&p2.y, &z1_3);
 
     let h = field_sub(&u2, &u1, m);
     let r = field_sub(&s2, &s1, m);
@@ -451,24 +425,24 @@ fn point_add_jacobian(
         };
     }
 
-    let h2 = ctx.square_mont(&h);
-    let h3 = ctx.mul_mont(&h2, &h);
-    let u1h2 = ctx.mul_mont(&u1, &h2);
+    let h2 = ctx.square(&h);
+    let h3 = ctx.mul(&h2, &h);
+    let u1h2 = ctx.mul(&u1, &h2);
 
     // X₃ = R² − H³ − 2·U₁·H²
-    let r2 = ctx.square_mont(&r);
+    let r2 = ctx.square(&r);
     let two_u1h2 = field_add(&u1h2, &u1h2, m);
     let x3 = field_sub(&field_sub(&r2, &h3, m), &two_u1h2, m);
 
     // Y₃ = R·(U₁·H² − X₃) − S₁·H³
     let u1h2_minus_x3 = field_sub(&u1h2, &x3, m);
-    let r_term = ctx.mul_mont(&r, &u1h2_minus_x3);
-    let s1h3 = ctx.mul_mont(&s1, &h3);
+    let r_term = ctx.mul(&r, &u1h2_minus_x3);
+    let s1h3 = ctx.mul(&s1, &h3);
     let y3 = field_sub(&r_term, &s1h3, m);
 
     // Z₃ = H·Z₁·Z₂
-    let hz1 = ctx.mul_mont(&h, &p1.z);
-    let z3 = ctx.mul_mont(&hz1, &p2.z);
+    let hz1 = ctx.mul(&h, &p1.z);
+    let z3 = ctx.mul(&hz1, &p2.z);
 
     JacobianPoint {
         x: x3,
@@ -477,27 +451,62 @@ fn point_add_jacobian(
     }
 }
 
-/// Scalar multiplication `k·P` via left-to-right binary double-and-add.
+/// Fixed window width (in bits) for prime-curve scalar multiplication.
+///
+/// A 4-bit window uses a 15-entry precomputed table (`1·P … 15·P`) and folds
+/// four scalar bits per iteration, cutting the number of point additions from
+/// roughly `bits/2` (plain double-and-add) to `bits/4` plus the small
+/// precomputation, while keeping the same `bits` doublings.
+const PRIME_WINDOW_BITS: usize = 4;
+
+/// Scalar multiplication `k·P` via a left-to-right fixed 4-bit window in
+/// Jacobian coordinates.
 ///
 /// The loop stays in Jacobian coordinates from start to finish and converts
-/// back to affine exactly once at the end, paying one field inversion instead
-/// of one per bit.
+/// back to affine exactly once at the end, paying one field inversion for the
+/// whole multiplication.  Each window contributes four doublings and at most
+/// one addition of a precomputed multiple `d·P` (`1 ≤ d ≤ 15`).
 ///
-/// **Side-channel note**: branching in the inner loop depends on the bit value
-/// of `k`.  This is not constant-time; see the module-level note.
+/// **Side-channel note**: the table index and the branch that skips zero
+/// digits both depend on `k`.  This is not constant-time; see the
+/// module-level note.  The result is the unique point `k·P`, hence identical
+/// to any correct double-and-add.
 fn scalar_mul_jacobian(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> AffinePoint {
     if k.is_zero() || point.is_infinity() {
         return AffinePoint::infinity();
     }
 
-    let mut result = JacobianPoint::infinity();
-    let p_jac = JacobianPoint::from_affine(point, curve);
+    // Precompute table[d] = d·P for d = 1 … 15 (index 0 is the unused
+    // identity slot so that `table[digit]` indexes directly by digit value).
+    let table_len = 1usize << PRIME_WINDOW_BITS;
+    let p_jac = JacobianPoint::from_affine(point);
+    let mut table: Vec<JacobianPoint> = Vec::with_capacity(table_len);
+    table.push(JacobianPoint::infinity());
+    table.push(JacobianPoint::from_affine(point));
+    for d in 2..table_len {
+        let next = point_add_jacobian(curve, &table[d - 1], &p_jac);
+        table.push(next);
+    }
 
-    // Scan from the most-significant bit down to bit 0.
-    for i in (0..k.bits()).rev() {
-        result = point_double_jacobian(curve, &result);
-        if k.bit(i) {
-            result = point_add_jacobian(curve, &result, &p_jac);
+    let nbits = k.bits();
+    let nwindows = nbits.div_ceil(PRIME_WINDOW_BITS);
+    let mut result = JacobianPoint::infinity();
+
+    // Scan windows from most significant to least significant.
+    for wi in (0..nwindows).rev() {
+        for _ in 0..PRIME_WINDOW_BITS {
+            result = point_double_jacobian(curve, &result);
+        }
+        // Assemble the window's digit from its PRIME_WINDOW_BITS scalar bits.
+        let base = wi * PRIME_WINDOW_BITS;
+        let mut digit = 0usize;
+        for j in 0..PRIME_WINDOW_BITS {
+            if k.bit(base + j) {
+                digit |= 1 << j;
+            }
+        }
+        if digit != 0 {
+            result = point_add_jacobian(curve, &result, &table[digit]);
         }
     }
 
@@ -631,21 +640,224 @@ fn double_binary(p: &AffinePoint, a: &BigUint, poly: &BigUint, degree: usize) ->
     AffinePoint::new(xr, yr)
 }
 
+// ─── Binary-curve López–Dahab projective arithmetic ─────────────────────────
+
+/// López–Dahab projective coordinates `(X : Y : Z)` for binary curves.
+///
+/// The affine point `(x, y)` corresponds to `(X, Y, Z)` with `x = X/Z` and
+/// `y = Y/Z²`, for any non-zero `Z`.  Unlike the affine formulas in
+/// [`add_binary`]/[`double_binary`], which each pay a full binary
+/// extended-GCD inversion per step, this representation is inversion-free in
+/// the inner loop: a whole scalar multiplication needs only one inversion, at
+/// the very end, when converting the result back to affine.  The point at
+/// infinity is represented with `Z = 0`.
+struct LDPoint {
+    x: BigUint,
+    y: BigUint,
+    z: BigUint,
+}
+
+impl LDPoint {
+    /// The point at infinity in López–Dahab form (`Z = 0`).
+    fn infinity() -> Self {
+        Self {
+            x: BigUint::one(),
+            y: BigUint::one(),
+            z: BigUint::zero(),
+        }
+    }
+
+    fn is_infinity(&self) -> bool {
+        self.z.is_zero()
+    }
+
+    /// Project back to affine coordinates: `x = X/Z`, `y = Y/Z²`.
+    ///
+    /// This is the single field inversion paid by a whole scalar
+    /// multiplication (versus roughly one per ladder step in the affine
+    /// formulation).
+    fn to_affine(&self, poly: &BigUint, degree: usize) -> AffinePoint {
+        if self.is_infinity() {
+            return AffinePoint::infinity();
+        }
+        // Fast path: Z = 1 (a freshly lifted affine point) needs no inversion.
+        if self.z.is_one() {
+            return AffinePoint::new(self.x.clone(), self.y.clone());
+        }
+        let z_inv = gf2m_inv(&self.z, poly, degree).expect("Z is non-zero off the identity");
+        let z_inv2 = gf2m_sq(&z_inv, poly, degree);
+        let x = gf2m_mul(&self.x, &z_inv, poly, degree);
+        let y = gf2m_mul(&self.y, &z_inv2, poly, degree);
+        AffinePoint::new(x, y)
+    }
+}
+
+/// Point doubling in López–Dahab coordinates on `y² + xy = x³ + ax² + b`.
+///
+/// Standard formulas (Hankerson–Menezes–Vanstone, *Guide to ECC*, Alg. 3.24):
+///
+/// ```text
+/// Z₃ = X₁²·Z₁²
+/// X₃ = X₁⁴ + b·Z₁⁴
+/// Y₃ = b·Z₁⁴·Z₃ + X₃·(a·Z₃ + Y₁² + b·Z₁⁴)
+/// ```
+///
+/// When `X₁ = 0` the affine point is 2-torsion (`x = 0`), so `2P = ∞`; this is
+/// signalled automatically by `Z₃ = 0`.
+fn ld_double(
+    p: &LDPoint,
+    a: &BigUint,
+    b: &BigUint,
+    poly: &BigUint,
+    degree: usize,
+) -> LDPoint {
+    if p.is_infinity() {
+        return LDPoint::infinity();
+    }
+
+    let x1_2 = gf2m_sq(&p.x, poly, degree);
+    let z1_2 = gf2m_sq(&p.z, poly, degree);
+
+    // Z₃ = X₁²·Z₁²
+    let z3 = gf2m_mul(&x1_2, &z1_2, poly, degree);
+    if z3.is_zero() {
+        // X₁ = 0 → affine x = 0 → 2P = ∞.
+        return LDPoint::infinity();
+    }
+
+    // b·Z₁⁴
+    let z1_4 = gf2m_sq(&z1_2, poly, degree);
+    let b_z1_4 = gf2m_mul(b, &z1_4, poly, degree);
+
+    // X₃ = X₁⁴ + b·Z₁⁴
+    let x1_4 = gf2m_sq(&x1_2, poly, degree);
+    let x3 = gf2m_add(&x1_4, &b_z1_4);
+
+    // Y₃ = b·Z₁⁴·Z₃ + X₃·(a·Z₃ + Y₁² + b·Z₁⁴)
+    let y1_2 = gf2m_sq(&p.y, poly, degree);
+    let a_z3 = gf2m_mul(a, &z3, poly, degree);
+    let inner = gf2m_add(&gf2m_add(&a_z3, &y1_2), &b_z1_4);
+    let term1 = gf2m_mul(&b_z1_4, &z3, poly, degree);
+    let term2 = gf2m_mul(&x3, &inner, poly, degree);
+    let y3 = gf2m_add(&term1, &term2);
+
+    LDPoint { x: x3, y: y3, z: z3 }
+}
+
+/// Mixed addition `P + Q` with `P` in López–Dahab coordinates and `Q = (x₂, y₂)`
+/// affine, on `y² + xy = x³ + ax² + b`.
+///
+/// Standard mixed LD/affine formulas (Hankerson–Menezes–Vanstone, Alg. 3.25):
+///
+/// ```text
+/// A = Y₁ + y₂·Z₁²      B = X₁ + x₂·Z₁      C = Z₁·B
+/// D = B²·(C + a·Z₁²)   Z₃ = C²             E = A·C
+/// X₃ = A² + D + E
+/// F = X₃ + x₂·Z₃       G = (x₂ + y₂)·Z₃²
+/// Y₃ = (E + Z₃)·F + G
+/// ```
+///
+/// `B = 0` means `x₁ = x₂`: then either `Q = P` (fall back to doubling) or
+/// `Q = −P` (the sum is `∞`).
+fn ld_add_mixed(
+    p: &LDPoint,
+    qx: &BigUint,
+    qy: &BigUint,
+    a: &BigUint,
+    b: &BigUint,
+    poly: &BigUint,
+    degree: usize,
+) -> LDPoint {
+    if p.is_infinity() {
+        // ∞ + Q = Q, lifted with Z = 1.
+        return LDPoint {
+            x: qx.clone(),
+            y: qy.clone(),
+            z: BigUint::one(),
+        };
+    }
+
+    let z1_2 = gf2m_sq(&p.z, poly, degree);
+
+    // A = Y₁ + y₂·Z₁²
+    let y2_z1_2 = gf2m_mul(qy, &z1_2, poly, degree);
+    let a_int = gf2m_add(&p.y, &y2_z1_2);
+
+    // B = X₁ + x₂·Z₁
+    let x2_z1 = gf2m_mul(qx, &p.z, poly, degree);
+    let b_int = gf2m_add(&p.x, &x2_z1);
+
+    if b_int.is_zero() {
+        // x₁ = x₂: doubling (Q = P) or identity (Q = −P).
+        return if a_int.is_zero() {
+            ld_double(p, a, b, poly, degree)
+        } else {
+            LDPoint::infinity()
+        };
+    }
+
+    // C = Z₁·B
+    let c = gf2m_mul(&p.z, &b_int, poly, degree);
+
+    // D = B²·(C + a·Z₁²)
+    let b_sq = gf2m_sq(&b_int, poly, degree);
+    let a_z1_2 = gf2m_mul(a, &z1_2, poly, degree);
+    let d = gf2m_mul(&b_sq, &gf2m_add(&c, &a_z1_2), poly, degree);
+
+    // Z₃ = C²
+    let z3 = gf2m_sq(&c, poly, degree);
+
+    // E = A·C
+    let e = gf2m_mul(&a_int, &c, poly, degree);
+
+    // X₃ = A² + D + E
+    let a_sq = gf2m_sq(&a_int, poly, degree);
+    let x3 = gf2m_add(&gf2m_add(&a_sq, &d), &e);
+
+    // F = X₃ + x₂·Z₃
+    let x2_z3 = gf2m_mul(qx, &z3, poly, degree);
+    let f = gf2m_add(&x3, &x2_z3);
+
+    // G = (x₂ + y₂)·Z₃²
+    let z3_2 = gf2m_sq(&z3, poly, degree);
+    let g = gf2m_mul(&gf2m_add(qx, qy), &z3_2, poly, degree);
+
+    // Y₃ = (E + Z₃)·F + G
+    let y3 = gf2m_add(&gf2m_mul(&gf2m_add(&e, &z3), &f, poly, degree), &g);
+
+    LDPoint { x: x3, y: y3, z: z3 }
+}
+
 /// Scalar multiplication for binary curves using left-to-right double-and-add
-/// in affine coordinates (no Jacobian optimisation).
+/// in López–Dahab projective coordinates.
+///
+/// The inner loop is inversion-free; the only binary-field inversion is the
+/// single one in [`LDPoint::to_affine`] at the end.  This replaces the former
+/// affine loop, which performed a full extended-GCD inversion in every add and
+/// double (roughly one per scalar bit).
 fn scalar_mul_binary(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> AffinePoint {
     if k.is_zero() || point.is_infinity() {
         return AffinePoint::infinity();
     }
 
-    let mut result = AffinePoint::infinity();
+    let (poly, degree) = match &curve.field {
+        FieldCtx::Binary { poly, degree } => (poly, *degree),
+        FieldCtx::Prime(_) => panic!("scalar_mul_binary called on a prime-field curve"),
+    };
+    let a = &curve.a;
+    let b = &curve.b;
+    let qx = &point.x;
+    let qy = &point.y;
+
+    let mut result = LDPoint::infinity();
     for i in (0..k.bits()).rev() {
-        result = curve.double(&result);
+        result = ld_double(&result, a, b, poly, degree);
         if k.bit(i) {
-            result = curve.add(&result, point);
+            result = ld_add_mixed(&result, qx, qy, a, b, poly, degree);
         }
     }
-    result
+
+    result.to_affine(poly, degree)
 }
 
 // ─── CurveParams ────────────────────────────────────────────────────────────
@@ -670,8 +882,6 @@ impl CurveParams {
         let field = MontgomeryCtx::new(&field_prime)?;
         let scalar = MontgomeryCtx::new(&subgroup_order)?;
         let coord_len = field_prime.bits().div_ceil(8);
-        let a_is_minus_3 = field_prime > BigUint::from_u64(3)
-            && curve_a == field_prime.sub_ref(&BigUint::from_u64(3));
         Some(Self {
             p: field_prime,
             a: curve_a,
@@ -683,7 +893,6 @@ impl CurveParams {
             field: FieldCtx::Prime(field),
             _scalar: scalar,
             coord_len,
-            a_is_minus_3,
         })
     }
 
@@ -725,9 +934,6 @@ impl CurveParams {
             },
             _scalar: scalar,
             coord_len,
-            // The −3 shortcut is a prime-field notion; binary-curve doubling
-            // never consults it.
-            a_is_minus_3: false,
         })
     }
 
@@ -814,8 +1020,8 @@ impl CurveParams {
     pub fn add(&self, p: &AffinePoint, q: &AffinePoint) -> AffinePoint {
         match &self.field {
             FieldCtx::Prime(_) => {
-                let pj = JacobianPoint::from_affine(p, self);
-                let qj = JacobianPoint::from_affine(q, self);
+                let pj = JacobianPoint::from_affine(p);
+                let qj = JacobianPoint::from_affine(q);
                 point_add_jacobian(self, &pj, &qj).to_affine(self)
             }
             FieldCtx::Binary { poly, degree } => add_binary(p, q, &self.a, poly, *degree),
@@ -827,7 +1033,7 @@ impl CurveParams {
     pub fn double(&self, p: &AffinePoint) -> AffinePoint {
         match &self.field {
             FieldCtx::Prime(_) => {
-                let pj = JacobianPoint::from_affine(p, self);
+                let pj = JacobianPoint::from_affine(p);
                 point_double_jacobian(self, &pj).to_affine(self)
             }
             FieldCtx::Binary { poly, degree } => double_binary(p, &self.a, poly, *degree),
@@ -2145,4 +2351,157 @@ mod tests {
         assert_eq!(shared_a, shared_b, "K-283 ECDH shared points must agree");
         assert!(!shared_a.is_infinity());
     }
+
+    // ── Differential test: windowed / López–Dahab scalar_mul vs a simple,
+    //    independent double-and-add reference ──────────────────────────────
+    //
+    // For every curve we compare `curve.scalar_mul(G, k)` (the optimised path:
+    // 4-bit fixed window for prime curves, López–Dahab projective coordinates
+    // for binary curves) against `reference_scalar_mul`, a plain left-to-right
+    // binary double-and-add built only from the single-operation affine
+    // `add`/`double`.  The reference shares none of the windowing bookkeeping
+    // or the López–Dahab arithmetic, so it is an independent oracle.  Scalars
+    // include the edge cases 0, 1, 2, n−1, n, n+1 plus deterministic
+    // pseudo-random full-width values, so all window boundaries are exercised.
+
+    /// A tiny deterministic xorshift64* PRNG for reproducible test scalars.
+    struct XorShift64 {
+        state: u64,
+    }
+
+    impl XorShift64 {
+        fn new(seed: u64) -> Self {
+            // Avoid the fixed point at 0.
+            Self {
+                state: seed | 1,
+            }
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.state;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.state = x;
+            x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        /// A pseudo-random `BigUint` of `byte_len` bytes.
+        fn random_biguint(&mut self, byte_len: usize) -> BigUint {
+            let mut bytes = vec![0u8; byte_len];
+            for b in bytes.iter_mut() {
+                *b = (self.next_u64() & 0xff) as u8;
+            }
+            BigUint::from_be_bytes(&bytes)
+        }
+    }
+
+    /// Independent reference scalar multiplication: plain (non-windowed)
+    /// left-to-right binary double-and-add.
+    ///
+    /// It deliberately shares none of the logic under test.  For prime curves
+    /// it runs a bit-serial double-and-add in Jacobian coordinates — the same
+    /// trusted point formulas used elsewhere, but without any of the 4-bit
+    /// window bookkeeping (table, digit extraction) that is being validated.
+    /// For binary curves it runs a bit-serial double-and-add in *affine*
+    /// coordinates via [`add_binary`]/[`double_binary`], which share no
+    /// arithmetic with the López–Dahab projective path under test.
+    fn reference_scalar_mul(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> AffinePoint {
+        if k.is_zero() || point.is_infinity() {
+            return AffinePoint::infinity();
+        }
+        match &curve.field {
+            FieldCtx::Prime(_) => {
+                let mut result = JacobianPoint::infinity();
+                let p_jac = JacobianPoint::from_affine(point);
+                for i in (0..k.bits()).rev() {
+                    result = point_double_jacobian(curve, &result);
+                    if k.bit(i) {
+                        result = point_add_jacobian(curve, &result, &p_jac);
+                    }
+                }
+                result.to_affine(curve)
+            }
+            FieldCtx::Binary { .. } => {
+                let mut result = AffinePoint::infinity();
+                for i in (0..k.bits()).rev() {
+                    result = curve.double(&result);
+                    if k.bit(i) {
+                        result = curve.add(&result, point);
+                    }
+                }
+                result
+            }
+        }
+    }
+
+    /// Assert `scalar_mul` agrees with the reference on edge and random scalars.
+    fn differential_check(curve: &CurveParams, seed: u64, random_count: usize) {
+        let g = curve.base_point();
+        let n = &curve.n;
+        let one = BigUint::one();
+        let byte_len = n.bits().div_ceil(8);
+
+        let mut scalars: Vec<BigUint> = vec![
+            BigUint::zero(),
+            one.clone(),
+            BigUint::from_u64(2),
+            n.sub_ref(&one),
+            n.clone(),
+            n.add_ref(&one),
+        ];
+        let mut rng = XorShift64::new(seed);
+        for _ in 0..random_count {
+            scalars.push(rng.random_biguint(byte_len));
+        }
+
+        for k in &scalars {
+            let got = curve.scalar_mul(&g, k);
+            let want = reference_scalar_mul(curve, &g, k);
+            assert_eq!(
+                got,
+                want,
+                "scalar_mul disagreed with reference double-and-add for k = {:02x?}",
+                k.to_be_bytes()
+            );
+            // Every result must also lie on the curve (or be ∞).
+            assert!(
+                curve.is_on_curve(&got),
+                "scalar_mul produced an off-curve point for k = {:02x?}",
+                k.to_be_bytes()
+            );
+        }
+    }
+
+    const DIFF_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
+
+    macro_rules! differential_test {
+        ($name:ident, $constructor:ident, $count:expr) => {
+            #[test]
+            fn $name() {
+                differential_check(&$constructor(), DIFF_SEED, $count);
+            }
+        };
+    }
+
+    // Prime curves (windowed path). The reference is cheap here, so use a
+    // generous number of random scalars.
+    differential_test!(diff_p192, p192, 32);
+    differential_test!(diff_p224, p224, 32);
+    differential_test!(diff_p256, p256, 32);
+    differential_test!(diff_secp256k1, secp256k1, 32);
+    differential_test!(diff_p384, p384, 24);
+    differential_test!(diff_p521, p521, 24);
+
+    // Binary curves (López–Dahab path).
+    differential_test!(diff_b163, b163, 10);
+    differential_test!(diff_k163, k163, 10);
+    differential_test!(diff_b233, b233, 8);
+    differential_test!(diff_k233, k233, 8);
+    differential_test!(diff_b283, b283, 6);
+    differential_test!(diff_k283, k283, 6);
+    differential_test!(diff_b409, b409, 3);
+    differential_test!(diff_k409, k409, 3);
+    differential_test!(diff_b571, b571, 2);
+    differential_test!(diff_k571, k571, 2);
 }
