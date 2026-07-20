@@ -127,6 +127,136 @@ const fn build_l_tables() -> [[u8; 256]; 16] {
 
 static L_TABLES: [[u8; 256]; 16] = build_l_tables();
 
+// ── Fused S∘L lookup tables (fast path only) ─────────────────────────────────
+//
+// The classic GOST R 34.12-2015 software optimization. A full "S then L" round
+// is a GF(2⁸)-linear map applied to the substituted bytes, so — because L is
+// GF(2⁸)-linear — it collapses to
+//
+//     round(state) = XOR_i  T[i][ state[i] ]
+//
+// where each T[i] is a 256-entry table of 128-bit column contributions that
+// already folds the S-box into the linear layer. This replaces the 16×16 = 256
+// dependent byte lookups of `apply_l` (16 R-steps × 16 GF lookups) with 16 u128
+// lookups per round.
+//
+//   LS_ENC[i][x] = L(eᵢ · Pi[x])         (forward: S then L)
+//   LS_DEC[i][x] = L⁻¹(eᵢ · Pi'[x])      (inverse: S⁻¹ then L⁻¹)
+//
+// Both tables are key-independent and built purely at compile time from the
+// fixed S-box and L matrix (same `const fn` machinery as `L_TABLES`), so no
+// runtime/lazy init is required. They index on secret bytes exactly like
+// `L_TABLES`, so the fast path keeps its existing (documented,
+// non-constant-time) side-channel posture.
+
+/// Const l-function, used only while building the fused tables at compile time.
+const fn l_func_const(block: &[u8; 16]) -> u8 {
+    let mut r = 0u8;
+    let mut i = 0;
+    while i < 16 {
+        r ^= gf_mul_const(L_COEFF[i], block[i]);
+        i += 1;
+    }
+    r
+}
+
+/// Const L = R¹⁶ (compile-time only).
+const fn apply_l_const(mut block: [u8; 16]) -> [u8; 16] {
+    let mut n = 0;
+    while n < 16 {
+        let lc = l_func_const(&block);
+        let mut i = 15;
+        while i > 0 {
+            block[i] = block[i - 1];
+            i -= 1;
+        }
+        block[0] = lc;
+        n += 1;
+    }
+    block
+}
+
+/// Const L⁻¹ = (R⁻¹)¹⁶ (compile-time only).
+const fn apply_l_inv_const(mut block: [u8; 16]) -> [u8; 16] {
+    let mut n = 0;
+    while n < 16 {
+        let mut sum = 0u8;
+        let mut i = 0;
+        while i < 15 {
+            sum ^= gf_mul_const(L_COEFF[i], block[i + 1]);
+            i += 1;
+        }
+        let new_last = block[0] ^ sum;
+        let mut j = 0;
+        while j < 15 {
+            block[j] = block[j + 1];
+            j += 1;
+        }
+        block[15] = new_last;
+        n += 1;
+    }
+    block
+}
+
+/// Build a fused S∘L table at compile time.
+///
+/// `inv = false` builds the forward (S then L) table, `inv = true` the inverse
+/// (S⁻¹ then L⁻¹) table. Column `i` is `(L or L⁻¹)(eᵢ)` where `eᵢ` is the unit
+/// vector with value 1 at position `i`; by GF(2⁸)-linearity the contribution of
+/// input byte value `v` at position `i` is `v · col[i]` componentwise.
+const fn build_fused_tables(inv: bool) -> [[u128; 256]; 16] {
+    let mut col = [[0u8; 16]; 16];
+    let mut i = 0;
+    while i < 16 {
+        let mut e = [0u8; 16];
+        e[i] = 1;
+        col[i] = if inv {
+            apply_l_inv_const(e)
+        } else {
+            apply_l_const(e)
+        };
+        i += 1;
+    }
+
+    let mut t = [[0u128; 256]; 16];
+    let mut idx = 0;
+    while idx < 16 {
+        let mut x = 0u16;
+        while x < 256 {
+            let s = if inv {
+                PI_INV[x as usize]
+            } else {
+                PI[x as usize]
+            };
+            let mut bytes = [0u8; 16];
+            let mut j = 0;
+            while j < 16 {
+                bytes[j] = gf_mul_const(s, col[idx][j]);
+                j += 1;
+            }
+            t[idx][x as usize] = u128::from_be_bytes(bytes);
+            x += 1;
+        }
+        idx += 1;
+    }
+    t
+}
+
+/// Forward fused table: `LS_ENC[i][x] = L(eᵢ · Pi[x])`.
+static LS_ENC: [[u128; 256]; 16] = build_fused_tables(false);
+/// Inverse fused table: `LS_DEC[i][x] = L⁻¹(eᵢ · Pi'[x])`.
+static LS_DEC: [[u128; 256]; 16] = build_fused_tables(true);
+
+/// One fused round: `XOR_i table[i][state[i]]`, packed big-endian into a u128.
+#[inline]
+fn fused_round(table: &[[u128; 256]; 16], state: &[u8; 16]) -> u128 {
+    let mut acc = 0u128;
+    for (i, &b) in state.iter().enumerate() {
+        acc ^= table[i][b as usize];
+    }
+    acc
+}
+
 // ── Core transforms ───────────────────────────────────────────────────────────
 
 #[inline]
@@ -350,15 +480,25 @@ fn key_schedule_ct(key: &[u8; 32]) -> [[u8; 16]; 10] {
 /// 128-bit block, 256-bit key.  Pure Rust, no unsafe, no heap allocation.
 pub struct Grasshopper {
     rk: [[u8; 16]; 10],
+    /// `dk[i] = L⁻¹(rk[i])` for i = 1..=8, used by the fully-fused decryption
+    /// path (indices 0 and 9 are unused). Derived key material — zeroized on drop.
+    dk: [[u8; 16]; 9],
 }
 
 impl Grasshopper {
     /// Construct from a 32-byte (256-bit) key.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
-        Grasshopper {
-            rk: key_schedule(key),
+        let rk = key_schedule(key);
+        // Precompute L⁻¹-transformed round keys for the restructured decryption
+        // that uses the fused inverse table (see `decrypt_block`).
+        let mut dk = [[0u8; 16]; 9];
+        for i in 1..9 {
+            let mut t = rk[i];
+            apply_l_inv(&mut t);
+            dk[i] = t;
         }
+        Grasshopper { rk, dk }
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
@@ -374,23 +514,37 @@ impl Grasshopper {
         let mut s = *block;
         for i in 0..9 {
             xor_block(&mut s, &self.rk[i]);
-            apply_s(&mut s);
-            apply_l(&mut s);
+            // Fused S then L: one round in 16 u128 lookups instead of 256.
+            s = fused_round(&LS_ENC, &s).to_be_bytes();
         }
         xor_block(&mut s, &self.rk[9]);
         s
     }
 
     /// Decrypt a 128-bit block (ECB mode).
+    ///
+    /// The naïve inverse round is `S⁻¹(L⁻¹(·))`, whose outer S⁻¹ cannot be folded
+    /// into an XOR of input-indexed tables. The standard fix restructures the
+    /// round to `L⁻¹(S⁻¹(·))` — which *is* fusable as `LS_DEC` — by carrying the
+    /// state through L⁻¹ and pre-transforming the round keys (`dk = L⁻¹(rk)`):
+    ///
+    ///   v₀ = L⁻¹(c ⊕ K₁₀)                       [= LS_DEC(S(c ⊕ K₁₀))]
+    ///   vₖ = LS_DEC(vₖ₋₁) ⊕ L⁻¹(rk)            for the 8 inner rounds
+    ///   pt = S⁻¹(v₈) ⊕ K₁
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         let mut s = *block;
         xor_block(&mut s, &self.rk[9]);
-        for i in (0..9).rev() {
-            apply_l_inv(&mut s);
-            apply_s_inv(&mut s);
-            xor_block(&mut s, &self.rk[i]);
+        // v₀ = L⁻¹(c ⊕ K₁₀). Since LS_DEC folds in S⁻¹, feed it S(c ⊕ K₁₀) so the
+        // S⁻¹ cancels, leaving a pure L⁻¹ via the fused table.
+        apply_s(&mut s);
+        s = fused_round(&LS_DEC, &s).to_be_bytes();
+        for i in (1..9).rev() {
+            let acc = fused_round(&LS_DEC, &s) ^ u128::from_be_bytes(self.dk[i]);
+            s = acc.to_be_bytes();
         }
+        apply_s_inv(&mut s);
+        xor_block(&mut s, &self.rk[0]);
         s
     }
 }
@@ -477,6 +631,10 @@ impl Drop for Grasshopper {
         for rk in &mut self.rk {
             crate::ct::zeroize_slice(rk.as_mut_slice());
         }
+        // The L⁻¹-transformed decryption round keys are derived key material too.
+        for dk in &mut self.dk {
+            crate::ct::zeroize_slice(dk.as_mut_slice());
+        }
     }
 }
 
@@ -508,6 +666,89 @@ mod tests {
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
             .collect();
         b.try_into().unwrap()
+    }
+
+    /// Deterministic xorshift64 PRNG — no external rng dependency.
+    struct XorShift64(u64);
+
+    impl XorShift64 {
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn fill(&mut self, buf: &mut [u8]) {
+            for chunk in buf.chunks_mut(8) {
+                let bytes = self.next_u64().to_le_bytes();
+                for (b, &r) in chunk.iter_mut().zip(bytes.iter()) {
+                    *b = r;
+                }
+            }
+        }
+    }
+
+    // ── Fused-table equivalence to the reference S/L composition ──────────────
+
+    #[test]
+    fn fused_round_matches_composition() {
+        // Forward fused round must equal apply_l(apply_s(x)); inverse fused round
+        // must equal apply_l_inv(apply_s_inv(x)) for a broad spread of inputs.
+        let mut rng = XorShift64(0x0123_4567_89ab_cdef);
+        for _ in 0..4000 {
+            let mut x = [0u8; 16];
+            rng.fill(&mut x);
+
+            let mut fwd = x;
+            apply_s(&mut fwd);
+            apply_l(&mut fwd);
+            assert_eq!(fused_round(&LS_ENC, &x).to_be_bytes(), fwd, "forward S then L");
+
+            let mut inv = x;
+            apply_s_inv(&mut inv);
+            apply_l_inv(&mut inv);
+            assert_eq!(
+                fused_round(&LS_DEC, &x).to_be_bytes(),
+                inv,
+                "inverse S_inv then L_inv"
+            );
+        }
+        // Also pin the boundary byte values explicitly.
+        for &v in &[0u8, 1, 2, 0x7f, 0x80, 0xfe, 0xff] {
+            let x = [v; 16];
+            let mut fwd = x;
+            apply_s(&mut fwd);
+            apply_l(&mut fwd);
+            assert_eq!(fused_round(&LS_ENC, &x).to_be_bytes(), fwd, "forward const {v}");
+        }
+    }
+
+    // ── Differential round-trip over thousands of random keys/blocks ──────────
+
+    #[test]
+    fn differential_roundtrip_random() {
+        let mut rng = XorShift64(0xdead_beef_cafe_f00d);
+        for n in 0..5000u32 {
+            let mut key = [0u8; 32];
+            let mut pt = [0u8; 16];
+            rng.fill(&mut key);
+            rng.fill(&mut pt);
+
+            let fast = Grasshopper::new(&key);
+            let ct = fast.encrypt_block(&pt);
+            assert_eq!(fast.decrypt_block(&ct), pt, "fast round-trip @{n}");
+
+            // Cross-check the fast path against the constant-time path on a subset
+            // (the Ct path is deliberately slow, so sample rather than run all).
+            if n % 25 == 0 {
+                let slow = GrasshopperCt::new(&key);
+                assert_eq!(slow.encrypt_block(&pt), ct, "fast vs ct encrypt @{n}");
+                assert_eq!(slow.decrypt_block(&ct), pt, "ct decrypt @{n}");
+            }
+        }
     }
 
     #[test]
