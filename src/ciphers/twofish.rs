@@ -195,6 +195,81 @@ fn mds_multiply(y: [u8; 4]) -> u32 {
     u32::from_le_bytes(out)
 }
 
+// One column of the fixed 4x4 MDS mix, packed as the little-endian `u32` it
+// contributes to `mds_multiply`'s output.  Because both the MDS layer and
+// `u32::from_le_bytes` are linear over XOR, `mds_multiply(y)` equals the XOR of
+// `mds_column(j, y[j])` across the four columns — the identity that lets the
+// keyed S-box and the MDS diffusion collapse into one table lookup.
+fn mds_column(col: usize, val: u8) -> u32 {
+    let mut out = [0u8; 4];
+    let mut row = 0usize;
+    while row < 4 {
+        out[row] = gf_mul(MDS[row][col], val, MDS_GF_POLY);
+        row += 1;
+    }
+    u32::from_le_bytes(out)
+}
+
+// The keyed q-permutation cascade applied to a single input byte at column `j`.
+// This is exactly the per-byte transform inside `h()` (fast path) before the
+// MDS mix, with the S-box key words `s` playing the role of `l`.  Isolating it
+// per byte is what makes precomputation possible: each output byte of `h`'s
+// pre-MDS stage depends only on the corresponding input byte.
+fn keyed_h_byte(v: u8, j: usize, s: &[u32; 4], words: usize) -> u8 {
+    // Which q-permutation each column uses in the extra 192-/256-bit layers.
+    const W4: [usize; 4] = [1, 0, 0, 1];
+    const W3: [usize; 4] = [1, 1, 0, 0];
+
+    let mut y = v;
+    if words == 4 {
+        y = q_perm(y, W4[j], false) ^ b(s[3], j);
+    }
+    if words >= 3 {
+        y = q_perm(y, W3[j], false) ^ b(s[2], j);
+    }
+
+    // The shared 128-bit keyed core (mirrors the explicit nesting in `h`).
+    match j {
+        0 => q_perm(q_perm(q_perm(y, 0, false) ^ b(s[1], 0), 0, false) ^ b(s[0], 0), 1, false),
+        1 => q_perm(q_perm(q_perm(y, 1, false) ^ b(s[1], 1), 0, false) ^ b(s[0], 1), 0, false),
+        2 => q_perm(q_perm(q_perm(y, 0, false) ^ b(s[1], 2), 1, false) ^ b(s[0], 2), 1, false),
+        3 => q_perm(q_perm(q_perm(y, 1, false) ^ b(s[1], 3), 1, false) ^ b(s[0], 3), 0, false),
+        _ => unreachable!(),
+    }
+}
+
+// Precompute the four keyed 256-entry tables (S-box composed with one MDS
+// column) for the FAST path.  Built once per key, this turns each `h()` on the
+// hot round path into four table lookups and three XORs, replacing two keyed
+// `h()` evaluations — each with sixteen loop-based GF multiplies — per round.
+//
+// The tables are secret key material (they depend on `s`); the fast path is
+// already documented as using secret-indexed lookups, so this changes nothing
+// about its side-channel posture.  Callers zeroize them on `Drop`.
+fn build_keyed_tables(s: &[u32; 4], words: usize) -> [[u32; 256]; 4] {
+    let mut tables = [[0u32; 256]; 4];
+    let mut j = 0usize;
+    while j < 4 {
+        let mut v = 0usize;
+        while v < 256 {
+            let hb = keyed_h_byte(v as u8, j, s, words);
+            tables[j][v] = mds_column(j, hb);
+            v += 1;
+        }
+        j += 1;
+    }
+    tables
+}
+
+// FAST-path evaluation of the keyed `h()` via the precomputed tables.
+#[inline]
+fn h_fast(x: u32, tables: &[[u32; 256]; 4]) -> u32 {
+    tables[0][(x & 0xff) as usize]
+        ^ tables[1][((x >> 8) & 0xff) as usize]
+        ^ tables[2][((x >> 16) & 0xff) as usize]
+        ^ tables[3][((x >> 24) & 0xff) as usize]
+}
+
 fn h(x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
     let mut y = x.to_le_bytes();
 
@@ -279,31 +354,13 @@ fn expand_key<const N: usize>(key: &[u8; N], use_ct: bool) -> ([u32; 40], [u32; 
     (sub, s_words, words)
 }
 
-#[inline]
-fn round_f(
-    x0: u32,
-    x1: u32,
-    subkeys: &[u32; 40],
-    s: &[u32; 4],
-    words: usize,
-    round: usize,
-    use_ct: bool,
-) -> (u32, u32) {
-    // Twofish's round function is the pair of keyed `g()` calls followed by
-    // the pseudo-Hadamard transform and round subkey injection.
-    let t0 = h(x0, s, words, use_ct);
-    let t1 = h(x1.rotate_left(8), s, words, use_ct);
-    let f0 = t0.wrapping_add(t1).wrapping_add(subkeys[8 + 2 * round]);
-    let f1 = t0
-        .wrapping_add(t1.wrapping_add(t1))
-        .wrapping_add(subkeys[8 + 2 * round + 1]);
-    (f0, f1)
-}
-
 #[derive(Clone, Copy)]
 struct TwofishCore {
     subkeys: [u32; 40],
     s: [u32; 4],
+    // FAST-path keyed S-box/MDS tables. Populated only when `!use_ct`; the
+    // constant-time path leaves them zeroed and never reads them.
+    keyed_tables: [[u32; 256]; 4],
     words: usize,
     use_ct: bool,
 }
@@ -311,12 +368,44 @@ struct TwofishCore {
 impl TwofishCore {
     fn new<const N: usize>(key: &[u8; N], use_ct: bool) -> Self {
         let (subkeys, s, words) = expand_key(key, use_ct);
+        // Only the fast path uses the secret-indexed tables; the constant-time
+        // path must keep evaluating `h()` without them.
+        let keyed_tables = if use_ct {
+            [[0u32; 256]; 4]
+        } else {
+            build_keyed_tables(&s, words)
+        };
         Self {
             subkeys,
             s,
+            keyed_tables,
             words,
             use_ct,
         }
+    }
+
+    // Evaluate the keyed `h()` for the round function: table lookups on the
+    // fast path, direct (non-secret-indexed) computation on the `Ct` path.
+    #[inline]
+    fn h_round(&self, x: u32) -> u32 {
+        if self.use_ct {
+            h(x, &self.s, self.words, true)
+        } else {
+            h_fast(x, &self.keyed_tables)
+        }
+    }
+
+    #[inline]
+    fn round_f(&self, x0: u32, x1: u32, round: usize) -> (u32, u32) {
+        // Twofish's round function is the pair of keyed `g()` calls followed by
+        // the pseudo-Hadamard transform and round subkey injection.
+        let t0 = self.h_round(x0);
+        let t1 = self.h_round(x1.rotate_left(8));
+        let f0 = t0.wrapping_add(t1).wrapping_add(self.subkeys[8 + 2 * round]);
+        let f1 = t0
+            .wrapping_add(t1.wrapping_add(t1))
+            .wrapping_add(self.subkeys[8 + 2 * round + 1]);
+        (f0, f1)
     }
 
     fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
@@ -329,27 +418,11 @@ impl TwofishCore {
         while round < 8 {
             // Two rounds are grouped per loop so the Feistel word swap stays
             // explicit without introducing a separate temporary block shuffle.
-            let (f0, f1) = round_f(
-                x0,
-                x1,
-                &self.subkeys,
-                &self.s,
-                self.words,
-                2 * round,
-                self.use_ct,
-            );
+            let (f0, f1) = self.round_f(x0, x1, 2 * round);
             x2 = (x2 ^ f0).rotate_right(1);
             x3 = x3.rotate_left(1) ^ f1;
 
-            let (f0, f1) = round_f(
-                x2,
-                x3,
-                &self.subkeys,
-                &self.s,
-                self.words,
-                2 * round + 1,
-                self.use_ct,
-            );
+            let (f0, f1) = self.round_f(x2, x3, 2 * round + 1);
             x0 = (x0 ^ f0).rotate_right(1);
             x1 = x1.rotate_left(1) ^ f1;
 
@@ -381,27 +454,11 @@ impl TwofishCore {
 
             // Decryption walks the same structure backward with the round
             // subkeys consumed in reverse order.
-            let (f0, f1) = round_f(
-                x2,
-                x3,
-                &self.subkeys,
-                &self.s,
-                self.words,
-                2 * round + 1,
-                self.use_ct,
-            );
+            let (f0, f1) = self.round_f(x2, x3, 2 * round + 1);
             x1 = (x1 ^ f1).rotate_right(1);
             x0 = x0.rotate_left(1) ^ f0;
 
-            let (f0, f1) = round_f(
-                x0,
-                x1,
-                &self.subkeys,
-                &self.s,
-                self.words,
-                2 * round,
-                self.use_ct,
-            );
+            let (f0, f1) = self.round_f(x0, x1, 2 * round);
             x3 = (x3 ^ f1).rotate_right(1);
             x2 = x2.rotate_left(1) ^ f0;
         }
@@ -472,6 +529,10 @@ macro_rules! define_twofish_type {
             fn drop(&mut self) {
                 zeroize_slice(&mut self.core.subkeys);
                 zeroize_slice(&mut self.core.s);
+                // The keyed S-box/MDS tables are key-derived secret material.
+                for table in self.core.keyed_tables.iter_mut() {
+                    zeroize_slice(table);
+                }
             }
         }
 
@@ -525,6 +586,10 @@ macro_rules! define_twofish_type {
             fn drop(&mut self) {
                 zeroize_slice(&mut self.core.subkeys);
                 zeroize_slice(&mut self.core.s);
+                // The keyed S-box/MDS tables are key-derived secret material.
+                for table in self.core.keyed_tables.iter_mut() {
+                    zeroize_slice(table);
+                }
             }
         }
     };
@@ -637,6 +702,60 @@ mod tests {
         assert_eq!(slow.encrypt_block(&pt), ct);
         assert_eq!(fast.decrypt_block(&ct), pt);
         assert_eq!(slow.decrypt_block(&ct), pt);
+    }
+
+    // Deterministic xorshift64* PRNG so the differential test needs no
+    // external rng and reproduces bit-for-bit across runs.
+    struct XorShift64(u64);
+
+    impl XorShift64 {
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn fill(&mut self, buf: &mut [u8]) {
+            for chunk in buf.chunks_mut(8) {
+                let bytes = self.next_u64().to_le_bytes();
+                chunk.copy_from_slice(&bytes[..chunk.len()]);
+            }
+        }
+    }
+
+    #[test]
+    fn fast_roundtrip_and_ct_equivalence_random() {
+        // Several thousand pseudorandom blocks under fresh pseudorandom keys:
+        // the FAST path must round-trip every block, and its ciphertext must
+        // match the constant-time path bit-for-bit (proving the precomputed
+        // keyed tables equal the direct h() evaluation).
+        let mut rng = XorShift64(0x1234_5678_9ABC_DEF1);
+
+        macro_rules! sweep {
+            ($fast:ident, $slow:ident, $klen:expr, $iters:expr) => {{
+                let mut n = 0usize;
+                while n < $iters {
+                    let mut key = [0u8; $klen];
+                    let mut pt = [0u8; 16];
+                    rng.fill(&mut key);
+                    rng.fill(&mut pt);
+                    let fast = $fast::new(&key);
+                    let slow = $slow::new(&key);
+                    let ct = fast.encrypt_block(&pt);
+                    assert_eq!(ct, slow.encrypt_block(&pt), "fast != ct enc ({} bit)", $klen * 8);
+                    assert_eq!(fast.decrypt_block(&ct), pt, "fast roundtrip ({} bit)", $klen * 8);
+                    assert_eq!(slow.decrypt_block(&ct), pt, "ct roundtrip ({} bit)", $klen * 8);
+                    n += 1;
+                }
+            }};
+        }
+
+        sweep!(Twofish128, Twofish128Ct, 16, 2000);
+        sweep!(Twofish192, Twofish192Ct, 24, 2000);
+        sweep!(Twofish256, Twofish256Ct, 32, 2000);
     }
 
     #[test]
