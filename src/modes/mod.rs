@@ -221,22 +221,120 @@ fn ghash_mul_vt(x: u128, y: u128) -> u128 {
     z
 }
 
+/// Constant-time carryless multiply of two 64-bit polynomials over GF(2).
+///
+/// This is BearSSL's `bmul64`: the masked-integer trick.  Each operand is split
+/// into four bit-groups (positions ≡ 0, 1, 2, 3 mod 4).  Because every set bit
+/// in a group sits four positions apart, an ordinary integer multiply of two
+/// groups cannot let a carry from one product term reach the bit position of
+/// another, so masking the product back to the group recovers the carryless
+/// (XOR) product bits for that residue class.  Four such products per output
+/// residue are XOR-combined, then each is masked to its group and OR-ed
+/// together.  The result is the low 64 bits of the 128-bit carryless product;
+/// the high half is obtained by feeding bit-reversed operands (see
+/// [`ghash_mul_ct`]).  Every step is data-independent, so this is constant-time.
+#[inline]
+fn bmul64(x: u64, y: u64) -> u64 {
+    const M0: u64 = 0x1111_1111_1111_1111;
+    const M1: u64 = 0x2222_2222_2222_2222;
+    const M2: u64 = 0x4444_4444_4444_4444;
+    const M3: u64 = 0x8888_8888_8888_8888;
+
+    let x0 = x & M0;
+    let x1 = x & M1;
+    let x2 = x & M2;
+    let x3 = x & M3;
+    let y0 = y & M0;
+    let y1 = y & M1;
+    let y2 = y & M2;
+    let y3 = y & M3;
+
+    // Ordinary wrapping multiplies; carries stay inside their residue class and
+    // are stripped by the masks below.
+    let z0 = x0.wrapping_mul(y0) ^ x1.wrapping_mul(y3) ^ x2.wrapping_mul(y2) ^ x3.wrapping_mul(y1);
+    let z1 = x0.wrapping_mul(y1) ^ x1.wrapping_mul(y0) ^ x2.wrapping_mul(y3) ^ x3.wrapping_mul(y2);
+    let z2 = x0.wrapping_mul(y2) ^ x1.wrapping_mul(y1) ^ x2.wrapping_mul(y0) ^ x3.wrapping_mul(y3);
+    let z3 = x0.wrapping_mul(y3) ^ x1.wrapping_mul(y2) ^ x2.wrapping_mul(y1) ^ x3.wrapping_mul(y0);
+
+    (z0 & M0) | (z1 & M1) | (z2 & M2) | (z3 & M3)
+}
+
 /// Multiply `x` and `y` in GF(2¹²⁸) — constant-time version of [`ghash_mul_vt`].
 ///
-/// Same field and algorithm as `ghash_mul_vt`, but both conditional XORs are
-/// replaced with branchless masking so neither the bit-pattern of `x` nor the
-/// carry bit of `v` leaks through timing.
+/// Same field and reflected bit convention as [`ghash_mul_vt`] (bit 127 of the
+/// `u128` is α⁰), but computed with BearSSL's `ghash_ctmul64` strategy instead
+/// of a 128-iteration bit-serial loop: assemble the 128×128 carryless product
+/// from six [`bmul64`] calls via Karatsuba (using the bit-reversal trick for the
+/// high halves), then reduce modulo f(α) = α¹²⁸ + α⁷ + α² + α + 1.  Both the
+/// carryless product and the reduction are branch-free, so the routine is
+/// constant-time and byte-for-byte identical to the bit-serial version.
 #[inline]
 fn ghash_mul_ct(x: u128, y: u128) -> u128 {
-    // Same reflected reduction constant as `ghash_mul_vt`: in GHASH bit order,
-    // x^7 + x^2 + x + 1 maps to 0xe1 in the most-significant byte.
+    // Split each operand into 64-bit halves in GHASH byte order: the high 64
+    // bits hold the most-significant block bytes.
+    let y1 = (x >> 64) as u64;
+    let y0 = x as u64;
+    let h1 = (y >> 64) as u64;
+    let h0 = y as u64;
+
+    let y0r = y0.reverse_bits();
+    let y1r = y1.reverse_bits();
+    let h0r = h0.reverse_bits();
+    let h1r = h1.reverse_bits();
+    let y2 = y0 ^ y1;
+    let y2r = y0r ^ y1r;
+    let h2 = h0 ^ h1;
+    let h2r = h0r ^ h1r;
+
+    // Karatsuba: low, high, and middle 64×64 carryless products, each with a
+    // bit-reversed companion that yields the product's high 64 bits.
+    let z0 = bmul64(y0, h0);
+    let z1 = bmul64(y1, h1);
+    let mut z2 = bmul64(y2, h2);
+    let z0h = bmul64(y0r, h0r);
+    let z1h = bmul64(y1r, h1r);
+    let mut z2h = bmul64(y2r, h2r);
+    z2 ^= z0 ^ z1;
+    z2h ^= z0h ^ z1h;
+    let z0h = z0h.reverse_bits() >> 1;
+    let z1h = z1h.reverse_bits() >> 1;
+    let z2h = z2h.reverse_bits() >> 1;
+
+    // The unreduced 256-bit product packed into four 64-bit limbs v0..v3.
+    let v0 = z0;
+    let mut v1 = z0h ^ z2;
+    let mut v2 = z1 ^ z2h;
+    let mut v3 = z1h;
+
+    // GHASH stores polynomials bit-reflected, so shift the whole product left by
+    // one to align it before reducing.
+    v3 = (v3 << 1) | (v2 >> 63);
+    v2 = (v2 << 1) | (v1 >> 63);
+    v1 = (v1 << 1) | (v0 >> 63);
+    let v0 = v0 << 1;
+
+    // Reduce modulo α¹²⁸ + α⁷ + α² + α + 1 (folding the high 128 bits down).
+    let v2 = v2 ^ v0 ^ (v0 >> 1) ^ (v0 >> 2) ^ (v0 >> 7);
+    let v1 = v1 ^ (v0 << 63) ^ (v0 << 62) ^ (v0 << 57);
+    let v3 = v3 ^ v1 ^ (v1 >> 1) ^ (v1 >> 2) ^ (v1 >> 7);
+    let v2 = v2 ^ (v1 << 63) ^ (v1 << 62) ^ (v1 << 57);
+
+    // Recombine the two reduced limbs into this crate's `u128` GHASH element.
+    // Its `from_be_bytes`/reflected convention orders the halves opposite to
+    // BearSSL's block layout, so `v3` supplies the high half and `v2` the low;
+    // the differential test against the bit-serial reference pins this exactly.
+    ((v3 as u128) << 64) | (v2 as u128)
+}
+
+/// Original bit-serial constant-time GHASH multiply, retained only as the
+/// byte-exact differential oracle for [`ghash_mul_ct`] in tests.
+#[cfg(test)]
+fn ghash_mul_ct_ref(x: u128, y: u128) -> u128 {
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
 
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
-        // Turn one bit into an all-ones/all-zero mask and use it to
-        // conditionally xor without data-dependent branches.
         let bit = u8::try_from((x >> (127 - i)) & 1).expect("single bit fits in u8");
         let bit_mask = 0u128.wrapping_sub(u128::from(bit));
         z ^= v & bit_mask;
@@ -1519,6 +1617,47 @@ mod tests {
             i += 2;
         }
         out
+    }
+
+    // Deterministic xorshift128+ PRNG so the differential oracle is reproducible.
+    fn xs_next(state: &mut (u64, u64)) -> u64 {
+        let mut x = state.0;
+        let y = state.1;
+        state.0 = y;
+        x ^= x << 23;
+        x ^= x >> 17;
+        x ^= y ^ (y >> 26);
+        state.1 = x;
+        x.wrapping_add(y)
+    }
+
+    fn xs_u128(state: &mut (u64, u64)) -> u128 {
+        let hi = u128::from(xs_next(state));
+        let lo = u128::from(xs_next(state));
+        (hi << 64) | lo
+    }
+
+    #[test]
+    fn ghash_mul_ct_matches_bit_serial_reference() {
+        // Primary safety net: the BearSSL-style multiply must be byte-for-byte
+        // identical to the old bit-serial constant-time multiply on every input.
+        const ITERS: usize = 500_000;
+        let mut state = (0x0123_4567_89ab_cdefu64, 0xfedc_ba98_7654_3210u64);
+        for _ in 0..ITERS {
+            let a = xs_u128(&mut state);
+            let b = xs_u128(&mut state);
+            assert_eq!(ghash_mul_ct(a, b), ghash_mul_ct_ref(a, b));
+        }
+
+        // Exhaustive corner combinations of extreme operands.
+        let corners = [0u128, 1, 2, 1 << 127, (1 << 127) | 1, u128::MAX, u128::MAX >> 1];
+        for &a in &corners {
+            for &b in &corners {
+                assert_eq!(ghash_mul_ct(a, b), ghash_mul_ct_ref(a, b));
+                // The variable-time reference must agree as well.
+                assert_eq!(ghash_mul_ct(a, b), ghash_mul_vt(a, b));
+            }
+        }
     }
 
     #[test]

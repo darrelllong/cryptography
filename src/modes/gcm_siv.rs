@@ -14,14 +14,20 @@ use crate::{Aes128, Aes256, BlockCipher};
 
 #[inline]
 fn ghash_mul(x: u128, y: u128) -> u128 {
-    // SP 800-38D field polynomial x^128 + x^7 + x^2 + x + 1, reused by POLYVAL
-    // through byte/bit reversal in RFC 8452. In reflected GHASH bit order,
-    // x^7 + x^2 + x + 1 is encoded as 0xe1 in the most-significant byte.
+    // POLYVAL operates in the same GF(2^128) as GHASH (RFC 8452 reaches it via
+    // byte/bit reversal), so this reuses the crate's BearSSL-style constant-time
+    // carryless multiply instead of a per-block bit-serial loop.
+    super::ghash_mul_ct(x, y)
+}
+
+/// Original bit-serial POLYVAL/GHASH multiply, kept only as the byte-exact
+/// differential oracle for [`ghash_mul`] in tests.
+#[cfg(test)]
+fn ghash_mul_ref(x: u128, y: u128) -> u128 {
     const R: u128 = 0xe100_0000_0000_0000_0000_0000_0000_0000;
     let mut z = 0u128;
     let mut v = y;
     for i in 0..128 {
-        // Branch-free conditional xor via all-ones/all-zero masks.
         let bit = u8::try_from((x >> (127 - i)) & 1).expect("single bit");
         let bit_mask = 0u128.wrapping_sub(u128::from(bit));
         z ^= v & bit_mask;
@@ -280,8 +286,46 @@ impl Aes256GcmSiv {
 
 #[cfg(test)]
 mod tests {
-    use super::{derive_keys, polyval, Aes128GcmSiv};
+    use super::{derive_keys, ghash_mul, ghash_mul_ref, polyval, Aes128GcmSiv};
     use crate::{Aes128, Aes256GcmSiv};
+
+    // Deterministic xorshift128+ PRNG for the differential oracle.
+    fn xs_next(state: &mut (u64, u64)) -> u64 {
+        let mut x = state.0;
+        let y = state.1;
+        state.0 = y;
+        x ^= x << 23;
+        x ^= x >> 17;
+        x ^= y ^ (y >> 26);
+        state.1 = x;
+        x.wrapping_add(y)
+    }
+
+    fn xs_u128(state: &mut (u64, u64)) -> u128 {
+        let hi = u128::from(xs_next(state));
+        let lo = u128::from(xs_next(state));
+        (hi << 64) | lo
+    }
+
+    #[test]
+    fn ghash_mul_matches_bit_serial_reference() {
+        // The delegated BearSSL-style POLYVAL multiply must be byte-for-byte
+        // identical to the old bit-serial multiply on every input.
+        const ITERS: usize = 500_000;
+        let mut state = (0x2545_f491_4f6c_dd1du64, 0x1234_5678_9abc_def0u64);
+        for _ in 0..ITERS {
+            let a = xs_u128(&mut state);
+            let b = xs_u128(&mut state);
+            assert_eq!(ghash_mul(a, b), ghash_mul_ref(a, b));
+        }
+
+        let corners = [0u128, 1, 2, 1 << 127, (1 << 127) | 1, u128::MAX, u128::MAX >> 1];
+        for &a in &corners {
+            for &b in &corners {
+                assert_eq!(ghash_mul(a, b), ghash_mul_ref(a, b));
+            }
+        }
+    }
 
     fn unhex_ws(input: &str) -> Vec<u8> {
         let compact: String = input.chars().filter(|c| !c.is_whitespace()).collect();
