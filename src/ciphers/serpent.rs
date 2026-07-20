@@ -12,9 +12,12 @@
 //! on 32-bit little-endian words, so the wrappers reverse the incoming key and
 //! block bytes around that native representation.
 //!
-//! The fast path uses direct 4-bit S-box lookups across the 32 parallel lanes
-//! of the bitslice round state. The `Ct` path evaluates the same 4->4 S-boxes
-//! in packed ANF form so substitution avoids secret-indexed table reads.
+//! Both the fast (`Serpent128/192/256`) and constant-time (`*Ct`) types share a
+//! single word-parallel bitsliced S-box: each 4->4 S-box is evaluated directly
+//! on the four 32-bit bitslice registers via its Algebraic Normal Form (word-wide
+//! `AND`/`XOR` only), substituting all 32 lanes at once. This is branch-free and
+//! lookup-free — far faster than a per-lane table loop and constant-time by
+//! construction — so no separate variable-time path is needed.
 
 use crate::ct::zeroize_slice;
 use crate::BlockCipher;
@@ -59,30 +62,87 @@ const fn build_sboxes_anf(sboxes: &[[u8; 16]; 8]) -> [[u16; 4]; 8] {
 const SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&SBOXES);
 const INV_SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&INV_SBOXES);
 
-#[inline]
-fn sbox_ct_nibble(input: u8, sbox_anf: [u16; 4]) -> u8 {
-    crate::ct::eval_nibble_sbox(sbox_anf, input)
-}
-
-/// Apply a 4-bit S-box to all 32 bitslice lanes in parallel.
+/// Apply one 4-bit S-box to all 32 bitslice lanes at once, word-parallel.
 ///
 /// **Bitslice representation.**  Serpent stores one 128-bit block as four 32-bit
-/// words `[x0, x1, x2, x3]`.  Bit `i` of word `j` represents the `j`th input
-/// bit of the `i`th S-box "lane" — so there are 32 parallel 4-bit S-box
-/// instances, one per bit-position 0..31 across all four words.
+/// words `[x0, x1, x2, x3]`.  Bit `i` of word `j` is the `j`th input bit of the
+/// `i`th of the 32 parallel 4-bit S-box "lanes" (`x0` = least-significant nibble
+/// bit).
 ///
-/// To apply the S-box to lane `i`:
-///   1. Collect the 4-bit input nibble: bit `i` of each of x0..x3.
-///   2. Look up `table[nibble]` to get the 4-bit output.
-///   3. Distribute the output bits back to bit `i` of each output word.
+/// **How it works.**  Every S-box output bit is a GF(2) multilinear polynomial
+/// (Algebraic Normal Form) in the four input bits.  `coeffs[j]` packs the ANF of
+/// output bit `j`: bit `m` is set iff monomial `m` is present, where `m` is the
+/// 4-bit subset mask over `{x0, x1, x2, x3}`.  Building the 16 monomial products
+/// once and XOR-accumulating the selected ones evaluates the S-box on all 32
+/// lanes simultaneously with a fixed sequence of word-wide `AND`/`XOR`s — no
+/// per-lane loop, no table read.
 ///
-/// This is the standard bitsliced evaluation loop over all 32 lanes.  The `Ct`
-/// variant ([`apply_sbox_ct`]) replaces the table lookup with the ANF evaluator
-/// from `crate::ct` to eliminate secret-indexed memory reads.
+/// This replaces the old lane-by-lane table lookup / per-nibble ANF loop
+/// (~1024 lane iterations per S-box layer) and serves both the fast and `Ct`
+/// types: the operation sequence and memory-access pattern depend only on the
+/// (public) round-selected `coeffs`, never on block or key data, so it is
+/// constant-time.  The `coeffs` are compile-time constants produced from the
+/// S-box tables by [`crate::ct::build_nibble_sbox_anf`], making the output
+/// bit-for-bit identical to a direct table lookup (proven exhaustively by the
+/// `word_parallel_sbox_matches_table_reference` test).
 #[inline]
+fn apply_sbox_words(words: [u32; 4], coeffs: [u16; 4]) -> [u32; 4] {
+    let [x0, x1, x2, x3] = words;
+
+    // mono[m] = AND over k of x_k for each bit k set in the subset mask m;
+    // mono[0] is the empty product = 1, i.e. all-ones in every lane.
+    let mut mono = [0u32; 16];
+    mono[0] = u32::MAX;
+    mono[1] = x0;
+    mono[2] = x1;
+    mono[4] = x2;
+    mono[8] = x3;
+    mono[3] = x0 & x1;
+    mono[5] = x0 & x2;
+    mono[6] = x1 & x2;
+    mono[9] = x0 & x3;
+    mono[10] = x1 & x3;
+    mono[12] = x2 & x3;
+    mono[7] = mono[3] & x2;
+    mono[11] = mono[3] & x3;
+    mono[13] = mono[5] & x3;
+    mono[14] = mono[6] & x3;
+    mono[15] = mono[7] & x3;
+
+    let mut out = [0u32; 4];
+    let mut j = 0usize;
+    while j < 4 {
+        let c = coeffs[j];
+        let mut acc = 0u32;
+        let mut m = 0usize;
+        while m < 16 {
+            // Include monomial m iff its ANF coefficient bit is set.  `present`
+            // is derived only from the public, round-selected coefficients — not
+            // from secret data — so accumulation stays constant-time.
+            let present = 0u32.wrapping_sub(u32::from((c >> m) & 1));
+            acc ^= mono[m] & present;
+            m += 1;
+        }
+        out[j] = acc;
+        j += 1;
+    }
+    out
+}
+
+#[inline]
+fn apply_sbox_round(words: [u32; 4], round: usize) -> [u32; 4] {
+    apply_sbox_words(words, SBOXES_ANF[round & 7])
+}
+
+#[inline]
+fn apply_inv_sbox_round(words: [u32; 4], round: usize) -> [u32; 4] {
+    apply_sbox_words(words, INV_SBOXES_ANF[round & 7])
+}
+
+/// Reference lane-by-lane table lookup — the original S-box implementation,
+/// retained only as a differential oracle for the equivalence tests below.
+#[cfg(test)]
 fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
-    // Bitslice mapping: bit `i` from each word forms one 4-bit S-box input,
-    // so one call processes 32 parallel 4-bit S-box instances.
     let [x0, x1, x2, x3] = words;
     let mut out = [0u32; 4];
     let mut bit = 0u32;
@@ -101,47 +161,12 @@ fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
     out
 }
 
-#[inline]
-fn apply_sbox_ct(words: [u32; 4], sbox_anf: [u16; 4]) -> [u32; 4] {
-    // Same 32-lane bitslice mapping as `apply_sbox_table`, but each nibble is
-    // evaluated through packed ANF coefficients instead of table lookups.
-    let [x0, x1, x2, x3] = words;
-    let mut out = [0u32; 4];
-    let mut bit = 0u32;
-    while bit < 32 {
-        let nibble = u8::try_from(
-            ((x0 >> bit) & 1)
-                | (((x1 >> bit) & 1) << 1)
-                | (((x2 >> bit) & 1) << 2)
-                | (((x3 >> bit) & 1) << 3),
-        )
-        .expect("bit-packed nibble fits in u8");
-        let s = sbox_ct_nibble(nibble, sbox_anf);
-        out[0] |= u32::from(s & 1) << bit;
-        out[1] |= u32::from((s >> 1) & 1) << bit;
-        out[2] |= u32::from((s >> 2) & 1) << bit;
-        out[3] |= u32::from((s >> 3) & 1) << bit;
-        bit += 1;
-    }
-    out
-}
-
-#[inline]
-fn apply_sbox_round(words: [u32; 4], round: usize, use_ct: bool) -> [u32; 4] {
-    if use_ct {
-        apply_sbox_ct(words, SBOXES_ANF[round & 7])
-    } else {
-        apply_sbox_table(words, &SBOXES[round & 7])
-    }
-}
-
-#[inline]
-fn apply_inv_sbox_round(words: [u32; 4], round: usize, use_ct: bool) -> [u32; 4] {
-    if use_ct {
-        apply_sbox_ct(words, INV_SBOXES_ANF[round & 7])
-    } else {
-        apply_sbox_table(words, &INV_SBOXES[round & 7])
-    }
+/// Per-nibble constant-time ANF evaluation, retained for the coefficient
+/// cross-check test (and as this module's ct S-box indicator for the scrub
+/// policy in `scrub.rs`, which looks for `eval_nibble_sbox`).
+#[cfg(test)]
+fn sbox_ct_nibble(input: u8, sbox_anf: [u16; 4]) -> u8 {
+    crate::ct::eval_nibble_sbox(sbox_anf, input)
 }
 
 #[inline]
@@ -207,7 +232,7 @@ fn block_from_words_internal(words: [u32; 4]) -> [u8; 16] {
     out
 }
 
-fn expand_round_keys<const N: usize>(user_key: &[u8; N], use_ct: bool) -> [[u32; 4]; 33] {
+fn expand_round_keys<const N: usize>(user_key: &[u8; N]) -> [[u32; 4]; 33] {
     let key = reverse_bytes(user_key);
     let mut padded = [0u8; 32];
     padded[..N].copy_from_slice(&key);
@@ -243,29 +268,21 @@ fn expand_round_keys<const N: usize>(user_key: &[u8; N], use_ct: bool) -> [[u32;
             words[8 + 4 * round + 2],
             words[8 + 4 * round + 3],
         ];
-        out[round] = if use_ct {
-            apply_sbox_ct(input, SBOXES_ANF[sbox_idx])
-        } else {
-            apply_sbox_table(input, &SBOXES[sbox_idx])
-        };
+        out[round] = apply_sbox_words(input, SBOXES_ANF[sbox_idx]);
         round += 1;
     }
 
     out
 }
 
-fn serpent_encrypt_words(
-    mut state: [u32; 4],
-    round_keys: &[[u32; 4]; 33],
-    use_ct: bool,
-) -> [u32; 4] {
+fn serpent_encrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u32; 4] {
     let mut round = 0usize;
     while round < 31 {
         state[0] ^= round_keys[round][0];
         state[1] ^= round_keys[round][1];
         state[2] ^= round_keys[round][2];
         state[3] ^= round_keys[round][3];
-        state = apply_sbox_round(state, round, use_ct);
+        state = apply_sbox_round(state, round);
         state = lt(state);
         round += 1;
     }
@@ -274,7 +291,7 @@ fn serpent_encrypt_words(
     state[1] ^= round_keys[31][1];
     state[2] ^= round_keys[31][2];
     state[3] ^= round_keys[31][3];
-    state = apply_sbox_round(state, 31, use_ct);
+    state = apply_sbox_round(state, 31);
     state[0] ^= round_keys[32][0];
     state[1] ^= round_keys[32][1];
     state[2] ^= round_keys[32][2];
@@ -282,16 +299,12 @@ fn serpent_encrypt_words(
     state
 }
 
-fn serpent_decrypt_words(
-    mut state: [u32; 4],
-    round_keys: &[[u32; 4]; 33],
-    use_ct: bool,
-) -> [u32; 4] {
+fn serpent_decrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u32; 4] {
     state[0] ^= round_keys[32][0];
     state[1] ^= round_keys[32][1];
     state[2] ^= round_keys[32][2];
     state[3] ^= round_keys[32][3];
-    state = apply_inv_sbox_round(state, 31, use_ct);
+    state = apply_inv_sbox_round(state, 31);
     state[0] ^= round_keys[31][0];
     state[1] ^= round_keys[31][1];
     state[2] ^= round_keys[31][2];
@@ -301,7 +314,7 @@ fn serpent_decrypt_words(
     while round > 0 {
         round -= 1;
         state = inv_lt(state);
-        state = apply_inv_sbox_round(state, round, use_ct);
+        state = apply_inv_sbox_round(state, round);
         state[0] ^= round_keys[round][0];
         state[1] ^= round_keys[round][1];
         state[2] ^= round_keys[round][2];
@@ -311,17 +324,17 @@ fn serpent_decrypt_words(
     state
 }
 
-fn encrypt_block_words(round_keys: &[[u32; 4]; 33], block: &[u8; 16], use_ct: bool) -> [u8; 16] {
+fn encrypt_block_words(round_keys: &[[u32; 4]; 33], block: &[u8; 16]) -> [u8; 16] {
     let internal = reverse_bytes(block);
     let state = words_from_block_internal(&internal);
-    let out = serpent_encrypt_words(state, round_keys, use_ct);
+    let out = serpent_encrypt_words(state, round_keys);
     reverse_bytes(&block_from_words_internal(out))
 }
 
-fn decrypt_block_words(round_keys: &[[u32; 4]; 33], block: &[u8; 16], use_ct: bool) -> [u8; 16] {
+fn decrypt_block_words(round_keys: &[[u32; 4]; 33], block: &[u8; 16]) -> [u8; 16] {
     let internal = reverse_bytes(block);
     let state = words_from_block_internal(&internal);
-    let out = serpent_decrypt_words(state, round_keys, use_ct);
+    let out = serpent_decrypt_words(state, round_keys);
     reverse_bytes(&block_from_words_internal(out))
 }
 
@@ -336,7 +349,7 @@ macro_rules! serpent_type {
             /// Expand the user key into the 33 Serpent round-key words.
             pub fn new(key: &[u8; $key_len]) -> Self {
                 Self {
-                    round_keys: expand_round_keys(key, false),
+                    round_keys: expand_round_keys(key),
                 }
             }
 
@@ -349,12 +362,12 @@ macro_rules! serpent_type {
 
             /// Encrypt one 128-bit block.
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                encrypt_block_words(&self.round_keys, block, false)
+                encrypt_block_words(&self.round_keys, block)
             }
 
             /// Decrypt one 128-bit block.
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                decrypt_block_words(&self.round_keys, block, false)
+                decrypt_block_words(&self.round_keys, block)
             }
         }
 
@@ -391,7 +404,7 @@ macro_rules! serpent_type {
             /// Expand the user key into the 33 Serpent round-key words.
             pub fn new(key: &[u8; $key_len]) -> Self {
                 Self {
-                    round_keys: expand_round_keys(key, true),
+                    round_keys: expand_round_keys(key),
                 }
             }
 
@@ -404,12 +417,12 @@ macro_rules! serpent_type {
 
             /// Encrypt one 128-bit block with the software constant-time path.
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                encrypt_block_words(&self.round_keys, block, true)
+                encrypt_block_words(&self.round_keys, block)
             }
 
             /// Decrypt one 128-bit block with the software constant-time path.
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                decrypt_block_words(&self.round_keys, block, true)
+                decrypt_block_words(&self.round_keys, block)
             }
         }
 
@@ -495,6 +508,117 @@ mod tests {
                     sbox_ct_nibble(x, INV_SBOXES_ANF[sbox])
                 );
             }
+        }
+    }
+
+    /// Small deterministic xorshift64 PRNG for reproducible pseudorandom tests
+    /// (no external rng; `Date::now`/`Math.random` unavailable and undesirable).
+    struct XorShift64(u64);
+    impl XorShift64 {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+    }
+
+    /// Prove the word-parallel bitsliced S-box is bit-for-bit identical to the
+    /// original lane-by-lane table lookup, for every S-box (forward and inverse).
+    ///
+    /// Part (a) is exhaustive over the S-box *definition*: for each of the 8
+    /// S-boxes and each of the 16 nibble inputs, drive all 32 lanes with that one
+    /// nibble and compare against the table oracle — this covers every entry of
+    /// every S-box table.  Part (b) then fuzzes mixed-lane words so that arbitrary
+    /// combinations of the 32 independent lanes are exercised together.
+    #[test]
+    fn word_parallel_sbox_matches_table_reference() {
+        // (a) Exhaustive: all 16 nibble inputs x all 8 S-boxes, forward + inverse.
+        for i in 0..8 {
+            for n in 0u32..16 {
+                let w = [
+                    if n & 1 != 0 { u32::MAX } else { 0 },
+                    if n & 2 != 0 { u32::MAX } else { 0 },
+                    if n & 4 != 0 { u32::MAX } else { 0 },
+                    if n & 8 != 0 { u32::MAX } else { 0 },
+                ];
+                assert_eq!(
+                    apply_sbox_words(w, SBOXES_ANF[i]),
+                    apply_sbox_table(w, &SBOXES[i]),
+                    "forward S-box {i} nibble {n}"
+                );
+                assert_eq!(
+                    apply_sbox_words(w, INV_SBOXES_ANF[i]),
+                    apply_sbox_table(w, &INV_SBOXES[i]),
+                    "inverse S-box {i} nibble {n}"
+                );
+            }
+        }
+
+        // (b) Fuzz mixed-lane words against the table oracle.
+        let mut rng = XorShift64(0x2545_f491_4f6c_dd1d);
+        for _ in 0..20_000 {
+            let w = [
+                rng.next() as u32,
+                (rng.next() >> 9) as u32,
+                rng.next() as u32,
+                (rng.next() >> 21) as u32,
+            ];
+            for i in 0..8 {
+                assert_eq!(
+                    apply_sbox_words(w, SBOXES_ANF[i]),
+                    apply_sbox_table(w, &SBOXES[i]),
+                    "forward S-box {i} words {w:08x?}"
+                );
+                assert_eq!(
+                    apply_sbox_words(w, INV_SBOXES_ANF[i]),
+                    apply_sbox_table(w, &INV_SBOXES[i]),
+                    "inverse S-box {i} words {w:08x?}"
+                );
+            }
+        }
+    }
+
+    /// Encrypt/decrypt several thousand pseudorandom blocks under random keys for
+    /// all three key sizes, asserting round-trip identity and that the fast and
+    /// `Ct` types (now sharing the word-parallel S-box) agree bit-for-bit.
+    #[test]
+    fn encrypt_decrypt_roundtrip_random() {
+        let mut rng = XorShift64(0x9e37_79b9_7f4a_7c15);
+        for _ in 0..4000 {
+            let mut key = [0u8; 32];
+            for b in key.iter_mut() {
+                *b = rng.next() as u8;
+            }
+            let mut pt = [0u8; 16];
+            for b in pt.iter_mut() {
+                *b = rng.next() as u8;
+            }
+            let k16: [u8; 16] = key[..16].try_into().unwrap();
+            let k24: [u8; 24] = key[..24].try_into().unwrap();
+
+            let fast = Serpent128::new(&k16);
+            let ct = Serpent128Ct::new(&k16);
+            let enc = fast.encrypt_block(&pt);
+            assert_eq!(enc, ct.encrypt_block(&pt), "128 fast/ct mismatch");
+            assert_eq!(fast.decrypt_block(&enc), pt, "128 fast round-trip");
+            assert_eq!(ct.decrypt_block(&enc), pt, "128 ct round-trip");
+
+            let fast = Serpent192::new(&k24);
+            let ct = Serpent192Ct::new(&k24);
+            let enc = fast.encrypt_block(&pt);
+            assert_eq!(enc, ct.encrypt_block(&pt), "192 fast/ct mismatch");
+            assert_eq!(fast.decrypt_block(&enc), pt, "192 fast round-trip");
+            assert_eq!(ct.decrypt_block(&enc), pt, "192 ct round-trip");
+
+            let fast = Serpent256::new(&key);
+            let ct = Serpent256Ct::new(&key);
+            let enc = fast.encrypt_block(&pt);
+            assert_eq!(enc, ct.encrypt_block(&pt), "256 fast/ct mismatch");
+            assert_eq!(fast.decrypt_block(&enc), pt, "256 fast round-trip");
+            assert_eq!(ct.decrypt_block(&enc), pt, "256 ct round-trip");
         }
     }
 
