@@ -12,7 +12,7 @@ use crate::hash::Digest;
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
-    generate_prime_order_group, is_probable_prime, mod_inverse, mod_pow, random_nonzero_below,
+    generate_prime_order_group, is_probable_prime_untrusted, mod_inverse, mod_pow, random_nonzero_below,
 };
 use crate::Csprng;
 use crate::Hmac;
@@ -560,7 +560,7 @@ impl Dsa {
 /// This checks that `p` and `q` are prime, that `q` divides `p - 1`, and that
 /// `g` lies in the order-`q` subgroup of `Z_p^*`.
 fn validate_domain(prime: &BigUint, subgroup_order: &BigUint, generator: &BigUint) -> bool {
-    if !is_probable_prime(prime) || !is_probable_prime(subgroup_order) {
+    if !is_probable_prime_untrusted(prime) || !is_probable_prime_untrusted(subgroup_order) {
         return false;
     }
     if subgroup_order >= prime {

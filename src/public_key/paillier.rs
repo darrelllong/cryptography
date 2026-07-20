@@ -11,7 +11,7 @@ use core::fmt;
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
-    gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_coprime_below, random_probable_prime,
+    gcd, is_probable_prime_untrusted, lcm, mod_inverse, mod_pow, random_coprime_below, random_probable_prime,
 };
 use crate::Csprng;
 
@@ -339,7 +339,7 @@ impl Paillier {
         q: &BigUint,
         base: &BigUint,
     ) -> Option<(PaillierPublicKey, PaillierPrivateKey)> {
-        if p == q || !is_probable_prime(p) || !is_probable_prime(q) {
+        if p == q || !is_probable_prime_untrusted(p) || !is_probable_prime_untrusted(q) {
             return None;
         }
 

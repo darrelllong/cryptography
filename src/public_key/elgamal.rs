@@ -11,7 +11,7 @@ use core::fmt;
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
-    generate_prime_order_group, is_probable_prime, mod_pow, random_nonzero_below,
+    generate_prime_order_group, is_probable_prime_untrusted, mod_pow, random_nonzero_below,
 };
 use crate::Csprng;
 
@@ -377,7 +377,7 @@ impl ElGamal {
         generator: &BigUint,
         secret: &BigUint,
     ) -> Option<(ElGamalPublicKey, ElGamalPrivateKey)> {
-        if !is_probable_prime(prime) {
+        if !is_probable_prime_untrusted(prime) {
             return None;
         }
         if generator <= &BigUint::one() || generator >= prime {

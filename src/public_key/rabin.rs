@@ -9,7 +9,7 @@ use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
-use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
+use crate::public_key::primes::{is_probable_prime_untrusted, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
 
 // Arbitrary 32-bit disambiguation tag. It is not a checksum; it is just a
@@ -248,7 +248,7 @@ impl Rabin {
     /// `(c^((p + 1) / 4) mod p)` valid during decryption.
     #[must_use]
     pub fn from_primes(p: &BigUint, q: &BigUint) -> Option<(RabinPublicKey, RabinPrivateKey)> {
-        if p == q || !is_probable_prime(p) || !is_probable_prime(q) {
+        if p == q || !is_probable_prime_untrusted(p) || !is_probable_prime_untrusted(q) {
             return None;
         }
         if p.rem_u64(4) != 3 || q.rem_u64(4) != 3 {

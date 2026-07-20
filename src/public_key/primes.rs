@@ -132,15 +132,45 @@ fn is_witness(
     value != one
 }
 
+/// Number of candidate-derived pseudorandom Miller-Rabin rounds added by
+/// [`is_probable_prime_untrusted`] on top of the fixed bases.
+///
+/// Each round independently catches a composite with probability ≥ 3/4
+/// (Rabin), so forging a value that survives all of them requires grinding on
+/// the order of `4^64 = 2^128` candidates — infeasible.
+const HARDENED_HASH_ROUNDS: usize = 64;
+
 /// Miller-Rabin probable-prime test with a fixed witness set.
+///
+/// This is appropriate for the crate's own randomly generated candidates,
+/// where a fixed base set already rejects composites with overwhelming
+/// probability. For values that arrive from an **untrusted** source (parsed
+/// keys, peer-supplied domain parameters), use [`is_probable_prime_untrusted`]:
+/// a fixed base set can be defeated by a purpose-built strong pseudoprime.
 #[must_use]
 pub fn is_probable_prime(n: &BigUint) -> bool {
-    is_probable_prime_with_bases(n, &MR_BASES)
+    mr_probable_prime(n, &MR_BASES, 0)
 }
 
 /// Miller-Rabin using explicit witness bases.
 #[must_use]
 pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool {
+    mr_probable_prime(candidate, bases, 0)
+}
+
+/// Hardened Miller-Rabin for candidates from an untrusted source.
+///
+/// Runs the fixed small-prime bases plus [`HARDENED_HASH_ROUNDS`] additional
+/// witnesses derived by hashing the candidate itself. Because those witnesses
+/// are an unpredictable function of `n`, an adversary cannot construct a
+/// composite that is a strong pseudoprime to a base set they can choose in
+/// advance (the Arnault-style attack on fixed bases).
+#[must_use]
+pub fn is_probable_prime_untrusted(candidate: &BigUint) -> bool {
+    mr_probable_prime(candidate, &MR_BASES, HARDENED_HASH_ROUNDS)
+}
+
+fn mr_probable_prime(candidate: &BigUint, bases: &[u64], hash_rounds: usize) -> bool {
     if candidate.is_zero() {
         return false;
     }
@@ -163,7 +193,7 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         }
     }
 
-    if bases.is_empty() {
+    if bases.is_empty() && hash_rounds == 0 {
         return false;
     }
 
@@ -186,7 +216,46 @@ pub fn is_probable_prime_with_bases(candidate: &BigUint, bases: &[u64]) -> bool 
         }
     }
 
+    // Candidate-derived pseudorandom witnesses (untrusted-input hardening).
+    // Any composite reaching this point already survived every fixed base, so
+    // these rounds only ever run to completion for a genuine prime.
+    for witness in hash_derived_bases(candidate, hash_rounds) {
+        // `hash_derived_bases` returns values in [2, n-2] ⊂ [2, n-1).
+        if is_witness(&witness, &ctx, &odd_factor, two_adic_exponent) {
+            return false;
+        }
+    }
+
     true
+}
+
+/// Derive `count` Miller-Rabin witnesses in `[2, n-2]` as a SHAKE256 PRF of the
+/// candidate, so the witness schedule cannot be predicted before `n` is fixed.
+fn hash_derived_bases(candidate: &BigUint, count: usize) -> Vec<BigUint> {
+    if count == 0 {
+        return Vec::new();
+    }
+    use crate::hash::Xof;
+    let n_bytes = candidate.to_be_bytes();
+    // Values reaching the witness loop are > 997, so `n - 3 >= 2` and the map
+    // `2 + (h mod (n-3))` lands in [2, n-2].
+    let n_minus_three = candidate.sub_ref(&BigUint::from_u64(3));
+    let two = BigUint::from_u64(2);
+
+    let mut xof = crate::hash::sha3::Shake256::new();
+    xof.update(b"cryptography-rs/miller-rabin-witness/v1");
+    xof.update(&n_bytes);
+
+    // Draw a few extra bytes beyond the candidate width so the modular
+    // reduction into [0, n-3) has negligible bias.
+    let mut buf = vec![0u8; n_bytes.len() + 16];
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        xof.squeeze(&mut buf);
+        let h = BigUint::from_be_bytes(&buf);
+        out.push(two.add_ref(&h.modulo(&n_minus_three)));
+    }
+    out
 }
 
 /// Draw a random integer in `[0, upper_exclusive)`.
@@ -400,11 +469,42 @@ pub fn mod_inverse(a: &BigUint, n: &BigUint) -> Option<BigUint> {
 #[cfg(test)]
 mod tests {
     use super::{
-        gcd, is_probable_prime, is_probable_prime_with_bases, lcm, mod_inverse, mod_pow,
-        random_nonzero_below,
+        gcd, is_probable_prime, is_probable_prime_untrusted, is_probable_prime_with_bases, lcm,
+        mod_inverse, mod_pow, random_nonzero_below,
     };
     use crate::public_key::bigint::BigUint;
     use crate::Csprng;
+
+    #[test]
+    fn untrusted_hardening_rejects_pseudoprime_that_fools_fixed_bases() {
+        // A014233(12) = 318665857834031151167461 is the smallest strong
+        // pseudoprime to the first twelve prime bases {2,3,…,37} — exactly this
+        // crate's fixed MR_BASES. The fixed-base test is therefore fooled into
+        // accepting it, while the candidate-derived hardened witnesses reject
+        // it. (Its prime factors exceed the trial-division sieve, so it reaches
+        // the Miller-Rabin stage.)
+        let ten18 = BigUint::from_u64(1_000_000_000_000_000_000);
+        let spsp = BigUint::from_u64(318_665)
+            .mul_ref(&ten18)
+            .add_ref(&BigUint::from_u64(857_834_031_151_167_461));
+
+        assert!(
+            is_probable_prime(&spsp),
+            "fixed-base test is expected to be fooled by A014233(12)"
+        );
+        assert!(
+            !is_probable_prime_untrusted(&spsp),
+            "hardened test must reject the pseudoprime"
+        );
+    }
+
+    #[test]
+    fn untrusted_still_accepts_primes_and_rejects_composites() {
+        assert!(is_probable_prime_untrusted(&BigUint::from_u64(65_537)));
+        assert!(is_probable_prime_untrusted(&BigUint::from_u64(2_147_483_647))); // Mersenne prime
+        assert!(!is_probable_prime_untrusted(&BigUint::from_u64(561))); // Carmichael
+        assert!(!is_probable_prime_untrusted(&BigUint::from_u64(1_000_003 * 3))); // composite
+    }
 
     struct ZeroRng;
 

@@ -150,19 +150,45 @@ impl<H: Digest> RsaOaep<H> {
     }
 
     /// Decrypt one `RSAES-OAEP` ciphertext.
+    ///
+    /// The RSA private operation here is **unblinded**. Prefer
+    /// [`Self::decrypt_rng`] when a CSPRNG is available so the variable-time
+    /// bigint stack never sees the raw attacker-chosen ciphertext.
     #[must_use]
     pub fn decrypt(private: &RsaPrivateKey, label: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
-        let h_len = H::OUTPUT_LEN;
         let k = modulus_len_bytes(private.modulus());
-        if ciphertext.len() != k || k < 2 * h_len + 2 {
+        if ciphertext.len() != k || k < 2 * H::OUTPUT_LEN + 2 {
             return None;
         }
+        let encoded_int = private.decrypt_raw(&os2ip(ciphertext));
+        Self::oaep_decode(label, k, &encoded_int)
+    }
 
-        let ciphertext_int = os2ip(ciphertext);
-        let encoded_int = private.decrypt_raw(&ciphertext_int);
+    /// Decrypt one `RSAES-OAEP` ciphertext with CSPRNG-driven ciphertext
+    /// blinding on the RSA private operation (Brumley–Boneh timing-attack
+    /// countermeasure). Functionally identical to [`Self::decrypt`].
+    #[must_use]
+    pub fn decrypt_rng<R: crate::Csprng>(
+        private: &RsaPrivateKey,
+        label: &[u8],
+        ciphertext: &[u8],
+        rng: &mut R,
+    ) -> Option<Vec<u8>> {
+        let k = modulus_len_bytes(private.modulus());
+        if ciphertext.len() != k || k < 2 * H::OUTPUT_LEN + 2 {
+            return None;
+        }
+        let encoded_int = private.decrypt_raw_blinded(&os2ip(ciphertext), rng);
+        Self::oaep_decode(label, k, &encoded_int)
+    }
+
+    /// Shared OAEP decode of the recovered integer (constant-time validation),
+    /// used by both the blinded and unblinded decrypt paths.
+    fn oaep_decode(label: &[u8], k: usize, encoded_int: &BigUint) -> Option<Vec<u8>> {
+        let h_len = H::OUTPUT_LEN;
         // Always `Some`: raw RSA decryption returns a value in `[0, n)`, and
         // the modulus occupies exactly `k` bytes.
-        let encoded = i2osp(&encoded_int, k)?;
+        let encoded = i2osp(encoded_int, k)?;
 
         let (masked_seed, masked_db) = encoded[1..].split_at(h_len);
         let seed_mask = mgf1::<H>(masked_db, h_len);
@@ -209,13 +235,9 @@ impl<H: Digest> RsaOaep<H> {
 pub struct RsaPss<H: Digest>(PhantomData<H>);
 
 impl<H: Digest> RsaPss<H> {
-    /// Sign one message using `RSASSA-PSS`.
-    ///
-    /// The caller supplies the salt explicitly so the encoding is fully
-    /// deterministic under test.
-    #[must_use]
-    pub fn sign(private: &RsaPrivateKey, message: &[u8], salt: &[u8]) -> Option<Vec<u8>> {
-        let k = modulus_len_bytes(private.modulus());
+    /// Build the RFC 8017 §9.1.1 PSS-encoded integer representative, shared by
+    /// the blinded and unblinded signing paths.
+    fn pss_encode(private: &RsaPrivateKey, message: &[u8], salt: &[u8]) -> Option<BigUint> {
         // RFC 8017 uses `emBits = modBits - 1` so the encoded representative
         // is guaranteed to stay below the modulus.
         let em_bits = private.modulus().bits().saturating_sub(1);
@@ -253,25 +275,39 @@ impl<H: Digest> RsaPss<H> {
         // field 0xbc.
         encoded.push(0xbc);
 
-        let encoded_int = os2ip(&encoded);
+        Some(os2ip(&encoded))
+    }
+
+    /// Sign one message using `RSASSA-PSS`.
+    ///
+    /// The caller supplies the salt explicitly so the encoding is fully
+    /// deterministic under test. The RSA private operation is **unblinded**;
+    /// prefer [`Self::sign_rng`] for production signing.
+    #[must_use]
+    pub fn sign(private: &RsaPrivateKey, message: &[u8], salt: &[u8]) -> Option<Vec<u8>> {
+        let k = modulus_len_bytes(private.modulus());
+        let encoded_int = Self::pss_encode(private, message, salt)?;
         let signature_int = private.decrypt_raw(&encoded_int);
         i2osp(&signature_int, k)
     }
 
-    /// Sign one message using `RSASSA-PSS` with a fresh random salt.
+    /// Sign one message using `RSASSA-PSS` with a fresh random salt and
+    /// CSPRNG-driven ciphertext blinding on the RSA private operation.
     ///
     /// The deterministic `sign(..., salt)` variant remains for fixed-vector
-    /// testing; this helper matches the RNG-taking style of the other
-    /// randomized public-key wrappers in the crate.
+    /// testing; this is the production signing path (fresh salt + blinding).
     #[must_use]
     pub fn sign_rng<R: Csprng>(
         private: &RsaPrivateKey,
         message: &[u8],
         rng: &mut R,
     ) -> Option<Vec<u8>> {
+        let k = modulus_len_bytes(private.modulus());
         let mut salt = vec![0u8; H::OUTPUT_LEN];
         rng.fill_bytes(&mut salt);
-        Self::sign(private, message, &salt)
+        let encoded_int = Self::pss_encode(private, message, &salt)?;
+        let signature_int = private.decrypt_raw_blinded(&encoded_int, rng);
+        i2osp(&signature_int, k)
     }
 
     /// Verify one `RSASSA-PSS` signature.

@@ -39,7 +39,7 @@ use core::fmt;
 
 use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{
-    generate_prime_order_group, is_probable_prime, mod_pow, random_nonzero_below,
+    generate_prime_order_group, is_probable_prime_untrusted, mod_pow, random_nonzero_below,
 };
 use crate::Csprng;
 
@@ -327,7 +327,7 @@ impl Dh {
 /// Validate DH domain parameters: both `p` and `q` must be probable primes,
 /// `q | p − 1`, and `g` must be a generator of the order-`q` subgroup.
 fn validate_domain(p: &BigUint, q: &BigUint, g: &BigUint) -> bool {
-    if !is_probable_prime(p) || !is_probable_prime(q) {
+    if !is_probable_prime_untrusted(p) || !is_probable_prime_untrusted(q) {
         return false;
     }
     if q >= p {

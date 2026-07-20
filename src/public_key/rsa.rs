@@ -9,7 +9,7 @@ use core::fmt;
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::primes::{
-    gcd, is_probable_prime, lcm, mod_inverse, mod_pow, random_nonzero_below,
+    gcd, is_probable_prime_untrusted, lcm, mod_inverse, mod_pow, random_nonzero_below,
     random_probable_prime,
 };
 use crate::Csprng;
@@ -160,7 +160,22 @@ impl RsaPrivateKey {
         // `BigUint::mod_mul`, which would rebuild `R mod p` / `R^2 mod p` via two
         // full-width divisions on every private operation.
         let h = self.p_ctx.mul(&self.q_inv, &delta);
-        m2.add_ref(&self.q.mul_ref(&h))
+        let m = m2.add_ref(&self.q.mul_ref(&h));
+
+        // Bellcore / Boneh–DeMillo–Lipton fault check. A transient fault in
+        // either CRT half (m1 or m2) yields an `m` with `m^e != c (mod n)`, and
+        // releasing such a value lets an attacker recover a prime factor from
+        // `gcd(m^e - c, n)`. Verifying `m^e == c (mod n)` costs one extra public
+        // exponentiation (cheap: `e` is sparse). On mismatch we fall back to the
+        // non-CRT exponentiation `c^d mod n`, which is fault-isolated (it never
+        // exposes p or q individually) and total, so a detected fault degrades
+        // to a correct-but-slower result rather than a key-leaking one.
+        let c_mod_n = ciphertext.modulo(&self.n);
+        if mod_pow(&m, &self.e, &self.n) == c_mod_n {
+            m
+        } else {
+            mod_pow(&c_mod_n, &self.d, &self.n)
+        }
     }
 
     /// Apply the raw private operation with multiplicative (base) blinding.
@@ -213,7 +228,7 @@ impl Rsa {
         q: &BigUint,
         exponent: &BigUint,
     ) -> Option<(RsaPublicKey, RsaPrivateKey)> {
-        if p == q || !is_probable_prime(p) || !is_probable_prime(q) {
+        if p == q || !is_probable_prime_untrusted(p) || !is_probable_prime_untrusted(q) {
             return None;
         }
         if exponent <= &BigUint::one() {
@@ -267,7 +282,7 @@ impl Rsa {
     /// to it.
     #[must_use]
     pub fn from_primes(p: &BigUint, q: &BigUint) -> Option<(RsaPublicKey, RsaPrivateKey)> {
-        if p == q || !is_probable_prime(p) || !is_probable_prime(q) {
+        if p == q || !is_probable_prime_untrusted(p) || !is_probable_prime_untrusted(q) {
             return None;
         }
 

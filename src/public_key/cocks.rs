@@ -12,7 +12,7 @@ use core::fmt;
 
 use crate::public_key::bigint::BigUint;
 use crate::public_key::io::{decode_biguints, encode_biguints};
-use crate::public_key::primes::{is_probable_prime, mod_inverse, mod_pow, random_probable_prime};
+use crate::public_key::primes::{is_probable_prime_untrusted, mod_inverse, mod_pow, random_probable_prime};
 use crate::Csprng;
 
 const COCKS_PUBLIC_LABEL: &str = "CRYPTOGRAPHY COCKS PUBLIC KEY";
@@ -184,7 +184,7 @@ impl Cocks {
     /// `p` is not invertible modulo `q - 1`.
     #[must_use]
     pub fn from_primes(p: &BigUint, q: &BigUint) -> Option<(CocksPublicKey, CocksPrivateKey)> {
-        if p >= q || !is_probable_prime(p) || !is_probable_prime(q) {
+        if p >= q || !is_probable_prime_untrusted(p) || !is_probable_prime_untrusted(q) {
             return None;
         }
 
