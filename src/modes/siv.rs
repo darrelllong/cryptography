@@ -4,21 +4,8 @@
 //! CTR encryption. The caller supplies separate block-cipher instances for the
 //! CMAC key half and CTR key half.
 
+use super::{dbl, dbl_block};
 use crate::BlockCipher;
-
-#[inline]
-fn dbl_block(block: [u8; 16]) -> [u8; 16] {
-    let mut out = [0u8; 16];
-    let mut carry = 0u8;
-    for i in (0..16).rev() {
-        out[i] = (block[i] << 1) | carry;
-        carry = block[i] >> 7;
-    }
-    // Branch-free reduction: `mask` is 0xFF iff a carry left the top bit.
-    let mask = 0u8.wrapping_sub(carry);
-    out[15] ^= 0x87 & mask;
-    out
-}
 
 #[inline]
 fn xor_block(a: [u8; 16], b: [u8; 16]) -> [u8; 16] {
@@ -34,29 +21,6 @@ fn xor_in_place(dst: &mut [u8], src: &[u8]) {
     for (d, s) in dst.iter_mut().zip(src.iter()) {
         *d ^= *s;
     }
-}
-
-#[inline]
-fn rb_for(block_len: usize) -> u8 {
-    match block_len {
-        8 => 0x1b,
-        16 => 0x87,
-        _ => panic!("CMAC only supports 64-bit or 128-bit block ciphers"),
-    }
-}
-
-fn dbl(block: &[u8]) -> Vec<u8> {
-    let mut out = vec![0u8; block.len()];
-    let mut carry = 0u8;
-    for (o, &b) in out.iter_mut().rev().zip(block.iter().rev()) {
-        *o = (b << 1) | carry;
-        carry = b >> 7;
-    }
-    // Branch-free reduction: `mask` is 0xFF iff the shift overflowed.
-    let mask = 0u8.wrapping_sub(carry);
-    let last = out.len() - 1;
-    out[last] ^= rb_for(block.len()) & mask;
-    out
 }
 
 fn cmac_compute<C: BlockCipher>(cipher: &C, data: &[u8]) -> [u8; 16] {

@@ -116,10 +116,7 @@ impl EcElGamalPublicKey {
     #[must_use]
     pub fn from_wire_bytes(curve: CurveParams, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
-        // Reject points outside the prime-order subgroup (small-subgroup
-        // hardening on cofactor h > 1 curves), matching
-        // `EcdsaPublicKey::from_wire_bytes`.
-        if !curve.scalar_mul(&q, &curve.n).is_infinity() {
+        if !curve.is_in_prime_subgroup(&q) {
             return None;
         }
         Some(Self { curve, q })

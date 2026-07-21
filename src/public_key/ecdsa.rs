@@ -116,7 +116,7 @@ impl EcdsaPublicKey {
         let q = curve.decode_point(bytes)?;
         // Same subgroup check as from_key_blob: reject torsion points on
         // curves with h > 1 (e.g. binary curves where h = 2).
-        if !curve.scalar_mul(&q, &curve.n).is_infinity() {
+        if !curve.is_in_prime_subgroup(&q) {
             return None;
         }
         Some(Self { curve, q })
@@ -270,7 +270,7 @@ impl EcdsaPublicKey {
         // point may lie in a small torsion subgroup of order h rather than n.
         // Verify n·Q = O so that u₂·Q in verification is never decoupled from
         // the private key.  For h = 1 this is always true but costs little.
-        if !curve.scalar_mul(&public_point, &curve.n).is_infinity() {
+        if !curve.is_in_prime_subgroup(&public_point) {
             return None;
         }
         Some(Self {
@@ -354,7 +354,7 @@ impl EcdsaPublicKey {
         if !curve.is_on_curve(&public_point) {
             return None;
         }
-        if !curve.scalar_mul(&public_point, &curve.n).is_infinity() {
+        if !curve.is_in_prime_subgroup(&public_point) {
             return None;
         }
         Some(Self {

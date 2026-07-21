@@ -77,14 +77,11 @@ const INV_SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&INV_SBOXES);
 /// lanes simultaneously with a fixed sequence of word-wide `AND`/`XOR`s — no
 /// per-lane loop, no table read.
 ///
-/// This replaces the old lane-by-lane table lookup / per-nibble ANF loop
-/// (~1024 lane iterations per S-box layer) and serves both the fast and `Ct`
-/// types: the operation sequence and memory-access pattern depend only on the
-/// (public) round-selected `coeffs`, never on block or key data, so it is
-/// constant-time.  The `coeffs` are compile-time constants produced from the
-/// S-box tables by [`crate::ct::build_nibble_sbox_anf`], making the output
-/// bit-for-bit identical to a direct table lookup (proven exhaustively by the
-/// `word_parallel_sbox_matches_table_reference` test).
+/// The operation sequence and memory-access pattern depend only on the
+/// (public) round-selected `coeffs`, never on block or key data, so this is
+/// constant-time.  The `coeffs` are compile-time constants from
+/// [`crate::ct::build_nibble_sbox_anf`], so the output is bit-for-bit identical
+/// to a direct table lookup.
 #[inline]
 fn apply_sbox_words(words: [u32; 4], coeffs: [u16; 4]) -> [u32; 4] {
     let [x0, x1, x2, x3] = words;
@@ -395,60 +392,11 @@ macro_rules! serpent_type {
             }
         }
 
+        // The word-parallel bitsliced S-box has no secret-dependent table
+        // lookups or branches, so the fast path is already constant-time and
+        // the `Ct` type is simply an alias — no separate implementation exists.
         #[doc = $doc_ct]
-        pub struct $name_ct {
-            round_keys: [[u32; 4]; 33],
-        }
-
-        impl $name_ct {
-            /// Expand the user key into the 33 Serpent round-key words.
-            pub fn new(key: &[u8; $key_len]) -> Self {
-                Self {
-                    round_keys: expand_round_keys(key),
-                }
-            }
-
-            /// Expand the key and then wipe the caller-owned key buffer.
-            pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
-                let cipher = Self::new(key);
-                zeroize_slice(key);
-                cipher
-            }
-
-            /// Encrypt one 128-bit block with the software constant-time path.
-            pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                encrypt_block_words(&self.round_keys, block)
-            }
-
-            /// Decrypt one 128-bit block with the software constant-time path.
-            pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                decrypt_block_words(&self.round_keys, block)
-            }
-        }
-
-        impl BlockCipher for $name_ct {
-            const BLOCK_LEN: usize = 16;
-
-            fn encrypt(&self, block: &mut [u8]) {
-                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
-                let ct = self.encrypt_block(arr);
-                block.copy_from_slice(&ct);
-            }
-
-            fn decrypt(&self, block: &mut [u8]) {
-                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
-                let pt = self.decrypt_block(arr);
-                block.copy_from_slice(&pt);
-            }
-        }
-
-        impl Drop for $name_ct {
-            fn drop(&mut self) {
-                for rk in &mut self.round_keys {
-                    zeroize_slice(rk);
-                }
-            }
-        }
+        pub type $name_ct = $name;
     };
 }
 
@@ -457,21 +405,21 @@ serpent_type!(
     Serpent128Ct,
     16,
     "Serpent with a 128-bit key (public byte order matches the original submission vectors).",
-    "Constant-time Serpent with a 128-bit key."
+    "Serpent-128 (`Ct` alias): the bitsliced S-box is constant-time by construction, so this is identical to [`Serpent128`]."
 );
 serpent_type!(
     Serpent192,
     Serpent192Ct,
     24,
     "Serpent with a 192-bit key (public byte order matches the original submission vectors).",
-    "Constant-time Serpent with a 192-bit key."
+    "Serpent-192 (`Ct` alias): identical to [`Serpent192`]; the bitsliced S-box is constant-time by construction."
 );
 serpent_type!(
     Serpent256,
     Serpent256Ct,
     32,
     "Serpent with a 256-bit key (public byte order matches the original submission vectors).",
-    "Constant-time Serpent with a 256-bit key."
+    "Serpent-256 (`Ct` alias): identical to [`Serpent256`]; the bitsliced S-box is constant-time by construction."
 );
 
 pub type Serpent = Serpent128;

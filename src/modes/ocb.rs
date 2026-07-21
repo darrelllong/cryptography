@@ -3,6 +3,7 @@
 //! This implementation targets 128-bit block ciphers and the default 128-bit
 //! authentication tag profile.
 
+use super::dbl_block;
 use crate::BlockCipher;
 
 #[inline]
@@ -11,20 +12,6 @@ fn xor_block(a: &[u8; 16], b: &[u8; 16]) -> [u8; 16] {
     for i in 0..16 {
         out[i] = a[i] ^ b[i];
     }
-    out
-}
-
-#[inline]
-fn dbl_block(block: [u8; 16]) -> [u8; 16] {
-    let mut out = [0u8; 16];
-    let mut carry = 0u8;
-    for i in (0..16).rev() {
-        out[i] = (block[i] << 1) | carry;
-        carry = block[i] >> 7;
-    }
-    // Branch-free reduction: `mask` is 0xFF iff a carry left the top bit.
-    let mask = 0u8.wrapping_sub(carry);
-    out[15] ^= 0x87 & mask;
     out
 }
 

@@ -479,6 +479,8 @@ fn scalar_mul_jacobian(curve: &CurveParams, point: &AffinePoint, k: &BigUint) ->
     // Precompute table[d] = d·P for d = 1 … 15 (index 0 is the unused
     // identity slot so that `table[digit]` indexes directly by digit value).
     let table_len = 1usize << PRIME_WINDOW_BITS;
+    // table[1] = P; table[d] = table[d-1] + P. (`JacobianPoint` isn't `Clone`,
+    // so the base point is re-derived rather than copied — both are `1·P`.)
     let p_jac = JacobianPoint::from_affine(point);
     let mut table: Vec<JacobianPoint> = Vec::with_capacity(table_len);
     table.push(JacobianPoint::infinity());
@@ -1049,6 +1051,18 @@ impl CurveParams {
             FieldCtx::Prime(_) => scalar_mul_jacobian(self, point, k),
             FieldCtx::Binary { .. } => scalar_mul_binary(self, point, k),
         }
+    }
+
+    /// Returns `true` if `point` lies in the prime-order subgroup (`n·point = O`).
+    ///
+    /// Decoders should reject peer points that fail this check: on curves with
+    /// cofactor `h > 1` (here the binary curves, `h = 2` or `4`) an on-curve
+    /// low-order point would otherwise enable a small-subgroup attack against a
+    /// static key, leaking `d mod ord(point)`. Prime NIST curves have `h = 1`,
+    /// where every on-curve point already satisfies this.
+    #[must_use]
+    pub fn is_in_prime_subgroup(&self, point: &AffinePoint) -> bool {
+        self.scalar_mul(point, &self.n).is_infinity()
     }
 
     /// Compute the ECDH shared point `d·Q`.

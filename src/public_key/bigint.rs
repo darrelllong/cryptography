@@ -1021,6 +1021,11 @@ impl MontgomeryCtx {
     /// trip of [`Self::mul`]; the workhorse for callers (such as elliptic
     /// curve point arithmetic) that keep whole computations in the Montgomery
     /// domain and convert only at the boundaries.
+    ///
+    /// Unlike [`Self::mul`]/[`Self::pow`] this does not scrub its workspace:
+    /// it is the innermost field-multiply, called in tight loops, so the
+    /// per-call volatile wipe is omitted for speed. The product is returned as
+    /// a `BigUint`, whose own `Drop` wipes it; the caller keeps the value.
     #[must_use]
     pub fn mul_mont(&self, lhs: &BigUint, rhs: &BigUint) -> BigUint {
         let mut workspace = Vec::new();

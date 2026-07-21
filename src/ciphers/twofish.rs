@@ -210,30 +210,32 @@ fn mds_column(col: usize, val: u8) -> u32 {
     u32::from_le_bytes(out)
 }
 
-// The keyed q-permutation cascade applied to a single input byte at column `j`.
-// This is exactly the per-byte transform inside `h()` (fast path) before the
-// MDS mix, with the S-box key words `s` playing the role of `l`.  Isolating it
-// per byte is what makes precomputation possible: each output byte of `h`'s
-// pre-MDS stage depends only on the corresponding input byte.
-fn keyed_h_byte(v: u8, j: usize, s: &[u32; 4], words: usize) -> u8 {
+// The keyed q-permutation cascade for a single input byte at column `j`, before
+// the MDS mix. This is the one definition of Twofish's per-byte `h` transform:
+// `h()` applies it to all four bytes, and the fast-path table builder maps it
+// over all 256 inputs per column. Keeping it per byte is what makes that
+// precomputation possible — each pre-MDS output byte depends only on its input
+// byte. `s` is the key material (`l` in `h`); `use_ct` selects the constant-time
+// q-permutation.
+fn keyed_h_byte(v: u8, j: usize, s: &[u32; 4], words: usize, use_ct: bool) -> u8 {
     // Which q-permutation each column uses in the extra 192-/256-bit layers.
     const W4: [usize; 4] = [1, 0, 0, 1];
     const W3: [usize; 4] = [1, 1, 0, 0];
 
     let mut y = v;
     if words == 4 {
-        y = q_perm(y, W4[j], false) ^ b(s[3], j);
+        y = q_perm(y, W4[j], use_ct) ^ b(s[3], j);
     }
     if words >= 3 {
-        y = q_perm(y, W3[j], false) ^ b(s[2], j);
+        y = q_perm(y, W3[j], use_ct) ^ b(s[2], j);
     }
 
-    // The shared 128-bit keyed core (mirrors the explicit nesting in `h`).
+    // The shared 128-bit keyed core from the submission paper.
     match j {
-        0 => q_perm(q_perm(q_perm(y, 0, false) ^ b(s[1], 0), 0, false) ^ b(s[0], 0), 1, false),
-        1 => q_perm(q_perm(q_perm(y, 1, false) ^ b(s[1], 1), 0, false) ^ b(s[0], 1), 0, false),
-        2 => q_perm(q_perm(q_perm(y, 0, false) ^ b(s[1], 2), 1, false) ^ b(s[0], 2), 1, false),
-        3 => q_perm(q_perm(q_perm(y, 1, false) ^ b(s[1], 3), 1, false) ^ b(s[0], 3), 0, false),
+        0 => q_perm(q_perm(q_perm(y, 0, use_ct) ^ b(s[1], 0), 0, use_ct) ^ b(s[0], 0), 1, use_ct),
+        1 => q_perm(q_perm(q_perm(y, 1, use_ct) ^ b(s[1], 1), 0, use_ct) ^ b(s[0], 1), 0, use_ct),
+        2 => q_perm(q_perm(q_perm(y, 0, use_ct) ^ b(s[1], 2), 1, use_ct) ^ b(s[0], 2), 1, use_ct),
+        3 => q_perm(q_perm(q_perm(y, 1, use_ct) ^ b(s[1], 3), 1, use_ct) ^ b(s[0], 3), 0, use_ct),
         _ => unreachable!(),
     }
 }
@@ -252,7 +254,7 @@ fn build_keyed_tables(s: &[u32; 4], words: usize) -> [[u32; 256]; 4] {
     while j < 4 {
         let mut v = 0usize;
         while v < 256 {
-            let hb = keyed_h_byte(v as u8, j, s, words);
+            let hb = keyed_h_byte(v as u8, j, s, words, false);
             tables[j][v] = mds_column(j, hb);
             v += 1;
         }
@@ -270,48 +272,18 @@ fn h_fast(x: u32, tables: &[[u32; 256]; 4]) -> u32 {
         ^ tables[3][((x >> 24) & 0xff) as usize]
 }
 
+// The keyed function `h`: apply the per-byte cascade to each of the four input
+// bytes, then mix the results through the MDS matrix. The Ct path computes this
+// directly (with `use_ct`); the fast path precomputes it as tables via
+// `build_keyed_tables`, which maps the same `keyed_h_byte` over every input.
 fn h(x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
-    let mut y = x.to_le_bytes();
-
-    // Extra key words add extra q-permutation layers for 192- and 256-bit
-    // keys before the shared 128-bit tail of the construction.
-    if words == 4 {
-        y[0] = q_perm(y[0], 1, use_ct) ^ b(l[3], 0);
-        y[1] = q_perm(y[1], 0, use_ct) ^ b(l[3], 1);
-        y[2] = q_perm(y[2], 0, use_ct) ^ b(l[3], 2);
-        y[3] = q_perm(y[3], 1, use_ct) ^ b(l[3], 3);
-    }
-    if words >= 3 {
-        y[0] = q_perm(y[0], 1, use_ct) ^ b(l[2], 0);
-        y[1] = q_perm(y[1], 1, use_ct) ^ b(l[2], 1);
-        y[2] = q_perm(y[2], 0, use_ct) ^ b(l[2], 2);
-        y[3] = q_perm(y[3], 0, use_ct) ^ b(l[2], 3);
-    }
-
-    // The final three q layers are the common keyed core from the submission
-    // paper. This implementation computes them directly instead of building
-    // the large keyed MDS tables used by faster Twofish software.
-    y[0] = q_perm(
-        q_perm(q_perm(y[0], 0, use_ct) ^ b(l[1], 0), 0, use_ct) ^ b(l[0], 0),
-        1,
-        use_ct,
-    );
-    y[1] = q_perm(
-        q_perm(q_perm(y[1], 1, use_ct) ^ b(l[1], 1), 0, use_ct) ^ b(l[0], 1),
-        0,
-        use_ct,
-    );
-    y[2] = q_perm(
-        q_perm(q_perm(y[2], 0, use_ct) ^ b(l[1], 2), 1, use_ct) ^ b(l[0], 2),
-        1,
-        use_ct,
-    );
-    y[3] = q_perm(
-        q_perm(q_perm(y[3], 1, use_ct) ^ b(l[1], 3), 1, use_ct) ^ b(l[0], 3),
-        0,
-        use_ct,
-    );
-
+    let xb = x.to_le_bytes();
+    let y = [
+        keyed_h_byte(xb[0], 0, l, words, use_ct),
+        keyed_h_byte(xb[1], 1, l, words, use_ct),
+        keyed_h_byte(xb[2], 2, l, words, use_ct),
+        keyed_h_byte(xb[3], 3, l, words, use_ct),
+    ];
     mds_multiply(y)
 }
 
