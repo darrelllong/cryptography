@@ -77,6 +77,10 @@ pub struct CurveParams {
     pub p: BigUint,
     /// Curve coefficient `a` in `F_p`.
     pub a: BigUint,
+    /// Curve coefficient `a` in Montgomery form, precomputed once so the
+    /// Jacobian doubling formula stays in the Montgomery domain. Unused (and
+    /// left zero) for binary curves, which do their own GF(2^m) arithmetic.
+    pub(crate) a_mont: BigUint,
     /// Curve coefficient `b` in `F_p`.
     pub b: BigUint,
     /// Prime order of the base-point subgroup.
@@ -185,18 +189,23 @@ impl JacobianPoint {
         self.z.is_zero()
     }
 
-    /// Lift an affine point to Jacobian coordinates with `Z = 1`.
+    /// Lift an affine point to Jacobian coordinates with `Z = 1`, in the
+    /// Montgomery domain.
     ///
-    /// Setting `Z = 1` means `X = x·1² = x` and `Y = y·1³ = y`, so the
-    /// Jacobian coordinates are just the affine coordinates unchanged.
-    fn from_affine(p: &AffinePoint) -> Self {
+    /// Every coordinate of a [`JacobianPoint`] is held in Montgomery form so
+    /// the add/double formulas run on [`MontgomeryCtx::mul_mont`] /
+    /// [`MontgomeryCtx::square_mont`] — one reduction per multiply, no
+    /// per-operation encode/decode — across the whole scalar multiplication.
+    /// `X = x·1² = x` and `Y = y·1³ = y`, so encoding `x`, `y`, and the
+    /// constant `1` (as `Z`) is all that is required.
+    fn from_affine(ctx: &MontgomeryCtx, p: &AffinePoint) -> Self {
         if p.infinity {
             return Self::infinity();
         }
         Self {
-            x: p.x.clone(),
-            y: p.y.clone(),
-            z: BigUint::one(),
+            x: ctx.encode(&p.x),
+            y: ctx.encode(&p.y),
+            z: ctx.one_mont().clone(),
         }
     }
 
@@ -211,26 +220,35 @@ impl JacobianPoint {
         if self.is_infinity() {
             return AffinePoint::infinity();
         }
-        // Fast path: if Z = 1 (as set by from_affine) no inversion is needed.
-        if self.z == BigUint::one() {
-            return AffinePoint::new(self.x.clone(), self.y.clone());
-        }
 
         let ctx = curve.prime_ctx();
+        // Coordinates are in Montgomery form; decode to ordinary residues.
+        // The remaining inversion runs in the ordinary domain — it happens
+        // once per scalar multiplication, so its cost is negligible next to
+        // the add/double loop.
+        let x = ctx.decode(&self.x);
+        let y = ctx.decode(&self.y);
+        let z = ctx.decode(&self.z);
+
+        // Fast path: Z = 1 (as set by from_affine) needs no inversion.
+        if z.is_one() {
+            return AffinePoint::new(x, y);
+        }
+
         let p = &curve.p;
 
         // z_inv = Z^{p-2} mod p  (Fermat inversion over a prime field)
         let p_minus_2 = p.sub_ref(&BigUint::from_u64(2));
-        let z_inv = ctx.pow(&self.z, &p_minus_2);
+        let z_inv = ctx.pow(&z, &p_minus_2);
 
         // z_inv2 = Z^{-2}  and  z_inv3 = Z^{-3}
         let z_inv2 = ctx.square(&z_inv);
         let z_inv3 = ctx.mul(&z_inv2, &z_inv);
 
-        let x = ctx.mul(&self.x, &z_inv2);
-        let y = ctx.mul(&self.y, &z_inv3);
+        let x_aff = ctx.mul(&x, &z_inv2);
+        let y_aff = ctx.mul(&y, &z_inv3);
 
-        AffinePoint::new(x, y)
+        AffinePoint::new(x_aff, y_aff)
     }
 }
 
@@ -314,40 +332,44 @@ fn point_double_jacobian(curve: &CurveParams, p: &JacobianPoint) -> JacobianPoin
     let ctx = curve.prime_ctx();
     let m = &curve.p;
 
+    // All coordinates are in Montgomery form: mul_mont/square_mont stay in
+    // the domain, and field_add/field_sub are linear so they carry through
+    // unchanged (aR + bR = (a+b)R).
+
     // Y² and Y⁴
-    let y2 = ctx.square(&p.y);
-    let y4 = ctx.square(&y2);
+    let y2 = ctx.square_mont(&p.y);
+    let y4 = ctx.square_mont(&y2);
 
     // A = 4·X·Y²
-    let xy2 = ctx.mul(&p.x, &y2);
+    let xy2 = ctx.mul_mont(&p.x, &y2);
     let two_xy2 = field_add(&xy2, &xy2, m);
     let a = field_add(&two_xy2, &two_xy2, m);
 
     // X²; Z² and Z⁴
-    let x2 = ctx.square(&p.x);
-    let z2 = ctx.square(&p.z);
-    let z4 = ctx.square(&z2);
+    let x2 = ctx.square_mont(&p.x);
+    let z2 = ctx.square_mont(&p.z);
+    let z4 = ctx.square_mont(&z2);
 
     // B = 3·X² + a·Z⁴
     let three_x2 = field_add(&field_add(&x2, &x2, m), &x2, m);
-    let a_coeff_z4 = ctx.mul(&curve.a, &z4);
+    let a_coeff_z4 = ctx.mul_mont(&curve.a_mont, &z4);
     let b = field_add(&three_x2, &a_coeff_z4, m);
 
     // X' = B² − 2·A
-    let b2 = ctx.square(&b);
+    let b2 = ctx.square_mont(&b);
     let two_a = field_add(&a, &a, m);
     let x_new = field_sub(&b2, &two_a, m);
 
     // Y' = B·(A − X') − 8·Y⁴
     let a_minus_x = field_sub(&a, &x_new, m);
-    let b_times = ctx.mul(&b, &a_minus_x);
+    let b_times = ctx.mul_mont(&b, &a_minus_x);
     let two_y4 = field_add(&y4, &y4, m);
     let four_y4 = field_add(&two_y4, &two_y4, m);
     let eight_y4 = field_add(&four_y4, &four_y4, m);
     let y_new = field_sub(&b_times, &eight_y4, m);
 
     // Z' = 2·Y·Z
-    let yz = ctx.mul(&p.y, &p.z);
+    let yz = ctx.mul_mont(&p.y, &p.z);
     let z_new = field_add(&yz, &yz, m);
 
     JacobianPoint {
@@ -395,15 +417,18 @@ fn point_add_jacobian(
     let ctx = curve.prime_ctx();
     let m = &curve.p;
 
-    let z1_2 = ctx.square(&p1.z);
-    let z2_2 = ctx.square(&p2.z);
-    let z1_3 = ctx.mul(&z1_2, &p1.z);
-    let z2_3 = ctx.mul(&z2_2, &p2.z);
+    // Coordinates are in Montgomery form throughout (see `from_affine`):
+    // mul_mont/square_mont keep the domain, field_add/field_sub are linear.
 
-    let u1 = ctx.mul(&p1.x, &z2_2);
-    let u2 = ctx.mul(&p2.x, &z1_2);
-    let s1 = ctx.mul(&p1.y, &z2_3);
-    let s2 = ctx.mul(&p2.y, &z1_3);
+    let z1_2 = ctx.square_mont(&p1.z);
+    let z2_2 = ctx.square_mont(&p2.z);
+    let z1_3 = ctx.mul_mont(&z1_2, &p1.z);
+    let z2_3 = ctx.mul_mont(&z2_2, &p2.z);
+
+    let u1 = ctx.mul_mont(&p1.x, &z2_2);
+    let u2 = ctx.mul_mont(&p2.x, &z1_2);
+    let s1 = ctx.mul_mont(&p1.y, &z2_3);
+    let s2 = ctx.mul_mont(&p2.y, &z1_3);
 
     let h = field_sub(&u2, &u1, m);
     let r = field_sub(&s2, &s1, m);
@@ -419,24 +444,24 @@ fn point_add_jacobian(
         };
     }
 
-    let h2 = ctx.square(&h);
-    let h3 = ctx.mul(&h2, &h);
-    let u1h2 = ctx.mul(&u1, &h2);
+    let h2 = ctx.square_mont(&h);
+    let h3 = ctx.mul_mont(&h2, &h);
+    let u1h2 = ctx.mul_mont(&u1, &h2);
 
     // X₃ = R² − H³ − 2·U₁·H²
-    let r2 = ctx.square(&r);
+    let r2 = ctx.square_mont(&r);
     let two_u1h2 = field_add(&u1h2, &u1h2, m);
     let x3 = field_sub(&field_sub(&r2, &h3, m), &two_u1h2, m);
 
     // Y₃ = R·(U₁·H² − X₃) − S₁·H³
     let u1h2_minus_x3 = field_sub(&u1h2, &x3, m);
-    let r_term = ctx.mul(&r, &u1h2_minus_x3);
-    let s1h3 = ctx.mul(&s1, &h3);
+    let r_term = ctx.mul_mont(&r, &u1h2_minus_x3);
+    let s1h3 = ctx.mul_mont(&s1, &h3);
     let y3 = field_sub(&r_term, &s1h3, m);
 
     // Z₃ = H·Z₁·Z₂
-    let hz1 = ctx.mul(&h, &p1.z);
-    let z3 = ctx.mul(&hz1, &p2.z);
+    let hz1 = ctx.mul_mont(&h, &p1.z);
+    let z3 = ctx.mul_mont(&hz1, &p2.z);
 
     JacobianPoint {
         x: x3,
@@ -470,15 +495,17 @@ fn scalar_mul_jacobian(curve: &CurveParams, point: &AffinePoint, k: &BigUint) ->
         return AffinePoint::infinity();
     }
 
+    let ctx = curve.prime_ctx();
+
     // Precompute table[d] = d·P for d = 1 … 15 (index 0 is the unused
     // identity slot so that `table[digit]` indexes directly by digit value).
     let table_len = 1usize << PRIME_WINDOW_BITS;
     // table[1] = P; table[d] = table[d-1] + P. (`JacobianPoint` isn't `Clone`,
     // so the base point is re-derived rather than copied — both are `1·P`.)
-    let p_jac = JacobianPoint::from_affine(point);
+    let p_jac = JacobianPoint::from_affine(ctx, point);
     let mut table: Vec<JacobianPoint> = Vec::with_capacity(table_len);
     table.push(JacobianPoint::infinity());
-    table.push(JacobianPoint::from_affine(point));
+    table.push(JacobianPoint::from_affine(ctx, point));
     for d in 2..table_len {
         let next = point_add_jacobian(curve, &table[d - 1], &p_jac);
         table.push(next);
@@ -868,9 +895,11 @@ impl CurveParams {
         let field = MontgomeryCtx::new(&field_prime)?;
         let scalar = MontgomeryCtx::new(&subgroup_order)?;
         let coord_len = field_prime.bits().div_ceil(8);
+        let a_mont = field.encode(&curve_a);
         Some(Self {
             p: field_prime,
             a: curve_a,
+            a_mont,
             b: curve_b,
             n: subgroup_order,
             h: cofactor,
@@ -918,6 +947,8 @@ impl CurveParams {
             h: cofactor,
             gx: base_x,
             gy: base_y,
+            // Unused for binary curves (GF(2^m) arithmetic, not Montgomery).
+            a_mont: BigUint::zero(),
             field: FieldCtx::Binary(gf2m),
             _scalar: scalar,
             coord_len,
@@ -1006,9 +1037,9 @@ impl CurveParams {
     #[must_use]
     pub fn add(&self, p: &AffinePoint, q: &AffinePoint) -> AffinePoint {
         match &self.field {
-            FieldCtx::Prime(_) => {
-                let pj = JacobianPoint::from_affine(p);
-                let qj = JacobianPoint::from_affine(q);
+            FieldCtx::Prime(ctx) => {
+                let pj = JacobianPoint::from_affine(ctx, p);
+                let qj = JacobianPoint::from_affine(ctx, q);
                 point_add_jacobian(self, &pj, &qj).to_affine(self)
             }
             FieldCtx::Binary(field) => add_binary(p, q, &self.a, field),
@@ -1019,8 +1050,8 @@ impl CurveParams {
     #[must_use]
     pub fn double(&self, p: &AffinePoint) -> AffinePoint {
         match &self.field {
-            FieldCtx::Prime(_) => {
-                let pj = JacobianPoint::from_affine(p);
+            FieldCtx::Prime(ctx) => {
+                let pj = JacobianPoint::from_affine(ctx, p);
                 point_double_jacobian(self, &pj).to_affine(self)
             }
             FieldCtx::Binary(field) => double_binary(p, &self.a, field),
@@ -2392,9 +2423,9 @@ mod tests {
             return AffinePoint::infinity();
         }
         match &curve.field {
-            FieldCtx::Prime(_) => {
+            FieldCtx::Prime(ctx) => {
                 let mut result = JacobianPoint::infinity();
-                let p_jac = JacobianPoint::from_affine(point);
+                let p_jac = JacobianPoint::from_affine(ctx, point);
                 for i in (0..k.bits()).rev() {
                     result = point_double_jacobian(curve, &result);
                     if k.bit(i) {

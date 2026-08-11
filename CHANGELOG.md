@@ -9,6 +9,21 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
+### Changed
+- **Prime-curve scalar multiplication stays in the Montgomery domain.** The
+  Jacobian point arithmetic used `MontgomeryCtx::mul`/`square` (encode →
+  multiply → decode, plus two allocations) for every field multiply in the
+  hot loop, so each logical multiply cost three Montgomery reductions. It now
+  encodes the coordinates once in `from_affine`, runs `mul_mont`/`square_mont`
+  throughout, and decodes once in `to_affine` — the curve coefficient `a` is
+  precomputed in Montgomery form. Measured on Apple M1: `ecdsa_sign`
+  1.47 → 0.72 ms, `ecdh_agree` 1.38 → 0.69 ms (2×), now faster than the
+  v0.7.0 baseline. This recovers a ~1.9× regression that `perf(ec)` commit
+  `a63c781` introduced by adding a windowed ladder over the still
+  encode/decode-bound field arithmetic; ECDSA/ECDH/ECIES/EC-ElGamal all
+  benefit. Result values are unchanged (verified by the RFC known-answer
+  vectors and the differential ladder tests).
+
 ### Added
 - **P-224 compressed-point decoding.** Decompression now takes
   `rump::sqrt_mod` (general Tonelli–Shanks with the `(p+1)/4` shortcut), so
