@@ -10,6 +10,11 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Added
+- **P-224 compressed-point decoding.** Decompression now takes
+  `rump::sqrt_mod` (general Tonelli–Shanks with the `(p+1)/4` shortcut), so
+  every odd prime field decompresses; the long-standing `p ≡ 1 (mod 4)`
+  refusal on P-224 is gone, and the test that pinned the refusal now pins
+  the round trip.
 - `RsaPrivateKey::decrypt_raw_blinded` — the raw private operation with
   multiplicative (base) blinding, the classic Brumley–Boneh countermeasure.
   `decrypt_raw` documents that it is deliberately unblinded.
@@ -36,6 +41,15 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   bench and GMP comparison harness moved with the code. rump is the crate's
   only dependency (crates.io package name `rust-mp`, lib name `rump`): same
   author, extracted from this tree, same safety and scrubbing policies.
+- The `random_below` / `random_nonzero_below` / `random_coprime_below` /
+  `random_probable_prime` samplers now live in rump, driven by its `Rng`
+  trait; `public_key::primes` re-exports them behind the same
+  `Csprng`-based signatures, so callers are unchanged. The full
+  number-theory surface (`legendre`, `kronecker`, `sqrt_mod`,
+  `gcd_extended`, `crt_combine`) is re-exported there as well. RSA and
+  Rabin deliberately keep their precomputed CRT coefficients (RFC 8017
+  serializes `qInv`) rather than adopting the generic `crt_combine` — the
+  generic path would recompute an inverse per decrypt.
 - **Zero dependencies**: `quick-xml` is gone. The flat XML key format is
   read and written by a small strict scanner in `public_key::io`
   (byte-identical output, same strictness on input).

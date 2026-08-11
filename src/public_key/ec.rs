@@ -45,7 +45,7 @@
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::gf2m::{gf2m_add, gf2m_half_trace, gf2m_inv, gf2m_mul, gf2m_sq};
-use crate::public_key::primes::{mod_inverse, random_nonzero_below};
+use crate::public_key::primes::{mod_inverse, random_nonzero_below, sqrt_mod};
 use crate::Csprng;
 
 // ─── Core types ─────────────────────────────────────────────────────────────
@@ -706,13 +706,7 @@ impl LDPoint {
 ///
 /// When `X₁ = 0` the affine point is 2-torsion (`x = 0`), so `2P = ∞`; this is
 /// signalled automatically by `Z₃ = 0`.
-fn ld_double(
-    p: &LDPoint,
-    a: &BigUint,
-    b: &BigUint,
-    poly: &BigUint,
-    degree: usize,
-) -> LDPoint {
+fn ld_double(p: &LDPoint, a: &BigUint, b: &BigUint, poly: &BigUint, degree: usize) -> LDPoint {
     if p.is_infinity() {
         return LDPoint::infinity();
     }
@@ -743,7 +737,11 @@ fn ld_double(
     let term2 = gf2m_mul(&x3, &inner, poly, degree);
     let y3 = gf2m_add(&term1, &term2);
 
-    LDPoint { x: x3, y: y3, z: z3 }
+    LDPoint {
+        x: x3,
+        y: y3,
+        z: z3,
+    }
 }
 
 /// Mixed addition `P + Q` with `P` in López–Dahab coordinates and `Q = (x₂, y₂)`
@@ -827,7 +825,11 @@ fn ld_add_mixed(
     // Y₃ = (E + Z₃)·F + G
     let y3 = gf2m_add(&gf2m_mul(&gf2m_add(&e, &z3), &f, poly, degree), &g);
 
-    LDPoint { x: x3, y: y3, z: z3 }
+    LDPoint {
+        x: x3,
+        y: y3,
+        z: z3,
+    }
 }
 
 /// Scalar multiplication for binary curves using left-to-right double-and-add
@@ -1182,7 +1184,6 @@ impl CurveParams {
     /// - wrong byte length for the tag,
     /// - unrecognised tag byte,
     /// - coordinates that fail the on-curve check,
-    /// - prime-field compressed encoding on a curve with `p ≢ 3 (mod 4)`,
     /// - binary-field compressed encoding with an invalid x-coordinate.
     #[must_use]
     pub fn decode_point(&self, bytes: &[u8]) -> Option<AffinePoint> {
@@ -1274,12 +1275,14 @@ impl CurveParams {
     /// Recover the `y`-coordinate from `x` using the curve equation, selecting
     /// the root with the requested parity.
     ///
-    /// For a prime `p ≡ 3 (mod 4)`, the square root of `u mod p` is
-    /// `u^{(p+1)/4} mod p` — a single modular exponentiation.  This covers
-    /// P-256, P-384, and secp256k1 (all have `p ≡ 3 mod 4`).
+    /// The square root comes from `rump::sqrt_mod` (Tonelli–Shanks with the
+    /// `u^{(p+1)/4}` shortcut for `p ≡ 3 (mod 4)`), so every odd prime field
+    /// decompresses — including P-224, whose `p ≡ 1 (mod 4)` this crate
+    /// previously refused. The root is verified by squaring inside
+    /// `sqrt_mod` before it is returned.
     ///
     /// Returns `None` if `x` produces no square root in `F_p` (the `x`
-    /// coordinate is not on the curve) or if `p ≢ 3 (mod 4)`.
+    /// coordinate is not on the curve).
     fn field_sqrt_from_x(&self, x: &BigUint, odd_y: bool) -> Option<BigUint> {
         let ctx = self.prime_ctx();
 
@@ -1289,25 +1292,7 @@ impl CurveParams {
         let ax = ctx.mul(&self.a, x);
         let rhs = field_add(&field_add(&x3, &ax, &self.p), &self.b, &self.p);
 
-        // Verify p ≡ 3 (mod 4) so the exponent (p+1)/4 is an integer.
-        if self.p.rem_u64(4) != 3 {
-            return None;
-        }
-        let exp = {
-            let p_plus_1 = self.p.add_ref(&BigUint::one());
-            // (p + 1) / 4 is an integer because p ≡ 3 (mod 4) implies
-            // p + 1 ≡ 0 (mod 4).
-            let (q, _) = p_plus_1.div_rem(&BigUint::from_u64(4));
-            q
-        };
-
-        let y_candidate = ctx.pow(&rhs, &exp);
-
-        // Verify that the candidate is actually a square root (not every x
-        // has a square root mod p; about half do).
-        if ctx.square(&y_candidate) != rhs {
-            return None;
-        }
+        let y_candidate = sqrt_mod(&rhs, &self.p)?;
 
         // Select the root with the requested parity.
         let y = if y_candidate.is_odd() == odd_y {
@@ -1507,11 +1492,6 @@ pub fn p192() -> CurveParams {
 /// classical security.
 ///
 /// Curve equation: y² = x³ − 3x + b  (mod p).
-///
-/// **Note**: p ≡ 1 (mod 4) for P-224, so the fast Blum-modulus square-root
-/// shortcut used by [`CurveParams::decode_point`] for compressed points is
-/// unavailable.  Compressed-point encoding still works; decoding returns
-/// `None`.  Use uncompressed encoding for P-224 interoperability.
 ///
 /// # Panics
 ///
@@ -2136,7 +2116,6 @@ mod tests {
 
     #[test]
     fn p224_uncompressed_roundtrip() {
-        // P-224 has p ≡ 1 (mod 4); only uncompressed encoding is supported.
         let curve = p224();
         let g = curve.base_point();
         let enc = curve.encode_point(&g);
@@ -2145,14 +2124,23 @@ mod tests {
     }
 
     #[test]
-    fn p224_compressed_decode_returns_none() {
-        // Compressed decoding is intentionally unsupported for P-224.
+    fn p224_compressed_roundtrip() {
+        // P-224 has p ≡ 1 (mod 4), so decompression takes the general
+        // Tonelli–Shanks path in rump::sqrt_mod rather than the
+        // (p+1)/4 shortcut — this used to be rejected outright.
         let curve = p224();
-        let enc = curve.encode_point_compressed(&curve.base_point());
-        assert!(
-            curve.decode_point(&enc).is_none(),
-            "P-224 compressed decoding must return None (p ≡ 1 mod 4)"
-        );
+        let g = curve.base_point();
+        let enc = curve.encode_point_compressed(&g);
+        let dec = curve.decode_point(&enc).expect("P-224 compressed decode");
+        assert_eq!(dec, g);
+
+        // Scalar multiples exercise both parities of y.
+        for k in [2u64, 3, 5, 27] {
+            let point = curve.scalar_mul(&g, &BigUint::from_u64(k));
+            let enc = curve.encode_point_compressed(&point);
+            let dec = curve.decode_point(&enc).expect("compressed round trip");
+            assert_eq!(dec, point);
+        }
     }
 
     // ── P-521 ──────────────────────────────────────────────────────────────
@@ -2386,9 +2374,7 @@ mod tests {
     impl XorShift64 {
         fn new(seed: u64) -> Self {
             // Avoid the fixed point at 0.
-            Self {
-                state: seed | 1,
-            }
+            Self { state: seed | 1 }
         }
 
         fn next_u64(&mut self) -> u64 {

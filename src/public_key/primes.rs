@@ -3,9 +3,11 @@
 //! The deterministic number theory (gcd, lcm, jacobi, modular exponentiation
 //! and inversion, fixed-base Miller-Rabin) lives in the [`rump`]
 //! multiprecision crate and is re-exported here so existing callers keep
-//! their paths. This module holds what is cryptographic policy rather than
-//! arithmetic: entropy-driven random generation and the hash-hardened
-//! primality test for untrusted candidates.
+//! their paths, as are the random sampling routines, which rump drives
+//! through a caller-supplied generator (bridged here from [`Csprng`]). What
+//! stays native to this module is cryptographic policy: the SHAKE256-hardened
+//! primality test for untrusted candidates and the discrete-log group
+//! construction helpers.
 //!
 //! A smaller `u128`-bounded Miller-Rabin helper also exists in
 //! `crate::cprng::primes`; the duplication is intentional because the
@@ -15,7 +17,8 @@ use super::bigint::BigUint;
 use crate::Csprng;
 
 pub use rump::{
-    gcd, is_probable_prime, is_probable_prime_with_bases, jacobi, lcm, mod_inverse, mod_pow,
+    crt_combine, gcd, gcd_extended, is_probable_prime, is_probable_prime_with_bases, jacobi,
+    kronecker, lcm, legendre, mod_inverse, mod_pow, sqrt_mod,
 };
 
 /// Number of candidate-derived pseudorandom Miller-Rabin rounds added by
@@ -79,96 +82,47 @@ fn hash_derived_bases(candidate: &BigUint, count: usize) -> Vec<BigUint> {
     out
 }
 
+/// Adapter presenting any [`Csprng`] as a [`rump::Rng`] source.
+///
+/// The trait shapes are identical; the adapter exists because a blanket
+/// implementation of the foreign trait is not ours to write.
+struct CsprngSource<'a, R: Csprng>(&'a mut R);
+
+impl<R: Csprng> rump::Rng for CsprngSource<'_, R> {
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.fill_bytes(dest);
+    }
+}
+
 /// Draw a random integer in `[0, upper_exclusive)`.
 #[must_use]
 pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option<BigUint> {
-    if upper_exclusive.is_zero() {
-        return None;
-    }
-
-    let bits = upper_exclusive.bits();
-    let mut bytes = vec![0u8; bits.div_ceil(8)];
-    let excess_bits = bytes.len() * 8 - bits;
-    let top_mask = 0xff_u8 >> excess_bits;
-
-    loop {
-        rng.fill_bytes(&mut bytes);
-        // Rejection sampling from the next power-of-two range. The buffer is
-        // big-endian, so masking byte 0 constrains only the most significant
-        // partial byte and keeps the candidate below `2^bits`; the loop then
-        // retries until the draw lands below `upper_exclusive`. Because the
-        // candidate range is the next power of two, the expected retry count
-        // stays below 2.
-        bytes[0] &= top_mask;
-        let candidate = BigUint::from_be_bytes(&bytes);
-        crate::ct::zeroize_slice(bytes.as_mut_slice());
-        if candidate < *upper_exclusive {
-            return Some(candidate);
-        }
-    }
+    rump::random_below(&mut CsprngSource(rng), upper_exclusive)
 }
 
 /// Draw a random integer in `[1, upper_exclusive)`.
 #[must_use]
 pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option<BigUint> {
-    if upper_exclusive <= &BigUint::one() {
-        return None;
-    }
-
-    loop {
-        let candidate = random_below(rng, upper_exclusive)?;
-        if !candidate.is_zero() {
-            return Some(candidate);
-        }
-    }
+    rump::random_nonzero_below(&mut CsprngSource(rng), upper_exclusive)
 }
 
 /// Draw a random integer in `[1, upper_exclusive)` that is coprime to `coprime_to`.
 ///
 /// This is the nonce sampler used by schemes such as Paillier that need a
-/// fresh random unit modulo `n`: rejection-sample in `[1, upper_exclusive)`
-/// until the candidate lands in the multiplicative group with respect to
-/// `coprime_to`.
+/// fresh random unit modulo `n`.
 #[must_use]
 pub fn random_coprime_below<R: Csprng>(
     rng: &mut R,
     upper_exclusive: &BigUint,
     coprime_to: &BigUint,
 ) -> Option<BigUint> {
-    loop {
-        let candidate = random_nonzero_below(rng, upper_exclusive)?;
-        if gcd(&candidate, coprime_to) == BigUint::one() {
-            return Some(candidate);
-        }
-    }
+    rump::random_coprime_below(&mut CsprngSource(rng), upper_exclusive, coprime_to)
 }
 
 /// Draw a probable prime with the requested bit length.
 #[must_use]
 pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
-    if bits < 2 {
-        return None;
-    }
-
-    let mut bytes = vec![0u8; bits.div_ceil(8)];
-    let top_bit = (bits - 1) % 8;
-    let excess_bits = bytes.len() * 8 - bits;
-    let top_mask = 0xff_u8 >> excess_bits;
-    loop {
-        rng.fill_bytes(&mut bytes);
-        bytes[0] &= top_mask;
-        // Force the requested bit length by setting the top significant bit,
-        // then force oddness because every even candidate above 2 is composite.
-        bytes[0] |= 1u8 << top_bit;
-        let last = bytes.len() - 1;
-        bytes[last] |= 1;
-
-        let candidate = BigUint::from_be_bytes(&bytes);
-        crate::ct::zeroize_slice(bytes.as_mut_slice());
-        if is_probable_prime(&candidate) {
-            return Some(candidate);
-        }
-    }
+    rump::random_probable_prime(&mut CsprngSource(rng), bits)
 }
 
 pub(crate) fn random_even_with_bits<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
