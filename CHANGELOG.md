@@ -34,8 +34,8 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   changes. Randomized generation and the hash-hardened untrusted primality
   test remain here, composed over `rump::miller_rabin_witness`. The bigint
   bench and GMP comparison harness moved with the code. rump is the crate's
-  only dependency: same author, extracted from this tree, same safety and
-  scrubbing policies.
+  only dependency (crates.io package name `rust-mp`, lib name `rump`): same
+  author, extracted from this tree, same safety and scrubbing policies.
 - **Zero dependencies**: `quick-xml` is gone. The flat XML key format is
   read and written by a small strict scanner in `public_key::io`
   (byte-identical output, same strictness on input).

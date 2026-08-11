@@ -42,6 +42,7 @@ arm-sha3 = []
 
 [dependencies]
 # The multiprecision layer, extracted from this crate (see
-# src/public_key/bigint.rs). The path serves side-by-side checkouts; the
-# version takes over once rump is published.
-rump = { version = "0.1.0", path = "../rump" }
+# src/public_key/bigint.rs). The package is rust-mp, the lib is rump, so code
+# says `use rump::...`; the path serves side-by-side checkouts and the
+# version takes over once rust-mp is published.
+rust-mp = { version = "0.1.0", path = "../rump" }
