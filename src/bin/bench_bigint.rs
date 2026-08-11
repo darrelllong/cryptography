@@ -53,7 +53,12 @@ fn random_biguint(rng: &mut CtrDrbgAes256, bits: usize) -> BigUint {
     let mut bytes = vec![0u8; byte_len.max(1)];
     rng.fill_bytes(&mut bytes);
 
+    // Clear the bits above the requested width before forcing the top one, so
+    // the result really is `bits` bits wide. Only ORing the top bit in leaves
+    // the higher bits of the leading byte random, which silently widens any
+    // request that is not a multiple of 8.
     let top_bit = (bits - 1) % 8;
+    bytes[0] &= (1u8 << top_bit) - 1;
     bytes[0] |= 1u8 << top_bit;
     BigUint::from_be_bytes(&bytes)
 }
@@ -87,7 +92,15 @@ fn run_for_bits(rng: &mut CtrDrbgAes256, bits: usize) {
     let rhs = random_biguint(rng, bits);
     let modulus = random_odd_biguint(rng, bits);
     let base = random_biguint(rng, bits);
-    let divisor = random_biguint(rng, bits.saturating_sub(3)).add_ref(&BigUint::one());
+    // Half-width divisor: a full-width one leaves a quotient of a bit or two,
+    // so the timing says almost nothing about the quotient loop, and whenever
+    // the draw lands above the dividend `div_rem` returns through its
+    // `self < divisor` early exit and times a clone instead of a division.
+    let divisor = random_biguint(rng, bits / 2).add_ref(&BigUint::one());
+    assert!(
+        lhs >= divisor,
+        "divisor must not trip the div_rem fast path"
+    );
     let e_65537 = BigUint::from_u64(65_537);
     let exp_random = random_biguint(rng, 256);
     let ctx = MontgomeryCtx::new(&modulus).expect("odd modulus");
