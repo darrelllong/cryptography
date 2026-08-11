@@ -1046,6 +1046,13 @@ The crate also exposes arithmetic building blocks through `cryptography::vt`:
 - `CurveParams`, `AffinePoint`
 - `TwistedEdwardsCurve`, `EdwardsPoint`
 
+The multiprecision layer itself — those bigint types plus the number
+theory, GF(2^m) fields, and sampling — lives in the sibling
+[rump](https://github.com/darrelllong/rump) crate, whose own
+[MANUAL](https://github.com/darrelllong/rump/blob/main/MANUAL.md) documents
+every one of its public APIs with worked, test-pinned examples;
+`public_key::bigint` and `public_key::primes` re-export them here.
+
 Those are the right tools when you are testing formulas, reconstructing known
 vectors, or experimenting with the math directly. They are not the normal
 application-level entry points.
