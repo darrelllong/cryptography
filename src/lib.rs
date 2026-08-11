@@ -14,7 +14,9 @@
 //! Safety policy:
 //! - `#![deny(unsafe_code)]` is enforced crate-wide. The only exception in a
 //!   default build is the audited volatile-write zeroization helper
-//!   [`zeroize_slice`], which cannot be expressed in safe Rust.
+//!   [`zeroize_slice`], which cannot be expressed in safe Rust. The sole
+//!   dependency, the sibling `rump` multiprecision crate (extracted from this
+//!   tree), enforces the same policy with its own copy of that helper.
 //! - The opt-in `arm-sha3` cargo feature additionally enables an `unsafe`
 //!   NEON Keccak path on aarch64 (FEAT_SHA3, runtime-detected). Builds
 //!   without that feature contain no other `unsafe`.

@@ -671,7 +671,7 @@ family and supporting primitive covered in this repository:
 - HMAC: `fips198-1.pdf`
 - DRBGs: `sp800-90a-r1.pdf`
 - Entropy engineering and failure analysis: `hughes-2022-badrandom-the-effect-and-mitigations-for-low-entropy-random-numbers-in-tls.pdf`
-- Bigint arithmetic kernels: `comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`, `karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
+- Bigint arithmetic kernels (implemented in the sibling [rump](https://github.com/darrelllong/rump) crate): `comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`, `karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
 - Public-key primitives and RSA standards: `cocks-1973-note-on-non-secret-encryption.pdf`, `rsa-1978.pdf`, `elgamal-1985.pdf`, `rabin-1979-digitalized-signatures-and-public-key-functions.pdf`, `paillier-1999.pdf`, `schmidt-samoa.pdf`, `rfc8017-pkcs1-v2_2.pdf`, `sp800-56b-r2.pdf`, `fips186-5.pdf`
 - Post-quantum standards: `fips203-ml-kem.pdf`, `fips204-ml-dsa.pdf`
 - Hash standards/papers: `rfc1321-md5.pdf`, `ripemd-160-a-strengthened-version-of-ripemd.pdf`, `fips180-4.pdf`, `fips202.pdf`

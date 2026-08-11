@@ -8,7 +8,6 @@ interactively.
 
 | File | Purpose |
 |------|---------|
-| `bench_bigint.rs` | Microbenchmarks for bigint and Montgomery arithmetic |
 | `bench_public_key.rs` | Cross-platform latency benchmarks for all public-key schemes |
 | `cipher_encrypt.rs` | CTR-mode (block) / native-stream (stream) encryption of stdin under a fresh OS-random key.  Drives the R randomness battery in `scripts/cipher_randomness.R`; not a general-purpose CLI: it does not emit the IV, supports a fixed cipher set, and is intended for statistical testing only |
 | `pilot_cipher.rs` | Throughput benchmark driver for symmetric ciphers; called by `pilot-bench` to compute statistically tight MB/s figures |

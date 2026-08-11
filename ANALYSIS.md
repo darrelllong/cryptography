@@ -29,9 +29,12 @@ The implementation policy is intentionally uniform across the crate:
 - minimal dependencies unless a standard format or external interop clearly
   justifies one
 
-That is why the crate keeps its own cipher, hash, DRBG, and bigint code
-in-tree, while still using standard external formats such as DER/PEM where
-that materially improves interoperability.
+That is why the crate keeps its own cipher, hash, and DRBG code in-tree
+and takes its bigint layer from the sibling
+[rump](https://github.com/darrelllong/rump) crate (extracted from this tree;
+same author, same policies, no third-party code), while still using standard
+external formats such as DER/PEM where that materially improves
+interoperability.
 
 ## Coverage
 

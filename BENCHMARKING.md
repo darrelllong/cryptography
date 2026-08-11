@@ -179,16 +179,11 @@ bash scripts/bench_mldsa_ref.sh
 
 ## Bigint kernels vs GMP
 
-`scripts/bench_gmp.c` mirrors the operations and operand shapes of
-`src/bin/bench_bigint.rs` on top of GMP, so the two harnesses give an
-apples-to-apples comparison of the crate's pure-Rust bigint kernels against
-GMP's assembly-backed ones on the same machine.  Requires libgmp
-(`brew install gmp` on macOS, `libgmp-dev`/`gmp-devel` on Linux).
+The bigint microbenchmark and its GMP mirror moved with the multiprecision
+layer to the [rump](https://github.com/darrelllong/rump) crate:
 
 ```bash
+cd ../rump
 cargo run --release --bin bench_bigint          # ours
 bash scripts/bench_gmp.sh                       # GMP, same table format
 ```
-
-Both accept sizes in bits as arguments (default `256 512 1024 2048 4096`).
-Keep the two harnesses in lockstep when adding or reshaping operations.

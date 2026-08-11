@@ -41,3 +41,7 @@ arm-sha3 = []
 # `cargo test` on this package does not need to resolve benchmark-only crates.
 
 [dependencies]
+# The multiprecision layer, extracted from this crate (see
+# src/public_key/bigint.rs). The path serves side-by-side checkouts; the
+# version takes over once rump is published.
+rump = { version = "0.1.0", path = "../rump" }

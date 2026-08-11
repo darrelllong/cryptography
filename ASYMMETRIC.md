@@ -33,9 +33,11 @@ The broader implementation policy matches the rest of the crate:
 - minimal dependencies unless they clearly improve interoperability or
   maintainability
 
-That is why the bigint and Montgomery code live in-tree, while XML parsing uses
-`quick-xml` and RSA key persistence uses standard DER/PEM structures where that
-buys real compatibility.
+That is why the bigint and Montgomery code carry no external arithmetic
+backend: they live in the sibling [rump](https://github.com/darrelllong/rump)
+crate — extracted from this tree, same author, same pure-Rust and
+scrub-on-drop policies — while RSA key persistence uses standard DER/PEM
+structures where that buys real compatibility.
 
 ## Three-Level API
 
