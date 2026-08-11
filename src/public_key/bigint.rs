@@ -1,12 +1,12 @@
 //! A small pure-Rust bigint foundation for public-key primitives.
 //!
 //! The representation uses little-endian `u64` limbs because the surrounding
-//! algorithms are naturally word-oriented. This is intentionally simple:
-//! schoolbook multiplication and bitwise long division are easy to audit and
-//! track the public-key formulas directly, while keeping the public-key layer
-//! fully in Rust with no external arithmetic backend.
+//! algorithms are naturally word-oriented. The kernels come straight from the
+//! literature so they are easy to audit against their sources: schoolbook and
+//! Karatsuba multiplication, and Knuth's Algorithm D for division (*TAOCP*
+//! vol. 2, §4.3.1), all fully in Rust with no external arithmetic backend.
 //!
-//! Local references for planned multiplication-kernel upgrades:
+//! Local references for the multiplication kernels:
 //! - `pubs/comba-1990-exponentiation-cryptosystems-on-the-ibm-pc.pdf`
 //! - `pubs/karatsuba-ofman-1963-multiplication-of-multidigit-numbers-on-automata.pdf`
 
@@ -611,13 +611,16 @@ impl BigUint {
 
     /// Compute `(lhs * rhs) mod modulus`.
     ///
-    /// Odd moduli use a fresh Montgomery context so the common public-key path
-    /// avoids the division-heavy fallback. Even moduli keep the old
-    /// double-and-add reducer because Montgomery requires an odd modulus.
-    /// Rewriting one multiplicand as `y - 1` plus one extra add can change the
-    /// operand parity, but it does not change the modulus parity; the core
-    /// Montgomery requirement is `gcd(R, n) = 1`, so an even modulus still
-    /// needs a non-Montgomery path.
+    /// Multiply, then reduce once. This used to build a throwaway
+    /// [`MontgomeryCtx`] for odd moduli and fall back to a double-and-add
+    /// reducer for even ones, both to dodge a division. With Algorithm D doing
+    /// the reduction that trade no longer pays: a Montgomery context costs two
+    /// divisions to construct and then four Montgomery multiplies to encode,
+    /// multiply, and decode, where this costs one multiply and one division —
+    /// and it needs no odd-modulus special case.
+    ///
+    /// Callers that perform many multiplications under one modulus should still
+    /// build a [`MontgomeryCtx`] once and reuse it; this is the one-shot path.
     ///
     /// # Panics
     ///
@@ -625,40 +628,10 @@ impl BigUint {
     #[must_use]
     pub fn mod_mul(lhs: &Self, rhs: &Self, modulus: &Self) -> Self {
         assert!(!modulus.is_zero(), "modulus must be non-zero");
-        if modulus == &Self::one() {
+        if modulus.is_one() {
             return Self::zero();
         }
-        if let Some(ctx) = MontgomeryCtx::new(modulus) {
-            return ctx.mul(lhs, rhs);
-        }
-        Self::mod_mul_plain(lhs, rhs, modulus)
-    }
-
-    /// Compute `(lhs * rhs) mod modulus` using the simple double-and-add
-    /// fallback implementation.
-    ///
-    /// The result is mathematically correct, but repeated division-based
-    /// reduction makes it much slower than Montgomery multiplication for the
-    /// odd moduli that dominate public-key code. The current scheme code only
-    /// reaches this path for even moduli, so it remains as the explicit
-    /// fallback and readable reference for non-Montgomery cases.
-    #[must_use]
-    pub(crate) fn mod_mul_plain(lhs: &Self, rhs: &Self, modulus: &Self) -> Self {
-        if lhs.is_zero() || rhs.is_zero() {
-            return Self::zero();
-        }
-
-        let mut a = lhs.modulo(modulus);
-        let mut b = rhs.clone();
-        let mut out = Self::zero();
-        while !b.is_zero() {
-            if b.is_odd() {
-                out = out.add_ref(&a).modulo(modulus);
-            }
-            a = a.add_ref(&a).modulo(modulus);
-            b.shr1();
-        }
-        out
+        lhs.mul_ref(rhs).modulo(modulus)
     }
 
     /// Return `(quotient, remainder)` for Euclidean division. Panics on zero divisor.
@@ -673,28 +646,161 @@ impl BigUint {
             return (Self::zero(), self.clone());
         }
 
-        let mut quotient = Self::zero();
-        let mut remainder = Self::zero();
+        // One limb of quotient at a time, not one bit: both paths below produce
+        // 64 quotient bits per pass over the divisor.
+        if divisor.limbs.len() == 1 {
+            let (quotient, remainder) = Self::div_rem_limb(&self.limbs, divisor.limbs[0]);
+            return (quotient, Self::from_u64(remainder));
+        }
 
-        // Bit-by-bit long division. `remainder` holds the partially
-        // reconstructed dividend prefix; each step shifts it left, appends the
-        // next source bit, and subtracts the divisor if the prefix is already
-        // large enough.
-        for bit in (0..self.bits()).rev() {
-            remainder.shl1();
-            if self.bit(bit) {
-                if remainder.is_zero() {
-                    remainder.limbs.push(1);
-                } else {
-                    remainder.limbs[0] |= 1;
+        Self::div_rem_knuth(&self.limbs, &divisor.limbs)
+    }
+
+    /// Divide by a single limb by Horner's method in base `2^64`, the same
+    /// recurrence [`Self::rem_u64`] uses, keeping the quotient digits.
+    fn div_rem_limb(dividend: &[u64], divisor: u64) -> (Self, u64) {
+        let divisor = u128::from(divisor);
+        let mut quotient = vec![0u64; dividend.len()];
+        let mut remainder = 0u128;
+        for (slot, &limb) in quotient.iter_mut().zip(dividend.iter()).rev() {
+            let acc = (remainder << 64) | u128::from(limb);
+            *slot = low_u64(acc / divisor);
+            remainder = acc % divisor;
+        }
+
+        let mut quotient = Self { limbs: quotient };
+        quotient.normalize();
+        (quotient, low_u64(remainder))
+    }
+
+    /// Knuth's Algorithm D — long division in base `b = 2^64`.
+    ///
+    /// Reference: Knuth, *TAOCP* vol. 2, §4.3.1, Algorithm D; the borrow and
+    /// add-back mechanics follow Warren, *Hacker's Delight*, §9-2 (`divmnu`).
+    /// Step labels D1–D8 in the comments are Knuth's.
+    ///
+    /// Requires `dividend >= divisor` and at least two divisor limbs; both
+    /// slices are normalized (non-zero top limb). Costs
+    /// `O(quotient_limbs * divisor_limbs)` limb operations, against
+    /// `O(bits * limbs)` for the bit-serial long division it replaced: one
+    /// pass over the divisor now yields 64 quotient bits instead of one.
+    ///
+    /// Like the rest of the `vt::` lattice this is variable-time: the
+    /// quotient-digit corrections below are data-dependent.
+    fn div_rem_knuth(dividend: &[u64], divisor: &[u64]) -> (Self, Self) {
+        /// Knuth's `b`, the digit base.
+        const BASE: u128 = 1u128 << 64;
+
+        let n = divisor.len();
+        debug_assert!(n >= 2, "single-limb divisors take the Horner path");
+        debug_assert!(dividend.len() >= n, "caller screens dividend < divisor");
+        let m = dividend.len() - n;
+
+        // D1. Scale both operands so the divisor's top limb has its high bit
+        // set (the quotient is unchanged; the remainder is scaled back in D8).
+        // Normalization is what bounds the D3 estimate to at most two over the
+        // true digit, so a single conditional add-back in D6 suffices.
+        let shift = divisor[n - 1].leading_zeros();
+        let divisor = shl_into(divisor, shift, n);
+        // One limb of headroom: the shift can carry out, and the estimate step
+        // reads `rem[j + n]` for the top window.
+        let mut rem = shl_into(dividend, shift, dividend.len() + 1);
+        let divisor_hi = u128::from(divisor[n - 1]);
+        let divisor_next = u128::from(divisor[n - 2]);
+
+        let mut quotient = vec![0u64; m + 1];
+
+        // D2/D7. One quotient digit per pass, most significant first. The
+        // window `rem[j..=j + n]` always holds less than `divisor * b`, so
+        // each true digit fits in one limb.
+        for j in (0..=m).rev() {
+            // D3. Estimate the digit from the window's top two limbs:
+            // `q_hat = numerator / divisor_hi`, remainder `r_hat` (Knuth's
+            // q-hat and r-hat). Normalization guarantees `q_hat <= q + 2`.
+            //
+            // The loop's second test rules the estimate against the divisor's
+            // *third*-from-top limb; each firing lowers `q_hat` by one, and
+            // when it stops `q_hat <= q + 1` (TAOCP §4.3.1, exercise 20),
+            // leaving at most the one overshoot D6 can repair. Skipping this
+            // correction is not an option: for divisors like
+            // `[v0, d, d, ...]` with `d >= b/2` the raw estimate reaches
+            // `b + 1` — two over the true digit `b - 1` — which no single
+            // add-back can fix.
+            //
+            // The `q_hat >= BASE` arm is Knuth's `min(q_hat, b - 1)` clamp.
+            // Because `q_hat` stays in `u128` all the way into D4, the clamp
+            // is provably redundant here — an estimate of `b` or `b + 1` is
+            // always caught by the second test or repaired by D6 — but it is
+            // kept both to match the algorithm as published and to skip a
+            // predictably doomed full-width subtraction.
+            //
+            // Termination: each round adds `divisor_hi >= b/2` to `r_hat`, so
+            // the `r_hat >= BASE` break bounds the loop at two corrections
+            // beyond the clamp.
+            let numerator = (u128::from(rem[j + n]) << 64) | u128::from(rem[j + n - 1]);
+            let mut q_hat = numerator / divisor_hi;
+            let mut r_hat = numerator % divisor_hi;
+            while q_hat >= BASE || q_hat * divisor_next > (r_hat << 64) | u128::from(rem[j + n - 2])
+            {
+                q_hat -= 1;
+                r_hat += divisor_hi;
+                if r_hat >= BASE {
+                    break;
                 }
             }
 
-            if remainder.cmp(divisor) != Ordering::Less {
-                remainder.sub_assign_ref(divisor);
-                quotient.set_bit(bit);
+            // D4. Subtract `q_hat * divisor` from the window. Each step biases
+            // the difference by `BASE` so it stays unsigned; bit 64 of the
+            // biased result is 1 exactly when no borrow was needed.
+            let mut borrow = 0u128;
+            let mut carry = 0u128;
+            for i in 0..n {
+                let product = q_hat * u128::from(divisor[i]) + carry;
+                carry = product >> 64;
+                let diff = BASE + u128::from(rem[i + j]) - u128::from(low_u64(product)) - borrow;
+                rem[i + j] = low_u64(diff);
+                borrow = 1 - (diff >> 64);
             }
+            let diff = BASE + u128::from(rem[j + n]) - carry - borrow;
+            rem[j + n] = low_u64(diff);
+
+            // D5/D6. A borrow out of the top means `q_hat` was one too large
+            // (probability about `2/b` on random input); add the divisor back
+            // once. The carry out of the add-back cancels the borrow D4 left
+            // in the top limb, restoring the invariant checked below.
+            if diff >> 64 == 0 {
+                q_hat -= 1;
+                let mut carry = 0u128;
+                for i in 0..n {
+                    let sum = u128::from(rem[i + j]) + u128::from(divisor[i]) + carry;
+                    rem[i + j] = low_u64(sum);
+                    carry = sum >> 64;
+                }
+                rem[j + n] = rem[j + n].wrapping_add(low_u64(carry));
+            }
+
+            // After a correct step the remaining value fits below `b^n`, so
+            // the window's top limb must be clean. Release builds never read
+            // `rem[j + n]` again (the next window sits one limb lower), but
+            // the store above keeps this invariant true and checkable.
+            debug_assert!(rem[j + n] == 0, "quotient digit left residue");
+
+            quotient[j] = low_u64(q_hat);
         }
+
+        let mut quotient = Self { limbs: quotient };
+        quotient.normalize();
+
+        // D8. The remainder is the final window, still scaled by `2^shift`
+        // from D1; the true remainder's shifted-out low bits are zero.
+        debug_assert!(
+            shift == 0 || rem[0].trailing_zeros() >= shift,
+            "denormalized remainder must be a multiple of 2^shift"
+        );
+        let mut remainder = Self {
+            limbs: shr_limbs(&rem[..n], shift),
+        };
+        remainder.normalize();
 
         (quotient, remainder)
     }
@@ -1090,6 +1196,49 @@ fn low_u64(value: u128) -> u64 {
     u64::try_from(value & u128::from(u64::MAX)).expect("masked low 64 bits always fit into u64")
 }
 
+/// Copy `value` into a fresh `len`-limb buffer, shifted left by `shift` bits.
+///
+/// `shift` is below 64 and `len` is at least `value.len()`; this is the
+/// Algorithm D normalization step, which never needs a whole-limb shift.
+fn shl_into(value: &[u64], shift: u32, len: usize) -> Vec<u64> {
+    debug_assert!(shift < 64, "normalization shift stays within one limb");
+    debug_assert!(len >= value.len(), "destination must hold the source");
+
+    let mut out = vec![0u64; len];
+    if shift == 0 {
+        out[..value.len()].copy_from_slice(value);
+        return out;
+    }
+
+    // `shift` is in `1..64`, so `64 - shift` is also a defined shift amount.
+    let mut carry = 0u64;
+    for (slot, &limb) in out.iter_mut().zip(value.iter()) {
+        *slot = (limb << shift) | carry;
+        carry = limb >> (64 - shift);
+    }
+    if value.len() < len {
+        out[value.len()] = carry;
+    } else {
+        debug_assert!(carry == 0, "shift carried out of the destination");
+    }
+    out
+}
+
+/// Return `value` shifted right by `shift` bits (below 64) in a fresh buffer.
+fn shr_limbs(value: &[u64], shift: u32) -> Vec<u64> {
+    debug_assert!(shift < 64, "normalization shift stays within one limb");
+    if shift == 0 {
+        return value.to_vec();
+    }
+
+    let mut out = vec![0u64; value.len()];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let high = value.get(i + 1).map_or(0, |&next| next << (64 - shift));
+        *slot = (value[i] >> shift) | high;
+    }
+    out
+}
+
 fn montgomery_n0_inv(n0: u64) -> u64 {
     debug_assert!(n0 & 1 == 1, "Montgomery path requires an odd modulus");
     // Newton iteration in Z_(2^64): each step doubles the number of correct
@@ -1325,6 +1474,115 @@ mod tests {
         assert_eq!(q.mul_ref(&divisor).add_ref(&r), dividend);
     }
 
+    /// `(q, r)` with `dividend = q * divisor + r` and `r < divisor` is unique,
+    /// so checking the pair is a complete correctness statement for
+    /// [`BigUint::div_rem`] and needs no separately computed expected value.
+    fn assert_div_rem_invariant(dividend: &BigUint, divisor: &BigUint) {
+        let (quotient, remainder) = dividend.div_rem(divisor);
+        assert!(
+            remainder < *divisor,
+            "remainder {remainder:?} not reduced modulo {divisor:?}"
+        );
+        assert_eq!(
+            quotient.mul_ref(divisor).add_ref(&remainder),
+            *dividend,
+            "q * d + r != n for {dividend:?} / {divisor:?}"
+        );
+    }
+
+    #[test]
+    fn div_rem_invariant_over_limb_shapes() {
+        let mut seed = 0x243f_6a88_85a3_08d3;
+        // Cover both division paths (one-limb Horner and multi-limb Knuth),
+        // every quotient length from one limb up, and — because the leading
+        // limb is random — a spread of D1 normalization shifts.
+        for dividend_words in 1..=9usize {
+            for divisor_words in 1..=dividend_words {
+                for _ in 0..12 {
+                    let dividend = seeded_biguint(dividend_words, &mut seed);
+                    let divisor = seeded_biguint(divisor_words, &mut seed);
+                    assert_div_rem_invariant(&dividend, &divisor);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn div_rem_handles_quotient_estimate_corrections() {
+        // Knuth's D6 add-back runs with probability about 2^-63 on random
+        // input, so it needs inputs built to force it. These are the base-2^64
+        // analogues of the classic add-back cases from Warren, *Hacker's
+        // Delight*, §9-2, plus a divisor whose top limb is already normalized
+        // (D1 shift of zero) and one that needs the maximum shift.
+        let cases: [(&[u64], &[u64]); 5] = [
+            (&[0, 0, 0x8000_0000_0000_0000], &[1, 0x8000_0000_0000_0000]),
+            (
+                &[0, 0xFFFF_FFFF_FFFF_FFFE, 0x8000_0000_0000_0000],
+                &[0xFFFF_FFFF_FFFF_FFFF, 0x8000_0000_0000_0000],
+            ),
+            (
+                &[0xFFFF_FFFF_FFFF_FFFF, 0xFFFF_FFFF_FFFF_FFFF],
+                &[0xFFFF_FFFF_FFFF_FFFF, 0x0000_0000_FFFF_FFFF],
+            ),
+            (&[0, 0, 0, 1], &[1, 1]),
+            (&[u64::MAX, u64::MAX, u64::MAX], &[u64::MAX, 1]),
+        ];
+
+        for (dividend, divisor) in cases {
+            assert_div_rem_invariant(
+                &BigUint {
+                    limbs: dividend.to_vec(),
+                },
+                &BigUint {
+                    limbs: divisor.to_vec(),
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn div_rem_exercises_the_add_back_path() {
+        // Knuth's D6 add-back cannot happen for a two-limb divisor — there the
+        // `v[n-2]` test in D3 is exact — and on random longer input it runs
+        // with probability about `2 / 2^64`, so reaching it needs constructed
+        // inputs. `dividend = (q + 1) * divisor - 1` is that construction: D3
+        // accepts `q + 1` because it cannot see the divisor's low limbs, while
+        // the true quotient is `q`, which is precisely what D6 repairs.
+        let mut seed = 0xb504_f333_f9de_6484;
+        for divisor_words in 3..=6usize {
+            for q in [1u64, 2, 12_345, u64::MAX - 1] {
+                let mut divisor = seeded_biguint(divisor_words, &mut seed);
+                // A D1 shift of zero keeps the construction exact.
+                divisor.limbs[divisor_words - 1] |= 1 << 63;
+
+                let scale = BigUint::from_u64(q).add_ref(&BigUint::one());
+                let dividend = scale.mul_ref(&divisor).sub_ref(&BigUint::one());
+
+                assert_div_rem_invariant(&dividend, &divisor);
+                // `(q + 1) * d - 1 = q * d + (d - 1)`, so the answer is exact.
+                let (quotient, remainder) = dividend.div_rem(&divisor);
+                assert_eq!(quotient, BigUint::from_u64(q));
+                assert_eq!(remainder, divisor.sub_ref(&BigUint::one()));
+            }
+        }
+    }
+
+    #[test]
+    fn div_rem_edge_cases() {
+        let big = BigUint::from_be_bytes(&[0xFF; 40]);
+        assert_div_rem_invariant(&big, &BigUint::one());
+        assert_div_rem_invariant(&big, &big);
+        assert_eq!(big.div_rem(&big).0, BigUint::one());
+        assert!(big.div_rem(&big).1.is_zero());
+
+        // Divisor above the dividend takes the early exit.
+        let (quotient, remainder) = BigUint::from_u64(5).div_rem(&BigUint::from_u64(9));
+        assert!(quotient.is_zero());
+        assert_eq!(remainder, BigUint::from_u64(5));
+
+        assert!(BigUint::zero().div_rem(&BigUint::from_u64(7)).0.is_zero());
+    }
+
     #[test]
     fn sqrt_floor_small_values() {
         assert_eq!(BigUint::from_u64(0).sqrt_floor(), BigUint::from_u64(0));
@@ -1366,11 +1624,30 @@ mod tests {
     }
 
     #[test]
-    fn mod_mul_even_modulus_uses_fallback_path() {
+    fn mod_mul_handles_even_modulus() {
+        // Even moduli have no Montgomery representation, so this used to take a
+        // separate double-and-add path; multiply-then-reduce covers both.
         let a = BigUint::from_u64(37);
         let b = BigUint::from_u64(19);
         let modulus = BigUint::from_u64(100);
         assert_eq!(BigUint::mod_mul(&a, &b, &modulus), BigUint::from_u64(3));
+    }
+
+    #[test]
+    fn mod_mul_matches_montgomery_context() {
+        // The one-shot path and the reusable-context path must agree.
+        let mut seed = 0x0123_4567_89ab_cdef;
+        for words in [1usize, 2, 4, 8, 16] {
+            for _ in 0..8 {
+                let lhs = seeded_biguint(words, &mut seed);
+                let rhs = seeded_biguint(words, &mut seed);
+                let mut modulus = seeded_biguint(words, &mut seed);
+                modulus.limbs[0] |= 1; // Montgomery needs an odd modulus.
+
+                let ctx = MontgomeryCtx::new(&modulus).expect("odd modulus builds a context");
+                assert_eq!(BigUint::mod_mul(&lhs, &rhs, &modulus), ctx.mul(&lhs, &rhs));
+            }
+        }
     }
 
     #[test]
