@@ -578,6 +578,49 @@ impl BigUint {
         // limb, so no normalize() pass is needed here.
     }
 
+    /// Right-shift by `n` bits, discarding the shifted-out low bits.
+    ///
+    /// The mirror of [`Self::shl_bits`]: `n / 64` whole-limb drops plus up to
+    /// 63 bit positions within limbs, avoiding undefined behaviour from
+    /// shifting a `u64` by 64 or more. Equivalent to dividing by `2^n`.
+    pub fn shr_bits(&mut self, n: usize) {
+        if self.is_zero() || n == 0 {
+            return;
+        }
+        let limb_shifts = n / 64;
+        let bit_shifts = (n % 64) as u32;
+
+        if limb_shifts >= self.limbs.len() {
+            // Everything shifts out. Wipe rather than truncate so the old
+            // limbs do not linger beyond the vector's length.
+            self.limbs.fill(0);
+            self.limbs.clear();
+            return;
+        }
+
+        // Whole-limb shift: move the high limbs down, then wipe the vacated
+        // top slots before truncating for the same reason as above.
+        if limb_shifts > 0 {
+            let kept = self.limbs.len() - limb_shifts;
+            self.limbs.copy_within(limb_shifts.., 0);
+            self.limbs[kept..].fill(0);
+            self.limbs.truncate(kept);
+        }
+
+        // Remaining bit-level shift (0 < bit_shifts < 64, so 64 - bit_shifts
+        // is a defined shift amount).
+        if bit_shifts > 0 {
+            let mut carry = 0u64;
+            for limb in self.limbs.iter_mut().rev() {
+                let next_carry = *limb << (64 - bit_shifts);
+                *limb = (*limb >> bit_shifts) | carry;
+                carry = next_carry;
+            }
+        }
+
+        self.normalize();
+    }
+
     /// Compute `self mod modulus`.
     #[must_use]
     pub fn modulo(&self, modulus: &Self) -> Self {
@@ -1682,6 +1725,58 @@ mod tests {
                 assert_eq!(dispatched, schoolbook);
             }
         }
+    }
+
+    #[test]
+    fn shr_bits_inverts_shl_bits_and_matches_division() {
+        let mut seed = 0x6a09_e667_f3bc_c908;
+        let shifts = [0usize, 1, 7, 63, 64, 65, 127, 128, 200];
+        for words in [1usize, 2, 4, 9] {
+            for _ in 0..8 {
+                let value = seeded_biguint(words, &mut seed);
+                for &n in &shifts {
+                    // Round trip through the left shift.
+                    let mut widened = value.clone();
+                    widened.shl_bits(n);
+                    widened.shr_bits(n);
+                    assert_eq!(widened, value, "(x << {n}) >> {n} != x");
+
+                    // Independent oracle: shifting right by n is dividing by
+                    // 2^n, and division goes through Algorithm D, not the
+                    // shift code.
+                    let mut shifted = value.clone();
+                    shifted.shr_bits(n);
+                    let mut power_of_two = BigUint::zero();
+                    power_of_two.set_bit(n);
+                    assert_eq!(shifted, value.div_rem(&power_of_two).0, "x >> {n}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shr_bits_edge_cases() {
+        // Shifting everything out yields zero.
+        let mut value = BigUint::from_u128(u128::MAX);
+        value.shr_bits(128);
+        assert!(value.is_zero());
+
+        let mut value = BigUint::from_u64(1);
+        value.shr_bits(1);
+        assert!(value.is_zero());
+
+        // Shifting zero and shifting by zero are identities.
+        let mut zero = BigUint::zero();
+        zero.shr_bits(1_000);
+        assert!(zero.is_zero());
+        let mut value = BigUint::from_u64(42);
+        value.shr_bits(0);
+        assert_eq!(value, BigUint::from_u64(42));
+
+        // A shift far past the width is the same as shifting everything out.
+        let mut value = BigUint::from_u128(u128::MAX);
+        value.shr_bits(100_000);
+        assert!(value.is_zero());
     }
 
     #[test]
