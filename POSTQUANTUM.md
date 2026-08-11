@@ -386,7 +386,7 @@ The other eight parameter sets (`NtruEes401Ep1`, `NtruEes449Ep1`,
 (keygen / encaps / decaps) for one parameter set; outer ring = faster. ±90%
 CI half-widths are in the benchmark tables below.
 
-![ML-KEM throughput radar (Tolkien / Dennard / Heinlein)](assets/sweep-2026-06-11-mlkem-radar.svg)
+![ML-KEM throughput radar (Tolkien / Twilight / Heinlein)](assets/sweep-2026-08-11-mlkem-radar.svg)
 
 ### ML-DSA: Security vs. Cost
 
@@ -402,7 +402,7 @@ CI half-widths are in the benchmark tables below.
 (keygen / sign / verify) for one parameter set; outer ring = faster. ±90%
 CI half-widths are in the benchmark tables below.
 
-![ML-DSA throughput radar (Tolkien / Dennard / Heinlein)](assets/sweep-2026-06-11-mldsa-radar.svg)
+![ML-DSA throughput radar (Tolkien / Twilight / Heinlein)](assets/sweep-2026-08-11-mldsa-radar.svg)
 
 ### NTRU: Security vs. Cost
 
@@ -419,7 +419,7 @@ CI half-widths are in the benchmark tables below.
 (keygen / encaps / decaps) for one parameter set; outer ring = faster. ±90%
 CI half-widths are in the benchmark tables below.
 
-![NTRU throughput radar (Tolkien / Dennard / Heinlein)](assets/sweep-2026-06-11-ntru-radar.svg)
+![NTRU throughput radar (Tolkien / Twilight / Heinlein)](assets/sweep-2026-08-11-ntru-radar.svg)
 
 ### NTRUEncrypt (IEEE 1363.1): Security vs. Cost
 
@@ -462,9 +462,9 @@ reported in the table above are the integer form (i.e. what
 | Public key (bytes) | 1 184 | 1 952 | 930 | 931 |
 | Private key (bytes) | 2 400 | 4 000 | 1 234 | 1 101 |
 | Payload (bytes) | 1 088 CT + 32 SS | 3 309 sig | 930 CT + 32 SS | 931 CT (≤ 101 B msg) |
-| Keygen Tolkien (ms/op) | 0.03501 | 0.173 | 1.127 | 1.152 |
-| Primary op Tolkien (ms/op) | 0.03278 encaps | 0.3319 sign | 0.1025 encaps | 0.1742 encrypt |
-| Secondary op Tolkien (ms/op) | 0.03685 decaps | 0.03086 verify | 0.1153 decaps | 0.2705 decrypt |
+| Keygen Tolkien (ms/op) | 0.02318 | 0.09676 | 1.128 | 1.126 |
+| Primary op Tolkien (ms/op) | 0.01126 encaps | 0.2387 sign | 0.08611 encaps | 0.174 encrypt |
+| Secondary op Tolkien (ms/op) | 0.012 decaps | 0.02192 verify | 0.09966 decaps | 0.267 decrypt |
 
 90% CI half-widths for each entry are in the per-scheme benchmark tables
 below. The four schemes are not interchangeable — KEM, signature, and
@@ -494,109 +494,105 @@ bash scripts/bench_all_pk_full.sh
 ```
 
 Numbers below are `ms/op`, with **90%** CI half-width and rounds run. The
-2026-06-11 sweep was driven with `PILOT_PRESET=normal PILOT_CONFIDENCE_LEVEL=0.90`
+2026-08-11 sweep was driven with `PILOT_PRESET=normal PILOT_CONFIDENCE_LEVEL=0.90`
 (10% CI half-width target, autocorrelation tolerance 0.2, ≥ 50 rounds minimum
-sample size) against crate v0.7.0 (commit `1aae1df`); the exact invocations
+sample size) against commit `e7e4825`; the exact invocations
 are recorded in
-[`bench/sweep-2026-06-11/README.md`](bench/sweep-2026-06-11/README.md), which
+[`bench/sweep-2026-08-11/README.md`](bench/sweep-2026-08-11/README.md), which
 is the canonical record of what each host actually ran. Note that
 `scripts/bench_all_pk_full.sh` defaults `PILOT_PRESET=quick`, so a re-run
 without overriding the env var would not reproduce these numbers. The tables
 below are parallel runs on:
 
 - Apple M1 (`tolkien`, macOS)
-- AMD EPYC 7452 (`dennard.soe.ucsc.edu`, single-core slice)
+- AMD EPYC 7452 (`twilight.soe.ucsc.edu`, single-core slice; same silicon as June's `dennard`)
 - NVIDIA Jetson (`heinlein.local`, aarch64)
 
 ### ML-KEM (FIPS 203)
 
-| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) ms/op | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
+| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Twilight (EPYC 7452) ms/op | Twilight (EPYC 7452) ±CI (90%) | Twilight (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
 |---|---|---|---|---|---|---|---|---|---|
-| mlkem512_keygen | 0.0232 | ±0.001917 | 204 | 0.02625 | ±0.001427 | 50 | 0.04501 | ±0.003714 | 7431 |
-| mlkem512_encaps | 0.01991 | ±0.0001865 | 950 | 0.02631 | ±0.0001846 | 50 | 0.04929 | ±0.00411 | 6860 |
-| mlkem512_decaps | 0.02236 | ±0.001313 | 54 | 0.02972 | ±0.0002383 | 146 | 0.04696 | ±0.003221 | 24920 |
-| mlkem768_keygen | 0.03501 | ±0.0005 | 58 | 0.04287 | ±0.0003215 | 86 | 0.08338 | ±0.006911 | 7229 |
-| mlkem768_encaps | 0.03278 | ±0.0004288 | 680 | 0.04264 | ±0.0002736 | 269 | 0.07825 | ±0.006517 | 7319 |
-| mlkem768_decaps | 0.03685 | ±0.002925 | 50 | 0.04735 | ±0.0005021 | 140 | 0.08243 | ±0.006862 | 7735 |
-| mlkem1024_keygen | 0.05438 | ±0.0005956 | 200 | 0.06723 | ±0.000553 | 110 | 0.1221 | ±0.008786 | 5360 |
-| mlkem1024_encaps | 0.05093 | ±0.0007107 | 50 | 0.06504 | ±0.0004139 | 321 | 0.1197 | ±0.009962 | 9802 |
-| mlkem1024_decaps | 0.05839 | ±0.004873 | 58 | 0.06992 | ±0.0005599 | 50 | 0.1257 | ±0.01048 | 8098 |
+| mlkem512_keygen | 0.01414 | ±2.029e-05 | 80 | 0.02626 | ±0.0002278 | 54 | 0.04194 | ±0.003268 | 831 |
+| mlkem512_encaps | 0.00867 | ±7.29e-06 | 86 | 0.0196 | ±0.0002527 | 57 | 0.03105 | ±0.002565 | 565 |
+| mlkem512_decaps | 0.009044 | ±9.17e-06 | 50 | 0.02242 | ±0.0001954 | 112 | 0.03444 | ±0.002122 | 1190 |
+| mlkem768_keygen | 0.02318 | ±2.805e-05 | 170 | 0.04404 | ±0.0004195 | 50 | 0.07032 | ±0.00586 | 717 |
+| mlkem768_encaps | 0.01126 | ±1.085e-05 | 140 | 0.02688 | ±0.0003154 | 50 | 0.04245 | ±0.003537 | 1469 |
+| mlkem768_decaps | 0.012 | ±1.403e-05 | 260 | 0.03127 | ±0.0002772 | 80 | 0.04795 | ±0.004002 | 839 |
+| mlkem1024_keygen | 0.03638 | ±5.638e-05 | 82 | 0.06712 | ±0.0007828 | 50 | 0.11 | ±0.008793 | 320 |
+| mlkem1024_encaps | 0.01519 | ±2.392e-05 | 50 | 0.03732 | ±0.0004799 | 82 | 0.05832 | ±0.004074 | 560 |
+| mlkem1024_decaps | 0.01632 | ±1.882e-05 | 171 | 0.04288 | ±0.0003611 | 50 | 0.06589 | ±0.00413 | 835 |
 
 ### ML-DSA (FIPS 204)
 
-| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) ms/op | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
+| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Twilight (EPYC 7452) ms/op | Twilight (EPYC 7452) ±CI (90%) | Twilight (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
 |---|---|---|---|---|---|---|---|---|---|
-| mldsa44_keygen | 0.08007 | ±0.001451 | 50 | 0.09249 | ±0.0006203 | 51 | 0.1715 | ±0.01414 | 1193 |
-| mldsa44_sign | 0.1827 | ±0.0001737 | 380 | 0.3076 | ±0.001025 | 50 | 0.4643 | ±0.02961 | 80 |
-| mldsa44_verify | 0.0221 | ±0.001814 | 1104 | 0.0343 | ±0.0003976 | 290 | 0.061 | ±0.005034 | 10492 |
-| mldsa65_keygen | 0.173 | ±0.01275 | 110 | 0.166 | ±0.0008622 | 110 | 0.2937 | ±0.02395 | 146 |
-| mldsa65_sign | 0.3319 | ±0.001631 | 110 | 0.5347 | ±0.001611 | 50 | 0.808 | ±0.05505 | 50 |
-| mldsa65_verify | 0.03086 | ±0.001426 | 51 | 0.04925 | ±0.0005806 | 560 | 0.07582 | ±0.006299 | 26724 |
-| mldsa87_keygen | 0.2403 | ±0.004249 | 682 | 0.2427 | ±0.001139 | 50 | 0.4167 | ±0.03345 | 80 |
-| mldsa87_sign | 0.214 | ±0.002686 | 110 | 0.3393 | ±0.00139 | 50 | 0.5381 | ±0.04437 | 87 |
-| mldsa87_verify | 0.04784 | ±0.0003287 | 50 | 0.07421 | ±0.0007654 | 50 | 0.1129 | ±0.007483 | 27380 |
+| mldsa44_keygen | 0.05243 | ±7.969e-05 | 110 | 0.0954 | ±0.0005087 | 52 | 0.1705 | ±0.01357 | 80 |
+| mldsa44_sign | 0.14 | ±6.97e-05 | 50 | 0.3109 | ±0.001191 | 80 | 0.471 | ±0.034 | 50 |
+| mldsa44_verify | 0.01552 | ±1.605e-05 | 80 | 0.03446 | ±0.0003605 | 50 | 0.05488 | ±0.004006 | 530 |
+| mldsa65_keygen | 0.09676 | ±0.0001117 | 118 | 0.1706 | ±0.0009733 | 50 | 0.291 | ±0.02428 | 59 |
+| mldsa65_sign | 0.2387 | ±6.914e-05 | 80 | 0.5395 | ±0.001742 | 50 | 0.7905 | ±0.03576 | 50 |
+| mldsa65_verify | 0.02192 | ±1.633e-05 | 82 | 0.04874 | ±0.0005093 | 110 | 0.07849 | ±0.006465 | 263 |
+| mldsa87_keygen | 0.1352 | ±0.0001214 | 50 | 0.2482 | ±0.001166 | 170 | 0.4118 | ±0.03407 | 55 |
+| mldsa87_sign | 0.1514 | ±7.512e-05 | 80 | 0.3418 | ±0.001506 | 50 | 0.5075 | ±0.02972 | 50 |
+| mldsa87_verify | 0.03367 | ±2.656e-05 | 53 | 0.07422 | ±0.0007261 | 50 | 0.1144 | ±0.004208 | 260 |
 
 ### NTRU (NIST PQC round 3)
 
-| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) ms/op | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
+| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Twilight (EPYC 7452) ms/op | Twilight (EPYC 7452) ±CI (90%) | Twilight (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
 |---|---|---|---|---|---|---|---|---|---|
-| ntruhps509_keygen | 1.01 | ±0.03758 | 140 | 1.286 | ±0.01893 | 50 | 2.629 | ±0.02699 | 50 |
-| ntruhps509_encaps | 0.08523 | ±0.003333 | 140 | 0.1075 | ±0.0007177 | 320 | 0.2244 | ±0.01842 | 59 |
-| ntruhps509_decaps | 0.156 | ±0.01196 | 51 | 0.1556 | ±0.0008866 | 80 | 0.3515 | ±0.02485 | 50 |
-| ntruhps677_keygen | 1.127 | ±0.01347 | 140 | 1.814 | ±0.01149 | 50 | 3.55 | ±0.0335 | 53 |
-| ntruhps677_encaps | 0.1025 | ±0.003655 | 261 | 0.1354 | ±0.0007594 | 50 | 0.2614 | ±0.01821 | 80 |
-| ntruhps677_decaps | 0.1153 | ±0.002463 | 89 | 0.1634 | ±0.0009009 | 50 | 0.3451 | ±0.02874 | 86 |
-| ntruhps821_keygen | 2.478 | ±0.09013 | 50 | 2.854 | ±0.01281 | 56 | 5.789 | ±0.0654 | 50 |
-| ntruhps821_encaps | 0.1631 | ±0.0006477 | 110 | 0.1955 | ±0.001349 | 52 | 0.3838 | ±0.02866 | 50 |
-| ntruhps821_decaps | 0.2954 | ±0.001446 | 50 | 0.2797 | ±0.001448 | 50 | 0.5933 | ±0.04776 | 50 |
-| ntruhrss701_keygen | 1.189 | ±0.03097 | 50 | 1.853 | ±0.04173 | 50 | 3.965 | ±0.03582 | 83 |
-| ntruhrss701_encaps | 0.04695 | ±0.0008647 | 80 | 0.06868 | ±0.001824 | 50 | 0.1479 | ±0.009721 | 80 |
-| ntruhrss701_decaps | 0.1205 | ±0.002692 | 110 | 0.17 | ±0.0009 | 57 | 0.3736 | ±0.01242 | 51 |
+| ntruhps509_keygen | 0.9711 | ±0.001772 | 81 | 1.308 | ±0.004394 | 80 | 2.56 | ±0.03695 | 50 |
+| ntruhps509_encaps | 0.0818 | ±0.0001429 | 81 | 0.1094 | ±0.0006578 | 80 | 0.2252 | ±0.01171 | 50 |
+| ntruhps509_decaps | 0.1382 | ±0.0003768 | 50 | 0.1592 | ±0.000874 | 50 | 0.3502 | ±0.005051 | 80 |
+| ntruhps677_keygen | 1.128 | ±0.04444 | 50 | 1.865 | ±0.004605 | 50 | 3.382 | ±0.03239 | 110 |
+| ntruhps677_encaps | 0.08611 | ±0.002355 | 50 | 0.1381 | ±0.0008496 | 80 | 0.2623 | ±0.003471 | 50 |
+| ntruhps677_decaps | 0.09966 | ±0.003664 | 50 | 0.1686 | ±0.002402 | 82 | 0.3432 | ±0.02239 | 50 |
+| ntruhps821_keygen | 2.42 | ±0.004594 | 59 | 2.883 | ±0.005111 | 50 | 5.398 | ±0.08901 | 54 |
+| ntruhps821_encaps | 0.1623 | ±0.0004615 | 50 | 0.2015 | ±0.001515 | 50 | 0.3856 | ±0.02795 | 50 |
+| ntruhps821_decaps | 0.292 | ±0.000697 | 50 | 0.2903 | ±0.001444 | 116 | 0.599 | ±0.04948 | 50 |
+| ntruhrss701_keygen | 1.167 | ±0.03213 | 50 | 1.89 | ±0.003288 | 50 | 3.698 | ±0.04872 | 80 |
+| ntruhrss701_encaps | 0.04679 | ±0.002884 | 50 | 0.06998 | ±0.0007069 | 140 | 0.1468 | ±0.00231 | 50 |
+| ntruhrss701_decaps | 0.1152 | ±0.007519 | 80 | 0.1738 | ±0.0008715 | 50 | 0.3748 | ±0.004132 | 50 |
 
 ### NTRUEncrypt (IEEE Std 1363.1-2008)
 
-| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) ms/op | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
+| Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Twilight (EPYC 7452) ms/op | Twilight (EPYC 7452) ±CI (90%) | Twilight (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
 |---|---|---|---|---|---|---|---|---|---|
-| ntruees401ep1_keygen | 0.7687 | ±0.004918 | 320 | 0.9514 | ±0.003785 | 50 | 1.904 | ±0.1461 | 53 |
-| ntruees401ep1_encrypt | 0.1026 | ±0.001495 | 440 | 0.1126 | ±0.001077 | 59 | 0.3134 | ±0.02604 | 269 |
-| ntruees401ep1_decrypt | 0.1517 | ±0.00516 | 80 | 0.1591 | ±0.001426 | 56 | 0.482 | ±0.03502 | 50 |
-| ntruees443ep1_keygen | 0.7239 | ±0.005272 | 140 | 0.8582 | ±0.002657 | 80 | 1.705 | ±0.0488 | 50 |
-| ntruees443ep1_encrypt | 0.042 | ±0.0008745 | 50 | 0.04503 | ±0.0004905 | 50 | 0.09918 | ±0.006305 | 32600 |
-| ntruees443ep1_decrypt | 0.04088 | ±0.0005983 | 50 | 0.05064 | ±0.0005347 | 80 | 0.138 | ±0.01099 | 2780 |
-| ntruees449ep1_keygen | 0.912 | ±0.008829 | 110 | 1.13 | ±0.00451 | 200 | 2.36 | ±0.1519 | 50 |
-| ntruees449ep1_encrypt | 0.1418 | ±0.001775 | 50 | 0.1588 | ±0.004572 | 50 | 0.4487 | ±0.03735 | 50 |
-| ntruees449ep1_decrypt | 0.1787 | ±0.005028 | 110 | 0.2007 | ±0.001411 | 115 | 0.6183 | ±0.04357 | 88 |
-| ntruees541ep1_keygen | 0.709 | ±0.00574 | 416 | 1.05 | ±0.007288 | 55 | 2.016 | ±0.1354 | 50 |
-| ntruees541ep1_encrypt | 0.07116 | ±0.0007611 | 147 | 0.07689 | ±0.0008017 | 52 | 0.2005 | ±0.01662 | 7258 |
-| ntruees541ep1_decrypt | 0.08589 | ±0.0009115 | 110 | 0.1045 | ±0.0009226 | 50 | 0.3106 | ±0.02562 | 172 |
-| ntruees677ep1_keygen | 1.152 | ±0.00981 | 51 | 1.608 | ±0.007254 | 50 | 3.182 | ±0.07315 | 80 |
-| ntruees677ep1_encrypt | 0.1742 | ±0.001373 | 50 | 0.2054 | ±0.004011 | 80 | 0.5881 | ±0.03067 | 50 |
-| ntruees677ep1_decrypt | 0.2705 | ±0.002719 | 560 | 0.3249 | ±0.001881 | 50 | 1.047 | ±0.08623 | 50 |
-| ntruees1087ep1_keygen | 1.8 | ±0.01178 | 170 | 2.661 | ±0.00826 | 54 | 4.91 | ±0.08407 | 81 |
-| ntruees1087ep1_encrypt | 0.1417 | ±0.008618 | 140 | 0.1562 | ±0.001484 | 140 | 0.4486 | ±0.03395 | 50 |
-| ntruees1087ep1_decrypt | 0.1856 | ±0.002178 | 50 | 0.2263 | ±0.001669 | 114 | 0.7641 | ±0.05133 | 50 |
-| ntruees1087ep2_keygen | 1.9 | ±0.04097 | 50 | 2.788 | ±0.01074 | 140 | 5.184 | ±0.2943 | 50 |
-| ntruees1087ep2_encrypt | 0.2161 | ±0.003448 | 80 | 0.2495 | ±0.002322 | 50 | 0.7646 | ±0.02878 | 112 |
-| ntruees1087ep2_decrypt | 0.3254 | ±0.001143 | 320 | 0.3941 | ±0.002412 | 80 | 1.388 | ±0.1139 | 55 |
-| ntruees1171ep1_keygen | 2.046 | ±0.007211 | 53 | 2.991 | ±0.01417 | 50 | 6.048 | ±0.4397 | 50 |
-| ntruees1171ep1_encrypt | 0.2074 | ±0.001882 | 53 | 0.2388 | ±0.002055 | 80 | 0.7332 | ±0.05119 | 50 |
-| ntruees1171ep1_decrypt | 0.3097 | ±0.0002768 | 170 | 0.3776 | ±0.002803 | 85 | 1.308 | ±0.09014 | 50 |
-| ntruees1499ep1_keygen | 3.604 | ±0.2413 | 50 | 4.35 | ±0.01322 | 85 | 9.092 | ±0.1852 | 110 |
-| ntruees1499ep1_encrypt | 0.2132 | ±0.001169 | 89 | 0.2484 | ±0.002014 | 170 | 0.7275 | ±0.05999 | 59 |
-| ntruees1499ep1_decrypt | 0.3157 | ±0.02472 | 50 | 0.3927 | ±0.01566 | 50 | 1.24 | ±0.03257 | 50 |
-
-`EES1171EP1` was absent from the earlier 2026-05-08 sweep; as of the
-2026-06-11 sweep it is covered by the `ntruees1171ep1_*` rows wired into
-`scripts/bench_all_pk_full.sh` and appears in the table above.
+| ntruees401ep1_keygen | 0.7537 | ±0.000746 | 80 | 0.9664 | ±0.01377 | 50 | 1.831 | ±0.04926 | 110 |
+| ntruees401ep1_encrypt | 0.09678 | ±8.825e-05 | 86 | 0.1106 | ±0.001106 | 113 | 0.2963 | ±0.02016 | 50 |
+| ntruees401ep1_decrypt | 0.1333 | ±0.0001171 | 50 | 0.1615 | ±0.008727 | 50 | 0.4827 | ±0.03273 | 80 |
+| ntruees443ep1_keygen | 0.7005 | ±0.0008643 | 50 | 0.8692 | ±0.002609 | 50 | 1.712 | ±0.02397 | 80 |
+| ntruees443ep1_encrypt | 0.04115 | ±3.726e-05 | 87 | 0.04498 | ±0.0004609 | 170 | 0.1017 | ±0.007294 | 140 |
+| ntruees443ep1_decrypt | 0.04026 | ±5.079e-05 | 50 | 0.04995 | ±0.000548 | 50 | 0.1371 | ±0.0113 | 116 |
+| ntruees449ep1_keygen | 0.8905 | ±0.001233 | 171 | 1.13 | ±0.004091 | 50 | 2.184 | ±0.05105 | 50 |
+| ntruees449ep1_encrypt | 0.1358 | ±0.0001282 | 230 | 0.1556 | ±0.001178 | 170 | 0.4387 | ±0.02869 | 50 |
+| ntruees449ep1_decrypt | 0.1658 | ±0.0002389 | 50 | 0.1974 | ±0.001387 | 50 | 0.6227 | ±0.05111 | 53 |
+| ntruees541ep1_keygen | 0.6922 | ±0.001709 | 50 | 1.058 | ±0.004782 | 80 | 1.962 | ±0.1165 | 50 |
+| ntruees541ep1_encrypt | 0.0697 | ±6.839e-05 | 50 | 0.07611 | ±0.0008384 | 51 | 0.1971 | ±0.01619 | 83 |
+| ntruees541ep1_decrypt | 0.0839 | ±5.857e-05 | 140 | 0.1028 | ±0.004942 | 80 | 0.3105 | ±0.02535 | 80 |
+| ntruees677ep1_keygen | 1.126 | ±0.02177 | 50 | 1.621 | ±0.005894 | 114 | 3.337 | ±0.2777 | 53 |
+| ntruees677ep1_encrypt | 0.174 | ±0.0002022 | 50 | 0.2017 | ±0.001649 | 81 | 0.5875 | ±0.02286 | 50 |
+| ntruees677ep1_decrypt | 0.267 | ±9.053e-05 | 50 | 0.3252 | ±0.002043 | 140 | 1.023 | ±0.01056 | 80 |
+| ntruees1087ep1_keygen | 1.788 | ±0.02263 | 50 | 2.687 | ±0.006388 | 50 | 5.066 | ±0.1294 | 50 |
+| ntruees1087ep1_encrypt | 0.138 | ±0.0002103 | 50 | 0.1564 | ±0.001568 | 110 | 0.4467 | ±0.005431 | 50 |
+| ntruees1087ep1_decrypt | 0.1845 | ±0.0001204 | 50 | 0.2307 | ±0.001816 | 80 | 0.7537 | ±0.01328 | 80 |
+| ntruees1087ep2_keygen | 1.888 | ±0.02881 | 83 | 2.812 | ±0.009131 | 80 | 5.416 | ±0.2621 | 50 |
+| ntruees1087ep2_encrypt | 0.2139 | ±0.0002769 | 50 | 0.2483 | ±0.002281 | 84 | 0.7621 | ±0.009195 | 50 |
+| ntruees1087ep2_decrypt | 0.3237 | ±0.0001201 | 174 | 0.4009 | ±0.002749 | 50 | 1.37 | ±0.01687 | 52 |
+| ntruees1171ep1_keygen | 2.07 | ±0.04132 | 80 | 3.015 | ±0.01813 | 110 | 6.106 | ±0.4724 | 50 |
+| ntruees1171ep1_encrypt | 0.2066 | ±0.00017 | 80 | 0.2412 | ±0.002981 | 140 | 0.7426 | ±0.04789 | 50 |
+| ntruees1171ep1_decrypt | 0.3095 | ±0.0001289 | 54 | 0.3806 | ±0.003106 | 170 | 1.289 | ±0.02434 | 50 |
+| ntruees1499ep1_keygen | 3.17 | ±0.06417 | 50 | 4.374 | ±0.01748 | 50 | 9.638 | ±0.1622 | 290 |
+| ntruees1499ep1_encrypt | 0.2129 | ±0.0001693 | 111 | 0.2413 | ±0.002655 | 53 | 0.7198 | ±0.01159 | 51 |
+| ntruees1499ep1_decrypt | 0.3038 | ±0.0007624 | 530 | 0.3775 | ±0.003951 | 50 | 1.27 | ±0.01801 | 80 |
 
 ## Benchmark Discussion
 
 - `ML-KEM` scales roughly with parameter size and is stable across runs; CIs
-  are tight on Tolkien and Dennard, while Heinlein needs thousands of rounds
+  are tight on Tolkien and Twilight, while Heinlein needs thousands of rounds
   to converge on its noisier silicon but still meets the 10% target.
 - `ML-DSA` verify is consistently cheaper than sign at each level, as expected.
 - `ML-DSA` signing variance is driven by rejection behavior in the signer loop.
-  In the 2026-06-11 sweep this manifests as *non-monotone absolute timings
+  In the 2026-08-11 sweep this manifests as *non-monotone absolute timings
   across parameter sets* — `mldsa65_sign` lands at 0.332 ms on Tolkien while
   `mldsa87_sign` lands at 0.214 ms — even though the per-iteration cost
   grows monotonically with parameter size. The CI on each individual
