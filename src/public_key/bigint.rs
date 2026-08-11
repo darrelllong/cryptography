@@ -814,10 +814,9 @@ impl BigUint {
         }
     }
 
-    fn limb_or_zero(&self, idx: usize) -> u64 {
-        self.limbs.get(idx).copied().unwrap_or(0)
-    }
-
+    /// Legacy entry point kept for the two callers that still hand in
+    /// `BigUint`s of unknown shape ([`MontgomeryCtx::mul_mont`] and friends):
+    /// pads the operands to the modulus width and defers to the slice kernels.
     fn montgomery_mul_odd_with_workspace(
         lhs: &Self,
         rhs: &Self,
@@ -827,83 +826,238 @@ impl BigUint {
     ) -> Self {
         debug_assert!(modulus.is_odd(), "Montgomery path requires an odd modulus");
         let width = modulus.limbs.len();
-        // `2 * width` limbs hold the schoolbook product. The extra two limbs
-        // are carry headroom so neither pass can run off the end.
-        let needed = width * 2 + 2;
-        if workspace.len() != needed {
+        debug_assert!(
+            lhs.limbs.len() <= width && rhs.limbs.len() <= width,
+            "Montgomery operands must be reduced residues"
+        );
+
+        // Layout: `[scratch 2w+1 | lhs w | rhs w | out w]`.
+        let needed = mont_scratch_limbs(width) + 3 * width;
+        if workspace.len() < needed {
             workspace.resize(needed, 0);
-        } else {
-            workspace.fill(0);
         }
+        let (scratch, rest) = workspace.split_at_mut(mont_scratch_limbs(width));
+        let (lhs_pad, rest) = rest.split_at_mut(width);
+        let (rhs_pad, out) = rest.split_at_mut(width);
+        copy_padded(lhs_pad, &lhs.limbs);
+        copy_padded(rhs_pad, &rhs.limbs);
 
-        // First pass: accumulate the ordinary product `lhs * rhs`.
-        for i in 0..width {
-            let lhs_limb = lhs.limb_or_zero(i);
-            let mut carry = 0u128;
-            for j in 0..width {
-                let idx = i + j;
-                let acc = u128::from(workspace[idx])
-                    + u128::from(lhs_limb) * u128::from(rhs.limb_or_zero(j))
-                    + carry;
-                workspace[idx] = low_u64(acc);
-                carry = acc >> 64;
-            }
+        mont_mul(
+            &mut out[..width],
+            lhs_pad,
+            rhs_pad,
+            &modulus.limbs,
+            n0_inv,
+            scratch,
+        );
 
-            let mut idx = i + width;
-            while carry != 0 {
-                let acc = u128::from(workspace[idx]) + carry;
-                workspace[idx] = low_u64(acc);
-                carry = acc >> 64;
-                idx += 1;
-            }
-        }
-
-        // Second pass: Montgomery reduction. Choose `m` so the current low
-        // limb cancels modulo `2^64`, then add `m * modulus`. Each round
-        // zeros one more low limb; after `width` rounds the discarded low half
-        // accounts for the implicit division by `R = 2^(64w)`, so the high
-        // half is `lhs * rhs * R^-1 mod n`. That is why copying out
-        // `workspace[width..]` yields the Montgomery product.
-        for i in 0..width {
-            let m = workspace[i].wrapping_mul(n0_inv);
-            let mut carry = 0u128;
-            for j in 0..width {
-                let idx = i + j;
-                let acc = u128::from(workspace[idx])
-                    + u128::from(m) * u128::from(modulus.limb_or_zero(j))
-                    + carry;
-                workspace[idx] = low_u64(acc);
-                carry = acc >> 64;
-            }
-
-            let mut idx = i + width;
-            while carry != 0 {
-                let acc = u128::from(workspace[idx]) + carry;
-                workspace[idx] = low_u64(acc);
-                carry = acc >> 64;
-                idx += 1;
-            }
-        }
-
-        let mut out = Self {
-            limbs: workspace[width..=(width * 2)].to_vec(),
+        let mut result = Self {
+            limbs: out[..width].to_vec(),
         };
-        out.normalize();
-        // Montgomery reduction leaves a value in `[0, 2n)`, so at most one
-        // subtraction is needed to return to the canonical residue range.
-        if out >= *modulus {
-            out.sub_assign_ref(modulus);
-        }
-        out
+        result.normalize();
+        result
     }
 }
 
+/// Scratch limbs the `mont_*` kernels need for a `width`-limb modulus: a
+/// `2 * width` product plus one limb so the reduction's final carry has a
+/// home.
+#[inline]
+fn mont_scratch_limbs(width: usize) -> usize {
+    width * 2 + 1
+}
+
+/// Copy `src` into `dst`, zero-padding the (little-endian) high limbs.
+#[inline]
+fn copy_padded(dst: &mut [u64], src: &[u64]) {
+    debug_assert!(src.len() <= dst.len(), "operand wider than the modulus");
+    dst[..src.len()].copy_from_slice(src);
+    dst[src.len()..].fill(0);
+}
+
+/// Montgomery multiplication on fixed-width limb slices:
+/// `out = lhs * rhs * R^-1 mod n` with `R = 2^(64 * width)`, canonical
+/// (`out < n`).
+///
+/// Reference: Montgomery, *Modular Multiplication Without Trial Division*,
+/// Math. Comp. 44 (1985). This is the "separated operand scanning" shape from
+/// Koç, Acar & Kaliski, *Analyzing and Comparing Montgomery Multiplication
+/// Algorithms* (IEEE Micro 16(3), 1996): a full schoolbook product followed by
+/// one reduction pass, which keeps each phase auditable on its own.
+///
+/// `lhs` and `rhs` are `width`-limb reduced residues; `scratch` holds the
+/// double-width product ([`mont_scratch_limbs`]). `out` may not alias the
+/// inputs (enforced by borrow rules at every call site).
+fn mont_mul(
+    out: &mut [u64],
+    lhs: &[u64],
+    rhs: &[u64],
+    modulus: &[u64],
+    n0_inv: u64,
+    scratch: &mut [u64],
+) {
+    let width = modulus.len();
+    debug_assert!(lhs.len() == width && rhs.len() == width && out.len() == width);
+    let scratch = &mut scratch[..mont_scratch_limbs(width)];
+    scratch.fill(0);
+
+    // Schoolbook product `lhs * rhs` into the low `2 * width` limbs. The
+    // carry out of each row lands one limb past the row end and cannot ripple
+    // further: that limb was last touched as the previous row's carry, so
+    // adding a fresh carry to it stays below `2^64`.
+    for i in 0..width {
+        let lhs_limb = u128::from(lhs[i]);
+        let mut carry = 0u128;
+        for j in 0..width {
+            let acc = u128::from(scratch[i + j]) + lhs_limb * u128::from(rhs[j]) + carry;
+            scratch[i + j] = low_u64(acc);
+            carry = acc >> 64;
+        }
+        scratch[i + width] = low_u64(carry);
+    }
+
+    mont_redc(out, modulus, n0_inv, scratch);
+}
+
+/// Montgomery squaring: `out = value^2 * R^-1 mod n`, canonical.
+///
+/// The product pass computes each cross term `value[i] * value[j]` (`i < j`)
+/// once, doubles the whole partial sum with a single shift pass, then adds
+/// the `value[i]^2` diagonal. Doubling as a separate pass sidesteps the
+/// overflow in accumulating `2 * a_i * a_j` directly — that product can
+/// exceed `u128` once the running carry joins it — and cuts the
+/// multiplication count from `width^2` to `width * (width + 1) / 2`, which
+/// matters because squarings are the bulk of an exponentiation ladder.
+fn mont_sqr(out: &mut [u64], value: &[u64], modulus: &[u64], n0_inv: u64, scratch: &mut [u64]) {
+    let width = modulus.len();
+    debug_assert!(value.len() == width && out.len() == width);
+    let scratch = &mut scratch[..mont_scratch_limbs(width)];
+    scratch.fill(0);
+
+    // Cross terms, each pair once: rows shorten as `i` rises.
+    for i in 0..width {
+        let value_limb = u128::from(value[i]);
+        let mut carry = 0u128;
+        for j in (i + 1)..width {
+            let acc = u128::from(scratch[i + j]) + value_limb * u128::from(value[j]) + carry;
+            scratch[i + j] = low_u64(acc);
+            carry = acc >> 64;
+        }
+        scratch[i + width] = low_u64(carry);
+    }
+
+    // Double the cross-term sum: one bit shifted through `2 * width` limbs.
+    let mut carry = 0u64;
+    for limb in scratch[..width * 2].iter_mut() {
+        let next = *limb >> 63;
+        *limb = (*limb << 1) | carry;
+        carry = next;
+    }
+    debug_assert!(carry == 0, "doubled cross terms stay under 2^(128w - 1)");
+
+    // Diagonal `value[i]^2` terms, rippling each carry only as far as it
+    // reaches.
+    for (i, &limb) in value.iter().enumerate() {
+        let mut carry = u128::from(limb) * u128::from(limb);
+        let mut idx = i * 2;
+        while carry != 0 {
+            let acc = u128::from(scratch[idx]) + (carry & u128::from(u64::MAX));
+            scratch[idx] = low_u64(acc);
+            carry = (carry >> 64) + (acc >> 64);
+            idx += 1;
+        }
+    }
+
+    mont_redc(out, modulus, n0_inv, scratch);
+}
+
+/// Montgomery reduction (REDC): fold the double-width value in `scratch`
+/// down to `out = scratch * R^-1 mod n`, canonical.
+///
+/// Each round picks `m = scratch[i] * (-n^-1) mod 2^64` so adding
+/// `m * modulus` zeroes limb `i`; after `width` rounds the low half is all
+/// zero and discarding it is the division by `R`. The result before the
+/// final subtraction lies in `[0, 2n)` — `scratch < R*n` guarantees it — so
+/// one conditional subtract restores the canonical range.
+fn mont_redc(out: &mut [u64], modulus: &[u64], n0_inv: u64, scratch: &mut [u64]) {
+    let width = modulus.len();
+
+    // Carry out of each round's row, accumulated at `scratch[i + width]`.
+    // Unlike the product pass this can ripple, so `overflow` tracks the bit
+    // that escapes past the end of the double-width value.
+    let mut overflow = 0u64;
+    for i in 0..width {
+        let m = u128::from(scratch[i].wrapping_mul(n0_inv));
+        let mut carry = 0u128;
+        for j in 0..width {
+            let acc = u128::from(scratch[i + j]) + m * u128::from(modulus[j]) + carry;
+            scratch[i + j] = low_u64(acc);
+            carry = acc >> 64;
+        }
+        debug_assert!(scratch[i] == 0, "REDC round must clear its low limb");
+
+        let acc = u128::from(scratch[i + width]) + u128::from(overflow) + carry;
+        scratch[i + width] = low_u64(acc);
+        overflow = low_u64(acc >> 64);
+    }
+
+    // The reduced value is the high half plus the escaped bit; it is below
+    // `2n`, so at most one subtraction of `n` is needed. Subtract when the
+    // escaped bit is set (the value is at least `R > n`) or the high half
+    // reaches `n`.
+    let high = &scratch[width..width * 2];
+    if overflow != 0 || cmp_limbs(high, modulus) != Ordering::Less {
+        let mut borrow = 0u128;
+        for i in 0..width {
+            let diff = (1u128 << 64) + u128::from(high[i]) - u128::from(modulus[i]) - borrow;
+            out[i] = low_u64(diff);
+            borrow = 1 - (diff >> 64);
+        }
+        debug_assert!(
+            u128::from(overflow) == borrow,
+            "conditional subtract must consume the escaped bit"
+        );
+    } else {
+        out.copy_from_slice(high);
+    }
+}
+
+/// Compare two equal-width little-endian limb slices.
+fn cmp_limbs(lhs: &[u64], rhs: &[u64]) -> Ordering {
+    debug_assert!(lhs.len() == rhs.len());
+    for (&l, &r) in lhs.iter().rev().zip(rhs.iter().rev()) {
+        match l.cmp(&r) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    Ordering::Equal
+}
+
 impl MontgomeryCtx {
+    /// Modulus width in limbs; every kernel buffer is sized from this.
+    fn width(&self) -> usize {
+        self.modulus.limbs.len()
+    }
+
+    /// Grow `workspace` to at least the kernels' scratch size and return it
+    /// as a slice.
+    fn scratch<'a>(&self, workspace: &'a mut Vec<u64>) -> &'a mut [u64] {
+        let needed = mont_scratch_limbs(self.width());
+        if workspace.len() < needed {
+            workspace.resize(needed, 0);
+        }
+        workspace
+    }
+
     fn encode_with_workspace(&self, value: &BigUint, workspace: &mut Vec<u64>) -> BigUint {
         if value.is_zero() {
             return BigUint::zero();
         }
 
+        // Multiplying by `R^2 mod n` inside the reduction yields
+        // `value * R mod n`, the Montgomery form. The reduction also brings
+        // an unreduced `value` into range first.
         BigUint::montgomery_mul_odd_with_workspace(
             &value.modulo(&self.modulus),
             &self.r2_mod,
@@ -913,14 +1067,25 @@ impl MontgomeryCtx {
         )
     }
 
+    /// Convert back from Montgomery form: a bare REDC, since
+    /// `REDC(x) = x * R^-1 mod n` and decoding is exactly multiplication by
+    /// `R^-1`. No product pass needed — the double-width input is just the
+    /// value itself, zero-extended.
     fn decode_with_workspace(&self, value: &BigUint, workspace: &mut Vec<u64>) -> BigUint {
-        BigUint::montgomery_mul_odd_with_workspace(
-            value,
-            &BigUint::one(),
-            &self.modulus,
-            self.n0_inv,
-            workspace,
-        )
+        let width = self.width();
+        debug_assert!(
+            value.limbs.len() <= width,
+            "Montgomery residues never exceed the modulus width"
+        );
+
+        let mut out = vec![0u64; width];
+        let scratch = self.scratch(workspace);
+        copy_padded(scratch, &value.limbs);
+        mont_redc(&mut out, &self.modulus.limbs, self.n0_inv, scratch);
+
+        let mut result = BigUint { limbs: out };
+        result.normalize();
+        result
     }
 
     fn pow_encoded_with_workspace(
@@ -929,105 +1094,147 @@ impl MontgomeryCtx {
         exponent: &BigUint,
         workspace: &mut Vec<u64>,
     ) -> BigUint {
-        if self.modulus == BigUint::one() {
+        if self.modulus.is_one() {
             return BigUint::zero();
         }
 
         let bits = exponent.bits();
+        if bits == 0 {
+            // `x^0 = 1`, and the modulus exceeds one here.
+            return BigUint::one();
+        }
 
-        // Short exponents (e.g. F4 public exponents): plain right-to-left
-        // binary avoids the window table setup cost.
-        if bits <= 64 {
-            let mut result = self.one_mont.clone();
-            let mut power = base_mont.clone();
+        let width = self.width();
+        let modulus = &self.modulus.limbs;
+        let scratch = self.scratch(workspace);
+
+        // The ladder runs on fixed-width buffers with a swap after each step,
+        // so the whole exponentiation performs no allocation and no
+        // intermediate wipes; every buffer that touched secret-derived state
+        // is scrubbed once, on exit.
+        let mut acc = vec![0u64; width];
+        let mut tmp = vec![0u64; width];
+
+        let result = if bits <= 64 {
+            // Short exponents (e.g. F4 public exponents): right-to-left
+            // binary square-and-multiply (Knuth, TAOCP vol. 2, §4.6.3)
+            // avoids the window table setup. The accumulator starts at the
+            // first set bit's power rather than at one, and the final
+            // squaring — whose result no later bit consumes — is skipped.
+            let exponent_word = exponent.limbs[0];
+            let mut power = vec![0u64; width];
+            copy_padded(&mut power, &base_mont.limbs);
+            let mut seeded = false;
 
             for bit in 0..bits {
-                if exponent.bit(bit) {
-                    result = BigUint::montgomery_mul_odd_with_workspace(
-                        &result,
-                        &power,
-                        &self.modulus,
-                        self.n0_inv,
-                        workspace,
-                    );
-                }
-                power = BigUint::montgomery_mul_odd_with_workspace(
-                    &power,
-                    &power,
-                    &self.modulus,
-                    self.n0_inv,
-                    workspace,
-                );
-            }
-
-            return self.decode_with_workspace(&result, workspace);
-        }
-
-        // Fixed 4-bit window, scanned left to right: per window 4 squarings
-        // plus at most one multiply out of a 16-entry power table, versus one
-        // multiply every other bit for the binary ladder (~1.23 vs ~1.5
-        // multiplies per exponent bit; the 14-multiply table amortizes over
-        // any exponent long enough to reach this path).
-        //
-        // Like the rest of the public-key stack this is variable-time: zero
-        // windows skip their multiply, which is why the variable-time lattice
-        // of callers lives under `vt::`.
-        const WINDOW: usize = 4;
-        let mut table = Vec::with_capacity(1 << WINDOW);
-        table.push(self.one_mont.clone());
-        table.push(base_mont.clone());
-        for i in 2..(1 << WINDOW) {
-            let next = BigUint::montgomery_mul_odd_with_workspace(
-                &table[i - 1],
-                base_mont,
-                &self.modulus,
-                self.n0_inv,
-                workspace,
-            );
-            table.push(next);
-        }
-
-        let windows = bits.div_ceil(WINDOW);
-        let mut result: Option<BigUint> = None;
-        for w in (0..windows).rev() {
-            if let Some(acc) = result.as_mut() {
-                for _ in 0..WINDOW {
-                    *acc = BigUint::montgomery_mul_odd_with_workspace(
-                        acc,
-                        acc,
-                        &self.modulus,
-                        self.n0_inv,
-                        workspace,
-                    );
-                }
-            }
-
-            let mut idx = 0usize;
-            for j in (0..WINDOW).rev() {
-                idx = (idx << 1) | usize::from(exponent.bit(w * WINDOW + j));
-            }
-
-            match result.as_mut() {
-                // Top window: seed the accumulator directly instead of
-                // squaring up from one (the top window is non-zero because
-                // `bits` counts up to the most significant set bit).
-                None => result = Some(table[idx].clone()),
-                Some(acc) => {
-                    if idx != 0 {
-                        *acc = BigUint::montgomery_mul_odd_with_workspace(
-                            acc,
-                            &table[idx],
-                            &self.modulus,
-                            self.n0_inv,
-                            workspace,
-                        );
+                if exponent_word >> bit & 1 == 1 {
+                    if seeded {
+                        mont_mul(&mut tmp, &acc, &power, modulus, self.n0_inv, scratch);
+                        core::mem::swap(&mut acc, &mut tmp);
+                    } else {
+                        acc.copy_from_slice(&power);
+                        seeded = true;
                     }
                 }
+                if bit + 1 < bits {
+                    mont_sqr(&mut tmp, &power, modulus, self.n0_inv, scratch);
+                    core::mem::swap(&mut power, &mut tmp);
+                }
             }
-        }
 
-        let result = result.unwrap_or_else(|| self.one_mont.clone());
-        self.decode_with_workspace(&result, workspace)
+            crate::ct::zeroize_slice(&mut power);
+            debug_assert!(seeded, "bits counts up to a set bit");
+            acc
+        } else {
+            // Fixed 4-bit window, scanned left to right (the k-ary method:
+            // Knuth, TAOCP vol. 2, §4.6.3; HAC algorithm 14.82). Per window:
+            // four squarings plus at most one multiply out of a 16-entry
+            // power table, ~1.23 multiplies per exponent bit against ~1.5
+            // for binary; the 15-step table amortizes over any exponent long
+            // enough to reach this path. A sliding window would shave a few
+            // percent more at the cost of variable-length window parsing;
+            // the fixed window keeps the scan trivially auditable.
+            //
+            // Like the rest of the public-key stack this is variable-time:
+            // zero windows skip their multiply, which is why the
+            // variable-time lattice of callers lives under `vt::`.
+            const WINDOW: usize = 4;
+            const TABLE_LEN: usize = 1 << WINDOW;
+
+            // table[i] holds `base^i` in Montgomery form, contiguously:
+            // entry `i` at limbs `i * width..(i + 1) * width`. Even entries
+            // are squares of earlier entries, odd entries one multiply away.
+            let mut table = vec![0u64; TABLE_LEN * width];
+            copy_padded(&mut table[..width], &self.one_mont.limbs);
+            copy_padded(&mut table[width..2 * width], &base_mont.limbs);
+            for i in 2..TABLE_LEN {
+                let (built, rest) = table.split_at_mut(i * width);
+                let entry = &mut rest[..width];
+                if i % 2 == 0 {
+                    mont_sqr(
+                        entry,
+                        &built[(i / 2) * width..(i / 2 + 1) * width],
+                        modulus,
+                        self.n0_inv,
+                        scratch,
+                    );
+                } else {
+                    mont_mul(
+                        entry,
+                        &built[(i - 1) * width..i * width],
+                        &built[width..2 * width],
+                        modulus,
+                        self.n0_inv,
+                        scratch,
+                    );
+                }
+            }
+
+            let windows = bits.div_ceil(WINDOW);
+            let mut seeded = false;
+            for w in (0..windows).rev() {
+                if seeded {
+                    for _ in 0..WINDOW {
+                        mont_sqr(&mut tmp, &acc, modulus, self.n0_inv, scratch);
+                        core::mem::swap(&mut acc, &mut tmp);
+                    }
+                }
+
+                let mut idx = 0usize;
+                for j in (0..WINDOW).rev() {
+                    idx = (idx << 1) | usize::from(exponent.bit(w * WINDOW + j));
+                }
+
+                let entry = &table[idx * width..(idx + 1) * width];
+                if !seeded {
+                    // Top window: seed the accumulator directly instead of
+                    // squaring up from one (it is non-zero because `bits`
+                    // counts up to the most significant set bit).
+                    acc.copy_from_slice(entry);
+                    seeded = true;
+                } else if idx != 0 {
+                    // Skipping `idx == 0` merely skips a multiply by one;
+                    // performing it would be correct, just wasted work.
+                    mont_mul(&mut tmp, &acc, entry, modulus, self.n0_inv, scratch);
+                    core::mem::swap(&mut acc, &mut tmp);
+                }
+            }
+
+            crate::ct::zeroize_slice(&mut table);
+            acc
+        };
+
+        // Decode with a bare REDC (see `decode_with_workspace`), reusing
+        // `tmp` as the double-width input.
+        let mut acc = result;
+        tmp.resize(mont_scratch_limbs(width), 0);
+        copy_padded(&mut tmp, &acc);
+        mont_redc(&mut acc, modulus, self.n0_inv, &mut tmp);
+
+        crate::ct::zeroize_slice(&mut tmp);
+        let mut result = BigUint { limbs: acc };
+        result.normalize();
+        result
     }
 
     /// Build a Montgomery context for a non-zero odd modulus.
@@ -1047,11 +1254,16 @@ impl MontgomeryCtx {
         r2.set_bit(modulus.limbs.len() * 128);
         let r2_mod = r2.modulo(modulus);
 
-        // `R mod n` is the Montgomery encoding of 1, stored so exponentiation
-        // can start its accumulator in the correct domain.
-        let mut r = BigUint::zero();
-        r.set_bit(modulus.limbs.len() * 64);
-        let one_mont = r.modulo(modulus);
+        // `R mod n`, the Montgomery encoding of 1, seeds exponentiation
+        // accumulators. One REDC derives it from the constant above —
+        // `REDC(R^2 mod n) = R mod n` — instead of a second division.
+        let width = modulus.limbs.len();
+        let mut one_limbs = vec![0u64; width];
+        let mut scratch = vec![0u64; mont_scratch_limbs(width)];
+        copy_padded(&mut scratch, &r2_mod.limbs);
+        mont_redc(&mut one_limbs, &modulus.limbs, n0_inv, &mut scratch);
+        let mut one_mont = BigUint { limbs: one_limbs };
+        one_mont.normalize();
 
         Some(Self {
             modulus: modulus.clone(),
@@ -1158,10 +1370,13 @@ impl MontgomeryCtx {
     }
 
     /// Compute `base^exponent mod modulus` inside the context.
+    ///
+    /// `base` may be unreduced (encoding reduces it); `exponent == 0` yields
+    /// one, and a modulus of one yields zero.
     #[must_use]
     pub fn pow(&self, base: &BigUint, exponent: &BigUint) -> BigUint {
         let mut workspace = Vec::new();
-        let base_mont = self.encode_with_workspace(&base.modulo(&self.modulus), &mut workspace);
+        let base_mont = self.encode_with_workspace(base, &mut workspace);
         let result = self.pow_encoded_with_workspace(&base_mont, exponent, &mut workspace);
         // The workspace held Montgomery intermediates of a (possibly secret)
         // exponentiation; wipe it before the buffer is freed.
@@ -1239,11 +1454,16 @@ fn shr_limbs(value: &[u64], shift: u32) -> Vec<u64> {
     out
 }
 
+/// Compute `-n0^-1 mod 2^64`, the reduction coefficient REDC multiplies by
+/// each round (Dussé & Kaliski, *A Cryptographic Library for the Motorola
+/// DSP56000*, EUROCRYPT '90, where the word-level variant of Montgomery
+/// reduction was introduced).
 fn montgomery_n0_inv(n0: u64) -> u64 {
     debug_assert!(n0 & 1 == 1, "Montgomery path requires an odd modulus");
-    // Newton iteration in Z_(2^64): each step doubles the number of correct
-    // low bits in the inverse of `n0`. Six iterations are enough to converge
-    // to the full 64-bit inverse, and Montgomery reduction wants `-n0^-1`.
+    // Newton/Hensel iteration in Z_(2^64): `inv = 1` inverts `n0` modulo 2
+    // (both are odd), and each step doubles the correct low bits —
+    // 1, 2, 4, 8, 16, 32, 64 — so six steps reach the full word. Montgomery
+    // reduction wants the negation.
     let mut inv = 1u64;
     for _ in 0..6 {
         inv = inv.wrapping_mul(2u64.wrapping_sub(n0.wrapping_mul(inv)));
