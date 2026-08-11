@@ -41,6 +41,10 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   bench and GMP comparison harness moved with the code. rump is the crate's
   only dependency (crates.io package name `rust-mp`, lib name `rump`): same
   author, extracted from this tree, same safety and scrubbing policies.
+- GF(2^m) arithmetic moved to rump as the public `Gf2m` context; the
+  binary-curve code in `ec` now threads one field context instead of a
+  loose (polynomial, degree) pair, and `CurveParams::new_binary` validates
+  the pair against the derived degree.
 - The `random_below` / `random_nonzero_below` / `random_coprime_below` /
   `random_probable_prime` samplers now live in rump, driven by its `Rng`
   trait; `public_key::primes` re-exports them behind the same

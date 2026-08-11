@@ -44,29 +44,23 @@
 //! loop before exposing scalar multiplication to such an environment.
 
 use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::gf2m::{gf2m_add, gf2m_half_trace, gf2m_inv, gf2m_mul, gf2m_sq};
 use crate::public_key::primes::{mod_inverse, random_nonzero_below, sqrt_mod};
 use crate::Csprng;
+use rump::Gf2m;
 
 // ─── Core types ─────────────────────────────────────────────────────────────
 
 /// Discriminates between prime-field and binary-extension-field arithmetic.
 ///
 /// Prime-field curves use Montgomery arithmetic via [`MontgomeryCtx`].
-/// Binary-field curves use polynomial arithmetic over `GF(2^m)`; `poly` is the
-/// irreducible polynomial encoded as a `BigUint` bit-pattern and `degree` is
-/// its degree `m`.
+/// Binary-field curves carry a [`Gf2m`] context: the irreducible polynomial
+/// with its degree derived from it, and the field arithmetic as methods.
 #[derive(Clone, Debug)]
 pub(crate) enum FieldCtx {
     /// Short-Weierstrass curve over a prime field `F_p`.
     Prime(MontgomeryCtx),
     /// Short-Weierstrass curve over a binary extension field GF(2^m).
-    Binary {
-        /// Irreducible polynomial of degree `degree`, encoded as a `BigUint`.
-        poly: BigUint,
-        /// Degree of the extension, i.e. m in GF(2^m).
-        degree: usize,
-    },
+    Binary(Gf2m),
 }
 
 /// Parameters for a short-Weierstrass elliptic curve y² = x³ + ax + b (mod p).
@@ -518,23 +512,16 @@ fn scalar_mul_jacobian(curve: &CurveParams, point: &AffinePoint, k: &BigUint) ->
 // ─── Binary-curve affine arithmetic ─────────────────────────────────────────
 
 /// On-curve check for binary Weierstrass curves: `y² + xy = x³ + ax² + b`.
-fn is_on_curve_binary(
-    x: &BigUint,
-    y: &BigUint,
-    a: &BigUint,
-    b: &BigUint,
-    poly: &BigUint,
-    degree: usize,
-) -> bool {
+fn is_on_curve_binary(x: &BigUint, y: &BigUint, a: &BigUint, b: &BigUint, field: &Gf2m) -> bool {
     // lhs = y² + x·y
-    let y2 = gf2m_sq(y, poly, degree);
-    let xy = gf2m_mul(x, y, poly, degree);
-    let lhs = gf2m_add(&y2, &xy);
+    let y2 = field.square(y);
+    let xy = field.mul(x, y);
+    let lhs = Gf2m::add(&y2, &xy);
     // rhs = x³ + a·x² + b
-    let x2 = gf2m_sq(x, poly, degree);
-    let x3 = gf2m_mul(x, &x2, poly, degree);
-    let ax2 = gf2m_mul(a, &x2, poly, degree);
-    let rhs = gf2m_add(&gf2m_add(&x3, &ax2), b);
+    let x2 = field.square(x);
+    let x3 = field.mul(x, &x2);
+    let ax2 = field.mul(a, &x2);
+    let rhs = Gf2m::add(&Gf2m::add(&x3, &ax2), b);
     lhs == rhs
 }
 
@@ -547,13 +534,7 @@ fn is_on_curve_binary(
 /// xR = λ² + λ + xP + xQ + a
 /// yR = λ(xP + xR) + xR + yP
 /// ```
-fn add_binary(
-    p: &AffinePoint,
-    q: &AffinePoint,
-    a: &BigUint,
-    poly: &BigUint,
-    degree: usize,
-) -> AffinePoint {
+fn add_binary(p: &AffinePoint, q: &AffinePoint, a: &BigUint, field: &Gf2m) -> AffinePoint {
     if p.is_infinity() {
         return q.clone();
     }
@@ -566,13 +547,13 @@ fn add_binary(
     let x2 = &q.x;
     let y2 = &q.y;
 
-    let dx = gf2m_add(x1, x2);
+    let dx = Gf2m::add(x1, x2);
     if dx.is_zero() {
         // x1 = x2: either P = Q (double) or Q = −P (sum = ∞).
-        let dy = gf2m_add(y1, y2);
+        let dy = Gf2m::add(y1, y2);
         return if dy.is_zero() {
             // y1 = y2 and x1 = x2 → P = Q.
-            double_binary(p, a, poly, degree)
+            double_binary(p, a, field)
         } else {
             // Q = −P (since −P = (xP, xP ⊕ yP), so xP ⊕ yP = yQ when xP = xQ
             // and the sum is the identity).
@@ -581,21 +562,21 @@ fn add_binary(
     }
 
     // λ = (y1 + y2) / (x1 + x2)
-    let dy = gf2m_add(y1, y2);
-    let dx_inv = gf2m_inv(&dx, poly, degree).expect("dx is non-zero");
-    let lambda = gf2m_mul(&dy, &dx_inv, poly, degree);
+    let dy = Gf2m::add(y1, y2);
+    let dx_inv = field.inverse(&dx).expect("dx is non-zero");
+    let lambda = field.mul(&dy, &dx_inv);
 
     // xR = λ² + λ + x1 + x2 + a
-    let lambda_sq = gf2m_sq(&lambda, poly, degree);
-    let mut xr = gf2m_add(&lambda_sq, &lambda);
+    let lambda_sq = field.square(&lambda);
+    let mut xr = Gf2m::add(&lambda_sq, &lambda);
     xr.bitxor_assign(x1);
     xr.bitxor_assign(x2);
     xr.bitxor_assign(a);
 
     // yR = λ(x1 + xR) + xR + y1
-    let x1_xr = gf2m_add(x1, &xr);
-    let lambda_term = gf2m_mul(&lambda, &x1_xr, poly, degree);
-    let mut yr = gf2m_add(&lambda_term, &xr);
+    let x1_xr = Gf2m::add(x1, &xr);
+    let lambda_term = field.mul(&lambda, &x1_xr);
+    let mut yr = Gf2m::add(&lambda_term, &xr);
     yr.bitxor_assign(y1);
 
     AffinePoint::new(xr, yr)
@@ -611,7 +592,7 @@ fn add_binary(
 /// ```
 ///
 /// If `xP = 0` then `2P = ∞` (P is its own inverse).
-fn double_binary(p: &AffinePoint, a: &BigUint, poly: &BigUint, degree: usize) -> AffinePoint {
+fn double_binary(p: &AffinePoint, a: &BigUint, field: &Gf2m) -> AffinePoint {
     if p.is_infinity() {
         return AffinePoint::infinity();
     }
@@ -624,20 +605,20 @@ fn double_binary(p: &AffinePoint, a: &BigUint, poly: &BigUint, degree: usize) ->
     let y1 = &p.y;
 
     // λ = x1 + y1 / x1
-    let x1_inv = gf2m_inv(x1, poly, degree).expect("x is non-zero");
-    let y1_over_x1 = gf2m_mul(y1, &x1_inv, poly, degree);
-    let lambda = gf2m_add(x1, &y1_over_x1);
+    let x1_inv = field.inverse(x1).expect("x is non-zero");
+    let y1_over_x1 = field.mul(y1, &x1_inv);
+    let lambda = Gf2m::add(x1, &y1_over_x1);
 
     // xR = λ² + λ + a
-    let lambda_sq = gf2m_sq(&lambda, poly, degree);
-    let mut xr = gf2m_add(&lambda_sq, &lambda);
+    let lambda_sq = field.square(&lambda);
+    let mut xr = Gf2m::add(&lambda_sq, &lambda);
     xr.bitxor_assign(a);
 
     // yR = x1² + (λ + 1)·xR
-    let x1_sq = gf2m_sq(x1, poly, degree);
-    let lambda_plus_1 = gf2m_add(&lambda, &BigUint::one());
-    let lambda_plus_1_xr = gf2m_mul(&lambda_plus_1, &xr, poly, degree);
-    let yr = gf2m_add(&x1_sq, &lambda_plus_1_xr);
+    let x1_sq = field.square(x1);
+    let lambda_plus_1 = Gf2m::add(&lambda, &BigUint::one());
+    let lambda_plus_1_xr = field.mul(&lambda_plus_1, &xr);
+    let yr = Gf2m::add(&x1_sq, &lambda_plus_1_xr);
 
     AffinePoint::new(xr, yr)
 }
@@ -678,7 +659,7 @@ impl LDPoint {
     /// This is the single field inversion paid by a whole scalar
     /// multiplication (versus roughly one per ladder step in the affine
     /// formulation).
-    fn to_affine(&self, poly: &BigUint, degree: usize) -> AffinePoint {
+    fn to_affine(&self, field: &Gf2m) -> AffinePoint {
         if self.is_infinity() {
             return AffinePoint::infinity();
         }
@@ -686,10 +667,12 @@ impl LDPoint {
         if self.z.is_one() {
             return AffinePoint::new(self.x.clone(), self.y.clone());
         }
-        let z_inv = gf2m_inv(&self.z, poly, degree).expect("Z is non-zero off the identity");
-        let z_inv2 = gf2m_sq(&z_inv, poly, degree);
-        let x = gf2m_mul(&self.x, &z_inv, poly, degree);
-        let y = gf2m_mul(&self.y, &z_inv2, poly, degree);
+        let z_inv = field
+            .inverse(&self.z)
+            .expect("Z is non-zero off the identity");
+        let z_inv2 = field.square(&z_inv);
+        let x = field.mul(&self.x, &z_inv);
+        let y = field.mul(&self.y, &z_inv2);
         AffinePoint::new(x, y)
     }
 }
@@ -706,36 +689,36 @@ impl LDPoint {
 ///
 /// When `X₁ = 0` the affine point is 2-torsion (`x = 0`), so `2P = ∞`; this is
 /// signalled automatically by `Z₃ = 0`.
-fn ld_double(p: &LDPoint, a: &BigUint, b: &BigUint, poly: &BigUint, degree: usize) -> LDPoint {
+fn ld_double(p: &LDPoint, a: &BigUint, b: &BigUint, field: &Gf2m) -> LDPoint {
     if p.is_infinity() {
         return LDPoint::infinity();
     }
 
-    let x1_2 = gf2m_sq(&p.x, poly, degree);
-    let z1_2 = gf2m_sq(&p.z, poly, degree);
+    let x1_2 = field.square(&p.x);
+    let z1_2 = field.square(&p.z);
 
     // Z₃ = X₁²·Z₁²
-    let z3 = gf2m_mul(&x1_2, &z1_2, poly, degree);
+    let z3 = field.mul(&x1_2, &z1_2);
     if z3.is_zero() {
         // X₁ = 0 → affine x = 0 → 2P = ∞.
         return LDPoint::infinity();
     }
 
     // b·Z₁⁴
-    let z1_4 = gf2m_sq(&z1_2, poly, degree);
-    let b_z1_4 = gf2m_mul(b, &z1_4, poly, degree);
+    let z1_4 = field.square(&z1_2);
+    let b_z1_4 = field.mul(b, &z1_4);
 
     // X₃ = X₁⁴ + b·Z₁⁴
-    let x1_4 = gf2m_sq(&x1_2, poly, degree);
-    let x3 = gf2m_add(&x1_4, &b_z1_4);
+    let x1_4 = field.square(&x1_2);
+    let x3 = Gf2m::add(&x1_4, &b_z1_4);
 
     // Y₃ = b·Z₁⁴·Z₃ + X₃·(a·Z₃ + Y₁² + b·Z₁⁴)
-    let y1_2 = gf2m_sq(&p.y, poly, degree);
-    let a_z3 = gf2m_mul(a, &z3, poly, degree);
-    let inner = gf2m_add(&gf2m_add(&a_z3, &y1_2), &b_z1_4);
-    let term1 = gf2m_mul(&b_z1_4, &z3, poly, degree);
-    let term2 = gf2m_mul(&x3, &inner, poly, degree);
-    let y3 = gf2m_add(&term1, &term2);
+    let y1_2 = field.square(&p.y);
+    let a_z3 = field.mul(a, &z3);
+    let inner = Gf2m::add(&Gf2m::add(&a_z3, &y1_2), &b_z1_4);
+    let term1 = field.mul(&b_z1_4, &z3);
+    let term2 = field.mul(&x3, &inner);
+    let y3 = Gf2m::add(&term1, &term2);
 
     LDPoint {
         x: x3,
@@ -765,8 +748,7 @@ fn ld_add_mixed(
     qy: &BigUint,
     a: &BigUint,
     b: &BigUint,
-    poly: &BigUint,
-    degree: usize,
+    field: &Gf2m,
 ) -> LDPoint {
     if p.is_infinity() {
         // ∞ + Q = Q, lifted with Z = 1.
@@ -777,53 +759,53 @@ fn ld_add_mixed(
         };
     }
 
-    let z1_2 = gf2m_sq(&p.z, poly, degree);
+    let z1_2 = field.square(&p.z);
 
     // A = Y₁ + y₂·Z₁²
-    let y2_z1_2 = gf2m_mul(qy, &z1_2, poly, degree);
-    let a_int = gf2m_add(&p.y, &y2_z1_2);
+    let y2_z1_2 = field.mul(qy, &z1_2);
+    let a_int = Gf2m::add(&p.y, &y2_z1_2);
 
     // B = X₁ + x₂·Z₁
-    let x2_z1 = gf2m_mul(qx, &p.z, poly, degree);
-    let b_int = gf2m_add(&p.x, &x2_z1);
+    let x2_z1 = field.mul(qx, &p.z);
+    let b_int = Gf2m::add(&p.x, &x2_z1);
 
     if b_int.is_zero() {
         // x₁ = x₂: doubling (Q = P) or identity (Q = −P).
         return if a_int.is_zero() {
-            ld_double(p, a, b, poly, degree)
+            ld_double(p, a, b, field)
         } else {
             LDPoint::infinity()
         };
     }
 
     // C = Z₁·B
-    let c = gf2m_mul(&p.z, &b_int, poly, degree);
+    let c = field.mul(&p.z, &b_int);
 
     // D = B²·(C + a·Z₁²)
-    let b_sq = gf2m_sq(&b_int, poly, degree);
-    let a_z1_2 = gf2m_mul(a, &z1_2, poly, degree);
-    let d = gf2m_mul(&b_sq, &gf2m_add(&c, &a_z1_2), poly, degree);
+    let b_sq = field.square(&b_int);
+    let a_z1_2 = field.mul(a, &z1_2);
+    let d = field.mul(&b_sq, &Gf2m::add(&c, &a_z1_2));
 
     // Z₃ = C²
-    let z3 = gf2m_sq(&c, poly, degree);
+    let z3 = field.square(&c);
 
     // E = A·C
-    let e = gf2m_mul(&a_int, &c, poly, degree);
+    let e = field.mul(&a_int, &c);
 
     // X₃ = A² + D + E
-    let a_sq = gf2m_sq(&a_int, poly, degree);
-    let x3 = gf2m_add(&gf2m_add(&a_sq, &d), &e);
+    let a_sq = field.square(&a_int);
+    let x3 = Gf2m::add(&Gf2m::add(&a_sq, &d), &e);
 
     // F = X₃ + x₂·Z₃
-    let x2_z3 = gf2m_mul(qx, &z3, poly, degree);
-    let f = gf2m_add(&x3, &x2_z3);
+    let x2_z3 = field.mul(qx, &z3);
+    let f = Gf2m::add(&x3, &x2_z3);
 
     // G = (x₂ + y₂)·Z₃²
-    let z3_2 = gf2m_sq(&z3, poly, degree);
-    let g = gf2m_mul(&gf2m_add(qx, qy), &z3_2, poly, degree);
+    let z3_2 = field.square(&z3);
+    let g = field.mul(&Gf2m::add(qx, qy), &z3_2);
 
     // Y₃ = (E + Z₃)·F + G
-    let y3 = gf2m_add(&gf2m_mul(&gf2m_add(&e, &z3), &f, poly, degree), &g);
+    let y3 = Gf2m::add(&field.mul(&Gf2m::add(&e, &z3), &f), &g);
 
     LDPoint {
         x: x3,
@@ -844,8 +826,8 @@ fn scalar_mul_binary(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> A
         return AffinePoint::infinity();
     }
 
-    let (poly, degree) = match &curve.field {
-        FieldCtx::Binary { poly, degree } => (poly, *degree),
+    let field = match &curve.field {
+        FieldCtx::Binary(field) => field,
         FieldCtx::Prime(_) => panic!("scalar_mul_binary called on a prime-field curve"),
     };
     let a = &curve.a;
@@ -855,13 +837,13 @@ fn scalar_mul_binary(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> A
 
     let mut result = LDPoint::infinity();
     for i in (0..k.bits()).rev() {
-        result = ld_double(&result, a, b, poly, degree);
+        result = ld_double(&result, a, b, field);
         if k.bit(i) {
-            result = ld_add_mixed(&result, qx, qy, a, b, poly, degree);
+            result = ld_add_mixed(&result, qx, qy, a, b, field);
         }
     }
 
-    result.to_affine(poly, degree)
+    result.to_affine(field)
 }
 
 // ─── CurveParams ────────────────────────────────────────────────────────────
@@ -922,8 +904,12 @@ impl CurveParams {
     ) -> Option<Self> {
         let (base_x, base_y) = base_point;
         let scalar = MontgomeryCtx::new(&subgroup_order)?;
+        let gf2m = Gf2m::new(modulus_poly)?;
+        if gf2m.degree() != degree {
+            return None;
+        }
         let coord_len = degree.div_ceil(8);
-        let field_prime = modulus_poly.clone();
+        let field_prime = gf2m.modulus().clone();
         Some(Self {
             p: field_prime,
             a: curve_a,
@@ -932,10 +918,7 @@ impl CurveParams {
             h: cofactor,
             gx: base_x,
             gy: base_y,
-            field: FieldCtx::Binary {
-                poly: modulus_poly,
-                degree,
-            },
+            field: FieldCtx::Binary(gf2m),
             _scalar: scalar,
             coord_len,
         })
@@ -951,7 +934,7 @@ impl CurveParams {
     fn prime_ctx(&self) -> &MontgomeryCtx {
         match &self.field {
             FieldCtx::Prime(ctx) => ctx,
-            FieldCtx::Binary { .. } => {
+            FieldCtx::Binary(_) => {
                 panic!("prime_ctx called on a binary-field curve")
             }
         }
@@ -962,7 +945,7 @@ impl CurveParams {
     #[must_use]
     pub fn gf2m_degree(&self) -> Option<usize> {
         match &self.field {
-            FieldCtx::Binary { degree, .. } => Some(*degree),
+            FieldCtx::Binary(field) => Some(field.degree()),
             FieldCtx::Prime(_) => None,
         }
     }
@@ -994,8 +977,8 @@ impl CurveParams {
                 let rhs = field_add(&field_add(&x3, &ax, &self.p), &self.b, &self.p);
                 lhs == rhs
             }
-            FieldCtx::Binary { poly, degree } => {
-                is_on_curve_binary(&point.x, &point.y, &self.a, &self.b, poly, *degree)
+            FieldCtx::Binary(field) => {
+                is_on_curve_binary(&point.x, &point.y, &self.a, &self.b, field)
             }
         }
     }
@@ -1011,9 +994,9 @@ impl CurveParams {
         }
         match &self.field {
             FieldCtx::Prime(_) => AffinePoint::new(point.x.clone(), field_neg(&point.y, &self.p)),
-            FieldCtx::Binary { .. } => {
+            FieldCtx::Binary(_) => {
                 // −P = (xP, xP ⊕ yP)
-                let neg_y = gf2m_add(&point.x, &point.y);
+                let neg_y = Gf2m::add(&point.x, &point.y);
                 AffinePoint::new(point.x.clone(), neg_y)
             }
         }
@@ -1028,7 +1011,7 @@ impl CurveParams {
                 let qj = JacobianPoint::from_affine(q);
                 point_add_jacobian(self, &pj, &qj).to_affine(self)
             }
-            FieldCtx::Binary { poly, degree } => add_binary(p, q, &self.a, poly, *degree),
+            FieldCtx::Binary(field) => add_binary(p, q, &self.a, field),
         }
     }
 
@@ -1040,7 +1023,7 @@ impl CurveParams {
                 let pj = JacobianPoint::from_affine(p);
                 point_double_jacobian(self, &pj).to_affine(self)
             }
-            FieldCtx::Binary { poly, degree } => double_binary(p, &self.a, poly, *degree),
+            FieldCtx::Binary(field) => double_binary(p, &self.a, field),
         }
     }
 
@@ -1051,7 +1034,7 @@ impl CurveParams {
     pub fn scalar_mul(&self, point: &AffinePoint, k: &BigUint) -> AffinePoint {
         match &self.field {
             FieldCtx::Prime(_) => scalar_mul_jacobian(self, point, k),
-            FieldCtx::Binary { .. } => scalar_mul_binary(self, point, k),
+            FieldCtx::Binary(_) => scalar_mul_binary(self, point, k),
         }
     }
 
@@ -1160,13 +1143,14 @@ impl CurveParams {
         }
         let parity = match &self.field {
             FieldCtx::Prime(_) => point.y.is_odd(),
-            FieldCtx::Binary { poly, degree } => {
+            FieldCtx::Binary(field) => {
                 if point.x.is_zero() {
                     false
                 } else {
-                    let x_inv =
-                        gf2m_inv(&point.x, poly, *degree).expect("x is non-zero in binary curve");
-                    let z = gf2m_mul(&point.y, &x_inv, poly, *degree);
+                    let x_inv = field
+                        .inverse(&point.x)
+                        .expect("x is non-zero in binary curve");
+                    let z = field.mul(&point.y, &x_inv);
                     z.is_odd()
                 }
             }
@@ -1220,9 +1204,7 @@ impl CurveParams {
                         let y = self.field_sqrt_from_x(&x, odd_tag)?;
                         Some(AffinePoint::new(x, y))
                     }
-                    FieldCtx::Binary { poly, degree } => {
-                        self.decompress_binary_point(&x, odd_tag, poly, *degree)
-                    }
+                    FieldCtx::Binary(field) => self.decompress_binary_point(&x, odd_tag, field),
                 }
             }
             _ => None,
@@ -1240,8 +1222,7 @@ impl CurveParams {
         &self,
         x: &BigUint,
         odd_z: bool,
-        poly: &BigUint,
-        degree: usize,
+        field: &Gf2m,
     ) -> Option<AffinePoint> {
         if x.is_zero() {
             // x = 0 implies 2P = ∞; decompression for this edge case requires
@@ -1249,21 +1230,21 @@ impl CurveParams {
             return None;
         }
         // β = x + a + b·x⁻²
-        let x_inv = gf2m_inv(x, poly, degree)?;
-        let x_inv2 = gf2m_sq(&x_inv, poly, degree);
-        let b_x_inv2 = gf2m_mul(&self.b, &x_inv2, poly, degree);
-        let beta = gf2m_add(&gf2m_add(x, &self.a), &b_x_inv2);
+        let x_inv = field.inverse(x)?;
+        let x_inv2 = field.square(&x_inv);
+        let b_x_inv2 = field.mul(&self.b, &x_inv2);
+        let beta = Gf2m::add(&Gf2m::add(x, &self.a), &b_x_inv2);
 
         // Solve z² + z = β.
-        let z0 = gf2m_half_trace(&beta, poly, degree);
+        let z0 = field.half_trace(&beta);
         // The two solutions differ by 1; choose by LSB parity.
         let z = if z0.is_odd() == odd_z {
             z0
         } else {
-            gf2m_add(&z0, &BigUint::one())
+            Gf2m::add(&z0, &BigUint::one())
         };
 
-        let y = gf2m_mul(&z, x, poly, degree);
+        let y = field.mul(&z, x);
         let pt = AffinePoint::new(x.clone(), y);
         if self.is_on_curve(&pt) {
             Some(pt)
@@ -2422,7 +2403,7 @@ mod tests {
                 }
                 result.to_affine(curve)
             }
-            FieldCtx::Binary { .. } => {
+            FieldCtx::Binary(_) => {
                 let mut result = AffinePoint::infinity();
                 for i in (0..k.bits()).rev() {
                     result = curve.double(&result);

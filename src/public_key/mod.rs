@@ -61,7 +61,6 @@ pub mod eddsa;
 pub mod edwards_dh;
 pub mod edwards_elgamal;
 pub mod elgamal;
-mod gf2m;
 mod io;
 pub mod ml_dsa;
 pub mod ml_kem;
