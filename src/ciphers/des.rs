@@ -331,7 +331,8 @@ pub type KeySchedule = [u64; 16];
 /// Generate the key schedule from a 64-bit key (including parity bits).
 /// Returns 16 subkeys, each 48 bits (stored in the low 48 bits of u64).
 ///
-/// For decryption, pass the returned schedule reversed to [`des_ecb_block`].
+/// For decryption, pass the returned schedule reversed to the block
+/// function (`Des::decrypt` does this internally).
 #[must_use]
 pub fn key_schedule(key: u64) -> KeySchedule {
     // PC-1: select and permute 56 bits.

@@ -1134,7 +1134,7 @@ fn check_rep_weight<const N: usize>(p: &Poly<N>, params: &EesParams) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NtruEesError {
     /// The plaintext handed to `encrypt` is longer than
-    /// [`EesParams::max_message_bytes`] for the parameter set, so the
+    /// `EesParams::max_message_bytes` for the parameter set, so the
     /// SVES-3 message block (`db` salt bits, length byte, payload, zero
     /// padding) cannot hold it.
     MessageTooLong,
@@ -1143,7 +1143,7 @@ pub enum NtruEesError {
     /// padding, out-of-range length byte) or the deterministic
     /// re-encryption did not reproduce the ciphertext. The cause is
     /// deliberately not distinguished, and is reported only after every
-    /// check has run — see the reaction-oracle notes inside [`decrypt`].
+    /// check has run — see the reaction-oracle notes inside `decrypt`.
     InvalidCiphertext,
 }
 
@@ -1423,7 +1423,7 @@ macro_rules! define_ees_set {
         /// `h = 3 g f^{-1} (mod q)` held in its canonical wire form —
         /// `N` coefficients of `logq = 11` bits each, coefficient 0
         /// first, bits packed least-significant first within each byte,
-        /// [`PUBLIC_KEY_BYTES`] (`ceil(N * 11 / 8)`) bytes in all.
+        /// `PUBLIC_KEY_BYTES` (`ceil(N * 11 / 8)`) bytes in all.
         /// Produced by the namespace type's `keygen` or decoded with
         /// [`Self::from_wire_bytes`].
         #[derive(Clone, Eq, PartialEq)]
@@ -1446,8 +1446,8 @@ macro_rules! define_ees_set {
         /// Ciphertext for this parameter set: the ring element
         /// `e = r h + m' (mod q)` in the same 11-bit-per-coefficient,
         /// least-significant-bit-first packing as the public key —
-        /// [`CIPHERTEXT_BYTES`] bytes, always equal to
-        /// [`PUBLIC_KEY_BYTES`].
+        /// `CIPHERTEXT_BYTES` bytes, always equal to
+        /// `PUBLIC_KEY_BYTES`.
         #[derive(Clone, Eq, PartialEq)]
         pub struct $ct_ty {
             bytes: Vec<u8>,
@@ -1455,7 +1455,7 @@ macro_rules! define_ees_set {
 
         impl $pk_ty {
             /// Decode a public key from its wire bytes. Returns `None`
-            /// unless `bytes` is exactly [`PUBLIC_KEY_BYTES`] long and
+            /// unless `bytes` is exactly `PUBLIC_KEY_BYTES` long and
             /// the unused bits after the `N * 11` coefficient bits in
             /// the final byte are all zero, so every public key has a
             /// single accepted encoding. Coefficient values are not
@@ -1474,7 +1474,7 @@ macro_rules! define_ees_set {
                 })
             }
 
-            /// Canonical wire encoding, [`PUBLIC_KEY_BYTES`] long, as an
+            /// Canonical wire encoding, `PUBLIC_KEY_BYTES` long, as an
             /// owned copy. [`Self::from_wire_bytes`] accepts exactly
             /// this output and reproduces an equal key.
             #[must_use]
@@ -1483,7 +1483,7 @@ macro_rules! define_ees_set {
             }
 
             /// Borrow the canonical wire encoding without copying: the
-            /// same [`PUBLIC_KEY_BYTES`] bytes [`Self::to_wire_bytes`]
+            /// same `PUBLIC_KEY_BYTES` bytes [`Self::to_wire_bytes`]
             /// would return.
             #[must_use]
             pub fn as_bytes(&self) -> &[u8] {
@@ -1493,7 +1493,7 @@ macro_rules! define_ees_set {
 
         impl $sk_ty {
             /// Serialise as the packed trapdoor followed by the embedded
-            /// public key: [`PRIVATE_KEY_BYTES`] `+` [`PUBLIC_KEY_BYTES`]
+            /// public key: `PRIVATE_KEY_BYTES` `+` `PUBLIC_KEY_BYTES`
             /// bytes total. The trapdoor section uses the IEEE 1363.1
             /// packing for this set's trapdoor structure: 2 bits of
             /// signed trinary per coefficient for a dense set, or
@@ -1509,8 +1509,8 @@ macro_rules! define_ees_set {
             }
 
             /// Inverse of [`Self::to_wire_bytes`]. Returns `None`
-            /// unless the length is exactly [`PRIVATE_KEY_BYTES`] `+`
-            /// [`PUBLIC_KEY_BYTES`], the trapdoor section decodes with
+            /// unless the length is exactly `PRIVATE_KEY_BYTES` `+`
+            /// `PUBLIC_KEY_BYTES`, the trapdoor section decodes with
             /// precisely the ones / minus-ones counts this set
             /// prescribes (with clear trailing padding bits and, for
             /// product form, every index below `N`), and the trailing
@@ -1539,7 +1539,7 @@ macro_rules! define_ees_set {
 
         impl $ct_ty {
             /// Decode a ciphertext from wire bytes. Returns `None`
-            /// unless `bytes` is exactly [`CIPHERTEXT_BYTES`] long with
+            /// unless `bytes` is exactly `CIPHERTEXT_BYTES` long with
             /// the bits past the `N * 11` coefficient bits in the final
             /// byte all zero — the same single-accepted-encoding rule
             /// the public-key decoder enforces. Whether the ciphertext
@@ -1558,7 +1558,7 @@ macro_rules! define_ees_set {
                 })
             }
 
-            /// Canonical wire encoding, [`CIPHERTEXT_BYTES`] long, as an
+            /// Canonical wire encoding, `CIPHERTEXT_BYTES` long, as an
             /// owned copy. [`Self::from_wire_bytes`] accepts exactly
             /// this output and reproduces an equal ciphertext.
             #[must_use]
@@ -1567,7 +1567,7 @@ macro_rules! define_ees_set {
             }
 
             /// Borrow the canonical wire encoding without copying: the
-            /// same [`CIPHERTEXT_BYTES`] bytes [`Self::to_wire_bytes`]
+            /// same `CIPHERTEXT_BYTES` bytes [`Self::to_wire_bytes`]
             /// would return.
             #[must_use]
             pub fn as_bytes(&self) -> &[u8] {
@@ -1597,7 +1597,7 @@ macro_rules! define_ees_set {
         /// struct carrying the wire-size constants and the `keygen` /
         /// `encrypt` / `decrypt` entry points, all of which delegate to
         /// the shared routines in
-        /// [`crate::public_key::ntru_ees_core`] with this set's
+        /// `ntru_ees_core` with this set's
         /// constants bound. Variable-time arithmetic; see the core
         /// module's side-channel notes.
         pub struct $type_name;
@@ -1634,12 +1634,12 @@ macro_rules! define_ees_set {
             /// SVES-3 encryption (IEEE 1363.1). Prepends `db` random
             /// salt bits and a length byte to `msg`, zero-pads, masks
             /// the resulting trinary message with an MGF of `r * h`,
-            /// and returns the [`CIPHERTEXT_BYTES`]-byte ciphertext
+            /// and returns the `CIPHERTEXT_BYTES`-byte ciphertext
             /// `e = r h + m' (mod q)`, where the blinding polynomial
             /// `r` is derived deterministically (IGF) from the set OID,
             /// the message, the salt, and the truncated public key.
             /// Errs with [`NtruEesError::MessageTooLong`] when
-            /// `msg.len()` exceeds [`MAX_MESSAGE_BYTES`]; salts are
+            /// `msg.len()` exceeds `MAX_MESSAGE_BYTES`; salts are
             /// redrawn until the masked message carries at least `dm0`
             /// of each trinary value, so the number of bytes drawn from
             /// `rng` is itself variable.
@@ -1661,7 +1661,7 @@ macro_rules! define_ees_set {
             /// [`NtruEesError::InvalidCiphertext`], and only after
             /// every check has run (reaction-oracle hygiene; see the
             /// core `decrypt`). On success returns the plaintext, at
-            /// most [`MAX_MESSAGE_BYTES`] bytes.
+            /// most `MAX_MESSAGE_BYTES` bytes.
             pub fn decrypt(sk: &$sk_ty, ct: &$ct_ty) -> Result<Vec<u8>, NtruEesError> {
                 __ees_core_decrypt::<N>(&sk.t, &sk.pk.bytes, &ct.bytes, &PARAMS)
             }

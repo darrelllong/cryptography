@@ -163,7 +163,8 @@ impl DsaPublicKey {
         self.verify_digest_scalar(&digest_to_scalar(digest, &self.q), signature)
     }
 
-    /// Verify a byte-encoded signature produced by [`DsaPrivateKey::sign_bytes`].
+    /// Verify a byte-encoded signature produced by
+    /// [`DsaPrivateKey::sign_digest_bytes`].
     #[must_use]
     pub fn verify_bytes(&self, digest: &[u8], signature: &[u8]) -> bool {
         let Some(signature) = DsaSignature::from_key_blob(signature) else {

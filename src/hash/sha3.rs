@@ -1,4 +1,4 @@
-//! SHA-3 (Keccak-f[1600]) from FIPS 202.
+//! SHA-3 (Keccak-f\[1600\]) from FIPS 202.
 //!
 //! This module implements the fixed-output SHA-3 family:
 //!
@@ -374,7 +374,7 @@ impl<const RATE: usize> KeccakSponge<RATE> {
 macro_rules! define_sha3 {
     ($name:ident, $rate:expr, $out_len:expr) => {
         /// Fixed-output SHA-3 hasher from FIPS 202: a sponge over the
-        /// 1600-bit (200-byte) Keccak-f[1600] permutation with the SHA-3
+        /// 1600-bit (200-byte) Keccak-f\[1600\] permutation with the SHA-3
         /// domain-separation suffix `0x06`.
         ///
         #[doc = concat!("`", stringify!($name), "` absorbs input at a rate of")]
@@ -480,7 +480,7 @@ define_sha3!(Sha3_512, 72, 64);
 macro_rules! define_shake {
     ($name:ident, $rate:expr) => {
         /// Extendable-output function from FIPS 202: a sponge over the
-        /// 1600-bit (200-byte) Keccak-f[1600] permutation with the SHAKE
+        /// 1600-bit (200-byte) Keccak-f\[1600\] permutation with the SHAKE
         /// domain-separation suffix `0x1f`.
         ///
         #[doc = concat!("`", stringify!($name), "` absorbs and squeezes at a rate of")]

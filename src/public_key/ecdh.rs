@@ -10,7 +10,7 @@
 //! Bob:   S = d_B · Q_A = d_A · d_B · G
 //! ```
 //!
-//! The shared secret returned by [`EcdhPrivateKey::agree`] is the **x-coordinate**
+//! The shared secret returned by [`EcdhPrivateKey::agree_x_coordinate`] is the **x-coordinate**
 //! of the shared point `S`, zero-padded to `coord_len` bytes (per ANSI X9.63 /
 //! SEC 1 v2.0).  Both parties must apply the same KDF to this raw value before
 //! using it as a symmetric key.
@@ -19,8 +19,9 @@
 //!
 //! This module exposes static key pairs for simplicity.  For ephemeral ECDH
 //! (where a fresh key pair is generated per session), call
-//! [`Ecdh::generate`] per handshake, use [`EcdhPrivateKey::agree`], then
-//! discard the ephemeral private key.  ECIES in [`ecies`] combines ephemeral
+//! [`Ecdh::generate`] per handshake, use [`EcdhPrivateKey::agree_x_coordinate`],
+//! then discard the ephemeral private key.  ECIES in
+//! [`ecies`](crate::public_key::ecies) combines ephemeral
 //! ECDH with symmetric encryption into a self-contained encryption scheme.
 //!
 //! ## Side-channel note

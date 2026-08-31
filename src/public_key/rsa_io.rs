@@ -542,13 +542,21 @@ mod tests {
         let q = BigUint::from_u64(53);
         let (_, private) = Rsa::from_primes(&p, &q).expect("valid RSA key");
 
-        let Some(expected) = crate::test_utils::run_openssl(
+        let Some(round_tripped) = crate::test_utils::run_openssl(
             &["pkey", "-inform", "PEM", "-outform", "DER"],
             private.to_pkcs8_pem().as_bytes(),
         ) else {
             return;
         };
 
-        assert_eq!(expected, private.to_pkcs8_der());
+        // Acceptance is the property under test, and OpenSSL's DER output
+        // form for a private key is version-dependent: 3.6 re-emits the
+        // PKCS #8 PrivateKeyInfo, while 3.5 (Ubuntu 26.04) unwraps to the
+        // traditional PKCS #1 RSAPrivateKey. Either way, what comes back
+        // must decode to the same key.
+        let decoded = RsaPrivateKey::from_pkcs8_der(&round_tripped)
+            .or_else(|| RsaPrivateKey::from_pkcs1_der(&round_tripped))
+            .expect("openssl output is PKCS #8 or PKCS #1 DER");
+        assert_eq!(decoded, private);
     }
 }

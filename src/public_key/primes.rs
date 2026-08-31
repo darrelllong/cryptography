@@ -29,7 +29,7 @@ const HARDENED_HASH_ROUNDS: usize = 64;
 
 /// Hardened Miller-Rabin for candidates from an untrusted source.
 ///
-/// Runs the fixed small-prime bases plus [`HARDENED_HASH_ROUNDS`] additional
+/// Runs the fixed small-prime bases plus `HARDENED_HASH_ROUNDS` additional
 /// witnesses derived by hashing the candidate itself. Because those witnesses
 /// are an unpredictable function of `n`, an adversary cannot construct a
 /// composite that is a strong pseudoprime to a base set they can choose in

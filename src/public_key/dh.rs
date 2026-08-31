@@ -31,7 +31,7 @@
 //!
 //! ## Key validation
 //!
-//! [`DhPrivateKey::agree`] verifies that the peer's public key `y` lies in the
+//! [`DhPrivateKey::agree_element`] verifies that the peer's public key `y` lies in the
 //! correct subgroup (`1 < y < p` and `y^q ≡ 1 mod p`) before computing the
 //! shared secret.  Skipping this check enables small-subgroup attacks.
 

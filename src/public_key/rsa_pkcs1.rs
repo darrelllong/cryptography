@@ -1,6 +1,6 @@
 //! PKCS #1 v2.2 wrappers for the raw RSA primitive.
 //!
-//! The raw [`crate::Rsa`] type intentionally exposes only the trapdoor
+//! The raw [`Rsa`](crate::vt::Rsa) type intentionally exposes only the trapdoor
 //! permutation. This module layers the standards-based encodings on top:
 //!
 //! - `RSAES-OAEP` for encryption/decryption

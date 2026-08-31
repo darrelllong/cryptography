@@ -4,7 +4,7 @@
 //! Used in 3GPP LTE as 128-EEA3 (confidentiality) and 128-EIA3 (integrity).
 //!
 //! Architecture (spec §2):
-//!   - LFSR: 16 cells s[0]..s[15], each a 31-bit integer in GF(2³¹−1).
+//!   - LFSR: 16 cells `s[0]..s[15]`, each a 31-bit integer in GF(2³¹−1).
 //!   - Bit reorganization (BR): extracts four 32-bit words X0..X3 from LFSR.
 //!   - Nonlinear function F: two 32-bit memory registers R1, R2; takes
 //!     X0, X1, X2; produces output W.  Uses composite S-box S=(S0,S1,S0,S1)

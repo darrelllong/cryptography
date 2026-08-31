@@ -49,8 +49,20 @@ jobs:
         run: cargo build --all-targets
       - name: Clippy (deny warnings)
         run: cargo clippy --all-targets -- -D warnings
+      # Job logs need authentication to read, but annotations do not, so a
+      # failure names its failing tests where anyone can see them.
       - name: Tests
-        run: cargo test
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          set +e
+          cargo test 2>&1 | tee /tmp/test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -E "^test .* FAILED|panicked at" /tmp/test.log | head -20 | while read -r l; do echo "::error::$l"; done
+          fi
+          exit "$status"
       # The opt-in NEON Keccak path is aarch64-only and runtime-detected;
       # the macos-latest runner is Apple silicon, so the feature's unsafe
       # path actually executes there.

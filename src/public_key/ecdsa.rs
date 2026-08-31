@@ -192,7 +192,8 @@ impl EcdsaPublicKey {
         sum.x.rem(n) == signature.r
     }
 
-    /// Verify a byte-encoded signature produced by [`EcdsaPrivateKey::sign_bytes`].
+    /// Verify a byte-encoded signature produced by
+    /// [`EcdsaPrivateKey::sign_digest_bytes`].
     #[must_use]
     pub fn verify_bytes(&self, digest: &[u8], signature: &[u8]) -> bool {
         let Some(sig) = EcdsaSignature::from_key_blob(signature) else {
