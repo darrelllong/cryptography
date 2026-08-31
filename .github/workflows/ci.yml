@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.rust }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rust: stable
+          - os: macos-latest
+            rust: stable
+          # MSRV — keep in sync with rust-version in Cargo.toml.
+          - os: ubuntu-latest
+            rust: "1.87"
+    defaults:
+      run:
+        working-directory: cryptography
+    steps:
+      # rust-mp is taken from ../rump by path (it is not on crates.io), so
+      # the sibling is checked out next to this repository exactly as it
+      # lives on a development machine — the same layout entropy's CI uses.
+      - uses: actions/checkout@v4
+        with:
+          path: cryptography
+      - uses: actions/checkout@v4
+        with:
+          repository: darrelllong/rump
+          path: rump
+      - name: Install Rust ${{ matrix.rust }}
+        run: rustup toolchain install ${{ matrix.rust }} --profile minimal --component clippy,rustfmt && rustup default ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cryptography
+      - name: fmt
+        if: matrix.rust == 'stable'
+        run: cargo fmt --all -- --check
+      - name: Build (all targets)
+        run: cargo build --all-targets
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test
+      # The opt-in NEON Keccak path is aarch64-only and runtime-detected;
+      # the macos-latest runner is Apple silicon, so the feature's unsafe
+      # path actually executes there.
+      - name: Tests (arm-sha3, aarch64)
+        if: matrix.os == 'macos-latest'
+        run: cargo test --features arm-sha3 hash::sha3
+      - name: Doc build (deny warnings)
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
