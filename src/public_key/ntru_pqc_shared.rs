@@ -439,21 +439,45 @@ macro_rules! define_pqc_kem {
         variant = $variant:ident,
         kat_path = $kat_path:literal $(,)?
     ) => {
+        /// NTRU public key $h \in R_q$ for this parameter set, stored in
+        /// the NIST wire format: the $N - 1$ low coefficients packed
+        /// little-endian at $\log_2 q$ bits each (`PUBLIC_KEY_BYTES`
+        /// bytes in all). The dropped high coefficient is recomputed on
+        /// use from the sum-zero representative convention of round-3
+        /// NTRU.
         #[derive(Clone, Eq, PartialEq)]
         pub struct $pk_ty {
             bytes: [u8; PUBLIC_KEY_BYTES],
         }
 
+        /// NTRU private key for this parameter set, stored packed: the
+        /// trinary trapdoor $f$ and its $S_3$ inverse (5 trits per byte
+        /// each), the packed $h^{-1} \in S_q$, and the trailing 32-byte
+        /// implicit-rejection PRF key — `PRIVATE_KEY_BYTES` bytes in
+        /// all. The buffer is zeroized on drop, and the `Debug` impl
+        /// prints `<redacted>` instead of key material.
         #[derive(Clone, Eq, PartialEq)]
         pub struct $sk_ty {
             bytes: [u8; PRIVATE_KEY_BYTES],
         }
 
+        /// NTRU ciphertext $c = r \cdot h + \text{lift}(m)$ for this
+        /// parameter set, in the NIST wire format: $N - 1$ coefficients
+        /// packed little-endian at $\log_2 q$ bits each
+        /// (`CIPHERTEXT_BYTES` bytes in all). Decapsulation requires
+        /// the unused high padding bits of the final byte to be zero
+        /// and implicitly rejects otherwise.
         #[derive(Clone, Eq, PartialEq)]
         pub struct $ct_ty {
             bytes: [u8; CIPHERTEXT_BYTES],
         }
 
+        /// KEM shared secret for this parameter set: the 32-byte
+        /// SHA3-256 output $K = \text{SHA3-256}(r \mathbin\| m)$, or
+        /// the implicit-rejection key after a decapsulation failure.
+        /// Zeroized on drop; `Debug` prints `<redacted>`. There is
+        /// deliberately no `from_wire_bytes` — shared secrets only
+        /// come out of `encaps` / `decaps`.
         #[derive(Clone, Eq, PartialEq)]
         pub struct $ss_ty {
             bytes: [u8; SHARED_SECRET_BYTES],
@@ -474,6 +498,12 @@ macro_rules! define_pqc_kem {
         }
 
         impl $pk_ty {
+            /// Parse a public key from its NIST wire encoding. Returns
+            /// `None` exactly when
+            /// `bytes.len() != PUBLIC_KEY_BYTES` (this parameter set's
+            /// fixed length); the coefficient content is not otherwise
+            /// validated, so any correctly-sized byte string is
+            /// accepted.
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
                 if bytes.len() != PUBLIC_KEY_BYTES {
@@ -484,11 +514,16 @@ macro_rules! define_pqc_kem {
                 Some(Self { bytes: out })
             }
 
+            /// Copy of the NIST wire encoding, `PUBLIC_KEY_BYTES`
+            /// bytes; round-trips bit-for-bit through
+            /// [`Self::from_wire_bytes`].
             #[must_use]
             pub fn to_wire_bytes(&self) -> [u8; PUBLIC_KEY_BYTES] {
                 self.bytes
             }
 
+            /// Borrow the NIST wire encoding in place — the same bytes
+            /// [`Self::to_wire_bytes`] copies out, without the copy.
             #[must_use]
             pub fn as_bytes(&self) -> &[u8; PUBLIC_KEY_BYTES] {
                 &self.bytes
@@ -496,6 +531,11 @@ macro_rules! define_pqc_kem {
         }
 
         impl $sk_ty {
+            /// Parse a private key from its packed wire form (the
+            /// OWCPA secret key followed by the 32-byte
+            /// implicit-rejection PRF key). Returns `None` exactly when
+            /// `bytes.len() != PRIVATE_KEY_BYTES`; no consistency check
+            /// is run on the trapdoor content.
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
                 if bytes.len() != PRIVATE_KEY_BYTES {
@@ -506,11 +546,18 @@ macro_rules! define_pqc_kem {
                 Some(Self { bytes: out })
             }
 
+            /// Copy the packed private key out as a plain array
+            /// (`PRIVATE_KEY_BYTES` bytes); round-trips through
+            /// [`Self::from_wire_bytes`]. The copy leaves the
+            /// `Drop`-zeroizing wrapper — wiping the returned array
+            /// after use becomes the caller's responsibility.
             #[must_use]
             pub fn to_wire_bytes(&self) -> [u8; PRIVATE_KEY_BYTES] {
                 self.bytes
             }
 
+            /// Borrow the packed private key in place, avoiding the
+            /// unzeroized copy [`Self::to_wire_bytes`] hands out.
             #[must_use]
             pub fn as_bytes(&self) -> &[u8; PRIVATE_KEY_BYTES] {
                 &self.bytes
@@ -518,6 +565,11 @@ macro_rules! define_pqc_kem {
         }
 
         impl $ct_ty {
+            /// Parse a ciphertext from its NIST wire encoding. Returns
+            /// `None` exactly when `bytes.len() != CIPHERTEXT_BYTES`.
+            /// Padding bits are not checked here; a malformed or
+            /// corrupted ciphertext is instead absorbed by
+            /// decapsulation's implicit rejection.
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
                 if bytes.len() != CIPHERTEXT_BYTES {
@@ -528,11 +580,16 @@ macro_rules! define_pqc_kem {
                 Some(Self { bytes: out })
             }
 
+            /// Copy of the NIST wire encoding, `CIPHERTEXT_BYTES`
+            /// bytes; round-trips bit-for-bit through
+            /// [`Self::from_wire_bytes`].
             #[must_use]
             pub fn to_wire_bytes(&self) -> [u8; CIPHERTEXT_BYTES] {
                 self.bytes
             }
 
+            /// Borrow the NIST wire encoding in place — the same bytes
+            /// [`Self::to_wire_bytes`] copies out, without the copy.
             #[must_use]
             pub fn as_bytes(&self) -> &[u8; CIPHERTEXT_BYTES] {
                 &self.bytes
@@ -540,11 +597,17 @@ macro_rules! define_pqc_kem {
         }
 
         impl $ss_ty {
+            /// Copy the 32-byte shared secret out as a plain array. The
+            /// copy leaves the `Drop`-zeroizing wrapper — wiping the
+            /// returned array after use becomes the caller's
+            /// responsibility.
             #[must_use]
             pub fn to_wire_bytes(&self) -> [u8; SHARED_SECRET_BYTES] {
                 self.bytes
             }
 
+            /// Borrow the 32-byte shared secret in place, avoiding the
+            /// unzeroized copy [`Self::to_wire_bytes`] hands out.
             #[must_use]
             pub fn as_bytes(&self) -> &[u8; SHARED_SECRET_BYTES] {
                 &self.bytes
@@ -575,6 +638,12 @@ macro_rules! define_pqc_kem {
             }
         }
 
+        /// Zero-sized namespace for this parameter set's CCA KEM: the
+        /// wire-format length constants plus the [`Self::keygen`] /
+        /// [`Self::encaps`] / [`Self::decaps`] entry points of the
+        /// round-3 NIST NTRU scheme. Carries no state of its own — all
+        /// state travels in the key, ciphertext, and shared-secret
+        /// newtypes.
         pub struct $type_name;
 
         impl $type_name {
@@ -589,6 +658,14 @@ macro_rules! define_pqc_kem {
             /// round-3 NTRU sets).
             pub const SHARED_SECRET_BYTES: usize = SHARED_SECRET_BYTES;
 
+            /// Round-3 NTRU key generation for this parameter set.
+            /// Draws the $(f, g)$ sample seed and then the 32-byte
+            /// implicit-rejection PRF key from `rng` — in that order,
+            /// which the NIST KAT vectors pin down — and derives the
+            /// public key $h = g / f$ in $R_q$ (with the
+            /// variant-specific factor, $3$ for HPS or $3(x - 1)$ for
+            /// HRSS, folded into $g$). The private key packs $f$,
+            /// $f^{-1}$ in $S_3$, $h^{-1}$, and the PRF key.
             pub fn keygen<R: $crate::Csprng>(rng: &mut R) -> ($pk_ty, $sk_ty) {
                 let mut pk = [0u8; PUBLIC_KEY_BYTES];
                 let mut sk = [0u8; PRIVATE_KEY_BYTES];
@@ -602,6 +679,13 @@ macro_rules! define_pqc_kem {
                 ($pk_ty { bytes: pk }, $sk_ty { bytes: sk })
             }
 
+            /// Round-3 NTRU encapsulation against `pk`. Draws this
+            /// parameter set's $(r, m)$ sample seed from `rng`, sets
+            /// the shared secret to the SHA3-256 digest of the packed
+            /// $r \mathbin\| m$, and returns it with the ciphertext
+            /// $c = r \cdot h + \text{lift}(m)$. Decapsulating the
+            /// returned ciphertext under the matching private key
+            /// yields an equal shared secret.
             pub fn encaps<R: $crate::Csprng>(pk: &$pk_ty, rng: &mut R) -> ($ct_ty, $ss_ty) {
                 let mut ct = [0u8; CIPHERTEXT_BYTES];
                 let mut ss = [0u8; SHARED_SECRET_BYTES];
@@ -618,6 +702,15 @@ macro_rules! define_pqc_kem {
                 ($ct_ty { bytes: ct }, $ss_ty { bytes: ss })
             }
 
+            /// Round-3 NTRU decapsulation. Recovers $(r, m)$ from `ct`
+            /// under `sk`'s trapdoor and returns the SHA3-256 digest of
+            /// the packed $r \mathbin\| m$. It never fails: any OWCPA
+            /// consistency failure (non-zero ciphertext padding bits,
+            /// an invalid message, a non-trinary recovered $r$) instead
+            /// yields the deterministic implicit-rejection key
+            /// $\text{SHA3-256}(\text{prf} \mathbin\| c)$, selected by
+            /// a branch-free conditional move so accept and reject
+            /// share one code path.
             pub fn decaps(sk: &$sk_ty, ct: &$ct_ty) -> $ss_ty {
                 let mut ss = [0u8; SHARED_SECRET_BYTES];
                 let mut rm_scratch = [0u8; OWCPA_MSGBYTES];

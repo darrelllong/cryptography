@@ -88,6 +88,7 @@ pub struct EcdsaSignature {
     s: BigUint,
 }
 
+/// Namespace wrapper for the ECDSA construction.
 pub struct Ecdsa;
 
 // ─── EcdsaPublicKey ───────────────────────────────────────────────────────────
@@ -281,6 +282,8 @@ impl EcdsaPublicKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY ECDSA PUBLIC KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(ECDSA_PUBLIC_LABEL, &self.to_key_blob())
@@ -591,6 +594,8 @@ impl EcdsaPrivateKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY ECDSA PRIVATE KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(ECDSA_PRIVATE_LABEL, &self.to_key_blob())
@@ -687,11 +692,16 @@ impl fmt::Debug for EcdsaPrivateKey {
 // ─── EcdsaSignature ───────────────────────────────────────────────────────────
 
 impl EcdsaSignature {
+    /// The `r` component: the x-coordinate of `k·G` reduced mod `n`.
+    /// Valid signatures have `r ∈ [1, n)`.
     #[must_use]
     pub fn r(&self) -> &BigUint {
         &self.r
     }
 
+    /// The `s` component: `k⁻¹·(z + r·d) mod n`.  Signatures produced by
+    /// this crate are canonicalized to low-`s` form (`s ≤ n/2`); verification
+    /// rejects high-`s` signatures to prevent malleability.
     #[must_use]
     pub fn s(&self) -> &BigUint {
         &self.s

@@ -69,6 +69,7 @@ pub struct EcdhPrivateKey {
     q: AffinePoint,
 }
 
+/// Namespace wrapper for the ECDH key-agreement construction.
 pub struct Ecdh;
 
 // ─── EcdhPublicKey ────────────────────────────────────────────────────────────
@@ -179,6 +180,8 @@ impl EcdhPublicKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY ECDH PUBLIC KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(ECDH_PUBLIC_LABEL, &self.to_key_blob())
@@ -396,6 +399,8 @@ impl EcdhPrivateKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY ECDH PRIVATE KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(ECDH_PRIVATE_LABEL, &self.to_key_blob())

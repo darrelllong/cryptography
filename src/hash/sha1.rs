@@ -72,6 +72,14 @@ fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
     state[4] = state[4].wrapping_add(e_reg);
 }
 
+/// Streaming SHA-1 state (FIPS 180-4).
+///
+/// Absorbs input in 64-byte blocks via [`Sha1::update`] and produces a 20-byte
+/// digest via [`Sha1::finalize`]; [`Sha1::digest`] is the one-shot form.
+/// Cloning captures the mid-stream state, so a common prefix can be hashed
+/// once and extended along several branches. SHA-1's collision resistance is
+/// broken (chosen-prefix collisions are practical); use it only for legacy
+/// interoperability or HMAC, per the module warning.
 #[derive(Clone)]
 pub struct Sha1 {
     state: [u32; 5],
@@ -87,9 +95,15 @@ impl Default for Sha1 {
 }
 
 impl Sha1 {
+    /// Compression-function block size in bytes (512 bits). This is the
+    /// rate at which input is consumed and the pad width HMAC keys are
+    /// sized against.
     pub const BLOCK_LEN: usize = 64;
+    /// Digest length in bytes (160 bits).
     pub const OUTPUT_LEN: usize = 20;
 
+    /// Create a fresh hasher: the FIPS 180-4 §5.3.1 initial hash value and
+    /// an empty (zero-length) message.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -100,6 +114,10 @@ impl Sha1 {
         }
     }
 
+    /// Absorb more message bytes. May be called any number of times with
+    /// arbitrary chunk sizes; the digest depends only on the concatenation
+    /// of all chunks. The message length is tracked modulo 2^64 bits, as
+    /// FIPS 180-4 padding requires.
     pub fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             let take = (64 - self.pos).min(data.len());
@@ -116,6 +134,9 @@ impl Sha1 {
         }
     }
 
+    /// Apply the FIPS 180-4 `0x80` / length padding, consume the hasher, and
+    /// return the 20-byte digest (state words serialized big-endian). Keep a
+    /// [`Clone`] beforehand if the stream must continue past this point.
     #[must_use]
     pub fn finalize(mut self) -> [u8; 20] {
         self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
@@ -141,6 +162,8 @@ impl Sha1 {
         out
     }
 
+    /// One-shot convenience: hash `data` in a single call. Equivalent to
+    /// `new` + `update` + `finalize`, returning the 20-byte digest.
     #[must_use]
     pub fn digest(data: &[u8]) -> [u8; 20] {
         let mut h = Self::new();

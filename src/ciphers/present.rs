@@ -244,6 +244,9 @@ pub struct Present80 {
 }
 
 impl Present80 {
+    /// Expand the 80-bit key (big-endian) into the 32 round keys of the
+    /// CHES 2007 schedule, S-boxing the register's top nibble each step
+    /// with a direct (secret-indexed) table lookup.
     #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
         Self {
@@ -251,17 +254,23 @@ impl Present80 {
         }
     }
 
+    /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
+    /// key buffer so the master key survives only as expanded round keys.
     pub fn new_wiping(key: &mut [u8; 10]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 64-bit block (big-endian): 31 SP-network rounds plus a
+    /// final round-key xor. Returns the ciphertext; the input is untouched.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    /// Decrypt one 64-bit block (big-endian) by applying the inverse
+    /// P-layer and inverse S-box layer through the 31 rounds in reverse.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
@@ -274,6 +283,9 @@ pub struct Present80Ct {
 }
 
 impl Present80Ct {
+    /// Expand the 80-bit key (big-endian) into the 32 round keys, with the
+    /// schedule's per-step S-box evaluated in packed ANF form so key
+    /// expansion itself performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
         Self {
@@ -281,17 +293,25 @@ impl Present80Ct {
         }
     }
 
+    /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
+    /// key buffer so the master key survives only as expanded round keys.
     pub fn new_wiping(key: &mut [u8; 10]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 64-bit block (big-endian): the same 31 rounds plus final
+    /// key xor as the fast path, but each S-box layer evaluates the packed
+    /// ANF form of the 4-bit S-box instead of a secret-indexed table.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    /// Decrypt one 64-bit block (big-endian) through the 31 rounds in
+    /// reverse; the inverse S-box layer is evaluated in packed ANF form so
+    /// substitution avoids secret-indexed table reads.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
@@ -304,6 +324,9 @@ pub struct Present128 {
 }
 
 impl Present128 {
+    /// Expand the 128-bit key (big-endian) into the 32 round keys; the
+    /// 128-bit schedule S-boxes the register's top two nibbles each step,
+    /// here via direct (secret-indexed) table lookups.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -311,17 +334,23 @@ impl Present128 {
         }
     }
 
+    /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
+    /// key buffer so the master key survives only as expanded round keys.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 64-bit block (big-endian): 31 SP-network rounds plus a
+    /// final round-key xor. Returns the ciphertext; the input is untouched.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    /// Decrypt one 64-bit block (big-endian) by applying the inverse
+    /// P-layer and inverse S-box layer through the 31 rounds in reverse.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
@@ -334,6 +363,9 @@ pub struct Present128Ct {
 }
 
 impl Present128Ct {
+    /// Expand the 128-bit key (big-endian) into the 32 round keys; the
+    /// schedule's two per-step S-box applications are evaluated in packed
+    /// ANF form so key expansion performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -341,17 +373,25 @@ impl Present128Ct {
         }
     }
 
+    /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
+    /// key buffer so the master key survives only as expanded round keys.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 64-bit block (big-endian): the same 31 rounds plus final
+    /// key xor as the fast path, but each S-box layer evaluates the packed
+    /// ANF form of the 4-bit S-box instead of a secret-indexed table.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_encrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()
     }
 
+    /// Decrypt one 64-bit block (big-endian) through the 31 rounds in
+    /// reverse; the inverse S-box layer is evaluated in packed ANF form so
+    /// substitution avoids secret-indexed table reads.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         present_decrypt_ct(u64::from_be_bytes(*block), &self.round_keys).to_be_bytes()

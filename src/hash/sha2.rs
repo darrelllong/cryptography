@@ -472,6 +472,14 @@ impl Sha2_64Core {
 
 macro_rules! define_sha2_32 {
     ($name:ident, $out_len:expr, $iv:expr) => {
+        /// Streaming SHA-2 hasher from FIPS 180-4, built on the 32-bit
+        /// (eight-`u32`-word, 64-round) compression function over 64-byte
+        /// blocks.
+        ///
+        #[doc = concat!("`", stringify!($name), "` starts from its own FIPS 180-4")]
+        /// §5.3 initial hash value and returns the leading
+        #[doc = concat!(stringify!($out_len), " bytes of the big-endian-serialized")]
+        /// 256-bit final state.
         #[derive(Clone)]
         pub struct $name {
             inner: Sha2_32Core,
@@ -484,9 +492,16 @@ macro_rules! define_sha2_32 {
         }
 
         impl $name {
+            /// Message block size in bytes: this 32-bit SHA-2 line compresses
+            /// 512-bit (64-byte) blocks, and FIPS 180-4 §5.1.1 padding fills
+            /// the final block to that boundary.
             pub const BLOCK_LEN: usize = 64;
+            /// Digest length in bytes: the digest keeps the leading
+            #[doc = concat!(stringify!($out_len), " bytes of the 32-byte final state.")]
             pub const OUTPUT_LEN: usize = $out_len;
 
+            /// Begin hashing from this variant's FIPS 180-4 §5.3 initial hash
+            /// value, with an empty block buffer and a zero message length.
             #[must_use]
             pub fn new() -> Self {
                 Self {
@@ -494,15 +509,24 @@ macro_rules! define_sha2_32 {
                 }
             }
 
+            /// Absorb `data` into the running hash, buffering any partial
+            /// 64-byte block; splitting a message across calls produces the
+            /// same digest as hashing it in one call.
             pub fn update(&mut self, data: &[u8]) {
                 self.inner.update(data);
             }
 
+            /// Consume the hasher: apply FIPS 180-4 §5.1.1 padding (a `0x80`
+            /// byte, zeros, and the 64-bit big-endian message bit length),
+            /// compress the final block, and return the digest.
             #[must_use]
             pub fn finalize(self) -> [u8; $out_len] {
                 self.inner.finalize::<$out_len>()
             }
 
+            /// One-shot hash of `data`, equivalent to `new` + `update` +
+            /// `finalize`; returns a fixed-size array rather than the `Vec`
+            /// of the `Digest::digest` trait helper.
             #[must_use]
             pub fn digest(data: &[u8]) -> [u8; $out_len] {
                 let mut h = Self::new();
@@ -542,6 +566,15 @@ macro_rules! define_sha2_32 {
 
 macro_rules! define_sha2_64 {
     ($name:ident, $out_len:expr, $iv:expr) => {
+        /// Streaming SHA-2 hasher from FIPS 180-4, built on the 64-bit
+        /// (eight-`u64`-word, 80-round) compression function over 128-byte
+        /// blocks.
+        ///
+        #[doc = concat!("`", stringify!($name), "` starts from its own FIPS 180-4")]
+        /// §5.3 initial hash value and returns the leading
+        #[doc = concat!(stringify!($out_len), " bytes of the big-endian-serialized")]
+        /// 512-bit final state; the distinct initial values keep the
+        /// truncated variants domain-separated from SHA-512.
         #[derive(Clone)]
         pub struct $name {
             inner: Sha2_64Core,
@@ -554,9 +587,16 @@ macro_rules! define_sha2_64 {
         }
 
         impl $name {
+            /// Message block size in bytes: this 64-bit SHA-2 line compresses
+            /// 1024-bit (128-byte) blocks, and FIPS 180-4 §5.1.2 padding fills
+            /// the final block to that boundary.
             pub const BLOCK_LEN: usize = 128;
+            /// Digest length in bytes: the digest keeps the leading
+            #[doc = concat!(stringify!($out_len), " bytes of the 64-byte final state.")]
             pub const OUTPUT_LEN: usize = $out_len;
 
+            /// Begin hashing from this variant's FIPS 180-4 §5.3 initial hash
+            /// value, with an empty block buffer and a zero message length.
             #[must_use]
             pub fn new() -> Self {
                 Self {
@@ -564,15 +604,24 @@ macro_rules! define_sha2_64 {
                 }
             }
 
+            /// Absorb `data` into the running hash, buffering any partial
+            /// 128-byte block; splitting a message across calls produces the
+            /// same digest as hashing it in one call.
             pub fn update(&mut self, data: &[u8]) {
                 self.inner.update(data);
             }
 
+            /// Consume the hasher: apply FIPS 180-4 §5.1.2 padding (a `0x80`
+            /// byte, zeros, and the 128-bit big-endian message bit length),
+            /// compress the final block, and return the digest.
             #[must_use]
             pub fn finalize(self) -> [u8; $out_len] {
                 self.inner.finalize::<$out_len>()
             }
 
+            /// One-shot hash of `data`, equivalent to `new` + `update` +
+            /// `finalize`; returns a fixed-size array rather than the `Vec`
+            /// of the `Digest::digest` trait helper.
             #[must_use]
             pub fn digest(data: &[u8]) -> [u8; $out_len] {
                 let mut h = Self::new();

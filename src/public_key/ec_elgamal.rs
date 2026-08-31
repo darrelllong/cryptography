@@ -89,6 +89,7 @@ pub struct EcElGamalCiphertext {
     c2: AffinePoint,
 }
 
+/// Namespace wrapper for the `EC-ElGamal` construction.
 pub struct EcElGamal;
 
 // ─── EcElGamalPublicKey ───────────────────────────────────────────────────────
@@ -284,6 +285,8 @@ impl EcElGamalPublicKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY EC-ELGAMAL PUBLIC KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(EC_ELGAMAL_PUBLIC_LABEL, &self.to_key_blob())
@@ -502,6 +505,8 @@ impl EcElGamalPrivateKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY EC-ELGAMAL PRIVATE KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(EC_ELGAMAL_PRIVATE_LABEL, &self.to_key_blob())

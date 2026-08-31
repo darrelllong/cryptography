@@ -76,6 +76,7 @@ pub struct EciesPrivateKey {
     q: AffinePoint,
 }
 
+/// Namespace wrapper for the ECIES construction.
 pub struct Ecies;
 
 // ─── EciesPublicKey ───────────────────────────────────────────────────────────
@@ -221,6 +222,8 @@ impl EciesPublicKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY ECIES PUBLIC KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(ECIES_PUBLIC_LABEL, &self.to_key_blob())
@@ -457,6 +460,8 @@ impl EciesPrivateKey {
         })
     }
 
+    /// Encode as PEM text armor over the binary key blob, using the
+    /// `CRYPTOGRAPHY ECIES PRIVATE KEY` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(ECIES_PRIVATE_LABEL, &self.to_key_blob())

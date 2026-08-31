@@ -135,6 +135,12 @@ fn simon_dec(block: &mut [u8], rk: &[u64], n: u32, mask: u64) {
 macro_rules! simon_variant {
     ($Name:ident, $n:expr, $m:expr, $T:literal, $z:expr, $mask:expr,
      $key_len:literal, $blk_len:literal) => {
+        /// One member of the Simon family (Beaulieu et al., NSA, 2013).
+        ///
+        /// The name `Simon{B}_{K}` encodes the block size B and key size K
+        /// in bits; word size, key-word count, round count, and Z sequence
+        /// come from Table 3.1. The struct holds only the expanded round
+        /// keys — one word per Feistel round — and zeroizes them on drop.
         pub struct $Name {
             round_keys: [u64; $T],
         }

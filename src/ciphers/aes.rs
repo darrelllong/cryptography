@@ -1049,6 +1049,8 @@ pub struct Aes128 {
     dec_rk: [u32; 44],
 }
 impl Aes128 {
+    /// Expand the 16-byte key into the 10-round encryption schedule plus the
+    /// equivalent-inverse-cipher decryption schedule (FIPS 197, § 5.2/§ 5.3.5).
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         let enc_rk = expand_128(key);
@@ -1056,15 +1058,21 @@ impl Aes128 {
         make_dec_rk(&enc_rk, &mut dec_rk, 10);
         Self { enc_rk, dec_rk }
     }
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    /// Encrypt one 16-byte block through the 10 T-table rounds. This path is
+    /// keyed-table based and not constant-time; use `Aes128Ct` when that
+    /// matters.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt(block, &self.enc_rk, 10)
     }
+    /// Decrypt one 16-byte block through the 10 inverse T-table rounds
+    /// (not constant-time).
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt(block, &self.dec_rk, 10)
@@ -1077,6 +1085,8 @@ pub struct Aes192 {
     dec_rk: [u32; 52],
 }
 impl Aes192 {
+    /// Expand the 24-byte key into the 12-round encryption schedule plus the
+    /// equivalent-inverse-cipher decryption schedule (FIPS 197, § 5.2/§ 5.3.5).
     #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
         let enc_rk = expand_192(key);
@@ -1084,15 +1094,21 @@ impl Aes192 {
         make_dec_rk(&enc_rk, &mut dec_rk, 12);
         Self { enc_rk, dec_rk }
     }
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 24]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    /// Encrypt one 16-byte block through the 12 T-table rounds. This path is
+    /// keyed-table based and not constant-time; use `Aes192Ct` when that
+    /// matters.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt(block, &self.enc_rk, 12)
     }
+    /// Decrypt one 16-byte block through the 12 inverse T-table rounds
+    /// (not constant-time).
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt(block, &self.dec_rk, 12)
@@ -1105,6 +1121,8 @@ pub struct Aes256 {
     dec_rk: [u32; 60],
 }
 impl Aes256 {
+    /// Expand the 32-byte key into the 14-round encryption schedule plus the
+    /// equivalent-inverse-cipher decryption schedule (FIPS 197, § 5.2/§ 5.3.5).
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let enc_rk = expand_256(key);
@@ -1112,15 +1130,21 @@ impl Aes256 {
         make_dec_rk(&enc_rk, &mut dec_rk, 14);
         Self { enc_rk, dec_rk }
     }
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 32]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    /// Encrypt one 16-byte block through the 14 T-table rounds. This path is
+    /// keyed-table based and not constant-time; use `Aes256Ct` when that
+    /// matters.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt(block, &self.enc_rk, 14)
     }
+    /// Decrypt one 16-byte block through the 14 inverse T-table rounds
+    /// (not constant-time).
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt(block, &self.dec_rk, 14)
@@ -1138,6 +1162,9 @@ pub struct Aes128Ct {
     dec_rk: [u32; 44],
 }
 impl Aes128Ct {
+    /// Expand the 16-byte key for the 10-round constant-time path. `SubWord`
+    /// runs through the Boyar-Peralta boolean S-box circuit, so key setup
+    /// itself performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         let enc_rk = expand_128_bool(key);
@@ -1145,15 +1172,21 @@ impl Aes128Ct {
         make_dec_rk_ct(&enc_rk, &mut dec_rk, 10);
         Self { enc_rk, dec_rk }
     }
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    /// Encrypt one 16-byte block through the 10-round bytewise core. Every
+    /// S-box is computed as a boolean circuit, avoiding secret-dependent
+    /// memory access at a throughput cost versus `Aes128`.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt_ct(block, &self.enc_rk, 10)
     }
+    /// Decrypt one 16-byte block through the 10-round bytewise constant-time
+    /// inverse core (direct inverse rounds; slower than `Aes128`).
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt_ct(block, &self.dec_rk, 10)
@@ -1169,6 +1202,9 @@ pub struct Aes192Ct {
     dec_rk: [u32; 52],
 }
 impl Aes192Ct {
+    /// Expand the 24-byte key for the 12-round constant-time path. `SubWord`
+    /// runs through the Boyar-Peralta boolean S-box circuit, so key setup
+    /// itself performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
         let enc_rk = expand_192_bool(key);
@@ -1176,15 +1212,21 @@ impl Aes192Ct {
         make_dec_rk_ct(&enc_rk, &mut dec_rk, 12);
         Self { enc_rk, dec_rk }
     }
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 24]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    /// Encrypt one 16-byte block through the 12-round bytewise core. Every
+    /// S-box is computed as a boolean circuit, avoiding secret-dependent
+    /// memory access at a throughput cost versus `Aes192`.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt_ct(block, &self.enc_rk, 12)
     }
+    /// Decrypt one 16-byte block through the 12-round bytewise constant-time
+    /// inverse core (direct inverse rounds; slower than `Aes192`).
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt_ct(block, &self.dec_rk, 12)
@@ -1200,6 +1242,9 @@ pub struct Aes256Ct {
     dec_rk: [u32; 60],
 }
 impl Aes256Ct {
+    /// Expand the 32-byte key for the 14-round constant-time path. `SubWord`
+    /// runs through the Boyar-Peralta boolean S-box circuit, so key setup
+    /// itself performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let enc_rk = expand_256_bool(key);
@@ -1207,15 +1252,21 @@ impl Aes256Ct {
         make_dec_rk_ct(&enc_rk, &mut dec_rk, 14);
         Self { enc_rk, dec_rk }
     }
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 32]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
+    /// Encrypt one 16-byte block through the 14-round bytewise core. Every
+    /// S-box is computed as a boolean circuit, avoiding secret-dependent
+    /// memory access at a throughput cost versus `Aes256`.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_encrypt_ct(block, &self.enc_rk, 14)
     }
+    /// Decrypt one 16-byte block through the 14-round bytewise constant-time
+    /// inverse core (direct inverse rounds; slower than `Aes256`).
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         aes_decrypt_ct(block, &self.dec_rk, 14)

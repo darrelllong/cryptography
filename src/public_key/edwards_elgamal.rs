@@ -301,17 +301,27 @@ impl EdwardsElGamalCiphertext {
         Some(Self { c1, c2 })
     }
 
+    /// Encode as PEM text armor over the binary blob, using the
+    /// `CRYPTOGRAPHY EDWARDS-ELGAMAL CIPHERTEXT` label.
     #[must_use]
     pub fn to_pem(&self) -> String {
         pem_wrap(EDWARDS_ELGAMAL_CT_LABEL, &self.to_key_blob())
     }
 
+    /// Decode a ciphertext from the crate-defined PEM label, validating both
+    /// points against `curve`.
+    ///
+    /// Returns `None` if the label does not match, the payload is malformed,
+    /// or either point is neutral, off the curve, or outside the order-`n`
+    /// subgroup.
     #[must_use]
     pub fn from_pem(curve: &TwistedEdwardsCurve, pem: &str) -> Option<Self> {
         let blob = pem_unwrap(EDWARDS_ELGAMAL_CT_LABEL, pem)?;
         Self::from_key_blob(curve, &blob)
     }
 
+    /// Encode as XML with root `<EdwardsElGamalCiphertext>` and the affine
+    /// coordinates as `c1x`/`c1y`/`c2x`/`c2y` elements.
     #[must_use]
     pub fn to_xml(&self) -> String {
         xml_wrap(
@@ -325,6 +335,12 @@ impl EdwardsElGamalCiphertext {
         )
     }
 
+    /// Decode a ciphertext from the XML form produced by [`Self::to_xml`],
+    /// validating both points against `curve`.
+    ///
+    /// Returns `None` if the root element, tag names, or integer encoding is
+    /// invalid, or if either point is neutral, off the curve, or outside the
+    /// order-`n` subgroup.
     #[must_use]
     pub fn from_xml(curve: &TwistedEdwardsCurve, xml: &str) -> Option<Self> {
         let mut fields = xml_unwrap(

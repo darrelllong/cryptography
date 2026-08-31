@@ -152,8 +152,14 @@ impl Polyveck {
 /// ML-DSA parameter sets from FIPS 204.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MlDsaParameterSet {
+    /// ML-DSA-44 (security category 2): matrix dimensions (k, l) = (4, 4);
+    /// 1312-byte public key, 2560-byte private key, 2420-byte signature.
     MlDsa44,
+    /// ML-DSA-65 (security category 3): matrix dimensions (k, l) = (6, 5);
+    /// 1952-byte public key, 4032-byte private key, 3309-byte signature.
     MlDsa65,
+    /// ML-DSA-87 (security category 5): matrix dimensions (k, l) = (8, 7);
+    /// 2592-byte public key, 4896-byte private key, 4627-byte signature.
     MlDsa87,
 }
 
@@ -410,16 +416,24 @@ impl MlDsaPublicKey {
             .as_ref()
     }
 
+    /// The FIPS 204 parameter set this key belongs to. Verification refuses
+    /// a signature whose parameter set differs from the key's.
     #[must_use]
     pub fn parameter_set(&self) -> MlDsaParameterSet {
         self.params
     }
 
+    /// Serialize to the FIPS 204 public-key encoding `rho || t1`
+    /// (`public_key_len()` bytes: 1312/1952/2592 for ML-DSA-44/65/87).
     #[must_use]
     pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.bytes.clone()
     }
 
+    /// Parse a FIPS 204 public key. Only the length is checked here
+    /// (`None` unless exactly `params.public_key_len()` bytes); the key is
+    /// unpacked and the A-matrix expanded lazily on first verification,
+    /// which returns `false` if that expansion fails.
     #[must_use]
     pub fn from_wire_bytes(params: MlDsaParameterSet, bytes: &[u8]) -> Option<Self> {
         if bytes.len() != params.public_key_len() {
@@ -432,6 +446,10 @@ impl MlDsaPublicKey {
         })
     }
 
+    /// Serialize to this crate's self-describing framing: a one-byte
+    /// parameter-set tag followed by the FIPS 204 wire encoding. Unlike
+    /// [`Self::to_wire_bytes`], the result can be parsed without knowing
+    /// the parameter set out of band.
     #[must_use]
     pub fn to_key_blob(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(1 + self.bytes.len());
@@ -440,6 +458,9 @@ impl MlDsaPublicKey {
         out
     }
 
+    /// Parse a blob produced by [`Self::to_key_blob`]. Returns `None` on an
+    /// empty input, an unknown parameter-set tag, or a body whose length
+    /// does not match the tagged parameter set.
     #[must_use]
     pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&id, rest) = blob.split_first()?;
@@ -472,16 +493,26 @@ impl MlDsaPrivateKey {
             .as_ref()
     }
 
+    /// The FIPS 204 parameter set this key belongs to. It fixes the
+    /// signature length produced by signing and the blob framing.
     #[must_use]
     pub fn parameter_set(&self) -> MlDsaParameterSet {
         self.params
     }
 
+    /// Serialize to the FIPS 204 private-key encoding
+    /// `rho || K || tr || s1 || s2 || t0` (`private_key_len()` bytes:
+    /// 2560/4032/4896 for ML-DSA-44/65/87). This is raw secret key
+    /// material; handle the returned buffer accordingly.
     #[must_use]
     pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.bytes.clone()
     }
 
+    /// Parse a FIPS 204 private key. Only the length is checked here
+    /// (`None` unless exactly `params.private_key_len()` bytes); the
+    /// secret vectors are unpacked and NTT-transformed lazily on first
+    /// signing use, which returns `None` if that expansion fails.
     #[must_use]
     pub fn from_wire_bytes(params: MlDsaParameterSet, bytes: &[u8]) -> Option<Self> {
         if bytes.len() != params.private_key_len() {
@@ -494,6 +525,9 @@ impl MlDsaPrivateKey {
         })
     }
 
+    /// Serialize to this crate's self-describing framing: a one-byte
+    /// parameter-set tag followed by the FIPS 204 wire encoding. The
+    /// result contains raw secret key material; handle it accordingly.
     #[must_use]
     pub fn to_key_blob(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(1 + self.bytes.len());
@@ -502,6 +536,9 @@ impl MlDsaPrivateKey {
         out
     }
 
+    /// Parse a blob produced by [`Self::to_key_blob`]. Returns `None` on an
+    /// empty input, an unknown parameter-set tag, or a body whose length
+    /// does not match the tagged parameter set.
     #[must_use]
     pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&id, rest) = blob.split_first()?;
@@ -511,16 +548,26 @@ impl MlDsaPrivateKey {
 }
 
 impl MlDsaSignature {
+    /// The FIPS 204 parameter set this signature was produced under.
+    /// Verification refuses a signature whose parameter set differs from
+    /// the public key's.
     #[must_use]
     pub fn parameter_set(&self) -> MlDsaParameterSet {
         self.params
     }
 
+    /// Serialize to the FIPS 204 signature encoding `c~ || z || h`
+    /// (`signature_len()` bytes: 2420/3309/4627 for ML-DSA-44/65/87).
     #[must_use]
     pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.bytes.clone()
     }
 
+    /// Parse a FIPS 204 signature. Returns `None` if the length is not
+    /// exactly `params.signature_len()` or if the structural decode fails
+    /// (malformed hint encoding: indices out of order or a weight above
+    /// omega). Acceptance here says nothing about validity for any
+    /// message; that is decided by verification.
     #[must_use]
     pub fn from_wire_bytes(params: MlDsaParameterSet, bytes: &[u8]) -> Option<Self> {
         let p = params.profile();
@@ -533,6 +580,9 @@ impl MlDsaSignature {
         })
     }
 
+    /// Serialize to this crate's self-describing framing: a one-byte
+    /// parameter-set tag followed by the FIPS 204 wire encoding, mirroring
+    /// the key-blob format used by the key types.
     #[must_use]
     pub fn to_key_blob(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(1 + self.bytes.len());
@@ -541,6 +591,9 @@ impl MlDsaSignature {
         out
     }
 
+    /// Parse a blob produced by [`Self::to_key_blob`]. Returns `None` on an
+    /// empty input, an unknown parameter-set tag, or a body rejected by
+    /// [`Self::from_wire_bytes`] (wrong length or malformed hint encoding).
     #[must_use]
     pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&id, rest) = blob.split_first()?;

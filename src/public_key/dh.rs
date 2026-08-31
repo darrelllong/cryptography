@@ -85,6 +85,7 @@ pub struct DhPrivateKey {
     y: BigUint,
 }
 
+/// Namespace wrapper for the Diffie-Hellman construction.
 pub struct Dh;
 
 // ─── DhParams ─────────────────────────────────────────────────────────────────
@@ -114,16 +115,19 @@ crate::public_key::io::impl_blob_pem_serialization!(DhParams, DH_PARAMS_LABEL, [
 // ─── DhPublicKey ──────────────────────────────────────────────────────────────
 
 impl DhPublicKey {
+    /// The prime modulus `p`.
     #[must_use]
     pub fn modulus(&self) -> &BigUint {
         &self.p
     }
 
+    /// The prime subgroup order `q` (a divisor of `p − 1`).
     #[must_use]
     pub fn subgroup_order(&self) -> &BigUint {
         &self.q
     }
 
+    /// The generator `g` of the order-`q` subgroup of `Z_p*`.
     #[must_use]
     pub fn generator(&self) -> &BigUint {
         &self.g
@@ -135,6 +139,8 @@ impl DhPublicKey {
         &self.y
     }
 
+    /// Extract the domain parameters `(p, q, g)` as a standalone [`DhParams`],
+    /// suitable for generating further key pairs in the same group.
     #[must_use]
     pub fn params(&self) -> DhParams {
         DhParams {
@@ -180,16 +186,19 @@ crate::public_key::io::impl_blob_pem_serialization!(
 // ─── DhPrivateKey ─────────────────────────────────────────────────────────────
 
 impl DhPrivateKey {
+    /// The prime modulus `p`.
     #[must_use]
     pub fn modulus(&self) -> &BigUint {
         &self.p
     }
 
+    /// The prime subgroup order `q` (a divisor of `p − 1`).
     #[must_use]
     pub fn subgroup_order(&self) -> &BigUint {
         &self.q
     }
 
+    /// The generator `g` of the order-`q` subgroup of `Z_p*`.
     #[must_use]
     pub fn generator(&self) -> &BigUint {
         &self.g
@@ -212,6 +221,8 @@ impl DhPrivateKey {
         }
     }
 
+    /// Extract the domain parameters `(p, q, g)` as a standalone [`DhParams`],
+    /// suitable for generating further key pairs in the same group.
     #[must_use]
     pub fn params(&self) -> DhParams {
         DhParams {

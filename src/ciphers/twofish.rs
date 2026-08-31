@@ -469,6 +469,11 @@ impl TwofishCore {
 
 macro_rules! define_twofish_type {
     ($name:ident, $name_ct:ident, $key_len:expr) => {
+        /// Twofish (AES submission, 1998) fast software path for the key
+        /// size named in the type: 128-bit block, 16 rounds. Key expansion
+        /// precomputes four keyed 256-entry S-box/MDS tables so each
+        /// round's `h()` becomes four secret-indexed lookups and three
+        /// xors; all key-derived material is zeroized on drop.
         pub struct $name {
             core: TwofishCore,
         }
@@ -526,6 +531,11 @@ macro_rules! define_twofish_type {
             }
         }
 
+        /// Constant-time Twofish for the same key size: it skips the keyed
+        /// table precomputation and instead evaluates every `h()` — in the
+        /// key schedule and per round — from the published 4-bit `q0`/`q1`
+        /// building blocks with fixed-scan nibble selection, so no table
+        /// read is indexed by secret data.
         pub struct $name_ct {
             core: TwofishCore,
         }
@@ -589,7 +599,9 @@ define_twofish_type!(Twofish128, Twofish128Ct, 16);
 define_twofish_type!(Twofish192, Twofish192Ct, 24);
 define_twofish_type!(Twofish256, Twofish256Ct, 32);
 
+/// Default Twofish instantiation: alias for [`Twofish128`] (128-bit key).
 pub type Twofish = Twofish128;
+/// Constant-time Twofish-128 alias.
 pub type TwofishCt = Twofish128Ct;
 
 #[cfg(test)]

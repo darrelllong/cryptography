@@ -325,11 +325,15 @@ fn cast_decrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
     out
 }
 
+/// CAST-128 fast software path: 64-bit block Feistel cipher of RFC 2144,
+/// using the direct S-box tables from Appendix A (not constant-time).
 pub struct Cast128 {
     subkeys: Subkeys,
 }
 
 impl Cast128 {
+    /// Expand a full-length 16-byte (128-bit) key into the masking and
+    /// rotation subkeys; the cipher then runs all 16 rounds.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -337,6 +341,9 @@ impl Cast128 {
         }
     }
 
+    /// Expand a variable-length key of 5 to 16 bytes, the CAST5-40 through
+    /// CAST5-128 range of RFC 2144. Keys of 80 bits or less run 12 rounds
+    /// instead of 16. Panics if `key.len()` is outside `5..=16`.
     #[must_use]
     pub fn with_key_bytes(key: &[u8]) -> Self {
         Self {
@@ -344,23 +351,30 @@ impl Cast128 {
         }
     }
 
+    /// Expand the key as `with_key_bytes` does, then wipe the caller-owned
+    /// key buffer. Panics, without wiping, if `key.len()` is outside `5..=16`.
     pub fn with_key_bytes_wiping(key: &mut [u8]) -> Self {
         let out = Self::with_key_bytes(key);
         zeroize_slice(key);
         out
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         zeroize_slice(key);
         out
     }
 
+    /// Encrypt one 8-byte block through the 12 or 16 Feistel rounds selected
+    /// by the key size; not constant-time.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         cast_encrypt(*block, &self.subkeys, false)
     }
 
+    /// Decrypt one 8-byte block by applying the rounds with the subkeys in
+    /// reverse order; not constant-time.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         cast_decrypt(*block, &self.subkeys, false)
@@ -390,11 +404,17 @@ impl Drop for Cast128 {
     }
 }
 
+/// CAST-128 constant-time software path: every S-box lookup scans the whole
+/// 256-entry table with masked selection, so neither the rounds nor the key
+/// schedule perform secret-indexed table reads (slower than `Cast128`).
 pub struct Cast128Ct {
     subkeys: Subkeys,
 }
 
 impl Cast128Ct {
+    /// Expand a full-length 16-byte (128-bit) key into the masking and
+    /// rotation subkeys with fixed-scan S-box lookups; all 16 rounds are
+    /// used.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -402,6 +422,10 @@ impl Cast128Ct {
         }
     }
 
+    /// Expand a variable-length key of 5 to 16 bytes, the CAST5-40 through
+    /// CAST5-128 range of RFC 2144, with fixed-scan S-box lookups. Keys of
+    /// 80 bits or less run 12 rounds instead of 16. Panics if `key.len()` is
+    /// outside `5..=16`.
     #[must_use]
     pub fn with_key_bytes(key: &[u8]) -> Self {
         Self {
@@ -409,23 +433,32 @@ impl Cast128Ct {
         }
     }
 
+    /// Expand the key as `with_key_bytes` does, then wipe the caller-owned
+    /// key buffer. Panics, without wiping, if `key.len()` is outside `5..=16`.
     pub fn with_key_bytes_wiping(key: &mut [u8]) -> Self {
         let out = Self::with_key_bytes(key);
         zeroize_slice(key);
         out
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         zeroize_slice(key);
         out
     }
 
+    /// Encrypt one 8-byte block through the 12 or 16 Feistel rounds selected
+    /// by the key size, with fixed-scan S-box lookups in place of direct
+    /// indexing.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         cast_encrypt(*block, &self.subkeys, true)
     }
 
+    /// Decrypt one 8-byte block by applying the rounds with the subkeys in
+    /// reverse order, with fixed-scan S-box lookups in place of direct
+    /// indexing.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
         cast_decrypt(*block, &self.subkeys, true)
@@ -455,7 +488,9 @@ impl Drop for Cast128Ct {
     }
 }
 
+/// RFC 2144 also names this cipher CAST5; alias for `Cast128`.
 pub type Cast5 = Cast128;
+/// Constant-time CAST5 alias for `Cast128Ct`.
 pub type Cast5Ct = Cast128Ct;
 
 #[cfg(test)]

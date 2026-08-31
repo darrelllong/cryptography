@@ -136,6 +136,14 @@ fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
     state[0] = t;
 }
 
+/// Streaming RIPEMD-160 state (Dobbertin/Bosselaers/Preneel).
+///
+/// Absorbs input in 64-byte blocks via [`Ripemd160::update`] and produces a
+/// 20-byte digest via [`Ripemd160::finalize`]; [`Ripemd160::digest`] is the
+/// one-shot form. Cloning captures the mid-stream state, so a common prefix
+/// can be hashed once and extended along several branches. Prefer a modern
+/// hash for new designs; this exists for legacy interoperability (for
+/// example, Bitcoin's HASH160), per the module warning.
 #[derive(Clone)]
 pub struct Ripemd160 {
     state: [u32; 5],
@@ -151,9 +159,15 @@ impl Default for Ripemd160 {
 }
 
 impl Ripemd160 {
+    /// Compression-function block size in bytes (512 bits). This is the
+    /// rate at which input is consumed and the pad width HMAC keys are
+    /// sized against.
     pub const BLOCK_LEN: usize = 64;
+    /// Digest length in bytes (160 bits).
     pub const OUTPUT_LEN: usize = 20;
 
+    /// Create a fresh hasher: the specification's initial chaining value and
+    /// an empty (zero-length) message.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -164,6 +178,10 @@ impl Ripemd160 {
         }
     }
 
+    /// Absorb more message bytes. May be called any number of times with
+    /// arbitrary chunk sizes; the digest depends only on the concatenation
+    /// of all chunks. The message length is tracked modulo 2^64 bits for
+    /// the Merkle-Damgaard length padding.
     pub fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             let take = (64 - self.pos).min(data.len());
@@ -180,6 +198,10 @@ impl Ripemd160 {
         }
     }
 
+    /// Apply the `0x80` / little-endian length padding, consume the hasher,
+    /// and return the 20-byte digest (state words serialized little-endian,
+    /// unlike the SHA family). Keep a [`Clone`] beforehand if the stream
+    /// must continue past this point.
     #[must_use]
     pub fn finalize(mut self) -> [u8; 20] {
         self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
@@ -205,6 +227,8 @@ impl Ripemd160 {
         out
     }
 
+    /// One-shot convenience: hash `data` in a single call. Equivalent to
+    /// `new` + `update` + `finalize`, returning the 20-byte digest.
     #[must_use]
     pub fn digest(data: &[u8]) -> [u8; 20] {
         let mut h = Self::new();

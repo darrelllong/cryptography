@@ -566,6 +566,8 @@ pub struct Camellia128 {
 }
 
 impl Camellia128 {
+    /// Expand the 16-byte key into the RFC 3713 subkey schedule for the
+    /// 18-round variant, using the direct S-box tables.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -573,17 +575,22 @@ impl Camellia128 {
         }
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 16-byte block through the 18 Feistel rounds (with the two
+    /// `FL`/`FLINV` layers) using the direct S-box tables; not constant-time.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_18(*block, &self.subkeys, false)
     }
 
+    /// Decrypt one 16-byte block by applying the 18 rounds with the subkeys
+    /// in reverse order; not constant-time.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_18(*block, &self.subkeys, false)
@@ -596,6 +603,8 @@ pub struct Camellia128Ct {
 }
 
 impl Camellia128Ct {
+    /// Expand the 16-byte key for the 18-round variant, evaluating the S-box
+    /// in packed ANF form so key setup performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -603,17 +612,22 @@ impl Camellia128Ct {
         }
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 16-byte block through the 18 rounds with the ANF-evaluated
+    /// S-box: no secret-indexed table reads, slower than `Camellia128`.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_18(*block, &self.subkeys, true)
     }
 
+    /// Decrypt one 16-byte block through the 18 rounds (subkeys reversed)
+    /// with the ANF-evaluated S-box; no secret-indexed table reads.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_18(*block, &self.subkeys, true)
@@ -626,6 +640,10 @@ pub struct Camellia192 {
 }
 
 impl Camellia192 {
+    /// Expand the 24-byte key into the RFC 3713 subkey schedule for the
+    /// 24-round variant, using the direct S-box tables. Per the RFC, the
+    /// right key half `KR` is the 64-bit key tail followed by its bitwise
+    /// complement.
     #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
         let mut kl_bytes = [0u8; 16];
@@ -640,17 +658,23 @@ impl Camellia192 {
         }
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 24]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 16-byte block through the 24 Feistel rounds (with the
+    /// three `FL`/`FLINV` layers) using the direct S-box tables; not
+    /// constant-time.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, false)
     }
 
+    /// Decrypt one 16-byte block by applying the 24 rounds with the subkeys
+    /// in reverse order; not constant-time.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, false)
@@ -663,6 +687,10 @@ pub struct Camellia192Ct {
 }
 
 impl Camellia192Ct {
+    /// Expand the 24-byte key for the 24-round variant (with `KR` completed
+    /// from the key tail and its complement, as in `Camellia192`), evaluating
+    /// the S-box in packed ANF form so key setup performs no secret-indexed
+    /// table reads.
     #[must_use]
     pub fn new(key: &[u8; 24]) -> Self {
         let mut kl_bytes = [0u8; 16];
@@ -677,17 +705,22 @@ impl Camellia192Ct {
         }
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 24]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 16-byte block through the 24 rounds with the ANF-evaluated
+    /// S-box: no secret-indexed table reads, slower than `Camellia192`.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, true)
     }
 
+    /// Decrypt one 16-byte block through the 24 rounds (subkeys reversed)
+    /// with the ANF-evaluated S-box; no secret-indexed table reads.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, true)
@@ -700,6 +733,9 @@ pub struct Camellia256 {
 }
 
 impl Camellia256 {
+    /// Expand the 32-byte key into the RFC 3713 subkey schedule for the
+    /// 24-round variant, using the direct S-box tables; the key halves map
+    /// directly to `KL` and `KR`.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let mut left_key_bytes = [0u8; 16];
@@ -713,17 +749,23 @@ impl Camellia256 {
         }
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 32]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 16-byte block through the 24 Feistel rounds (with the
+    /// three `FL`/`FLINV` layers) using the direct S-box tables; not
+    /// constant-time.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, false)
     }
 
+    /// Decrypt one 16-byte block by applying the 24 rounds with the subkeys
+    /// in reverse order; not constant-time.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, false)
@@ -736,6 +778,8 @@ pub struct Camellia256Ct {
 }
 
 impl Camellia256Ct {
+    /// Expand the 32-byte key for the 24-round variant, evaluating the S-box
+    /// in packed ANF form so key setup performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
         let mut left_key_bytes = [0u8; 16];
@@ -749,17 +793,22 @@ impl Camellia256Ct {
         }
     }
 
+    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
     pub fn new_wiping(key: &mut [u8; 32]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 16-byte block through the 24 rounds with the ANF-evaluated
+    /// S-box: no secret-indexed table reads, slower than `Camellia256`.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_encrypt_24(*block, &self.subkeys, true)
     }
 
+    /// Decrypt one 16-byte block through the 24 rounds (subkeys reversed)
+    /// with the ANF-evaluated S-box; no secret-indexed table reads.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         camellia_decrypt_24(*block, &self.subkeys, true)

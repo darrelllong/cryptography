@@ -127,6 +127,14 @@ fn compress(state: &mut [u32; 4], block: &[u8; 64]) {
     state[3] = state[3].wrapping_add(d_reg);
 }
 
+/// Streaming MD5 state (RFC 1321).
+///
+/// Absorbs input in 64-byte blocks via [`Md5::update`] and produces a
+/// 16-byte digest via [`Md5::finalize`]; [`Md5::digest`] is the one-shot
+/// form. Cloning captures the mid-stream state, so a common prefix can be
+/// hashed once and extended along several branches. MD5's collision
+/// resistance is thoroughly broken and it length-extends, so use it only
+/// for legacy interoperability, per the module warning.
 #[derive(Clone)]
 pub struct Md5 {
     state: [u32; 4],
@@ -142,9 +150,15 @@ impl Default for Md5 {
 }
 
 impl Md5 {
+    /// Compression-function block size in bytes (512 bits). This is the
+    /// rate at which input is consumed and the pad width HMAC keys are
+    /// sized against.
     pub const BLOCK_LEN: usize = 64;
+    /// Digest length in bytes (128 bits).
     pub const OUTPUT_LEN: usize = 16;
 
+    /// Create a fresh hasher: the RFC 1321 §3.3 initial state (A, B, C, D)
+    /// and an empty (zero-length) message.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -155,6 +169,10 @@ impl Md5 {
         }
     }
 
+    /// Absorb more message bytes. May be called any number of times with
+    /// arbitrary chunk sizes; the digest depends only on the concatenation
+    /// of all chunks. The message length is tracked modulo 2^64 bits, as
+    /// RFC 1321 padding requires.
     pub fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             let take = (64 - self.pos).min(data.len());
@@ -171,6 +189,10 @@ impl Md5 {
         }
     }
 
+    /// Apply the RFC 1321 `0x80` / little-endian length padding, consume the
+    /// hasher, and return the 16-byte digest (state words serialized
+    /// little-endian). Keep a [`Clone`] beforehand if the stream must
+    /// continue past this point.
     #[must_use]
     pub fn finalize(mut self) -> [u8; 16] {
         self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
@@ -196,6 +218,8 @@ impl Md5 {
         out
     }
 
+    /// One-shot convenience: hash `data` in a single call. Equivalent to
+    /// `new` + `update` + `finalize`, returning the 16-byte digest.
     #[must_use]
     pub fn digest(data: &[u8]) -> [u8; 16] {
         let mut h = Self::new();

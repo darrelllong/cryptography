@@ -119,6 +119,13 @@ fn speck_dec(block: &mut [u8], rk: &[u64], alpha: u32, beta: u32, n: u32, mask: 
 macro_rules! speck_variant {
     ($Name:ident, $n:expr, $m:expr, $T:literal, $alpha:expr, $beta:expr, $mask:expr,
      $key_len:literal, $blk_len:literal) => {
+        /// One member of the Speck family (Beaulieu et al., NSA, 2013).
+        ///
+        /// The name `Speck{B}_{K}` encodes the block size B and key size K
+        /// in bits; word size, key-word count, round count, and the α/β
+        /// rotation amounts come from Table 4.1. The struct holds only the
+        /// expanded round keys — one word per ARX round — and zeroizes them
+        /// on drop.
         pub struct $Name {
             round_keys: [u64; $T],
         }

@@ -25,6 +25,7 @@
 //!   without that feature contain no other `unsafe`.
 
 #![deny(unsafe_code)]
+#![deny(missing_docs)]
 
 mod ct;
 #[cfg(test)]

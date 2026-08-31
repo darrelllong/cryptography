@@ -226,6 +226,9 @@ pub struct Seed {
 }
 
 impl Seed {
+    /// Derive the 32 round-key words (two per Feistel round) from the
+    /// 128-bit key via the G-function schedule of RFC 4009, using the
+    /// direct (secret-indexed) S0/S1 table lookups inside G.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -233,17 +236,24 @@ impl Seed {
         }
     }
 
+    /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
+    /// key buffer so the master key survives only as expanded round keys.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 128-bit block through the 16 Feistel rounds (final
+    /// half-swap omitted per RFC 4009); words are read and written
+    /// big-endian. Returns the ciphertext; the input is untouched.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_encrypt(*block, &self.round_keys, false)
     }
 
+    /// Decrypt one 128-bit block by running the 16 Feistel rounds with the
+    /// round-key pairs consumed in reverse order.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_decrypt(*block, &self.round_keys, false)
@@ -256,6 +266,9 @@ pub struct SeedCt {
 }
 
 impl SeedCt {
+    /// Derive the 32 round-key words from the 128-bit key via the RFC 4009
+    /// G-function schedule, with the two 8-bit S-boxes evaluated in packed
+    /// ANF form so key expansion performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
         Self {
@@ -263,17 +276,25 @@ impl SeedCt {
         }
     }
 
+    /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
+    /// key buffer so the master key survives only as expanded round keys.
     pub fn new_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
     }
 
+    /// Encrypt one 128-bit block through the same 16 Feistel rounds as the
+    /// fast path, but every G-function call evaluates S0/S1 in packed ANF
+    /// form instead of secret-indexed table lookups.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_encrypt(*block, &self.round_keys, true)
     }
 
+    /// Decrypt one 128-bit block with the round-key pairs in reverse order;
+    /// every G-function call evaluates S0/S1 in packed ANF form instead of
+    /// secret-indexed table lookups.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_decrypt(*block, &self.round_keys, true)

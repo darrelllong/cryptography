@@ -422,7 +422,10 @@ serpent_type!(
     "Serpent-256 (`Ct` alias): identical to [`Serpent256`]; the bitsliced S-box is constant-time by construction."
 );
 
+/// Default Serpent instantiation: alias for [`Serpent128`] (128-bit key).
 pub type Serpent = Serpent128;
+/// Constant-time Serpent-128 alias. Because the shared bitsliced S-box is
+/// constant-time by construction, this is the same type as [`Serpent`].
 pub type SerpentCt = Serpent128Ct;
 
 #[cfg(test)]

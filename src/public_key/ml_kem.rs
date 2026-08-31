@@ -78,8 +78,14 @@ struct Profile {
 /// ML-KEM parameter sets from FIPS 203.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MlKemParameterSet {
+    /// ML-KEM-512 (security category 1): rank k = 2; 800-byte public key,
+    /// 1632-byte private key, 768-byte ciphertext, 32-byte shared secret.
     MlKem512,
+    /// ML-KEM-768 (security category 3): rank k = 3; 1184-byte public key,
+    /// 2400-byte private key, 1088-byte ciphertext, 32-byte shared secret.
     MlKem768,
+    /// ML-KEM-1024 (security category 5): rank k = 4; 1568-byte public key,
+    /// 3168-byte private key, 1568-byte ciphertext, 32-byte shared secret.
     MlKem1024,
 }
 
@@ -252,6 +258,8 @@ impl Drop for MlKemSharedSecret {
 pub struct MlKem;
 
 impl MlKemPublicKey {
+    /// The FIPS 203 parameter set this key belongs to. Encapsulation output
+    /// sizes and blob framing are fixed by this value.
     #[must_use]
     pub fn parameter_set(&self) -> MlKemParameterSet {
         self.params
@@ -269,11 +277,17 @@ impl MlKemPublicKey {
         })
     }
 
+    /// Serialize to the FIPS 203 encapsulation-key encoding `t || rho`
+    /// (`public_key_len()` bytes: 800/1184/1568 for ML-KEM-512/768/1024).
     #[must_use]
     pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.bytes.clone()
     }
 
+    /// Parse a FIPS 203 encapsulation key. Returns `None` if the length is
+    /// not exactly `params.public_key_len()` or if any packed 12-bit NTT
+    /// coefficient is non-canonical (>= q = 3329), enforced by a re-encode
+    /// round-trip as the "modulus check" of FIPS 203 §7.2 requires.
     #[must_use]
     pub fn from_wire_bytes(params: MlKemParameterSet, bytes: &[u8]) -> Option<Self> {
         if bytes.len() != params.public_key_len() {
@@ -299,6 +313,10 @@ impl MlKemPublicKey {
         })
     }
 
+    /// Serialize to this crate's self-describing framing: a one-byte
+    /// parameter-set tag followed by the FIPS 203 wire encoding. Unlike
+    /// [`Self::to_wire_bytes`], the result can be parsed without knowing
+    /// the parameter set out of band.
     #[must_use]
     pub fn to_key_blob(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(1 + self.bytes.len());
@@ -307,6 +325,9 @@ impl MlKemPublicKey {
         out
     }
 
+    /// Parse a blob produced by [`Self::to_key_blob`]. Returns `None` on an
+    /// empty input, an unknown parameter-set tag, or a body rejected by
+    /// [`Self::from_wire_bytes`] (wrong length or non-canonical encoding).
     #[must_use]
     pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&id, rest) = blob.split_first()?;
@@ -331,16 +352,27 @@ impl MlKemPrivateKey {
         })
     }
 
+    /// The FIPS 203 parameter set this key belongs to. It fixes which
+    /// ciphertext length [`MlKem::decaps`] accepts and the blob framing.
     #[must_use]
     pub fn parameter_set(&self) -> MlKemParameterSet {
         self.params
     }
 
+    /// Serialize to the FIPS 203 decapsulation-key encoding
+    /// `dk_PKE || ek || H(ek) || z` (`private_key_len()` bytes:
+    /// 1632/2400/3168 for ML-KEM-512/768/1024). This is raw secret key
+    /// material; handle the returned buffer accordingly.
     #[must_use]
     pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.bytes.clone()
     }
 
+    /// Parse a FIPS 203 decapsulation key. Returns `None` if the length is
+    /// not exactly `params.private_key_len()`, if either the secret or the
+    /// embedded public polynomial vector is non-canonically packed (checked
+    /// by re-encode round-trips), or if the stored `H(ek)` does not match
+    /// the hash of the embedded encapsulation key.
     #[must_use]
     pub fn from_wire_bytes(params: MlKemParameterSet, bytes: &[u8]) -> Option<Self> {
         if bytes.len() != params.private_key_len() {
@@ -378,6 +410,9 @@ impl MlKemPrivateKey {
         })
     }
 
+    /// Serialize to this crate's self-describing framing: a one-byte
+    /// parameter-set tag followed by the FIPS 203 wire encoding. The result
+    /// contains raw secret key material; handle it accordingly.
     #[must_use]
     pub fn to_key_blob(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(1 + self.bytes.len());
@@ -386,6 +421,10 @@ impl MlKemPrivateKey {
         out
     }
 
+    /// Parse a blob produced by [`Self::to_key_blob`]. Returns `None` on an
+    /// empty input, an unknown parameter-set tag, or a body rejected by
+    /// [`Self::from_wire_bytes`] (wrong length, non-canonical encoding, or
+    /// an inconsistent embedded `H(ek)`).
     #[must_use]
     pub fn from_key_blob(blob: &[u8]) -> Option<Self> {
         let (&id, rest) = blob.split_first()?;
@@ -395,16 +434,26 @@ impl MlKemPrivateKey {
 }
 
 impl MlKemCiphertext {
+    /// The FIPS 203 parameter set this ciphertext was produced under.
+    /// [`MlKem::decaps`] refuses a ciphertext whose parameter set differs
+    /// from the private key's.
     #[must_use]
     pub fn parameter_set(&self) -> MlKemParameterSet {
         self.params
     }
 
+    /// Serialize to the FIPS 203 ciphertext encoding `c1 || c2`
+    /// (`ciphertext_len()` bytes: 768/1088/1568 for ML-KEM-512/768/1024).
     #[must_use]
     pub fn to_wire_bytes(&self) -> Vec<u8> {
         self.bytes.clone()
     }
 
+    /// Parse a FIPS 203 ciphertext. Returns `None` if the length is not
+    /// exactly `params.ciphertext_len()` or if the compressed polynomial
+    /// payload fails to decode. Acceptance here does not imply the
+    /// ciphertext is genuine: decapsulating a forged or corrupted
+    /// ciphertext still succeeds and yields the implicit-rejection secret.
     #[must_use]
     pub fn from_wire_bytes(params: MlKemParameterSet, bytes: &[u8]) -> Option<Self> {
         if bytes.len() != params.ciphertext_len() {
@@ -419,11 +468,18 @@ impl MlKemCiphertext {
 }
 
 impl MlKemSharedSecret {
+    /// Return the 32-byte shared secret. This is keying material — feed it
+    /// to a KDF or cipher and avoid persisting it; the containing struct
+    /// zeroizes itself on drop, but the returned copy is the caller's to
+    /// scrub.
     #[must_use]
     pub fn to_wire_bytes(&self) -> [u8; SS_BYTES] {
         self.bytes
     }
 
+    /// Reconstruct a shared secret from bytes (e.g. from a KAT vector).
+    /// Returns `None` unless `bytes` is exactly 32 bytes; any 32-byte
+    /// value is accepted, as every value is a valid shared secret.
     #[must_use]
     pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != SS_BYTES {

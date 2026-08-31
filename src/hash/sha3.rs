@@ -373,6 +373,15 @@ impl<const RATE: usize> KeccakSponge<RATE> {
 
 macro_rules! define_sha3 {
     ($name:ident, $rate:expr, $out_len:expr) => {
+        /// Fixed-output SHA-3 hasher from FIPS 202: a sponge over the
+        /// 1600-bit (200-byte) Keccak-f[1600] permutation with the SHA-3
+        /// domain-separation suffix `0x06`.
+        ///
+        #[doc = concat!("`", stringify!($name), "` absorbs input at a rate of")]
+        #[doc = concat!(stringify!($rate), " bytes per permutation call and emits a")]
+        #[doc = concat!(stringify!($out_len), "-byte digest; the remaining state")]
+        /// bytes form the capacity, twice the digest length. As a sponge, the
+        /// digest is not subject to length-extension attacks.
         #[derive(Clone)]
         pub struct $name {
             inner: Keccak<$rate>,
@@ -385,9 +394,16 @@ macro_rules! define_sha3 {
         }
 
         impl $name {
+            /// Keccak sponge rate in bytes (200 minus twice the digest
+            /// length); this is also the block size HMAC uses with the SHA-3
+            /// family.
             pub const BLOCK_LEN: usize = $rate;
+            /// Digest length in bytes; the sponge capacity is twice this, so
+            /// collision resistance is half the digest length in bits.
             pub const OUTPUT_LEN: usize = $out_len;
 
+            /// Begin hashing from the all-zero 1600-bit Keccak state with an
+            /// empty rate buffer.
             #[must_use]
             pub fn new() -> Self {
                 Self {
@@ -395,15 +411,25 @@ macro_rules! define_sha3 {
                 }
             }
 
+            /// Absorb `data`, XORing each completed rate-sized block into the
+            /// state (little-endian lanes) and permuting; partial blocks are
+            /// buffered, so a message may be split across calls arbitrarily.
             pub fn update(&mut self, data: &[u8]) {
                 self.inner.update(data);
             }
 
+            /// Consume the hasher: XOR in the `0x06` domain suffix and the
+            /// closing bit of the `pad10*1` rule, permute once more, and
+            /// return the digest read from the leading state lanes in
+            /// little-endian byte order.
             #[must_use]
             pub fn finalize(self) -> [u8; $out_len] {
                 self.inner.finalize()
             }
 
+            /// One-shot hash of `data`, equivalent to `new` + `update` +
+            /// `finalize`; returns a fixed-size array rather than the `Vec`
+            /// of the `Digest::digest` trait helper.
             #[must_use]
             pub fn digest(data: &[u8]) -> [u8; $out_len] {
                 let mut h = Self::new();
@@ -453,6 +479,18 @@ define_sha3!(Sha3_512, 72, 64);
 
 macro_rules! define_shake {
     ($name:ident, $rate:expr) => {
+        /// Extendable-output function from FIPS 202: a sponge over the
+        /// 1600-bit (200-byte) Keccak-f[1600] permutation with the SHAKE
+        /// domain-separation suffix `0x1f`.
+        ///
+        #[doc = concat!("`", stringify!($name), "` absorbs and squeezes at a rate of")]
+        #[doc = concat!(stringify!($rate), " bytes per permutation call; the")]
+        /// remaining state bytes form the capacity, twice the security
+        /// strength the variant is named for.
+        ///
+        /// Absorb with [`Xof::update`], then draw any number of output bytes
+        /// with [`Xof::squeeze`]; the first squeeze finalizes the sponge, and
+        /// updating after that panics. The state is zeroized on drop.
         #[derive(Clone)]
         pub struct $name {
             inner: XofState<$rate>,
@@ -465,8 +503,13 @@ macro_rules! define_shake {
         }
 
         impl $name {
+            /// Keccak sponge rate in bytes: input is absorbed and output
+            /// squeezed in blocks of this size, one permutation call per
+            /// block.
             pub const BLOCK_LEN: usize = $rate;
 
+            /// Begin a fresh absorb-phase sponge with an all-zero 1600-bit
+            /// Keccak state.
             #[must_use]
             pub fn new() -> Self {
                 Self {
@@ -474,6 +517,9 @@ macro_rules! define_shake {
                 }
             }
 
+            /// One-shot XOF: absorb `data`, then fill all of `out` with
+            /// squeezed output. `out.len()` selects the output length, and a
+            /// longer output begins with the bytes of a shorter one.
             pub fn digest(data: &[u8], out: &mut [u8]) {
                 let mut xof = Self::new();
                 xof.update(data);
