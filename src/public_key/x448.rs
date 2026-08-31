@@ -117,34 +117,70 @@ fn fe_reduce_u128(t: &[u128; 15]) -> Fe {
     r[..8].copy_from_slice(&p[..8]);
 
     // First carry pass through limbs 0..7.
-    let c0 = r[0] >> 56; r[0] &= mask; r[1] += c0;
-    let c1 = r[1] >> 56; r[1] &= mask; r[2] += c1;
-    let c2 = r[2] >> 56; r[2] &= mask; r[3] += c2;
-    let c3 = r[3] >> 56; r[3] &= mask; r[4] += c3;
-    let c4 = r[4] >> 56; r[4] &= mask; r[5] += c4;
-    let c5 = r[5] >> 56; r[5] &= mask; r[6] += c5;
-    let c6 = r[6] >> 56; r[6] &= mask; r[7] += c6;
-    let c7 = r[7] >> 56; r[7] &= mask;
+    let c0 = r[0] >> 56;
+    r[0] &= mask;
+    r[1] += c0;
+    let c1 = r[1] >> 56;
+    r[1] &= mask;
+    r[2] += c1;
+    let c2 = r[2] >> 56;
+    r[2] &= mask;
+    r[3] += c2;
+    let c3 = r[3] >> 56;
+    r[3] &= mask;
+    r[4] += c3;
+    let c4 = r[4] >> 56;
+    r[4] &= mask;
+    r[5] += c4;
+    let c5 = r[5] >> 56;
+    r[5] &= mask;
+    r[6] += c5;
+    let c6 = r[6] >> 56;
+    r[6] &= mask;
+    r[7] += c6;
+    let c7 = r[7] >> 56;
+    r[7] &= mask;
     // c7 represents the contribution of bit 448 and above, which by the prime
     // structure 2^448 ≡ 2^224 + 1 folds back into limb 0 and limb 4.
     r[0] += c7;
     r[4] += c7;
 
     // Second pass to settle any new carries from the wrap-back.
-    let c0 = r[0] >> 56; r[0] &= mask; r[1] += c0;
-    let c1 = r[1] >> 56; r[1] &= mask; r[2] += c1;
-    let c2 = r[2] >> 56; r[2] &= mask; r[3] += c2;
-    let c3 = r[3] >> 56; r[3] &= mask; r[4] += c3;
-    let c4 = r[4] >> 56; r[4] &= mask; r[5] += c4;
-    let c5 = r[5] >> 56; r[5] &= mask; r[6] += c5;
-    let c6 = r[6] >> 56; r[6] &= mask; r[7] += c6;
-    let c7 = r[7] >> 56; r[7] &= mask;
+    let c0 = r[0] >> 56;
+    r[0] &= mask;
+    r[1] += c0;
+    let c1 = r[1] >> 56;
+    r[1] &= mask;
+    r[2] += c1;
+    let c2 = r[2] >> 56;
+    r[2] &= mask;
+    r[3] += c2;
+    let c3 = r[3] >> 56;
+    r[3] &= mask;
+    r[4] += c3;
+    let c4 = r[4] >> 56;
+    r[4] &= mask;
+    r[5] += c4;
+    let c5 = r[5] >> 56;
+    r[5] &= mask;
+    r[6] += c5;
+    let c6 = r[6] >> 56;
+    r[6] &= mask;
+    r[7] += c6;
+    let c7 = r[7] >> 56;
+    r[7] &= mask;
     r[0] += c7;
     r[4] += c7;
 
     Fe([
-        r[0] as u64, r[1] as u64, r[2] as u64, r[3] as u64,
-        r[4] as u64, r[5] as u64, r[6] as u64, r[7] as u64,
+        r[0] as u64,
+        r[1] as u64,
+        r[2] as u64,
+        r[3] as u64,
+        r[4] as u64,
+        r[5] as u64,
+        r[6] as u64,
+        r[7] as u64,
     ])
 }
 
@@ -174,20 +210,20 @@ fn fe_invert(z: &Fe) -> Fe {
     // Build f(n) = z^(2^n - 1) for n in {2, 4, 8, 16, 32, 64, 128} via
     // repeated doubling, then chain up to f(222).
     let f2 = {
-        let t = fe_sq(z);            // z^2
-        fe_mul(&t, z)                // z^3 = z^(2^2 - 1)
+        let t = fe_sq(z); // z^2
+        fe_mul(&t, z) // z^3 = z^(2^2 - 1)
     };
-    let f4 = fe_mul(&fe_pow2k(&f2, 2), &f2);     // z^(2^4 - 1)
-    let f8 = fe_mul(&fe_pow2k(&f4, 4), &f4);     // z^(2^8 - 1)
-    let f16 = fe_mul(&fe_pow2k(&f8, 8), &f8);    // z^(2^16 - 1)
+    let f4 = fe_mul(&fe_pow2k(&f2, 2), &f2); // z^(2^4 - 1)
+    let f8 = fe_mul(&fe_pow2k(&f4, 4), &f4); // z^(2^8 - 1)
+    let f16 = fe_mul(&fe_pow2k(&f8, 8), &f8); // z^(2^16 - 1)
     let f32 = fe_mul(&fe_pow2k(&f16, 16), &f16); // z^(2^32 - 1)
     let f64 = fe_mul(&fe_pow2k(&f32, 32), &f32); // z^(2^64 - 1)
     let f128 = fe_mul(&fe_pow2k(&f64, 64), &f64); // z^(2^128 - 1)
     let f192 = fe_mul(&fe_pow2k(&f128, 64), &f64); // z^(2^192 - 1)
     let f208 = fe_mul(&fe_pow2k(&f192, 16), &f16); // z^(2^208 - 1)
-    let f216 = fe_mul(&fe_pow2k(&f208, 8), &f8);   // z^(2^216 - 1)
-    let f220 = fe_mul(&fe_pow2k(&f216, 4), &f4);   // z^(2^220 - 1)
-    let a = fe_mul(&fe_pow2k(&f220, 2), &f2);      // A = z^(2^222 - 1)
+    let f216 = fe_mul(&fe_pow2k(&f208, 8), &f8); // z^(2^216 - 1)
+    let f220 = fe_mul(&fe_pow2k(&f216, 4), &f4); // z^(2^220 - 1)
+    let a = fe_mul(&fe_pow2k(&f220, 2), &f2); // A = z^(2^222 - 1)
 
     // B = sq(A) * z = z^(2^223 - 1).
     let b = fe_mul(&fe_sq(&a), z);
@@ -228,14 +264,29 @@ fn fe_to_bytes(a: &Fe) -> [u8; X448_LEN] {
     let mut t = a.0;
     // Two carry passes bring t into [0, 2*p).
     for _ in 0..2 {
-        let c = t[0] >> 56; t[0] &= MASK56; t[1] += c;
-        let c = t[1] >> 56; t[1] &= MASK56; t[2] += c;
-        let c = t[2] >> 56; t[2] &= MASK56; t[3] += c;
-        let c = t[3] >> 56; t[3] &= MASK56; t[4] += c;
-        let c = t[4] >> 56; t[4] &= MASK56; t[5] += c;
-        let c = t[5] >> 56; t[5] &= MASK56; t[6] += c;
-        let c = t[6] >> 56; t[6] &= MASK56; t[7] += c;
-        let c = t[7] >> 56; t[7] &= MASK56;
+        let c = t[0] >> 56;
+        t[0] &= MASK56;
+        t[1] += c;
+        let c = t[1] >> 56;
+        t[1] &= MASK56;
+        t[2] += c;
+        let c = t[2] >> 56;
+        t[2] &= MASK56;
+        t[3] += c;
+        let c = t[3] >> 56;
+        t[3] &= MASK56;
+        t[4] += c;
+        let c = t[4] >> 56;
+        t[4] &= MASK56;
+        t[5] += c;
+        let c = t[5] >> 56;
+        t[5] &= MASK56;
+        t[6] += c;
+        let c = t[6] >> 56;
+        t[6] &= MASK56;
+        t[7] += c;
+        let c = t[7] >> 56;
+        t[7] &= MASK56;
         t[0] += c;
         t[4] += c;
     }
@@ -350,10 +401,7 @@ impl X448 {
         let mut secret = [0u8; X448_LEN];
         rng.fill_bytes(&mut secret);
         let public_bytes = X448::scalar_mult_base(&secret);
-        (
-            X448PublicKey(public_bytes),
-            X448PrivateKey(secret),
-        )
+        (X448PublicKey(public_bytes), X448PrivateKey(secret))
     }
 }
 

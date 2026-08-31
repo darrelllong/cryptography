@@ -1330,9 +1330,12 @@ mod tests {
     fn tdes_matches_openssl_ecb() {
         let key_hex = "133457799bbcdff100112233445566778899aabbccddeeff";
         let pt_hex = "0123456789abcdef";
-        let Some(expected) =
-            crate::test_utils::run_openssl_enc("-des-ede3-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
-        else {
+        let Some(expected) = crate::test_utils::run_openssl_enc(
+            "-des-ede3-ecb",
+            key_hex,
+            None,
+            &hex_to_bytes8(pt_hex),
+        ) else {
             return;
         };
 

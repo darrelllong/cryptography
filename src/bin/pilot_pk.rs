@@ -55,11 +55,10 @@ use std::time::Instant;
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
-    ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, NtruEes1087Ep2, NtruEes401Ep1,
-    NtruEes1087Ep1, NtruEes1171Ep1, NtruEes1499Ep1, NtruEes443Ep1, NtruEes449Ep1, NtruEes541Ep1,
-    NtruEes677Ep1,
-    NtruHps509, NtruHps677, NtruHps821, NtruHrss701, Paillier, Rabin, Rsa, RsaOaep, RsaPss,
-    SchmidtSamoa, X25519, X448,
+    ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, NtruEes1087Ep1, NtruEes1087Ep2,
+    NtruEes1171Ep1, NtruEes1499Ep1, NtruEes401Ep1, NtruEes443Ep1, NtruEes449Ep1, NtruEes541Ep1,
+    NtruEes677Ep1, NtruHps509, NtruHps677, NtruHps821, NtruHrss701, Paillier, Rabin, Rsa, RsaOaep,
+    RsaPss, SchmidtSamoa, X25519, X448,
 };
 use cryptography::{Csprng, CtrDrbgAes256, Sha256};
 
@@ -395,7 +394,7 @@ fn main() {
                 combined = black_box(pub_key.add_ciphertexts(&ct_a, &ct_b).unwrap());
             }
             let combined_plaintext = priv_key.decrypt(&combined);
-            let expected = BigUint::from_be_bytes(&MSG).add_ref(&BigUint::from_u64(1));
+            let expected = BigUint::from_be_bytes(&MSG).add(&BigUint::from_u64(1));
             assert_eq!(combined_plaintext, expected.to_be_bytes());
             ms_per_op(t0.elapsed(), n)
         }

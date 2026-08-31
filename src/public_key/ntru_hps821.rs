@@ -11,9 +11,6 @@
 //! `PQCkemKAT_1590.rsp` (sampled subset by default; full sweep under
 //! `--ignored`).
 
-
-
-
 // ---- parameter constants ---------------------------------------------------
 
 const N: usize = 821;

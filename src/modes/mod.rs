@@ -1670,7 +1670,15 @@ mod tests {
         }
 
         // Exhaustive corner combinations of extreme operands.
-        let corners = [0u128, 1, 2, 1 << 127, (1 << 127) | 1, u128::MAX, u128::MAX >> 1];
+        let corners = [
+            0u128,
+            1,
+            2,
+            1 << 127,
+            (1 << 127) | 1,
+            u128::MAX,
+            u128::MAX >> 1,
+        ];
         for &a in &corners {
             for &b in &corners {
                 assert_eq!(ghash_mul_ct(a, b), ghash_mul_ct_ref(a, b));

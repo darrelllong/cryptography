@@ -88,16 +88,10 @@ impl HashKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TrapdoorKind {
     /// `t` is a single trinary polynomial with `df` ones and `df` minus-ones.
-    Dense {
-        df: usize,
-    },
+    Dense { df: usize },
     /// `t = f_1 \cdot f_2 + f_3`. `df1`, `df2`, `df3` are the per-component
     /// ones-counts.
-    ProductForm {
-        df1: usize,
-        df2: usize,
-        df3: usize,
-    },
+    ProductForm { df1: usize, df2: usize, df3: usize },
 }
 
 /// All scalar parameters for an EES NTRUEncrypt set.
@@ -356,8 +350,7 @@ impl Trapdoor {
                 let mut bit_offset = 0usize;
                 let index_bits = EesParams::index_bits(params.n);
                 for poly in &[&p.f1, &p.f2, &p.f3] {
-                    pack_indices(&poly.ones, out, &mut bit_offset, index_bits)
-                        .expect("ones fit");
+                    pack_indices(&poly.ones, out, &mut bit_offset, index_bits).expect("ones fit");
                     pack_indices(&poly.neg_ones, out, &mut bit_offset, index_bits)
                         .expect("neg_ones fit");
                 }
@@ -408,9 +401,18 @@ impl Trapdoor {
                     return None;
                 }
                 Some(Trapdoor::Product(ProductPoly {
-                    f1: TernaryPoly { ones: f1_ones, neg_ones: f1_neg },
-                    f2: TernaryPoly { ones: f2_ones, neg_ones: f2_neg },
-                    f3: TernaryPoly { ones: f3_ones, neg_ones: f3_neg },
+                    f1: TernaryPoly {
+                        ones: f1_ones,
+                        neg_ones: f1_neg,
+                    },
+                    f2: TernaryPoly {
+                        ones: f2_ones,
+                        neg_ones: f2_neg,
+                    },
+                    f3: TernaryPoly {
+                        ones: f3_ones,
+                        neg_ones: f3_neg,
+                    },
                 }))
             }
         }
@@ -421,9 +423,7 @@ impl Trapdoor {
     /// This is the ordinary-keygen entry point.
     fn sample_iid<R: Csprng>(rng: &mut R, params: &EesParams) -> Self {
         match params.trapdoor {
-            TrapdoorKind::Dense { df } => {
-                Trapdoor::Dense(sample_trinary(rng, params.n, df, df))
-            }
+            TrapdoorKind::Dense { df } => Trapdoor::Dense(sample_trinary(rng, params.n, df, df)),
             TrapdoorKind::ProductForm { df1, df2, df3 } => Trapdoor::Product(ProductPoly {
                 f1: sample_trinary(rng, params.n, df1, df1),
                 f2: sample_trinary(rng, params.n, df2, df2),
@@ -508,10 +508,7 @@ fn poly_inverse_mod2_cyclic(a_coeffs: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn poly_inverse_mod_q_cyclic<const N: usize>(
-    a: &Poly<N>,
-    params: &EesParams,
-) -> Option<Poly<N>> {
+fn poly_inverse_mod_q_cyclic<const N: usize>(a: &Poly<N>, params: &EesParams) -> Option<Poly<N>> {
     let q = params.q();
     let q_mask = params.q_mask();
     let a_mod2: Vec<u8> = a.coeffs.iter().map(|&c| (c & 1) as u8).collect();
@@ -566,7 +563,10 @@ struct BitStr {
 
 impl BitStr {
     fn new() -> Self {
-        Self { buf: Vec::new(), bit_len: 0 }
+        Self {
+            buf: Vec::new(),
+            bit_len: 0,
+        }
     }
 
     /// Append 8 bits at the top of the stack.
@@ -575,10 +575,7 @@ impl BitStr {
         if off == 0 {
             self.buf.push(b);
         } else {
-            *self
-                .buf
-                .last_mut()
-                .expect("non-empty by `bit_len > 0`") |= b << off;
+            *self.buf.last_mut().expect("non-empty by `bit_len > 0`") |= b << off;
             self.buf.push(b >> (8 - off));
         }
         self.bit_len += 8;
@@ -1139,10 +1136,7 @@ pub enum NtruEesError {
 /// Generate a fresh key pair. The returned `pk_bytes` has length
 /// `params.pk_wire_bytes()`; the trapdoor is returned as a [`Trapdoor`] so
 /// the caller can pack it with [`trapdoor_to_wire`].
-pub fn keygen<const N: usize, R: Csprng>(
-    params: &EesParams,
-    rng: &mut R,
-) -> (Vec<u8>, Trapdoor) {
+pub fn keygen<const N: usize, R: Csprng>(params: &EesParams, rng: &mut R) -> (Vec<u8>, Trapdoor) {
     debug_assert_eq!(params.n, N);
     let q_mask = params.q_mask();
     loop {
@@ -1200,8 +1194,7 @@ pub fn encrypt<const N: usize, R: Csprng>(
 
         let mtrin = sves_from_bytes::<N>(&m, q_mask);
 
-        let mut sdata =
-            Vec::with_capacity(params.oid.len() + msg.len() + b.len() + htrunc.len());
+        let mut sdata = Vec::with_capacity(params.oid.len() + msg.len() + b.len() + htrunc.len());
         sdata.extend_from_slice(&params.oid);
         sdata.extend_from_slice(msg);
         sdata.extend_from_slice(&b);
@@ -1431,18 +1424,26 @@ macro_rules! define_ees_set {
         impl $pk_ty {
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-                if bytes.len() != PUBLIC_KEY_BYTES { return None; }
+                if bytes.len() != PUBLIC_KEY_BYTES {
+                    return None;
+                }
                 if !__ees_padding_bits_clear(bytes, N * PARAMS.logq) {
                     return None;
                 }
-                Some(Self { bytes: bytes.to_vec() })
+                Some(Self {
+                    bytes: bytes.to_vec(),
+                })
             }
 
             #[must_use]
-            pub fn to_wire_bytes(&self) -> Vec<u8> { self.bytes.clone() }
+            pub fn to_wire_bytes(&self) -> Vec<u8> {
+                self.bytes.clone()
+            }
 
             #[must_use]
-            pub fn as_bytes(&self) -> &[u8] { &self.bytes }
+            pub fn as_bytes(&self) -> &[u8] {
+                &self.bytes
+            }
         }
 
         impl $sk_ty {
@@ -1456,31 +1457,43 @@ macro_rules! define_ees_set {
 
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-                if bytes.len() != PRIVATE_KEY_BYTES + PUBLIC_KEY_BYTES { return None; }
+                if bytes.len() != PRIVATE_KEY_BYTES + PUBLIC_KEY_BYTES {
+                    return None;
+                }
                 let t = __ees_trapdoor_from_wire(&bytes[..PRIVATE_KEY_BYTES], &PARAMS)?;
                 let pk = $pk_ty::from_wire_bytes(&bytes[PRIVATE_KEY_BYTES..])?;
                 Some(Self { t, pk })
             }
 
             #[must_use]
-            pub fn public_key(&self) -> &$pk_ty { &self.pk }
+            pub fn public_key(&self) -> &$pk_ty {
+                &self.pk
+            }
         }
 
         impl $ct_ty {
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-                if bytes.len() != CIPHERTEXT_BYTES { return None; }
+                if bytes.len() != CIPHERTEXT_BYTES {
+                    return None;
+                }
                 if !__ees_padding_bits_clear(bytes, N * PARAMS.logq) {
                     return None;
                 }
-                Some(Self { bytes: bytes.to_vec() })
+                Some(Self {
+                    bytes: bytes.to_vec(),
+                })
             }
 
             #[must_use]
-            pub fn to_wire_bytes(&self) -> Vec<u8> { self.bytes.clone() }
+            pub fn to_wire_bytes(&self) -> Vec<u8> {
+                self.bytes.clone()
+            }
 
             #[must_use]
-            pub fn as_bytes(&self) -> &[u8] { &self.bytes }
+            pub fn as_bytes(&self) -> &[u8] {
+                &self.bytes
+            }
         }
 
         impl ::core::fmt::Debug for $sk_ty {
@@ -1517,7 +1530,9 @@ macro_rules! define_ees_set {
 
             pub fn keygen<R: Csprng>(rng: &mut R) -> ($pk_ty, $sk_ty) {
                 let (pk_bytes, t) = __ees_core_keygen::<N, R>(&PARAMS, rng);
-                let pk = $pk_ty { bytes: pk_bytes.clone() };
+                let pk = $pk_ty {
+                    bytes: pk_bytes.clone(),
+                };
                 let sk = $sk_ty { t, pk: pk.clone() };
                 (pk, sk)
             }
@@ -1596,8 +1611,7 @@ macro_rules! define_ees_set {
                 use $crate::hash::sha2::Sha256;
                 let mut drbg = CtrDrbgAes256::new(&[0xC0u8; 48]);
                 let (pk, sk) = $type_name::keygen(&mut drbg);
-                let ct = $type_name::encrypt(&pk, &[0xA5u8; 8], &mut drbg)
-                    .expect("encrypt");
+                let ct = $type_name::encrypt(&pk, &[0xA5u8; 8], &mut drbg).expect("encrypt");
                 let mut h = Sha256::new();
                 h.update(&pk.to_wire_bytes());
                 h.update(&sk.to_wire_bytes());

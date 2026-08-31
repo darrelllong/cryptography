@@ -377,10 +377,7 @@ impl X25519 {
         let mut secret = [0u8; 32];
         rng.fill_bytes(&mut secret);
         let public_bytes = X25519::scalar_mult_base(&secret);
-        (
-            X25519PublicKey(public_bytes),
-            X25519PrivateKey(secret),
-        )
+        (X25519PublicKey(public_bytes), X25519PrivateKey(secret))
     }
 }
 
@@ -489,8 +486,7 @@ mod tests {
     fn rfc7748_section5_2_vector_1() {
         let k = arr32("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4");
         let u = arr32("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c");
-        let expected =
-            arr32("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552");
+        let expected = arr32("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552");
         assert_eq!(X25519::scalar_mult(&k, &u), expected);
     }
 
@@ -499,8 +495,7 @@ mod tests {
     fn rfc7748_section5_2_vector_2() {
         let k = arr32("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d");
         let u = arr32("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493");
-        let expected =
-            arr32("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957");
+        let expected = arr32("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957");
         assert_eq!(X25519::scalar_mult(&k, &u), expected);
     }
 
@@ -512,8 +507,7 @@ mod tests {
         let next = X25519::scalar_mult(&k, &u);
         u = k;
         k = next;
-        let expected =
-            arr32("422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079");
+        let expected = arr32("422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079");
         assert_eq!(k, expected);
         // Silence unused-warning on `u`: it would be the next u-coordinate input.
         let _ = u;
@@ -529,8 +523,7 @@ mod tests {
             u = k;
             k = next;
         }
-        let expected =
-            arr32("684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51");
+        let expected = arr32("684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51");
         assert_eq!(k, expected);
     }
 
@@ -547,8 +540,7 @@ mod tests {
             u = k;
             k = next;
         }
-        let expected =
-            arr32("7c3911e0ab2586fd864497297e575e6f3bc601c0883c30df5f4dd2d24f665424");
+        let expected = arr32("7c3911e0ab2586fd864497297e575e6f3bc601c0883c30df5f4dd2d24f665424");
         assert_eq!(k, expected);
     }
 

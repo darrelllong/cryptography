@@ -588,8 +588,8 @@ mod tests {
 
         // x=0x80: subsets of {bit7} are {} and {bit7} → indices 0 and 128.
         let (lo, hi) = subset_mask8(0x80);
-        assert_eq!(lo, 1);   // bit 0
-        assert_eq!(hi, 1);   // bit 128 (= bit 0 of hi)
+        assert_eq!(lo, 1); // bit 0
+        assert_eq!(hi, 1); // bit 128 (= bit 0 of hi)
     }
 
     #[test]
@@ -653,8 +653,9 @@ mod tests {
     /// nibble S-box (the PRESENT cipher S-box).
     #[test]
     fn nibble_sbox_anf_matches_direct_lookup_all_inputs() {
-        const PRESENT_SBOX: [u8; 16] =
-            [0xC, 0x5, 0x6, 0xB, 0x9, 0x0, 0xA, 0xD, 0x3, 0xE, 0xF, 0x8, 0x4, 0x7, 0x1, 0x2];
+        const PRESENT_SBOX: [u8; 16] = [
+            0xC, 0x5, 0x6, 0xB, 0x9, 0x0, 0xA, 0xD, 0x3, 0xE, 0xF, 0x8, 0x4, 0x7, 0x1, 0x2,
+        ];
         let coeffs = build_nibble_sbox_anf(&PRESENT_SBOX);
         for x in 0u8..16 {
             assert_eq!(

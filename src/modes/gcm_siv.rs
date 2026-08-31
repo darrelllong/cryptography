@@ -170,7 +170,10 @@ fn encrypt_core<C: BlockCipher>(
     // Compare as u64 so the `1 << 36` constant does not overflow `usize` on
     // 32-bit targets (where it would be a compile-time error). On such targets
     // the RFC 8452 limit is unreachable anyway since `len` maxes out at 2^32-1.
-    assert!(aad.len() as u64 <= (1u64 << 36), "AAD exceeds RFC 8452 limit");
+    assert!(
+        aad.len() as u64 <= (1u64 << 36),
+        "AAD exceeds RFC 8452 limit"
+    );
     assert!(
         plaintext.len() as u64 <= (1u64 << 36),
         "plaintext exceeds RFC 8452 limit"
@@ -319,7 +322,15 @@ mod tests {
             assert_eq!(ghash_mul(a, b), ghash_mul_ref(a, b));
         }
 
-        let corners = [0u128, 1, 2, 1 << 127, (1 << 127) | 1, u128::MAX, u128::MAX >> 1];
+        let corners = [
+            0u128,
+            1,
+            2,
+            1 << 127,
+            (1 << 127) | 1,
+            u128::MAX,
+            u128::MAX >> 1,
+        ];
         for &a in &corners {
             for &b in &corners {
                 assert_eq!(ghash_mul(a, b), ghash_mul_ref(a, b));

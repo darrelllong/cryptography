@@ -24,9 +24,6 @@
 //! `PQCkemKAT_1450.rsp` (sampled subset by default; full sweep under
 //! `--ignored`).
 
-
-
-
 // ---- parameter constants ---------------------------------------------------
 
 const N: usize = 701;
@@ -95,9 +92,8 @@ fn poly_lift_hrss(r: &mut [u16; N], a: &[u16; N]) {
     b[2] = b[2].wrapping_add(a[1].wrapping_mul(zj.wrapping_add(t)));
 
     for i in 3..N {
-        b[i] = b[i - 3].wrapping_add(
-            2u16.wrapping_mul(a[i].wrapping_add(a[i - 1]).wrapping_add(a[i - 2])),
-        );
+        b[i] = b[i - 3]
+            .wrapping_add(2u16.wrapping_mul(a[i].wrapping_add(a[i - 1]).wrapping_add(a[i - 2])));
     }
 
     crate::public_key::ntru_pqc_shared::poly_mod_3_phi_n::<N>(&mut b);

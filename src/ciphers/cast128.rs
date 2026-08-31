@@ -522,7 +522,8 @@ mod tests {
         let key_hex = "0123456712345678234567893456789a";
         let pt_hex = "0123456789abcdef";
         let pt: [u8; 8] = decode_hex(pt_hex).try_into().unwrap();
-        let Some(expected) = crate::test_utils::run_openssl_enc("-cast5-ecb", key_hex, None, &pt) else {
+        let Some(expected) = crate::test_utils::run_openssl_enc("-cast5-ecb", key_hex, None, &pt)
+        else {
             return;
         };
 

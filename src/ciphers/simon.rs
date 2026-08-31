@@ -194,16 +194,16 @@ macro_rules! simon_variant {
 // The KAT vectors in the tests below provide a second, independent check.
 //
 //                           n    m    T    z   mask                      key  blk   paper §T
-simon_variant!(Simon32_64,  16,  4,  32,  0,  0xffff_u64,               8,  4); // Table 3.1 T=32
-simon_variant!(Simon48_72,  24,  3,  36,  0,  0xff_ffff_u64,            9,  6); // Table 3.1 T=36
-simon_variant!(Simon48_96,  24,  4,  36,  1,  0xff_ffff_u64,           12,  6); // Table 3.1 T=36
-simon_variant!(Simon64_96,  32,  3,  42,  2,  0xffff_ffff_u64,         12,  8); // Table 3.1 T=42
-simon_variant!(Simon64_128, 32,  4,  44,  3,  0xffff_ffff_u64,         16,  8); // Table 3.1 T=44
-simon_variant!(Simon96_96,  48,  2,  52,  2,  0xffff_ffff_ffff_u64,   12, 12); // Table 3.1 T=52
-simon_variant!(Simon96_144, 48,  3,  54,  3,  0xffff_ffff_ffff_u64,   18, 12); // Table 3.1 T=54
-simon_variant!(Simon128_128, 64, 2,  68,  2,  u64::MAX,                16, 16); // Table 3.1 T=68
-simon_variant!(Simon128_192, 64, 3,  69,  3,  u64::MAX,                24, 16); // Table 3.1 T=69
-simon_variant!(Simon128_256, 64, 4,  72,  4,  u64::MAX,                32, 16); // Table 3.1 T=72
+simon_variant!(Simon32_64, 16, 4, 32, 0, 0xffff_u64, 8, 4); // Table 3.1 T=32
+simon_variant!(Simon48_72, 24, 3, 36, 0, 0xff_ffff_u64, 9, 6); // Table 3.1 T=36
+simon_variant!(Simon48_96, 24, 4, 36, 1, 0xff_ffff_u64, 12, 6); // Table 3.1 T=36
+simon_variant!(Simon64_96, 32, 3, 42, 2, 0xffff_ffff_u64, 12, 8); // Table 3.1 T=42
+simon_variant!(Simon64_128, 32, 4, 44, 3, 0xffff_ffff_u64, 16, 8); // Table 3.1 T=44
+simon_variant!(Simon96_96, 48, 2, 52, 2, 0xffff_ffff_ffff_u64, 12, 12); // Table 3.1 T=52
+simon_variant!(Simon96_144, 48, 3, 54, 3, 0xffff_ffff_ffff_u64, 18, 12); // Table 3.1 T=54
+simon_variant!(Simon128_128, 64, 2, 68, 2, u64::MAX, 16, 16); // Table 3.1 T=68
+simon_variant!(Simon128_192, 64, 3, 69, 3, u64::MAX, 24, 16); // Table 3.1 T=69
+simon_variant!(Simon128_256, 64, 4, 72, 4, u64::MAX, 32, 16); // Table 3.1 T=72
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests — known-answer vectors from Appendix B of the 2013 paper;

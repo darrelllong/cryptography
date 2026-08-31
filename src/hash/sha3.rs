@@ -140,8 +140,8 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         // c[0] and c[1] in one SIMD register.
         let c01 = {
             let t = veor3q_u64(
-                u64x2(state[0],  state[1]),
-                u64x2(state[5],  state[6]),
+                u64x2(state[0], state[1]),
+                u64x2(state[5], state[6]),
                 u64x2(state[10], state[11]),
             );
             veor3q_u64(t, u64x2(state[15], state[16]), u64x2(state[20], state[21]))
@@ -149,8 +149,8 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         // c[2] and c[3].
         let c23 = {
             let t = veor3q_u64(
-                u64x2(state[2],  state[3]),
-                u64x2(state[7],  state[8]),
+                u64x2(state[2], state[3]),
+                u64x2(state[7], state[8]),
                 u64x2(state[12], state[13]),
             );
             veor3q_u64(t, u64x2(state[17], state[18]), u64x2(state[22], state[23]))
@@ -169,7 +169,7 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         //   D[2] = c1 ^ rotl(c3, 1)    D[3] = c2 ^ rotl(c4, 1)
         let d01 = vrax1q_u64(u64x2(c4, c0), u64x2(c1, c2));
         let d23 = vrax1q_u64(u64x2(c1, c2), u64x2(c3, c4));
-        let d4  = c3 ^ c0.rotate_left(1);   // scalar
+        let d4 = c3 ^ c0.rotate_left(1); // scalar
 
         let d = [
             vgetq_lane_u64::<0>(d01),
@@ -204,22 +204,22 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
             let r = y * 5;
             // x=0: BCAX(b[0], b[2], b[1])    x=1: BCAX(b[1], b[3], b[2])
             let chi01 = vbcaxq_u64(
-                u64x2(b[r],   b[r+1]),
-                u64x2(b[r+2], b[r+3]),
-                u64x2(b[r+1], b[r+2]),
+                u64x2(b[r], b[r + 1]),
+                u64x2(b[r + 2], b[r + 3]),
+                u64x2(b[r + 1], b[r + 2]),
             );
             // x=2: BCAX(b[2], b[4], b[3])    x=3: BCAX(b[3], b[0], b[4])
             let chi23 = vbcaxq_u64(
-                u64x2(b[r+2], b[r+3]),
-                u64x2(b[r+4], b[r  ]),
-                u64x2(b[r+3], b[r+4]),
+                u64x2(b[r + 2], b[r + 3]),
+                u64x2(b[r + 4], b[r]),
+                u64x2(b[r + 3], b[r + 4]),
             );
-            state[r  ] = vgetq_lane_u64::<0>(chi01);
-            state[r+1] = vgetq_lane_u64::<1>(chi01);
-            state[r+2] = vgetq_lane_u64::<0>(chi23);
-            state[r+3] = vgetq_lane_u64::<1>(chi23);
+            state[r] = vgetq_lane_u64::<0>(chi01);
+            state[r + 1] = vgetq_lane_u64::<1>(chi01);
+            state[r + 2] = vgetq_lane_u64::<0>(chi23);
+            state[r + 3] = vgetq_lane_u64::<1>(chi23);
             // x=4: BCAX(b[4], b[1], b[0]) = b[4] ^ (b[1] & !b[0])
-            state[r+4] = b[r+4] ^ (b[r+1] & !b[r]);
+            state[r + 4] = b[r + 4] ^ (b[r + 1] & !b[r]);
         }
 
         // === Iota ===
@@ -637,7 +637,8 @@ mod tests {
     #[test]
     fn sha3_224_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-224", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-224", "-binary"], msg)
+        else {
             return;
         };
         assert_eq!(Sha3_224::digest(msg).as_slice(), expected.as_slice());
@@ -646,7 +647,8 @@ mod tests {
     #[test]
     fn sha3_256_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-256", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-256", "-binary"], msg)
+        else {
             return;
         };
         assert_eq!(Sha3_256::digest(msg).as_slice(), expected.as_slice());
@@ -655,7 +657,8 @@ mod tests {
     #[test]
     fn sha3_384_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-384", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-384", "-binary"], msg)
+        else {
             return;
         };
         assert_eq!(Sha3_384::digest(msg).as_slice(), expected.as_slice());
@@ -664,7 +667,8 @@ mod tests {
     #[test]
     fn sha3_512_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-512", "-binary"], msg) else {
+        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-512", "-binary"], msg)
+        else {
             return;
         };
         assert_eq!(Sha3_512::digest(msg).as_slice(), expected.as_slice());

@@ -232,10 +232,26 @@ fn keyed_h_byte(v: u8, j: usize, s: &[u32; 4], words: usize, use_ct: bool) -> u8
 
     // The shared 128-bit keyed core from the submission paper.
     match j {
-        0 => q_perm(q_perm(q_perm(y, 0, use_ct) ^ b(s[1], 0), 0, use_ct) ^ b(s[0], 0), 1, use_ct),
-        1 => q_perm(q_perm(q_perm(y, 1, use_ct) ^ b(s[1], 1), 0, use_ct) ^ b(s[0], 1), 0, use_ct),
-        2 => q_perm(q_perm(q_perm(y, 0, use_ct) ^ b(s[1], 2), 1, use_ct) ^ b(s[0], 2), 1, use_ct),
-        3 => q_perm(q_perm(q_perm(y, 1, use_ct) ^ b(s[1], 3), 1, use_ct) ^ b(s[0], 3), 0, use_ct),
+        0 => q_perm(
+            q_perm(q_perm(y, 0, use_ct) ^ b(s[1], 0), 0, use_ct) ^ b(s[0], 0),
+            1,
+            use_ct,
+        ),
+        1 => q_perm(
+            q_perm(q_perm(y, 1, use_ct) ^ b(s[1], 1), 0, use_ct) ^ b(s[0], 1),
+            0,
+            use_ct,
+        ),
+        2 => q_perm(
+            q_perm(q_perm(y, 0, use_ct) ^ b(s[1], 2), 1, use_ct) ^ b(s[0], 2),
+            1,
+            use_ct,
+        ),
+        3 => q_perm(
+            q_perm(q_perm(y, 1, use_ct) ^ b(s[1], 3), 1, use_ct) ^ b(s[0], 3),
+            0,
+            use_ct,
+        ),
         _ => unreachable!(),
     }
 }
@@ -373,7 +389,9 @@ impl TwofishCore {
         // the pseudo-Hadamard transform and round subkey injection.
         let t0 = self.h_round(x0);
         let t1 = self.h_round(x1.rotate_left(8));
-        let f0 = t0.wrapping_add(t1).wrapping_add(self.subkeys[8 + 2 * round]);
+        let f0 = t0
+            .wrapping_add(t1)
+            .wrapping_add(self.subkeys[8 + 2 * round]);
         let f1 = t0
             .wrapping_add(t1.wrapping_add(t1))
             .wrapping_add(self.subkeys[8 + 2 * round + 1]);
@@ -717,9 +735,24 @@ mod tests {
                     let fast = $fast::new(&key);
                     let slow = $slow::new(&key);
                     let ct = fast.encrypt_block(&pt);
-                    assert_eq!(ct, slow.encrypt_block(&pt), "fast != ct enc ({} bit)", $klen * 8);
-                    assert_eq!(fast.decrypt_block(&ct), pt, "fast roundtrip ({} bit)", $klen * 8);
-                    assert_eq!(slow.decrypt_block(&ct), pt, "ct roundtrip ({} bit)", $klen * 8);
+                    assert_eq!(
+                        ct,
+                        slow.encrypt_block(&pt),
+                        "fast != ct enc ({} bit)",
+                        $klen * 8
+                    );
+                    assert_eq!(
+                        fast.decrypt_block(&ct),
+                        pt,
+                        "fast roundtrip ({} bit)",
+                        $klen * 8
+                    );
+                    assert_eq!(
+                        slow.decrypt_block(&ct),
+                        pt,
+                        "ct roundtrip ({} bit)",
+                        $klen * 8
+                    );
                     n += 1;
                 }
             }};

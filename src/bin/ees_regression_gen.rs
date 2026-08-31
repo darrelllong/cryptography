@@ -38,7 +38,12 @@ macro_rules! run {
         let mut drbg = CtrDrbgAes256::new(&SEED);
         let (pk, sk) = <$ty>::keygen(&mut drbg);
         let ct = <$ty>::encrypt(&pk, &MSG, &mut drbg).expect("encrypt");
-        print_digest($name, &pk.to_wire_bytes(), &sk.to_wire_bytes(), &ct.to_wire_bytes());
+        print_digest(
+            $name,
+            &pk.to_wire_bytes(),
+            &sk.to_wire_bytes(),
+            &ct.to_wire_bytes(),
+        );
     }};
 }
 

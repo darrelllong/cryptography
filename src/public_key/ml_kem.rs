@@ -506,8 +506,13 @@ impl MlKem {
         let mut coins = [0u8; SYM_BYTES];
         coins.copy_from_slice(&kr[SYM_BYTES..]);
 
-        let ct_bytes =
-            indcpa_encrypt(p, randomness, &public_key.bytes, &coins, public_key.a_transpose())?;
+        let ct_bytes = indcpa_encrypt(
+            p,
+            randomness,
+            &public_key.bytes,
+            &coins,
+            public_key.a_transpose(),
+        )?;
         let mut ss = [0u8; SS_BYTES];
         ss.copy_from_slice(&kr[..SS_BYTES]);
         Some((
@@ -1447,7 +1452,10 @@ mod tests {
         let rej2 = MlKem::decaps(&sk, &bad_ct).expect("decaps");
 
         assert_eq!(rej1, rej2, "rejection key must be deterministic in (z, c)");
-        assert_ne!(rej1, ss, "rejection key must differ from the true shared secret");
+        assert_ne!(
+            rej1, ss,
+            "rejection key must differ from the true shared secret"
+        );
     }
 
     #[test]

@@ -705,7 +705,11 @@ mod tests {
             let mut fwd = x;
             apply_s(&mut fwd);
             apply_l(&mut fwd);
-            assert_eq!(fused_round(&LS_ENC, &x).to_be_bytes(), fwd, "forward S then L");
+            assert_eq!(
+                fused_round(&LS_ENC, &x).to_be_bytes(),
+                fwd,
+                "forward S then L"
+            );
 
             let mut inv = x;
             apply_s_inv(&mut inv);
@@ -722,7 +726,11 @@ mod tests {
             let mut fwd = x;
             apply_s(&mut fwd);
             apply_l(&mut fwd);
-            assert_eq!(fused_round(&LS_ENC, &x).to_be_bytes(), fwd, "forward const {v}");
+            assert_eq!(
+                fused_round(&LS_ENC, &x).to_be_bytes(),
+                fwd,
+                "forward const {v}"
+            );
         }
     }
 

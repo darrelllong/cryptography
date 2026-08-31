@@ -373,11 +373,7 @@ pub(crate) fn poly_s3_inv<const N: usize>(r: &mut [u16; N], a: &[u16; N]) {
 /// to $\pmod{2^{2k}}$. Four iterations carry the precision from $2^1$ to
 /// $2^{16}$, which subsumes every $q$ in this NTRU family ($q \le 2^{13}$).
 /// All arithmetic is `u16` wrapping; the caller reduces modulo $q$ at use.
-pub(crate) fn poly_r2_inv_to_rq_inv<const N: usize>(
-    r: &mut [u16; N],
-    ai: &[u16; N],
-    a: &[u16; N],
-) {
+pub(crate) fn poly_r2_inv_to_rq_inv<const N: usize>(r: &mut [u16; N], ai: &[u16; N], a: &[u16; N]) {
     let mut b = [0u16; N];
     for i in 0..N {
         b[i] = 0u16.wrapping_sub(a[i]);
@@ -480,57 +476,79 @@ macro_rules! define_pqc_kem {
         impl $pk_ty {
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-                if bytes.len() != PUBLIC_KEY_BYTES { return None; }
+                if bytes.len() != PUBLIC_KEY_BYTES {
+                    return None;
+                }
                 let mut out = [0u8; PUBLIC_KEY_BYTES];
                 out.copy_from_slice(bytes);
                 Some(Self { bytes: out })
             }
 
             #[must_use]
-            pub fn to_wire_bytes(&self) -> [u8; PUBLIC_KEY_BYTES] { self.bytes }
+            pub fn to_wire_bytes(&self) -> [u8; PUBLIC_KEY_BYTES] {
+                self.bytes
+            }
 
             #[must_use]
-            pub fn as_bytes(&self) -> &[u8; PUBLIC_KEY_BYTES] { &self.bytes }
+            pub fn as_bytes(&self) -> &[u8; PUBLIC_KEY_BYTES] {
+                &self.bytes
+            }
         }
 
         impl $sk_ty {
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-                if bytes.len() != PRIVATE_KEY_BYTES { return None; }
+                if bytes.len() != PRIVATE_KEY_BYTES {
+                    return None;
+                }
                 let mut out = [0u8; PRIVATE_KEY_BYTES];
                 out.copy_from_slice(bytes);
                 Some(Self { bytes: out })
             }
 
             #[must_use]
-            pub fn to_wire_bytes(&self) -> [u8; PRIVATE_KEY_BYTES] { self.bytes }
+            pub fn to_wire_bytes(&self) -> [u8; PRIVATE_KEY_BYTES] {
+                self.bytes
+            }
 
             #[must_use]
-            pub fn as_bytes(&self) -> &[u8; PRIVATE_KEY_BYTES] { &self.bytes }
+            pub fn as_bytes(&self) -> &[u8; PRIVATE_KEY_BYTES] {
+                &self.bytes
+            }
         }
 
         impl $ct_ty {
             #[must_use]
             pub fn from_wire_bytes(bytes: &[u8]) -> Option<Self> {
-                if bytes.len() != CIPHERTEXT_BYTES { return None; }
+                if bytes.len() != CIPHERTEXT_BYTES {
+                    return None;
+                }
                 let mut out = [0u8; CIPHERTEXT_BYTES];
                 out.copy_from_slice(bytes);
                 Some(Self { bytes: out })
             }
 
             #[must_use]
-            pub fn to_wire_bytes(&self) -> [u8; CIPHERTEXT_BYTES] { self.bytes }
+            pub fn to_wire_bytes(&self) -> [u8; CIPHERTEXT_BYTES] {
+                self.bytes
+            }
 
             #[must_use]
-            pub fn as_bytes(&self) -> &[u8; CIPHERTEXT_BYTES] { &self.bytes }
+            pub fn as_bytes(&self) -> &[u8; CIPHERTEXT_BYTES] {
+                &self.bytes
+            }
         }
 
         impl $ss_ty {
             #[must_use]
-            pub fn to_wire_bytes(&self) -> [u8; SHARED_SECRET_BYTES] { self.bytes }
+            pub fn to_wire_bytes(&self) -> [u8; SHARED_SECRET_BYTES] {
+                self.bytes
+            }
 
             #[must_use]
-            pub fn as_bytes(&self) -> &[u8; SHARED_SECRET_BYTES] { &self.bytes }
+            pub fn as_bytes(&self) -> &[u8; SHARED_SECRET_BYTES] {
+                &self.bytes
+            }
         }
 
         impl ::core::fmt::Debug for $pk_ty {
@@ -584,10 +602,7 @@ macro_rules! define_pqc_kem {
                 ($pk_ty { bytes: pk }, $sk_ty { bytes: sk })
             }
 
-            pub fn encaps<R: $crate::Csprng>(
-                pk: &$pk_ty,
-                rng: &mut R,
-            ) -> ($ct_ty, $ss_ty) {
+            pub fn encaps<R: $crate::Csprng>(pk: &$pk_ty, rng: &mut R) -> ($ct_ty, $ss_ty) {
                 let mut ct = [0u8; CIPHERTEXT_BYTES];
                 let mut ss = [0u8; SHARED_SECRET_BYTES];
                 let mut rm_seed_scratch = [0u8; SAMPLE_RM_BYTES];
@@ -645,11 +660,7 @@ macro_rules! define_pqc_kem {
                     let (pk, sk) = $type_name::keygen(&mut drbg);
                     let (ct, ss_a) = $type_name::encaps(&pk, &mut drbg);
                     let ss_b = $type_name::decaps(&sk, &ct);
-                    assert_eq!(
-                        ss_a.as_bytes(),
-                        ss_b.as_bytes(),
-                        "seed byte 0x{seed:02x}"
-                    );
+                    assert_eq!(ss_a.as_bytes(), ss_b.as_bytes(), "seed byte 0x{seed:02x}");
                 }
             }
 
@@ -715,12 +726,28 @@ macro_rules! define_pqc_kem {
                 let mut drbg = CtrDrbgAes256::new(&seed);
 
                 let (pk, sk) = $type_name::keygen(&mut drbg);
-                assert_eq!(pk.to_wire_bytes().as_slice(), entry.pk.as_slice(), "pk @ count={count}");
-                assert_eq!(sk.to_wire_bytes().as_slice(), entry.sk.as_slice(), "sk @ count={count}");
+                assert_eq!(
+                    pk.to_wire_bytes().as_slice(),
+                    entry.pk.as_slice(),
+                    "pk @ count={count}"
+                );
+                assert_eq!(
+                    sk.to_wire_bytes().as_slice(),
+                    entry.sk.as_slice(),
+                    "sk @ count={count}"
+                );
 
                 let (ct, ss) = $type_name::encaps(&pk, &mut drbg);
-                assert_eq!(ct.to_wire_bytes().as_slice(), entry.ct.as_slice(), "ct @ count={count}");
-                assert_eq!(ss.to_wire_bytes().as_slice(), entry.ss.as_slice(), "ss @ count={count}");
+                assert_eq!(
+                    ct.to_wire_bytes().as_slice(),
+                    entry.ct.as_slice(),
+                    "ct @ count={count}"
+                );
+                assert_eq!(
+                    ss.to_wire_bytes().as_slice(),
+                    entry.ss.as_slice(),
+                    "ss @ count={count}"
+                );
 
                 let ss2 = $type_name::decaps(&sk, &ct);
                 assert_eq!(ss.as_bytes(), ss2.as_bytes(), "decaps @ count={count}");
@@ -773,10 +800,7 @@ pub(crate) fn poly_trinary_zq_to_z3<const N: usize, const LOGQ: usize>(r: &mut [
 
 /// Project an arbitrary $R_q$ coefficient vector onto $S_3$ (mod 3,
 /// mod $\Phi_n$).
-pub(crate) fn poly_rq_to_s3<const N: usize, const LOGQ: usize>(
-    r: &mut [u16; N],
-    a: &[u16; N],
-) {
+pub(crate) fn poly_rq_to_s3<const N: usize, const LOGQ: usize>(r: &mut [u16; N], a: &[u16; N]) {
     let q_mask = ((1u32 << LOGQ) - 1) as u16;
     for i in 0..N {
         let mut c = a[i] & q_mask;
@@ -1064,12 +1088,14 @@ where
 /// low-order bits in the final byte; the high `8 - bits_used` bits are
 /// padding and must be zero. Mask `0xff << bits_used` selects exactly
 /// those high padding bits.
-pub(crate) fn owcpa_check_ciphertext<const N: usize, const LOGQ: usize>(
-    ciphertext: &[u8],
-) -> i32 {
+pub(crate) fn owcpa_check_ciphertext<const N: usize, const LOGQ: usize>(ciphertext: &[u8]) -> i32 {
     let pack_deg = N - 1;
     let bits_used = (LOGQ * pack_deg) & 7;
-    let mask: u8 = if bits_used == 0 { 0 } else { 0xffu8 << bits_used };
+    let mask: u8 = if bits_used == 0 {
+        0
+    } else {
+        0xffu8 << bits_used
+    };
     let last = *ciphertext.last().expect("non-empty ciphertext");
     let t = (last & mask) as u16;
     (1 & ((!t).wrapping_add(1) >> 15)) as i32
@@ -1308,30 +1334,18 @@ pub(crate) fn sample_fixed_type<const N: usize>(
 /// Cyclic multiplication in $R = \mathbb{Z}[x] / (x^N - 1)$ over `u16`
 /// wrapping arithmetic. Thin alias for the shared
 /// [`crate::public_key::ntru_poly_mul::poly_mul_cyclic`] entry point.
-pub(crate) fn poly_rq_mul<const N: usize>(
-    r: &mut [u16; N],
-    a: &[u16; N],
-    b: &[u16; N],
-) {
+pub(crate) fn poly_rq_mul<const N: usize>(r: &mut [u16; N], a: &[u16; N], b: &[u16; N]) {
     crate::public_key::ntru_poly_mul::poly_mul_cyclic(r, a, b);
 }
 
 /// $R_q$ multiplication followed by mod-$\Phi_n$ projection.
-pub(crate) fn poly_sq_mul<const N: usize>(
-    r: &mut [u16; N],
-    a: &[u16; N],
-    b: &[u16; N],
-) {
+pub(crate) fn poly_sq_mul<const N: usize>(r: &mut [u16; N], a: &[u16; N], b: &[u16; N]) {
     poly_rq_mul::<N>(r, a, b);
     poly_mod_q_phi_n::<N>(r);
 }
 
 /// $R$ multiplication followed by mod-3, mod-$\Phi_n$ projection.
-pub(crate) fn poly_s3_mul<const N: usize>(
-    r: &mut [u16; N],
-    a: &[u16; N],
-    b: &[u16; N],
-) {
+pub(crate) fn poly_s3_mul<const N: usize>(r: &mut [u16; N], a: &[u16; N], b: &[u16; N]) {
     poly_rq_mul::<N>(r, a, b);
     poly_mod_3_phi_n::<N>(r);
 }
@@ -1406,39 +1420,31 @@ pub(crate) fn poly_sq_frombytes_logq11<const N: usize>(r: &mut [u16; N], a: &[u8
     let full = pack_deg / 8;
     for i in 0..full {
         r[8 * i] = (a[11 * i] as u16) | (((a[11 * i + 1] as u16) & 0x07) << 8);
-        r[8 * i + 1] =
-            ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
+        r[8 * i + 1] = ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
         r[8 * i + 2] = ((a[11 * i + 2] as u16) >> 6)
             | (((a[11 * i + 3] as u16) & 0xff) << 2)
             | (((a[11 * i + 4] as u16) & 0x01) << 10);
-        r[8 * i + 3] =
-            ((a[11 * i + 4] as u16) >> 1) | (((a[11 * i + 5] as u16) & 0x0f) << 7);
-        r[8 * i + 4] =
-            ((a[11 * i + 5] as u16) >> 4) | (((a[11 * i + 6] as u16) & 0x7f) << 4);
+        r[8 * i + 3] = ((a[11 * i + 4] as u16) >> 1) | (((a[11 * i + 5] as u16) & 0x0f) << 7);
+        r[8 * i + 4] = ((a[11 * i + 5] as u16) >> 4) | (((a[11 * i + 6] as u16) & 0x7f) << 4);
         r[8 * i + 5] = ((a[11 * i + 6] as u16) >> 7)
             | (((a[11 * i + 7] as u16) & 0xff) << 1)
             | (((a[11 * i + 8] as u16) & 0x03) << 9);
-        r[8 * i + 6] =
-            ((a[11 * i + 8] as u16) >> 2) | (((a[11 * i + 9] as u16) & 0x1f) << 6);
-        r[8 * i + 7] =
-            ((a[11 * i + 9] as u16) >> 5) | (((a[11 * i + 10] as u16) & 0xff) << 3);
+        r[8 * i + 6] = ((a[11 * i + 8] as u16) >> 2) | (((a[11 * i + 9] as u16) & 0x1f) << 6);
+        r[8 * i + 7] = ((a[11 * i + 9] as u16) >> 5) | (((a[11 * i + 10] as u16) & 0xff) << 3);
     }
     let i = full;
     match pack_deg & 0x07 {
         4 => {
             r[8 * i] = (a[11 * i] as u16) | (((a[11 * i + 1] as u16) & 0x07) << 8);
-            r[8 * i + 1] =
-                ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
+            r[8 * i + 1] = ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
             r[8 * i + 2] = ((a[11 * i + 2] as u16) >> 6)
                 | (((a[11 * i + 3] as u16) & 0xff) << 2)
                 | (((a[11 * i + 4] as u16) & 0x01) << 10);
-            r[8 * i + 3] =
-                ((a[11 * i + 4] as u16) >> 1) | (((a[11 * i + 5] as u16) & 0x0f) << 7);
+            r[8 * i + 3] = ((a[11 * i + 4] as u16) >> 1) | (((a[11 * i + 5] as u16) & 0x0f) << 7);
         }
         2 => {
             r[8 * i] = (a[11 * i] as u16) | (((a[11 * i + 1] as u16) & 0x07) << 8);
-            r[8 * i + 1] =
-                ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
+            r[8 * i + 1] = ((a[11 * i + 1] as u16) >> 3) | (((a[11 * i + 2] as u16) & 0x3f) << 5);
         }
         0 => {}
         _ => unreachable!(),
@@ -1469,8 +1475,7 @@ pub(crate) fn poly_sq_frombytes_logq12<const N: usize>(r: &mut [u16; N], a: &[u8
     debug_assert!(a.len() >= (pack_deg * 12).div_ceil(8));
     for i in 0..pack_deg / 2 {
         r[2 * i] = (a[3 * i] as u16) | (((a[3 * i + 1] as u16) & 0x0f) << 8);
-        r[2 * i + 1] =
-            ((a[3 * i + 1] as u16) >> 4) | (((a[3 * i + 2] as u16) & 0xff) << 4);
+        r[2 * i + 1] = ((a[3 * i + 1] as u16) >> 4) | (((a[3 * i + 2] as u16) & 0xff) << 4);
     }
     r[N - 1] = 0;
 }
@@ -1542,21 +1547,18 @@ pub(crate) fn poly_sq_frombytes_logq13<const N: usize>(r: &mut [u16; N], a: &[u8
         r[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
             | ((a[13 * i + 2] as u16) << 3)
             | (((a[13 * i + 3] as u16) & 0x03) << 11);
-        r[8 * i + 2] =
-            ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
+        r[8 * i + 2] = ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
         r[8 * i + 3] = ((a[13 * i + 4] as u16) >> 7)
             | ((a[13 * i + 5] as u16) << 1)
             | (((a[13 * i + 6] as u16) & 0x0f) << 9);
         r[8 * i + 4] = ((a[13 * i + 6] as u16) >> 4)
             | ((a[13 * i + 7] as u16) << 4)
             | (((a[13 * i + 8] as u16) & 0x01) << 12);
-        r[8 * i + 5] =
-            ((a[13 * i + 8] as u16) >> 1) | (((a[13 * i + 9] as u16) & 0x3f) << 7);
+        r[8 * i + 5] = ((a[13 * i + 8] as u16) >> 1) | (((a[13 * i + 9] as u16) & 0x3f) << 7);
         r[8 * i + 6] = ((a[13 * i + 9] as u16) >> 6)
             | ((a[13 * i + 10] as u16) << 2)
             | (((a[13 * i + 11] as u16) & 0x07) << 10);
-        r[8 * i + 7] =
-            ((a[13 * i + 11] as u16) >> 3) | ((a[13 * i + 12] as u16) << 5);
+        r[8 * i + 7] = ((a[13 * i + 11] as u16) >> 3) | ((a[13 * i + 12] as u16) << 5);
     }
     let i = full;
     match pack_deg & 0x07 {
@@ -1565,8 +1567,7 @@ pub(crate) fn poly_sq_frombytes_logq13<const N: usize>(r: &mut [u16; N], a: &[u8
             r[8 * i + 1] = ((a[13 * i + 1] as u16) >> 5)
                 | ((a[13 * i + 2] as u16) << 3)
                 | (((a[13 * i + 3] as u16) & 0x03) << 11);
-            r[8 * i + 2] =
-                ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
+            r[8 * i + 2] = ((a[13 * i + 3] as u16) >> 2) | (((a[13 * i + 4] as u16) & 0x7f) << 6);
             r[8 * i + 3] = ((a[13 * i + 4] as u16) >> 7)
                 | ((a[13 * i + 5] as u16) << 1)
                 | (((a[13 * i + 6] as u16) & 0x0f) << 9);
