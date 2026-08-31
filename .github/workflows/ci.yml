@@ -71,3 +71,30 @@ jobs:
         run: cargo test --features arm-sha3 hash::sha3
       - name: Doc build (deny warnings)
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+
+  # The same courtesy this crate expects of rump: a breaking push here turns
+  # this CI red rather than entropy's next one. entropy builds and tests
+  # against the exact cryptography commit under test.
+  downstream:
+    name: downstream (entropy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cryptography
+      - uses: actions/checkout@v4
+        with:
+          repository: darrelllong/rump
+          path: rump
+      - uses: actions/checkout@v4
+        with:
+          repository: darrelllong/entropy
+          path: entropy
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: entropy
+      - name: entropy tests against this cryptography
+        working-directory: entropy
+        run: cargo test
