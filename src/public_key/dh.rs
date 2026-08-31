@@ -37,11 +37,12 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::primes::{
-    generate_prime_order_group, is_probable_prime_untrusted, mod_pow, random_nonzero_below,
+    generate_prime_order_group, is_probable_prime_untrusted, random_nonzero_below,
 };
 use crate::Csprng;
+use rump::modular::mod_pow;
+use rump::BigUint;
 
 const DH_PARAMS_LABEL: &str = "CRYPTOGRAPHY DH PARAMETERS";
 const DH_PUBLIC_LABEL: &str = "CRYPTOGRAPHY DH PUBLIC KEY";
@@ -333,8 +334,8 @@ fn validate_domain(p: &BigUint, q: &BigUint, g: &BigUint) -> bool {
     if q >= p {
         return false;
     }
-    let p_minus_one = p.sub_ref(&BigUint::one());
-    if !p_minus_one.modulo(q).is_zero() {
+    let p_minus_one = p.sub(&BigUint::one());
+    if !p_minus_one.rem(q).is_zero() {
         return false;
     }
     if g <= &BigUint::one() || g >= p {
@@ -348,8 +349,8 @@ fn validate_domain(p: &BigUint, q: &BigUint, g: &BigUint) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{Dh, DhParams, DhPrivateKey, DhPublicKey};
-    use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     fn rng() -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[0x33; 48])

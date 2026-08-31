@@ -6,7 +6,8 @@
 //! 2. verify(pk, bad_hash, sign(sk, digest, k)) == false  (first byte flipped).
 #![no_main]
 
-use cryptography::public_key::{bigint::BigUint, ec::p256, ecdsa::Ecdsa};
+use cryptography::public_key::{ec::p256, ecdsa::Ecdsa};
+use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
 
 const SCALAR: usize = 32;

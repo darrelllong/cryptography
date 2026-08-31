@@ -8,12 +8,13 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
-    generate_prime_order_group, is_probable_prime_untrusted, mod_pow, random_nonzero_below,
+    generate_prime_order_group, is_probable_prime_untrusted, random_nonzero_below,
 };
 use crate::Csprng;
+use rump::modular::{mod_pow, MontgomeryContext};
+use rump::BigUint;
 
 const ELGAMAL_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ELGAMAL PUBLIC KEY";
 const ELGAMAL_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ELGAMAL PRIVATE KEY";
@@ -33,12 +34,8 @@ pub struct ElGamalPublicKey {
     g: BigUint,
     /// Public component `b = g^a mod p`.
     b: BigUint,
-    /// Cached Montgomery encoding of `g` modulo `p`.
-    g_mont: Option<BigUint>,
-    /// Cached Montgomery encoding of `b` modulo `p`.
-    b_mont: Option<BigUint>,
     /// Cached Montgomery context for arithmetic modulo `p`.
-    p_ctx: Option<MontgomeryCtx>,
+    p_ctx: Option<MontgomeryContext>,
 }
 
 /// Private key for the `ElGamal` primitive.
@@ -54,7 +51,7 @@ pub struct ElGamalPrivateKey {
     /// Secret exponent `a`.
     a: BigUint,
     /// Cached Montgomery context for arithmetic modulo `p`.
-    p_ctx: Option<MontgomeryCtx>,
+    p_ctx: Option<MontgomeryContext>,
 }
 
 /// Raw `ElGamal` ciphertext pair `(gamma, delta)`.
@@ -118,13 +115,13 @@ impl ElGamalPublicKey {
             return None;
         }
 
-        let gamma = if let (Some(ctx), Some(g_mont)) = (&self.p_ctx, &self.g_mont) {
-            ctx.pow_encoded(g_mont, ephemeral)
+        let gamma = if let Some(ctx) = &self.p_ctx {
+            ctx.pow(&self.g, ephemeral)
         } else {
             mod_pow(&self.g, ephemeral, &self.p)
         };
-        let shared = if let (Some(ctx), Some(b_mont)) = (&self.p_ctx, &self.b_mont) {
-            ctx.pow_encoded(b_mont, ephemeral)
+        let shared = if let Some(ctx) = &self.p_ctx {
+            ctx.pow(&self.b, ephemeral)
         } else {
             mod_pow(&self.b, ephemeral, &self.p)
         };
@@ -193,16 +190,12 @@ impl ElGamalPublicKey {
         {
             return None;
         }
-        let p_ctx = MontgomeryCtx::new(&p);
-        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&g));
-        let b_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&b));
+        let p_ctx = MontgomeryContext::new(&p).ok();
         Some(Self {
             p,
             exponent_bound,
             g,
             b,
-            g_mont,
-            b_mont,
             p_ctx,
         })
     }
@@ -256,7 +249,7 @@ impl ElGamalPrivateKey {
     /// and Fermat's little theorem gives the same cancellation.
     #[must_use]
     pub fn decrypt_raw(&self, ciphertext: &ElGamalCiphertext) -> BigUint {
-        let exponent = self.exponent_modulus.sub_ref(&self.a);
+        let exponent = self.exponent_modulus.sub(&self.a);
         let factor = if let Some(ctx) = &self.p_ctx {
             ctx.pow(&ciphertext.gamma, &exponent)
         } else {
@@ -307,7 +300,7 @@ impl ElGamalPrivateKey {
         {
             return None;
         }
-        let p_ctx = MontgomeryCtx::new(&p);
+        let p_ctx = MontgomeryContext::new(&p).ok();
         Some(Self {
             p,
             exponent_modulus,
@@ -384,7 +377,7 @@ impl ElGamal {
             return None;
         }
 
-        let p_minus_one = prime.sub_ref(&BigUint::one());
+        let p_minus_one = prime.sub(&BigUint::one());
         // `a = 0` makes `b = g^a = 1`, and `a = p - 1` does the same by
         // Fermat. Both give a trivially useless public key, so the secret must
         // live strictly inside the non-zero exponent range.
@@ -393,17 +386,13 @@ impl ElGamal {
         }
 
         let public_component = mod_pow(generator, secret, prime);
-        let p_ctx = MontgomeryCtx::new(prime);
-        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(generator));
-        let b_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&public_component));
+        let p_ctx = MontgomeryContext::new(prime).ok();
         Some((
             ElGamalPublicKey {
                 p: prime.clone(),
                 exponent_bound: p_minus_one.clone(),
                 g: generator.clone(),
                 b: public_component,
-                g_mont,
-                b_mont,
                 p_ctx: p_ctx.clone(),
             },
             ElGamalPrivateKey {
@@ -430,17 +419,13 @@ impl ElGamal {
         let (prime, q, _cofactor, generator) = generate_prime_order_group(rng, bits)?;
         let secret = random_nonzero_below(rng, &q)?;
         let public_component = mod_pow(&generator, &secret, &prime);
-        let p_ctx = MontgomeryCtx::new(&prime);
-        let g_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&generator));
-        let b_mont = p_ctx.as_ref().map(|ctx| ctx.encode(&public_component));
+        let p_ctx = MontgomeryContext::new(&prime).ok();
         Some((
             ElGamalPublicKey {
                 p: prime.clone(),
                 exponent_bound: q.clone(),
                 g: generator.clone(),
                 b: public_component.clone(),
-                g_mont,
-                b_mont,
                 p_ctx: p_ctx.clone(),
             },
             ElGamalPrivateKey {
@@ -456,8 +441,8 @@ impl ElGamal {
 #[cfg(test)]
 mod tests {
     use super::{ElGamal, ElGamalPrivateKey, ElGamalPublicKey};
-    use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     #[test]
     fn derive_small_reference_key() {

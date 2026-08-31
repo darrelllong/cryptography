@@ -7,9 +7,9 @@
 #![no_main]
 
 use cryptography::public_key::{
-    bigint::BigUint,
     cocks::{Cocks, CocksPrivateKey, CocksPublicKey},
 };
+use cryptography::vt::BigUint;
 // Note: encrypt(msg) converts msg bytes to a BigUint (strips leading zeros).
 // decrypt returns the canonical big-endian bytes of that BigUint (also no
 // leading zeros).  The roundtrip therefore preserves the *integer* value, not

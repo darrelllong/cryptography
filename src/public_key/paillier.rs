@@ -8,12 +8,14 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
-    gcd, is_probable_prime_untrusted, lcm, mod_inverse, mod_pow, random_coprime_below, random_probable_prime,
+    is_probable_prime_untrusted, random_coprime_below, random_probable_prime,
 };
 use crate::Csprng;
+use rump::modular::{mod_inverse, mod_pow, MontgomeryContext};
+use rump::number_theory::{gcd, lcm};
+use rump::BigUint;
 
 const PAILLIER_PUBLIC_LABEL: &str = "CRYPTOGRAPHY PAILLIER PUBLIC KEY";
 const PAILLIER_PRIVATE_LABEL: &str = "CRYPTOGRAPHY PAILLIER PRIVATE KEY";
@@ -31,10 +33,8 @@ pub struct PaillierPublicKey {
     n_squared: BigUint,
     /// Public encryption base, typically `n + 1`.
     zeta: BigUint,
-    /// Cached Montgomery encoding of `zeta` modulo `n^2`.
-    zeta_mont: Option<BigUint>,
     /// Cached Montgomery context for arithmetic modulo `n^2`.
-    n_squared_ctx: Option<MontgomeryCtx>,
+    n_squared_ctx: Option<MontgomeryContext>,
 }
 
 /// Private key for the Paillier primitive.
@@ -53,9 +53,9 @@ pub struct PaillierPrivateKey {
     /// Precomputed inverse of `L(zeta^lambda mod n^2)` modulo `n`.
     u: BigUint,
     /// Cached Montgomery context for arithmetic modulo `n^2`.
-    n_squared_ctx: Option<MontgomeryCtx>,
+    n_squared_ctx: Option<MontgomeryContext>,
     /// Cached Montgomery context for arithmetic modulo `n`.
-    n_ctx: Option<MontgomeryCtx>,
+    n_ctx: Option<MontgomeryContext>,
 }
 
 /// Namespace wrapper for the Paillier construction.
@@ -95,8 +95,8 @@ impl PaillierPublicKey {
             return None;
         }
 
-        let left = if let (Some(ctx), Some(zeta_mont)) = (&self.n_squared_ctx, &self.zeta_mont) {
-            ctx.pow_encoded(zeta_mont, message)
+        let left = if let Some(ctx) = &self.n_squared_ctx {
+            ctx.pow(&self.zeta, message)
         } else {
             mod_pow(&self.zeta, message, &self.n_squared)
         };
@@ -189,14 +189,12 @@ impl PaillierPublicKey {
         if n <= BigUint::one() || !n.is_odd() || zeta <= BigUint::one() {
             return None;
         }
-        let n_squared = n.mul_ref(&n);
-        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
-        let zeta_mont = n_squared_ctx.as_ref().map(|ctx| ctx.encode(&zeta));
+        let n_squared = n.mul(&n);
+        let n_squared_ctx = MontgomeryContext::new(&n_squared).ok();
         Some(Self {
             n,
             n_squared,
             zeta,
-            zeta_mont,
             n_squared_ctx,
         })
     }
@@ -295,9 +293,9 @@ impl PaillierPrivateKey {
         if n <= BigUint::one() || !n.is_odd() || lambda.is_zero() || u.is_zero() {
             return None;
         }
-        let n_squared = n.mul_ref(&n);
-        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
-        let n_ctx = MontgomeryCtx::new(&n);
+        let n_squared = n.mul(&n);
+        let n_squared_ctx = MontgomeryContext::new(&n_squared).ok();
+        let n_ctx = MontgomeryContext::new(&n).ok();
         Some(Self {
             n,
             n_squared,
@@ -343,17 +341,17 @@ impl Paillier {
             return None;
         }
 
-        let n = p.mul_ref(q);
-        let p_minus_one = p.sub_ref(&BigUint::one());
-        let q_minus_one = q.sub_ref(&BigUint::one());
-        let totient = p_minus_one.mul_ref(&q_minus_one);
+        let n = p.mul(q);
+        let p_minus_one = p.sub(&BigUint::one());
+        let q_minus_one = q.sub(&BigUint::one());
+        let totient = p_minus_one.mul(&q_minus_one);
         if gcd(&n, &totient) != BigUint::one() {
             return None;
         }
 
         let lambda = lcm(&p_minus_one, &q_minus_one);
-        let n_squared = n.mul_ref(&n);
-        let zeta = base.modulo(&n_squared);
+        let n_squared = n.mul(&n);
+        let zeta = base.rem(&n_squared);
         if zeta <= BigUint::one() {
             return None;
         }
@@ -361,15 +359,13 @@ impl Paillier {
         let lifted = paillier_l(&mod_pow(&zeta, &lambda, &n_squared), &n);
         let u = mod_inverse(&lifted, &n)?;
 
-        let n_squared_ctx = MontgomeryCtx::new(&n_squared);
-        let n_ctx = MontgomeryCtx::new(&n);
-        let zeta_mont = n_squared_ctx.as_ref().map(|ctx| ctx.encode(&zeta));
+        let n_squared_ctx = MontgomeryContext::new(&n_squared).ok();
+        let n_ctx = MontgomeryContext::new(&n).ok();
         Some((
             PaillierPublicKey {
                 n: n.clone(),
                 n_squared: n_squared.clone(),
                 zeta,
-                zeta_mont,
                 n_squared_ctx: n_squared_ctx.clone(),
             },
             PaillierPrivateKey {
@@ -392,8 +388,8 @@ impl Paillier {
         p: &BigUint,
         q: &BigUint,
     ) -> Option<(PaillierPublicKey, PaillierPrivateKey)> {
-        let n = p.mul_ref(q);
-        let base = n.add_ref(&BigUint::one());
+        let n = p.mul(q);
+        let base = n.add(&BigUint::one());
         Self::from_primes_with_base(p, q, &base)
     }
 
@@ -427,7 +423,7 @@ fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
     // because the binomial expansion of `(n + 1)^m` modulo `n^2` leaves only
     // the linear `m*n` term, so `zeta^m` and therefore `c^lambda` stay in the
     // `1 + nZ` slice that `L` projects back down to `Z_n`.
-    let shifted = value.sub_ref(&BigUint::one());
+    let shifted = value.sub(&BigUint::one());
     let (quotient, remainder) = shifted.div_rem(modulus);
     debug_assert!(
         remainder.is_zero(),
@@ -439,8 +435,8 @@ fn paillier_l(value: &BigUint, modulus: &BigUint) -> BigUint {
 #[cfg(test)]
 mod tests {
     use super::{Paillier, PaillierPrivateKey, PaillierPublicKey};
-    use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     #[test]
     fn derive_small_reference_key() {
@@ -516,10 +512,10 @@ mod tests {
         let right_cipher = public
             .encrypt_with_nonce(&right, &right_nonce)
             .expect("valid Paillier nonce");
-        let modulus_squared = public.modulus().mul_ref(public.modulus());
+        let modulus_squared = public.modulus().mul(public.modulus());
         let combined_cipher = BigUint::mod_mul(&left_cipher, &right_cipher, &modulus_squared);
         let decrypted = private.decrypt_raw(&combined_cipher);
-        let expected = left.add_ref(&right).modulo(public.modulus());
+        let expected = left.add(&right).rem(public.modulus());
 
         assert_eq!(decrypted, expected);
     }
@@ -599,7 +595,7 @@ mod tests {
         let p = BigUint::from_u64(257);
         let q = BigUint::from_u64(263);
         let (public, _) = Paillier::from_primes(&p, &q).expect("valid Paillier key");
-        let invalid = public.modulus().mul_ref(public.modulus());
+        let invalid = public.modulus().mul(public.modulus());
         let mut drbg = CtrDrbgAes256::new(&[0x95; 48]);
         assert!(public.rerandomize(&invalid, &mut drbg).is_none());
         let valid = public

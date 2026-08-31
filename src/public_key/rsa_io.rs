@@ -9,9 +9,9 @@
 //! inner payloads of those modern containers and remain useful for debugging or
 //! interop with older tooling.
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::io::{pem_unwrap, pem_wrap};
 use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
+use rump::BigUint;
 
 const RSA_ENCRYPTION_OID: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
 
@@ -457,7 +457,7 @@ impl<'a> DerReader<'a> {
 mod tests {
     use super::{RsaPrivateKey, RsaPublicKey};
     use crate::public_key::rsa::Rsa;
-    use crate::vt::BigUint;
+    use rump::BigUint;
 
     #[test]
     fn spki_roundtrip() {

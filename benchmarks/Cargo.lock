@@ -177,19 +177,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
-name = "cryptography"
-version = "0.2.0"
-dependencies = [
- "quick-xml",
-]
-
-[[package]]
 name = "cryptography-benchmarks"
 version = "0.2.0"
 dependencies = [
  "criterion",
- "cryptography",
+ "cryptography-rs",
  "sodiumoxide",
+]
+
+[[package]]
+name = "cryptography-rs"
+version = "0.7.0"
+dependencies = [
+ "rust-mp",
 ]
 
 [[package]]
@@ -355,15 +355,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quick-xml"
-version = "0.38.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -420,6 +411,10 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "rust-mp"
+version = "0.3.0"
 
 [[package]]
 name = "rustversion"

@@ -14,9 +14,9 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec_edwards::{EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::Csprng;
+use rump::BigUint;
 
 const EDWARDS_DH_PUBLIC_LABEL: &str = "CRYPTOGRAPHY EDWARDS-DH PUBLIC KEY";
 const EDWARDS_DH_PRIVATE_LABEL: &str = "CRYPTOGRAPHY EDWARDS-DH PRIVATE KEY";
@@ -235,8 +235,8 @@ fn validate_public_point(curve: &TwistedEdwardsCurve, point: &EdwardsPoint) -> b
 mod tests {
     use super::{EdwardsDh, EdwardsDhPrivateKey, EdwardsDhPublicKey};
     use crate::public_key::ec_edwards::ed25519;
-    use crate::vt::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     fn decode_hex(hex: &str) -> Vec<u8> {
         let bytes = hex.as_bytes();

@@ -7,10 +7,11 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
-use crate::public_key::primes::{is_probable_prime_untrusted, mod_inverse, mod_pow, random_probable_prime};
+use crate::public_key::primes::{is_probable_prime_untrusted, random_probable_prime};
 use crate::Csprng;
+use rump::modular::{mod_inverse, mod_pow, MontgomeryContext};
+use rump::BigUint;
 
 // Arbitrary 32-bit disambiguation tag. It is not a checksum; it is just a
 // recognizable marker carried inside the encoded plaintext so decryption can
@@ -35,9 +36,9 @@ pub struct RabinPrivateKey {
     q_exponent: BigUint,
     p_coeff: Option<BigUint>,
     q_coeff: Option<BigUint>,
-    p_ctx: Option<MontgomeryCtx>,
-    q_ctx: Option<MontgomeryCtx>,
-    n_ctx: Option<MontgomeryCtx>,
+    p_ctx: Option<MontgomeryContext>,
+    q_ctx: Option<MontgomeryContext>,
+    n_ctx: Option<MontgomeryContext>,
     half_n: BigUint,
 }
 
@@ -99,13 +100,13 @@ crate::public_key::io::impl_blob_pem_serialization!(RabinPublicKey, RABIN_PUBLIC
 
 impl RabinPrivateKey {
     fn from_components(n: BigUint, p: BigUint, q: BigUint) -> Self {
-        let p_exponent = p.add_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
-        let q_exponent = q.add_ref(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
+        let p_exponent = p.add(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
+        let q_exponent = q.add(&BigUint::one()).div_rem(&BigUint::from_u64(4)).0;
         let p_coeff = mod_inverse(&p, &q);
         let q_coeff = mod_inverse(&q, &p);
-        let p_ctx = MontgomeryCtx::new(&p);
-        let q_ctx = MontgomeryCtx::new(&q);
-        let n_ctx = MontgomeryCtx::new(&n);
+        let p_ctx = MontgomeryContext::new(&p).ok();
+        let q_ctx = MontgomeryContext::new(&q).ok();
+        let n_ctx = MontgomeryContext::new(&n).ok();
         let half_n = half_modulus(&n);
         Self {
             n,
@@ -160,7 +161,7 @@ impl RabinPrivateKey {
         let term_from_q = ctx.mul(&ctx.mul(p_coeff, &self.p), &m_q);
         let term_from_p = ctx.mul(&ctx.mul(q_coeff, &self.q), &m_p);
 
-        let x = term_from_q.add_ref(&term_from_p).modulo(&self.n);
+        let x = term_from_q.add(&term_from_p).rem(&self.n);
         let y = sub_mod(&term_from_q, &term_from_p, &self.n);
 
         for root in [
@@ -175,7 +176,7 @@ impl RabinPrivateKey {
                 continue;
             }
 
-            let candidate = root.sub_ref(&self.half_n);
+            let candidate = root.sub(&self.half_n);
             if candidate.rem_u64(1u64 << 32) != u64::from(TAG) {
                 continue;
             }
@@ -220,7 +221,7 @@ impl RabinPrivateKey {
         if n <= BigUint::one() || p <= BigUint::one() || q <= BigUint::one() {
             return None;
         }
-        if p.mul_ref(&q) != n {
+        if p.mul(&q) != n {
             return None;
         }
         Some(Self::from_components(n, p, q))
@@ -255,7 +256,7 @@ impl Rabin {
             return None;
         }
 
-        let n = p.mul_ref(q);
+        let n = p.mul(q);
 
         Some((
             RabinPublicKey { n: n.clone() },
@@ -303,7 +304,7 @@ fn tagged_payload(message: &BigUint, modulus: &BigUint) -> Option<BigUint> {
     let tag = BigUint::from_u64(u64::from(TAG));
     // Encode `message || tag` and then shift by `n / 2` so the intended root
     // always lands in the upper half of the residue space.
-    let payload = message.mul_ref(&tag_modulus).add_ref(&tag).add_ref(&half);
+    let payload = message.mul(&tag_modulus).add(&tag).add(&half);
     if &payload >= modulus {
         None
     } else {
@@ -322,24 +323,24 @@ fn neg_mod(value: &BigUint, modulus: &BigUint) -> BigUint {
     if value.is_zero() {
         BigUint::zero()
     } else {
-        modulus.sub_ref(value)
+        modulus.sub(value)
     }
 }
 
 fn sub_mod(lhs: &BigUint, rhs: &BigUint, modulus: &BigUint) -> BigUint {
     if lhs >= rhs {
-        lhs.sub_ref(rhs)
+        lhs.sub(rhs)
     } else {
-        modulus.sub_ref(&rhs.sub_ref(lhs))
+        modulus.sub(&rhs.sub(lhs))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Rabin, RabinPrivateKey, RabinPublicKey};
-    use crate::public_key::bigint::BigUint;
     use crate::public_key::io::encode_biguints;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     fn reference_primes() -> (BigUint, BigUint) {
         (BigUint::from_u64(131_071), BigUint::from_u64(131_111))

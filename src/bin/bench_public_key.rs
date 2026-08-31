@@ -257,7 +257,7 @@ fn bench_paillier(rng: &mut CtrDrbgAes256, bits: usize) -> PaillierTimings {
     let paillier_add = start.elapsed();
     let combined_plaintext = paillier_private.decrypt(&combined);
     let mut expected = BigUint::from_be_bytes(&MESSAGE);
-    expected = expected.add_ref(&BigUint::from_u64(1));
+    expected = expected.add(&BigUint::from_u64(1));
     assert_eq!(combined_plaintext, expected.to_be_bytes());
 
     (
@@ -492,7 +492,7 @@ fn main() {
     }
     let mut rng = CtrDrbgAes256::new(&[0x5a; 48]);
 
-    println!("Public-key latency (in-tree bigint backend, {bits}-bit keys)");
+    println!("Public-key latency (rump multiprecision backend, {bits}-bit keys)");
     println!();
 
     let (_, _, (rsa_keygen, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify_time)) =

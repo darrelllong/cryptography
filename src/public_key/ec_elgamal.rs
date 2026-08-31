@@ -43,11 +43,11 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec::{AffinePoint, CurveParams};
 use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
 use crate::public_key::primes::random_nonzero_below;
 use crate::Csprng;
+use rump::BigUint;
 
 const EC_ELGAMAL_PUBLIC_LABEL: &str = "CRYPTOGRAPHY EC-ELGAMAL PUBLIC KEY";
 const EC_ELGAMAL_PRIVATE_LABEL: &str = "CRYPTOGRAPHY EC-ELGAMAL PRIVATE KEY";
@@ -800,9 +800,9 @@ fn biguint_to_u64(value: &BigUint) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{EcElGamal, EcElGamalCiphertext, EcElGamalPrivateKey, EcElGamalPublicKey};
-    use crate::public_key::bigint::BigUint;
     use crate::public_key::ec::{b163, p256, p384, secp256k1};
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     fn rng() -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[0xcd; 48])

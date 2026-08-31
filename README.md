@@ -441,7 +441,7 @@ The variable-time public-key module is intentionally explicit under
 `cryptography::vt` and exposes three layers:
 
 - core arithmetic primitives: `Rsa`, `Dsa`, `Cocks`, `ElGamal`, `Rabin`, `Paillier`, `SchmidtSamoa`
-- shared arithmetic support: `BigUint`, `BigInt`, `MontgomeryCtx`
+- shared arithmetic support (re-exported from [rump](https://github.com/darrelllong/rump)): `BigUint`, `BigInt`, `MontgomeryContext`
 - usable wrappers:
   - `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA encryption/signatures
   - standard RSA key externalization via PKCS #1 / PKCS #8 / SPKI in DER or PEM

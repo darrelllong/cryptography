@@ -29,11 +29,11 @@
 use core::fmt;
 use std::sync::OnceLock;
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec_edwards::{ed25519, EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{pem_unwrap, pem_wrap};
 use crate::Csprng;
 use crate::Sha512;
+use rump::BigUint;
 
 const ED25519_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ED25519 PUBLIC KEY";
 const ED25519_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ED25519 PRIVATE KEY";
@@ -262,11 +262,11 @@ impl Ed25519PrivateKey {
         let mut nonce_input = Vec::with_capacity(self.prefix.len() + message.len());
         nonce_input.extend_from_slice(&self.prefix);
         nonce_input.extend_from_slice(message);
-        let r = le_bytes_to_biguint(&Sha512::digest(&nonce_input)).modulo(&curve().n);
+        let r = le_bytes_to_biguint(&Sha512::digest(&nonce_input)).rem(&curve().n);
         let r_point = curve().scalar_mul_base(&r);
         let challenge = challenge_scalar(&r_point, &self.public.point, message);
-        let ka = BigUint::mod_mul(&challenge, &self.scalar, &curve().n);
-        let s = r.add_ref(&ka).modulo(&curve().n);
+        let ka = curve().scalar_ctx().mul(&challenge, &self.scalar);
+        let s = r.add(&ka).rem(&curve().n);
         Ed25519Signature { r_point, s }
     }
 
@@ -407,7 +407,7 @@ fn challenge_scalar(r_point: &EdwardsPoint, a_point: &EdwardsPoint, message: &[u
     let mut transcript = curve().encode_point(r_point);
     transcript.extend_from_slice(&curve().encode_point(a_point));
     transcript.extend_from_slice(message);
-    le_bytes_to_biguint(&Sha512::digest(&transcript)).modulo(&curve().n)
+    le_bytes_to_biguint(&Sha512::digest(&transcript)).rem(&curve().n)
 }
 
 /// Strict point decode: standard length, canonical `y`, on-curve, and subgroup-safe.

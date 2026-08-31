@@ -4,9 +4,9 @@
 #![no_main]
 
 use cryptography::public_key::{
-    bigint::BigUint,
     schmidt_samoa::{SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey},
 };
+use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
 use std::sync::OnceLock;
 

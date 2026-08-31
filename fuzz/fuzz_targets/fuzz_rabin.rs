@@ -7,9 +7,9 @@
 #![no_main]
 
 use cryptography::public_key::{
-    bigint::BigUint,
     rabin::{Rabin, RabinPrivateKey, RabinPublicKey},
 };
+use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
 use std::sync::OnceLock;
 

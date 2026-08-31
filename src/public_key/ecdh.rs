@@ -32,12 +32,12 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec::{AffinePoint, CurveParams};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
 use crate::Csprng;
+use rump::BigUint;
 
 const ECDH_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ECDH PUBLIC KEY";
 const ECDH_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ECDH PRIVATE KEY";

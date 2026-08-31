@@ -2,24 +2,22 @@
 //!
 //! The deterministic number theory (gcd, lcm, jacobi, modular exponentiation
 //! and inversion, fixed-base Miller-Rabin) lives in the [`rump`]
-//! multiprecision crate and is re-exported here so existing callers keep
-//! their paths, as are the random sampling routines, which rump drives
-//! through a caller-supplied generator (bridged here from [`Csprng`]). What
-//! stays native to this module is cryptographic policy: the SHAKE256-hardened
-//! primality test for untrusted candidates and the discrete-log group
-//! construction helpers.
+//! multiprecision crate; callers use `rump::modular` and
+//! `rump::number_theory` directly. This module holds only what rump cannot:
+//! cryptographic policy — the SHAKE256-hardened primality test for untrusted
+//! candidates and the discrete-log group construction helpers — plus the
+//! samplers, which bridge this crate's [`Csprng`] generators to
+//! [`rump::random::RandomSource`] (a bridge rump cannot own and a blanket
+//! impl the orphan rule forbids here).
 //!
 //! A smaller `u128`-bounded Miller-Rabin helper also exists in
 //! `crate::cprng::primes`; the duplication is intentional because the
 //! arithmetic types and intended use-cases differ.
 
-use super::bigint::BigUint;
 use crate::Csprng;
-
-pub use rump::{
-    crt_combine, gcd, gcd_extended, is_probable_prime, is_probable_prime_with_bases, jacobi,
-    kronecker, lcm, legendre, mod_inverse, mod_pow, sqrt_mod,
-};
+use rump::modular::mod_pow;
+use rump::number_theory::is_probable_prime;
+use rump::BigUint;
 
 /// Number of candidate-derived pseudorandom Miller-Rabin rounds added by
 /// [`is_probable_prime_untrusted`] on top of the fixed bases.
@@ -50,7 +48,7 @@ pub fn is_probable_prime_untrusted(candidate: &BigUint) -> bool {
 
     hash_derived_bases(candidate, HARDENED_HASH_ROUNDS)
         .iter()
-        .all(|witness| !rump::miller_rabin_witness(candidate, witness))
+        .all(|witness| !rump::number_theory::miller_rabin_witness(candidate, witness))
 }
 
 /// Derive `count` Miller-Rabin witnesses in `[2, n-2]` as a SHAKE256 PRF of the
@@ -63,7 +61,7 @@ fn hash_derived_bases(candidate: &BigUint, count: usize) -> Vec<BigUint> {
     let n_bytes = candidate.to_be_bytes();
     // The caller screens out sieve-sized candidates, so `n - 3 >= 2` and the
     // map `2 + (h mod (n-3))` lands in [2, n-2].
-    let n_minus_three = candidate.sub_ref(&BigUint::from_u64(3));
+    let n_minus_three = candidate.sub(&BigUint::from_u64(3));
     let two = BigUint::from_u64(2);
 
     let mut xof = crate::hash::sha3::Shake256::new();
@@ -77,18 +75,18 @@ fn hash_derived_bases(candidate: &BigUint, count: usize) -> Vec<BigUint> {
     for _ in 0..count {
         xof.squeeze(&mut buf);
         let h = BigUint::from_be_bytes(&buf);
-        out.push(two.add_ref(&h.modulo(&n_minus_three)));
+        out.push(two.add(&h.rem(&n_minus_three)));
     }
     out
 }
 
-/// Adapter presenting any [`Csprng`] as a [`rump::Rng`] source.
+/// Adapter presenting any [`Csprng`] as a [`rump::random::RandomSource`].
 ///
 /// The trait shapes are identical; the adapter exists because a blanket
 /// implementation of the foreign trait is not ours to write.
 struct CsprngSource<'a, R: Csprng>(&'a mut R);
 
-impl<R: Csprng> rump::Rng for CsprngSource<'_, R> {
+impl<R: Csprng> rump::random::RandomSource for CsprngSource<'_, R> {
     fn fill_bytes(&mut self, dest: &mut [u8]) {
         self.0.fill_bytes(dest);
     }
@@ -97,13 +95,13 @@ impl<R: Csprng> rump::Rng for CsprngSource<'_, R> {
 /// Draw a random integer in `[0, upper_exclusive)`.
 #[must_use]
 pub fn random_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option<BigUint> {
-    rump::random_below(&mut CsprngSource(rng), upper_exclusive)
+    rump::random::random_below(&mut CsprngSource(rng), upper_exclusive)
 }
 
 /// Draw a random integer in `[1, upper_exclusive)`.
 #[must_use]
 pub fn random_nonzero_below<R: Csprng>(rng: &mut R, upper_exclusive: &BigUint) -> Option<BigUint> {
-    rump::random_nonzero_below(&mut CsprngSource(rng), upper_exclusive)
+    rump::random::random_nonzero_below(&mut CsprngSource(rng), upper_exclusive)
 }
 
 /// Draw a random integer in `[1, upper_exclusive)` that is coprime to `coprime_to`.
@@ -116,13 +114,13 @@ pub fn random_coprime_below<R: Csprng>(
     upper_exclusive: &BigUint,
     coprime_to: &BigUint,
 ) -> Option<BigUint> {
-    rump::random_coprime_below(&mut CsprngSource(rng), upper_exclusive, coprime_to)
+    rump::random::random_coprime_below(&mut CsprngSource(rng), upper_exclusive, coprime_to)
 }
 
 /// Draw a probable prime with the requested bit length.
 #[must_use]
 pub fn random_probable_prime<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
-    rump::random_probable_prime(&mut CsprngSource(rng), bits)
+    rump::random::random_probable_prime(&mut CsprngSource(rng), bits)
 }
 
 pub(crate) fn random_even_with_bits<R: Csprng>(rng: &mut R, bits: usize) -> Option<BigUint> {
@@ -162,7 +160,7 @@ pub(crate) fn find_subgroup_generator<R: Csprng>(
     cofactor: &BigUint,
 ) -> Option<BigUint> {
     let one = BigUint::one();
-    let upper = prime.sub_ref(&one);
+    let upper = prime.sub(&one);
     loop {
         let candidate = random_nonzero_below(rng, &upper)
             .expect("prime > 2 leaves a non-zero subgroup-generator search range");
@@ -199,7 +197,7 @@ pub(crate) fn generate_prime_order_group<R: Csprng>(
         let mut attempts = 0usize;
         while attempts < 256 {
             let cofactor = random_even_with_bits(rng, cofactor_bits)?;
-            let prime = cofactor.mul_ref(&q).add_ref(&one);
+            let prime = cofactor.mul(&q).add(&one);
             if prime.bits() != bits || !is_probable_prime(&prime) {
                 attempts += 1;
                 continue;
@@ -213,9 +211,10 @@ pub(crate) fn generate_prime_order_group<R: Csprng>(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_probable_prime, is_probable_prime_untrusted, random_nonzero_below};
-    use crate::public_key::bigint::BigUint;
+    use super::{is_probable_prime_untrusted, random_nonzero_below};
     use crate::Csprng;
+    use rump::number_theory::is_probable_prime;
+    use rump::BigUint;
 
     #[test]
     fn untrusted_hardening_rejects_pseudoprime_that_fools_fixed_bases() {
@@ -227,8 +226,8 @@ mod tests {
         // the Miller-Rabin stage.)
         let ten18 = BigUint::from_u64(1_000_000_000_000_000_000);
         let spsp = BigUint::from_u64(318_665)
-            .mul_ref(&ten18)
-            .add_ref(&BigUint::from_u64(857_834_031_151_167_461));
+            .mul(&ten18)
+            .add(&BigUint::from_u64(857_834_031_151_167_461));
 
         assert!(
             is_probable_prime(&spsp),

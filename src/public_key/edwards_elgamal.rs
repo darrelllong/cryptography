@@ -14,12 +14,12 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec_edwards::{EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
 use crate::Csprng;
+use rump::BigUint;
 
 const EDWARDS_ELGAMAL_PUBLIC_LABEL: &str = "CRYPTOGRAPHY EDWARDS-ELGAMAL PUBLIC KEY";
 const EDWARDS_ELGAMAL_PRIVATE_LABEL: &str = "CRYPTOGRAPHY EDWARDS-ELGAMAL PRIVATE KEY";
@@ -441,8 +441,8 @@ mod tests {
         EdwardsElGamalPublicKey,
     };
     use crate::public_key::ec_edwards::ed25519;
-    use crate::vt::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     fn decode_hex(hex: &str) -> Vec<u8> {
         let bytes = hex.as_bytes();
@@ -576,7 +576,7 @@ mod tests {
         let base = curve.base_point();
         let order_two = crate::public_key::ec_edwards::EdwardsPoint::new(
             BigUint::zero(),
-            curve.p.sub_ref(&BigUint::one()),
+            curve.p.sub(&BigUint::one()),
         );
         let blob = encode_biguints(&[&order_two.x, &order_two.y, &base.x, &base.y]);
         assert!(

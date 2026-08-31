@@ -5,7 +5,8 @@
 //! performed using the second half as the digest and nonce source.
 #![no_main]
 
-use cryptography::public_key::{bigint::BigUint, dsa::DsaPrivateKey};
+use cryptography::public_key::{dsa::DsaPrivateKey};
+use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

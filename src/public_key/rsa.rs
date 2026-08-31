@@ -7,12 +7,13 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::primes::{
-    gcd, is_probable_prime_untrusted, lcm, mod_inverse, mod_pow, random_nonzero_below,
-    random_probable_prime,
+    is_probable_prime_untrusted, random_nonzero_below, random_probable_prime,
 };
 use crate::Csprng;
+use rump::modular::{mod_inverse, mod_pow, MontgomeryContext};
+use rump::number_theory::{gcd, lcm};
+use rump::BigUint;
 
 /// Public key for the core RSA primitive.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,8 +33,8 @@ pub struct RsaPrivateKey {
     d_p: BigUint,
     d_q: BigUint,
     q_inv: BigUint,
-    p_ctx: MontgomeryCtx,
-    q_ctx: MontgomeryCtx,
+    p_ctx: MontgomeryContext,
+    q_ctx: MontgomeryContext,
 }
 
 /// Namespace wrapper for the core RSA construction.
@@ -141,8 +142,8 @@ impl RsaPrivateKey {
         // m2 = c^dQ mod q
         // h  = (qInv * (m1 - m2)) mod p
         // m  = m2 + h*q
-        let c_mod_p = ciphertext.modulo(&self.p);
-        let c_mod_q = ciphertext.modulo(&self.q);
+        let c_mod_p = ciphertext.rem(&self.p);
+        let c_mod_q = ciphertext.rem(&self.q);
         let m1 = self.p_ctx.pow(&c_mod_p, &self.d_p);
         let m2 = self.q_ctx.pow(&c_mod_q, &self.d_q);
 
@@ -150,17 +151,17 @@ impl RsaPrivateKey {
         // m2 is reduced mod q but NOT mod p, so m2 can be ≥ p.
         // Reduce m2 mod p first so that the conditional subtraction stays in
         // [0, p) and `m1 + p - m2_mod_p` is always non-negative.
-        let m2_mod_p = m2.modulo(&self.p);
+        let m2_mod_p = m2.rem(&self.p);
         let delta = if m1 >= m2_mod_p {
-            m1.sub_ref(&m2_mod_p)
+            m1.sub(&m2_mod_p)
         } else {
-            m1.add_ref(&self.p).sub_ref(&m2_mod_p)
+            m1.add(&self.p).sub(&m2_mod_p)
         };
         // Reuse the cached Montgomery context for `p` instead of the standalone
         // `BigUint::mod_mul`, which would rebuild `R mod p` / `R^2 mod p` via two
         // full-width divisions on every private operation.
         let h = self.p_ctx.mul(&self.q_inv, &delta);
-        let m = m2.add_ref(&self.q.mul_ref(&h));
+        let m = m2.add(&self.q.mul(&h));
 
         // Bellcore / Boneh–DeMillo–Lipton fault check. A transient fault in
         // either CRT half (m1 or m2) yields an `m` with `m^e != c (mod n)`, and
@@ -177,7 +178,7 @@ impl RsaPrivateKey {
         // `decrypt_raw_blinded` mask/unmask `mod_mul`s is not covered here and
         // does not need to be — such a fault has no single-prime `gcd`
         // structure and so does not leak a factor.
-        let c_mod_n = ciphertext.modulo(&self.n);
+        let c_mod_n = ciphertext.rem(&self.n);
         if mod_pow(&m, &self.e, &self.n) == c_mod_n {
             m
         } else {
@@ -242,20 +243,20 @@ impl Rsa {
             return None;
         }
 
-        let p_minus_one = p.sub_ref(&BigUint::one());
-        let q_minus_one = q.sub_ref(&BigUint::one());
+        let p_minus_one = p.sub(&BigUint::one());
+        let q_minus_one = q.sub(&BigUint::one());
         let lambda = lcm(&p_minus_one, &q_minus_one);
         if gcd(exponent, &lambda) != BigUint::one() {
             return None;
         }
 
         let d = mod_inverse(exponent, &lambda)?;
-        let n = p.mul_ref(q);
-        let d_p = d.modulo(&p_minus_one);
-        let d_q = d.modulo(&q_minus_one);
+        let n = p.mul(q);
+        let d_p = d.rem(&p_minus_one);
+        let d_q = d.rem(&q_minus_one);
         let q_inv = mod_inverse(q, p)?;
-        let p_ctx = MontgomeryCtx::new(p)?;
-        let q_ctx = MontgomeryCtx::new(q)?;
+        let p_ctx = MontgomeryContext::new(p).ok()?;
+        let q_ctx = MontgomeryContext::new(q).ok()?;
 
         Some((
             RsaPublicKey {
@@ -293,15 +294,15 @@ impl Rsa {
             return None;
         }
 
-        let p_minus_one = p.sub_ref(&BigUint::one());
-        let q_minus_one = q.sub_ref(&BigUint::one());
+        let p_minus_one = p.sub(&BigUint::one());
+        let q_minus_one = q.sub(&BigUint::one());
         let lambda = lcm(&p_minus_one, &q_minus_one);
 
         let mut exponent_bit = 16usize;
         loop {
             let mut exponent = BigUint::zero();
             exponent.set_bit(exponent_bit);
-            exponent = exponent.add_ref(&BigUint::one());
+            exponent = exponent.add(&BigUint::one());
             if gcd(&exponent, &lambda) == BigUint::one() {
                 return Self::from_primes_with_exponent(p, q, &exponent);
             }
@@ -365,8 +366,8 @@ impl Rsa {
 #[cfg(test)]
 mod tests {
     use super::Rsa;
-    use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     #[test]
     fn derive_reference_key_with_default_exponent() {

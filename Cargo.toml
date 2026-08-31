@@ -2,6 +2,10 @@
 name = "cryptography-rs"
 version = "0.7.0"
 edition = "2021"
+# Matches the siblings rust-mp and rng-entropy; the floor is inherited from
+# rust-mp (u64/usize::is_multiple_of, stable 1.87) and verified with
+# `cargo +1.87 check`.
+rust-version = "1.87"
 license = "BSD-2-Clause"
 authors = ["Darrell Long"]
 description = "Block ciphers, hashes, public-key, and post-quantum primitives implemented directly from their specifications and original papers."
@@ -41,8 +45,10 @@ arm-sha3 = []
 # `cargo test` on this package does not need to resolve benchmark-only crates.
 
 [dependencies]
-# The multiprecision layer, extracted from this crate (see
-# src/public_key/bigint.rs). The package is rust-mp, the lib is rump, so code
-# says `use rump::...`; the path serves side-by-side checkouts and the
-# version takes over once rust-mp is published.
-rust-mp = { version = "0.1.0", path = "../rump" }
+# The multiprecision layer, extracted from this crate (re-exported through
+# `crate::vt`). The package is rust-mp, the lib is rump, so code says
+# `use rump::...`; the path serves side-by-side checkouts and the version
+# takes over once rust-mp is published. The `wipe` feature restores rump's
+# drop-time limb zeroization — key material must not linger in freed heap
+# memory, so this crate always enables it.
+rust-mp = { version = "0.3.0", path = "../rump", features = ["wipe"] }

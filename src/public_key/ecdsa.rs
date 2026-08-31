@@ -35,12 +35,13 @@
 use core::fmt;
 
 use crate::hash::Digest;
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec::{AffinePoint, CurveParams};
 use crate::public_key::io::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap};
-use crate::public_key::primes::{mod_inverse, random_nonzero_below};
+use crate::public_key::primes::random_nonzero_below;
 use crate::Csprng;
 use crate::Hmac;
+use rump::modular::mod_inverse;
+use rump::BigUint;
 
 const ECDSA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ECDSA PUBLIC KEY";
 const ECDSA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ECDSA PRIVATE KEY";
@@ -172,8 +173,9 @@ impl EcdsaPublicKey {
         };
 
         // u₁ = z·w mod n,  u₂ = r·w mod n
-        let u1 = BigUint::mod_mul(hash, &w, n);
-        let u2 = BigUint::mod_mul(&signature.r, &w, n);
+        let scalar_ctx = self.curve.scalar_ctx();
+        let u1 = scalar_ctx.mul(hash, &w);
+        let u2 = scalar_ctx.mul(&signature.r, &w);
 
         // (x₁, y₁) = u₁·G + u₂·Q
         let g = self.curve.base_point();
@@ -186,7 +188,7 @@ impl EcdsaPublicKey {
         }
 
         // Accept iff r ≡ x₁ (mod n).
-        sum.x.modulo(n) == signature.r
+        sum.x.rem(n) == signature.r
     }
 
     /// Verify a byte-encoded signature produced by [`EcdsaPrivateKey::sign_bytes`].
@@ -420,16 +422,17 @@ impl EcdsaPrivateKey {
         if r_point.is_infinity() {
             return None;
         }
-        let r = r_point.x.modulo(n);
+        let r = r_point.x.rem(n);
         if r.is_zero() {
             return None;
         }
 
         // s = k⁻¹ · (z + r·d) mod n
+        let scalar_ctx = self.curve.scalar_ctx();
         let k_inv = mod_inverse(nonce, n)?;
-        let rd = BigUint::mod_mul(&r, &self.d, n);
-        let z_plus_rd = z.add_ref(&rd).modulo(n);
-        let mut s = BigUint::mod_mul(&k_inv, &z_plus_rd, n);
+        let rd = scalar_ctx.mul(&r, &self.d);
+        let z_plus_rd = z.add(&rd).rem(n);
+        let mut s = scalar_ctx.mul(&k_inv, &z_plus_rd);
         if s.is_zero() {
             return None;
         }
@@ -798,7 +801,7 @@ fn canonicalize_low_s(order: &BigUint, s: &mut BigUint) {
     let mut half = order.clone();
     half.shr1();
     if (*s).cmp(&half).is_gt() {
-        *s = order.sub_ref(s);
+        *s = order.sub(s);
     }
 }
 
@@ -825,7 +828,7 @@ fn bits_to_int(input: &[u8], target_bits: usize) -> BigUint {
 
 fn bits_to_octets(input: &[u8], q: &BigUint, q_bits: usize, ro_len: usize) -> Vec<u8> {
     let z1 = bits_to_int(input, q_bits);
-    let z2 = z1.modulo(q);
+    let z2 = z1.rem(q);
     int_to_octets(&z2, ro_len)
 }
 
@@ -884,9 +887,9 @@ fn rfc6979_nonce<H: Digest>(q: &BigUint, x: &BigUint, digest: &[u8]) -> Option<B
 #[cfg(test)]
 mod tests {
     use super::{Ecdsa, EcdsaPrivateKey, EcdsaPublicKey, EcdsaSignature};
-    use crate::public_key::bigint::BigUint;
     use crate::public_key::ec::{b163, p256, p384, p521, secp256k1};
     use crate::{CtrDrbgAes256, Sha256, Sha384, Sha512};
+    use rump::BigUint;
 
     fn rng() -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[0xab; 48])
@@ -1046,7 +1049,7 @@ mod tests {
         let msg = b"message";
         let sig = private.sign_message::<Sha256>(msg).expect("sign");
         let bad = EcdsaSignature {
-            r: sig.r.add_ref(&BigUint::one()),
+            r: sig.r.add(&BigUint::one()),
             s: sig.s.clone(),
         };
         assert!(!public.verify_message::<Sha256>(msg, &bad));
@@ -1060,7 +1063,7 @@ mod tests {
         let sig = private.sign_message::<Sha256>(msg).expect("sign");
         let bad = EcdsaSignature {
             r: sig.r.clone(),
-            s: sig.s.add_ref(&BigUint::one()),
+            s: sig.s.add(&BigUint::one()),
         };
         assert!(!public.verify_message::<Sha256>(msg, &bad));
     }
@@ -1257,7 +1260,7 @@ mod tests {
         assert_eq!(signature.r, expected_r);
 
         // This implementation enforces low-s canonicalization.
-        let expected_s_low = private.curve.n.sub_ref(&expected_s_rfc);
+        let expected_s_low = private.curve.n.sub(&expected_s_rfc);
         assert_eq!(signature.s, expected_s_low);
         assert!(public.verify_message::<Sha256>(message, &signature));
     }

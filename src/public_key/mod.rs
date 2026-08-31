@@ -1,8 +1,9 @@
 //! Public-key building blocks.
 //!
-//! This module starts with the arithmetic foundation needed by the public-key
-//! schemes here: a simple limb-based bigint representation, a reusable
-//! Montgomery toolkit, plus primality and modular-arithmetic helpers. The goal
+//! The multiprecision arithmetic under these schemes — limb-based big
+//! integers, the Montgomery toolkit, and the deterministic number theory —
+//! lives in the sibling [`rump`] crate (re-exported through [`crate::vt`]);
+//! this module keeps the cryptographic policy layered on top of it. The goal
 //! is fidelity to the published arithmetic in pure idiomatic Rust, not a
 //! replacement for industrial multiprecision libraries or a wrapper around
 //! external C code.
@@ -46,7 +47,6 @@
 //! avoid intrinsics and FFI, and add dependencies only where they materially
 //! improve interoperability or maintenance.
 
-pub mod bigint;
 pub mod cocks;
 pub mod dh;
 pub mod dsa;
@@ -64,15 +64,15 @@ pub mod elgamal;
 mod io;
 pub mod ml_dsa;
 pub mod ml_kem;
+pub(crate) mod ntru_ees1087ep1;
+pub(crate) mod ntru_ees1087ep2;
+pub(crate) mod ntru_ees1171ep1;
+pub(crate) mod ntru_ees1499ep1;
 pub(crate) mod ntru_ees401ep1;
 pub(crate) mod ntru_ees443ep1;
 pub(crate) mod ntru_ees449ep1;
 pub(crate) mod ntru_ees541ep1;
 pub(crate) mod ntru_ees677ep1;
-pub(crate) mod ntru_ees1087ep1;
-pub(crate) mod ntru_ees1087ep2;
-pub(crate) mod ntru_ees1171ep1;
-pub(crate) mod ntru_ees1499ep1;
 pub(crate) mod ntru_ees_core;
 pub(crate) mod ntru_hps509;
 pub(crate) mod ntru_hps677;

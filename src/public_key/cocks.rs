@@ -10,10 +10,11 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::BigUint;
 use crate::public_key::io::{decode_biguints, encode_biguints};
-use crate::public_key::primes::{is_probable_prime_untrusted, mod_inverse, mod_pow, random_probable_prime};
+use crate::public_key::primes::{is_probable_prime_untrusted, random_probable_prime};
 use crate::Csprng;
+use rump::modular::{mod_inverse, mod_pow};
+use rump::BigUint;
 
 const COCKS_PUBLIC_LABEL: &str = "CRYPTOGRAPHY COCKS PUBLIC KEY";
 const COCKS_PRIVATE_LABEL: &str = "CRYPTOGRAPHY COCKS PRIVATE KEY";
@@ -188,9 +189,9 @@ impl Cocks {
             return None;
         }
 
-        let q_minus_one = q.sub_ref(&BigUint::one());
+        let q_minus_one = q.sub(&BigUint::one());
         let pi = mod_inverse(p, &q_minus_one)?;
-        let n = p.mul_ref(q);
+        let n = p.mul(q);
 
         Some((CocksPublicKey { n }, CocksPrivateKey { pi, q: q.clone() }))
     }
@@ -225,8 +226,8 @@ impl Cocks {
 #[cfg(test)]
 mod tests {
     use super::{Cocks, CocksPrivateKey, CocksPublicKey};
-    use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     #[test]
     fn derive_small_reference_key() {

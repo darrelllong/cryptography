@@ -13,9 +13,9 @@
 use core::marker::PhantomData;
 
 use crate::hash::Digest;
-use crate::public_key::bigint::BigUint;
 use crate::public_key::rsa::{RsaPrivateKey, RsaPublicKey};
 use crate::Csprng;
+use rump::BigUint;
 
 // RFC 8017's `k`: the octet length of the RSA modulus `n`.
 fn modulus_len_bytes(modulus: &BigUint) -> usize {
@@ -384,9 +384,9 @@ impl<H: Digest> RsaPss<H> {
 #[cfg(test)]
 mod tests {
     use super::{RsaOaep, RsaPss};
-    use crate::public_key::bigint::BigUint;
     use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
     use crate::{CtrDrbgAes256, Sha1, Sha512};
+    use rump::BigUint;
 
     fn decode_hex(hex: &str) -> Vec<u8> {
         let cleaned: String = hex.chars().filter(|c| !c.is_whitespace()).collect();

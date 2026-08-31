@@ -16,7 +16,10 @@
 //!   default build is the audited volatile-write zeroization helper
 //!   [`zeroize_slice`], which cannot be expressed in safe Rust. The sole
 //!   dependency, the sibling `rump` multiprecision crate (extracted from this
-//!   tree), enforces the same policy with its own copy of that helper.
+//!   tree), is built with its `wipe` feature — always enabled by this crate —
+//!   so every `BigUint` volatile-wipes its live limbs on drop and rump's
+//!   shrink paths, exponentiation ladder, and samplers wipe the buffers they
+//!   abandon, behind rump's own copy of the same audited helper.
 //! - The opt-in `arm-sha3` cargo feature additionally enables an `unsafe`
 //!   NEON Keccak path on aarch64 (FEAT_SHA3, runtime-detected). Builds
 //!   without that feature contain no other `unsafe`.
@@ -360,7 +363,6 @@ impl Aead for Aes256GcmSiv {
 /// public-key surface, but the scalar-mult primitive itself is hardened
 /// against timing side channels on the secret scalar.
 pub mod vt {
-    pub use crate::public_key::bigint::{BigInt, BigUint, MontgomeryCtx, Sign};
     pub use crate::public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
     pub use crate::public_key::dh::{Dh, DhParams, DhPrivateKey, DhPublicKey};
     pub use crate::public_key::dsa::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
@@ -392,17 +394,17 @@ pub mod vt {
         MlKem, MlKemCiphertext, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
         MlKemSharedSecret,
     };
-    pub use crate::public_key::ntru_hps509::{
-        NtruHps509, NtruHps509Ciphertext, NtruHps509PrivateKey, NtruHps509PublicKey,
-        NtruHps509SharedSecret,
+    pub use crate::public_key::ntru_ees1087ep1::{
+        NtruEes1087Ep1, NtruEes1087Ep1Ciphertext, NtruEes1087Ep1PrivateKey, NtruEes1087Ep1PublicKey,
     };
-    pub use crate::public_key::ntru_hps677::{
-        NtruHps677, NtruHps677Ciphertext, NtruHps677PrivateKey, NtruHps677PublicKey,
-        NtruHps677SharedSecret,
+    pub use crate::public_key::ntru_ees1087ep2::{
+        NtruEes1087Ep2, NtruEes1087Ep2Ciphertext, NtruEes1087Ep2PrivateKey, NtruEes1087Ep2PublicKey,
     };
-    pub use crate::public_key::ntru_hps821::{
-        NtruHps821, NtruHps821Ciphertext, NtruHps821PrivateKey, NtruHps821PublicKey,
-        NtruHps821SharedSecret,
+    pub use crate::public_key::ntru_ees1171ep1::{
+        NtruEes1171Ep1, NtruEes1171Ep1Ciphertext, NtruEes1171Ep1PrivateKey, NtruEes1171Ep1PublicKey,
+    };
+    pub use crate::public_key::ntru_ees1499ep1::{
+        NtruEes1499Ep1, NtruEes1499Ep1Ciphertext, NtruEes1499Ep1PrivateKey, NtruEes1499Ep1PublicKey,
     };
     pub use crate::public_key::ntru_ees401ep1::{
         NtruEes401Ep1, NtruEes401Ep1Ciphertext, NtruEes401Ep1PrivateKey, NtruEes401Ep1PublicKey,
@@ -419,23 +421,19 @@ pub mod vt {
     pub use crate::public_key::ntru_ees677ep1::{
         NtruEes677Ep1, NtruEes677Ep1Ciphertext, NtruEes677Ep1PrivateKey, NtruEes677Ep1PublicKey,
     };
-    pub use crate::public_key::ntru_ees1087ep1::{
-        NtruEes1087Ep1, NtruEes1087Ep1Ciphertext, NtruEes1087Ep1PrivateKey,
-        NtruEes1087Ep1PublicKey,
-    };
-    pub use crate::public_key::ntru_ees1087ep2::{
-        NtruEes1087Ep2, NtruEes1087Ep2Ciphertext, NtruEes1087Ep2PrivateKey,
-        NtruEes1087Ep2PublicKey,
-    };
-    pub use crate::public_key::ntru_ees1171ep1::{
-        NtruEes1171Ep1, NtruEes1171Ep1Ciphertext, NtruEes1171Ep1PrivateKey,
-        NtruEes1171Ep1PublicKey,
-    };
-    pub use crate::public_key::ntru_ees1499ep1::{
-        NtruEes1499Ep1, NtruEes1499Ep1Ciphertext, NtruEes1499Ep1PrivateKey,
-        NtruEes1499Ep1PublicKey,
-    };
     pub use crate::public_key::ntru_ees_core::NtruEesError;
+    pub use crate::public_key::ntru_hps509::{
+        NtruHps509, NtruHps509Ciphertext, NtruHps509PrivateKey, NtruHps509PublicKey,
+        NtruHps509SharedSecret,
+    };
+    pub use crate::public_key::ntru_hps677::{
+        NtruHps677, NtruHps677Ciphertext, NtruHps677PrivateKey, NtruHps677PublicKey,
+        NtruHps677SharedSecret,
+    };
+    pub use crate::public_key::ntru_hps821::{
+        NtruHps821, NtruHps821Ciphertext, NtruHps821PrivateKey, NtruHps821PublicKey,
+        NtruHps821SharedSecret,
+    };
     pub use crate::public_key::ntru_hrss701::{
         NtruHrss701, NtruHrss701Ciphertext, NtruHrss701PrivateKey, NtruHrss701PublicKey,
         NtruHrss701SharedSecret,
@@ -447,8 +445,10 @@ pub mod vt {
     pub use crate::public_key::schmidt_samoa::{
         SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey,
     };
-    pub use crate::public_key::x25519::{X25519, X25519PrivateKey, X25519PublicKey};
-    pub use crate::public_key::x448::{X448, X448PrivateKey, X448PublicKey};
+    pub use crate::public_key::x25519::{X25519PrivateKey, X25519PublicKey, X25519};
+    pub use crate::public_key::x448::{X448PrivateKey, X448PublicKey, X448};
+    pub use rump::modular::{MontgomeryContext, MontgomeryResidue, MontgomeryScratch};
+    pub use rump::{BigInt, BigUint, Sign};
 }
 
 #[cfg(test)]

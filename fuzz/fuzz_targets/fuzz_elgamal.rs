@@ -7,7 +7,8 @@
 //!   decrypt_raw(encrypt_with_nonce(m, r)) == m
 #![no_main]
 
-use cryptography::public_key::{bigint::BigUint, elgamal::ElGamal};
+use cryptography::public_key::{elgamal::ElGamal};
+use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
 
 const CHUNK: usize = 32;

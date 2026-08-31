@@ -8,12 +8,12 @@
 
 use core::fmt;
 
-use crate::public_key::bigint::{BigUint, MontgomeryCtx};
 use crate::public_key::io::{decode_biguints, encode_biguints};
-use crate::public_key::primes::{
-    is_probable_prime_untrusted, lcm, mod_inverse, mod_pow, random_probable_prime,
-};
+use crate::public_key::primes::{is_probable_prime_untrusted, random_probable_prime};
 use crate::Csprng;
+use rump::modular::{mod_inverse, mod_pow, MontgomeryContext};
+use rump::number_theory::lcm;
+use rump::BigUint;
 
 const SCHMIDT_SAMOA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PUBLIC KEY";
 const SCHMIDT_SAMOA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PRIVATE KEY";
@@ -22,7 +22,7 @@ const SCHMIDT_SAMOA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY SCHMIDT-SAMOA PRIVATE KE
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SchmidtSamoaPublicKey {
     n: BigUint,
-    n_ctx: Option<MontgomeryCtx>,
+    n_ctx: Option<MontgomeryContext>,
 }
 
 /// Private key for the Schmidt-Samoa primitive.
@@ -30,7 +30,7 @@ pub struct SchmidtSamoaPublicKey {
 pub struct SchmidtSamoaPrivateKey {
     d: BigUint,
     gamma: BigUint,
-    gamma_ctx: Option<MontgomeryCtx>,
+    gamma_ctx: Option<MontgomeryContext>,
 }
 
 /// Namespace wrapper for the Schmidt-Samoa construction.
@@ -96,7 +96,7 @@ impl SchmidtSamoaPublicKey {
         if n <= BigUint::one() {
             return None;
         }
-        let n_ctx = MontgomeryCtx::new(&n);
+        let n_ctx = MontgomeryContext::new(&n).ok();
         Some(Self { n, n_ctx })
     }
 }
@@ -169,7 +169,7 @@ impl SchmidtSamoaPrivateKey {
         if d.is_zero() || gamma <= BigUint::one() {
             return None;
         }
-        let gamma_ctx = MontgomeryCtx::new(&gamma);
+        let gamma_ctx = MontgomeryContext::new(&gamma).ok();
         Some(Self {
             d,
             gamma,
@@ -209,23 +209,23 @@ impl SchmidtSamoa {
             return None;
         }
 
-        let p_minus_one = p.sub_ref(&BigUint::one());
-        let q_minus_one = q.sub_ref(&BigUint::one());
+        let p_minus_one = p.sub(&BigUint::one());
+        let q_minus_one = q.sub(&BigUint::one());
         // This explicit divisibility check is equivalent to the later
         // `mod_inverse(...)?` failure, but keeping it here makes the Python
         // parameter restriction visible at the key-derivation boundary.
-        if q_minus_one.modulo(p).is_zero() || p_minus_one.modulo(q).is_zero() {
+        if q_minus_one.rem(p).is_zero() || p_minus_one.rem(q).is_zero() {
             return None;
         }
 
-        let gamma = p.mul_ref(q);
+        let gamma = p.mul(q);
         let lambda = lcm(&p_minus_one, &q_minus_one);
-        let p_squared = p.mul_ref(p);
-        let n = p_squared.mul_ref(q);
+        let p_squared = p.mul(p);
+        let n = p_squared.mul(q);
         let d = mod_inverse(&n, &lambda)?;
 
-        let n_ctx = MontgomeryCtx::new(&n);
-        let gamma_ctx = MontgomeryCtx::new(&gamma);
+        let n_ctx = MontgomeryContext::new(&n).ok();
+        let gamma_ctx = MontgomeryContext::new(&gamma).ok();
         Some((
             SchmidtSamoaPublicKey { n, n_ctx },
             SchmidtSamoaPrivateKey {
@@ -265,8 +265,8 @@ impl SchmidtSamoa {
 #[cfg(test)]
 mod tests {
     use super::{SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey};
-    use crate::public_key::bigint::BigUint;
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
     #[test]
     fn derive_small_reference_key() {

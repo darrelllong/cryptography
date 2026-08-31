@@ -12,9 +12,12 @@ boundary.
 
 | File | Purpose |
 |------|---------|
-| `bigint.rs` | Limb-based arbitrary-precision integers; Montgomery multiplication |
-| `primes.rs` | Primality testing (Miller-Rabin), safe prime generation |
-| `gf2m.rs` | Binary-field arithmetic for binary-curve implementations (private) |
+| `primes.rs` | Hardened primality policy and discrete-log group construction over the [rump](https://github.com/darrelllong/rump) number theory |
+
+The multiprecision arithmetic itself — `BigUint`/`BigInt` limb arithmetic,
+Montgomery contexts and residues, GF(2^m) — lives in the sibling
+[rump](https://github.com/darrelllong/rump) crate and is re-exported through
+`crate::vt`.
 
 ## Classical schemes
 

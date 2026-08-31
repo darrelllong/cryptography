@@ -5,7 +5,8 @@
 #![no_main]
 
 use cryptography::{
-    public_key::{bigint::BigUint, ec_edwards::ed25519, eddsa::EdDsa},
+    public_key::{ec_edwards::ed25519, eddsa::EdDsa},
+    vt::BigUint,
     Sha512,
 };
 use libfuzzer_sys::fuzz_target;

@@ -56,16 +56,18 @@
 //!
 //! This uses two modular exponentiations plus a comparison.
 
-use crate::public_key::bigint::{BigUint, MontgomeryCtx};
-use crate::public_key::primes::{mod_inverse, random_nonzero_below};
+use crate::public_key::primes::random_nonzero_below;
 use crate::Csprng;
+use rump::modular::mod_inverse;
+use rump::modular::{MontgomeryContext, MontgomeryResidue, MontgomeryScratch};
+use rump::BigUint;
 use std::sync::OnceLock;
 
 // ─── Core types ─────────────────────────────────────────────────────────────
 
 /// Parameters for a twisted Edwards curve `a·x² + y² = 1 + d·x²·y² (mod p)`.
 ///
-/// All constants are ordinary residues in `[0, p)`.  Two [`MontgomeryCtx`]
+/// All constants are ordinary residues in `[0, p)`.  Two [`MontgomeryContext`]
 /// values are pre-built at construction: one for field arithmetic mod `p` and
 /// one for scalar arithmetic mod `n`.  Montgomery encodings of `a` and
 /// `2·d mod p` are also cached because the extended-coordinate formulas
@@ -78,27 +80,140 @@ pub struct TwistedEdwardsCurve {
     pub a: BigUint,
     /// Curve coefficient `d`.
     pub d: BigUint,
-    /// Montgomery encodings of `a` and `2·d`, cached because the extended
-    /// point formulas run entirely in the Montgomery domain (`2·d` feeds the
-    /// unified addition formula).
-    pub(crate) a_mont: BigUint,
-    pub(crate) d2_mont: BigUint,
     /// Prime order of the base-point subgroup.
     pub n: BigUint,
     /// x-coordinate of the standard base point `G`.
     pub gx: BigUint,
     /// y-coordinate of the standard base point `G`.
     pub gy: BigUint,
-    /// Precomputed Montgomery context for field arithmetic mod `p`.
-    pub(crate) field: MontgomeryCtx,
-    /// Precomputed Montgomery context for scalar arithmetic mod `n`.
-    ///
-    /// This is cached next to the field context so Edwards-based scalar
-    /// protocols can reuse the subgroup modulus without redoing the Newton
-    /// setup, even when a given code path only touches the field arithmetic.
-    pub(crate) _scalar: MontgomeryCtx,
+    /// Montgomery arithmetic for the field mod `p`, with the residues the
+    /// extended-coordinate formulas multiply by in the hot path.
+    pub(crate) field: EdwardsFieldCtx,
+    /// Precomputed Montgomery context for scalar arithmetic mod `n`,
+    /// reached through [`Self::scalar_ctx`] by the signature schemes for
+    /// their products modulo the subgroup order.
+    scalar: MontgomeryContext,
     /// Byte length of a field element: `⌈p.bits() / 8⌉`.
     pub coord_len: usize,
+}
+
+/// Montgomery arithmetic for a twisted Edwards curve's prime field.
+///
+/// Bundles the [`MontgomeryContext`] for `p` with the residues the
+/// extended-coordinate formulas need ready-made: the curve coefficient `a`,
+/// the doubled coefficient `2·d` (which feeds the unified addition formula),
+/// and the zero residue so neutral checks are plain comparisons.
+///
+/// Every residue in a curve computation comes from this one context, so the
+/// `ContextMismatch` the residue operations report is unreachable here; the
+/// methods below unwrap it and keep the formulas readable.
+#[derive(Clone, Debug)]
+pub(crate) struct EdwardsFieldCtx {
+    /// Montgomery context for arithmetic mod `p`.
+    ctx: MontgomeryContext,
+    /// Curve coefficient `a`, encoded once into the Montgomery domain.
+    a_mont: MontgomeryResidue,
+    /// `2·d mod p`, encoded once into the Montgomery domain.
+    d2_mont: MontgomeryResidue,
+    /// The zero residue of the field.
+    zero: MontgomeryResidue,
+}
+
+impl EdwardsFieldCtx {
+    const SAME_CTX: &'static str = "curve residues share the curve's field context";
+
+    fn new(ctx: MontgomeryContext, a: &BigUint, d2: &BigUint) -> Self {
+        let a_mont = ctx.to_residue(a);
+        let d2_mont = ctx.to_residue(d2);
+        let zero = ctx.to_residue(&BigUint::zero());
+        Self {
+            ctx,
+            a_mont,
+            d2_mont,
+            zero,
+        }
+    }
+
+    /// `a·b` in the Montgomery domain, reusing `scratch` across the ladder.
+    #[inline]
+    fn mul(
+        &self,
+        a: &MontgomeryResidue,
+        b: &MontgomeryResidue,
+        scratch: &mut MontgomeryScratch,
+    ) -> MontgomeryResidue {
+        self.ctx
+            .mul_residue_with(a, b, scratch)
+            .expect(Self::SAME_CTX)
+    }
+
+    /// `a²` in the Montgomery domain, reusing `scratch` across the ladder.
+    #[inline]
+    fn sqr(&self, a: &MontgomeryResidue, scratch: &mut MontgomeryScratch) -> MontgomeryResidue {
+        self.ctx
+            .square_residue_with(a, scratch)
+            .expect(Self::SAME_CTX)
+    }
+
+    /// `a + b` in the Montgomery domain (the encoding is linear).
+    #[inline]
+    fn add(&self, a: &MontgomeryResidue, b: &MontgomeryResidue) -> MontgomeryResidue {
+        self.ctx.add_residue(a, b).expect(Self::SAME_CTX)
+    }
+
+    /// `a − b` in the Montgomery domain.
+    #[inline]
+    fn sub(&self, a: &MontgomeryResidue, b: &MontgomeryResidue) -> MontgomeryResidue {
+        self.ctx.sub_residue(a, b).expect(Self::SAME_CTX)
+    }
+
+    /// Whether `a` is the zero residue.
+    #[inline]
+    fn is_zero(&self, a: &MontgomeryResidue) -> bool {
+        *a == self.zero
+    }
+
+    /// The zero residue of the field.
+    #[inline]
+    fn zero(&self) -> &MontgomeryResidue {
+        &self.zero
+    }
+
+    /// The one residue of the field.
+    #[inline]
+    fn one(&self) -> MontgomeryResidue {
+        self.ctx.one()
+    }
+
+    /// The curve coefficient `a` as a residue.
+    #[inline]
+    fn a_mont(&self) -> &MontgomeryResidue {
+        &self.a_mont
+    }
+
+    /// `2·d mod p` as a residue.
+    #[inline]
+    fn d2_mont(&self) -> &MontgomeryResidue {
+        &self.d2_mont
+    }
+
+    /// Encode an ordinary value into the Montgomery domain.
+    #[inline]
+    fn to_residue(&self, value: &BigUint) -> MontgomeryResidue {
+        self.ctx.to_residue(value)
+    }
+
+    /// The underlying context, for one-shot arithmetic on ordinary values.
+    #[inline]
+    fn ctx(&self) -> &MontgomeryContext {
+        &self.ctx
+    }
+
+    /// Decode a residue back to an ordinary value in `[0, p)`.
+    #[inline]
+    fn decode(&self, a: &MontgomeryResidue) -> BigUint {
+        self.ctx.from_residue(a).expect(Self::SAME_CTX)
+    }
 }
 
 /// An affine Edwards curve point, or the neutral element `(0, 1)`.
@@ -120,10 +235,10 @@ pub struct EdwardsPoint {
 /// non-zero `Z`.  The neutral element `(0, 1)` is `(0, Z, Z, 0)`.
 #[derive(Clone, Debug)]
 struct ExtendedPoint {
-    x: BigUint,
-    y: BigUint,
-    z: BigUint,
-    t: BigUint,
+    x: MontgomeryResidue,
+    y: MontgomeryResidue,
+    z: MontgomeryResidue,
+    t: MontgomeryResidue,
 }
 
 const SCALAR_WINDOW_BITS: usize = 4;
@@ -131,8 +246,14 @@ const ED25519_BASE_WINDOW_BITS: usize = 8;
 const CACHED_PUBLIC_WINDOW_BITS: usize = 8;
 
 /// Cached precompute table for repeated variable-base scalar multiplication.
+///
+/// Carries the [`EdwardsFieldCtx`] that built it: the table's residues are
+/// bound to that exact context (rump checks residue provenance, not modulus
+/// equality), so cached multiplication always runs on the table's own field
+/// state, whichever structurally-equal curve instance asks for it.
 #[derive(Clone, Debug)]
 pub(crate) struct EdwardsMulTable {
+    fld: EdwardsFieldCtx,
     table: Vec<ExtendedPoint>,
     window_bits: usize,
 }
@@ -173,19 +294,19 @@ impl EdwardsPoint {
 // ─── ExtendedPoint ──────────────────────────────────────────────────────────
 
 impl ExtendedPoint {
-    /// The neutral element `(0, 1, 1, 0)` in extended coordinates, with the
-    /// non-zero coordinates in the Montgomery domain of `ctx`.
-    fn neutral(ctx: &MontgomeryCtx) -> Self {
+    /// The neutral element `(0, 1, 1, 0)` in extended coordinates, as
+    /// residues of `fld`.
+    fn neutral(fld: &EdwardsFieldCtx) -> Self {
         Self {
-            x: BigUint::zero(),
-            y: ctx.one_mont().clone(),
-            z: ctx.one_mont().clone(),
-            t: BigUint::zero(),
+            x: fld.zero().clone(),
+            y: fld.one(),
+            z: fld.one(),
+            t: fld.zero().clone(),
         }
     }
 
-    fn is_neutral(&self) -> bool {
-        self.x.is_zero() && self.y == self.z
+    fn is_neutral(&self, fld: &EdwardsFieldCtx) -> bool {
+        fld.is_zero(&self.x) && self.y == self.z
     }
 
     /// Lift an affine point to extended coordinates with `Z = 1`, encoding
@@ -193,17 +314,17 @@ impl ExtendedPoint {
     ///
     /// For affine `(x, y)`: extended `(x, y, 1, x·y)`.
     /// For the neutral element `(0, 1)`: extended `(0, 1, 1, 0)`.
-    fn from_affine(p: &EdwardsPoint, ctx: &MontgomeryCtx) -> Self {
+    fn from_affine(p: &EdwardsPoint, fld: &EdwardsFieldCtx) -> Self {
         if p.neutral {
-            return Self::neutral(ctx);
+            return Self::neutral(fld);
         }
-        let x = ctx.encode(&p.x);
-        let y = ctx.encode(&p.y);
-        let t = ctx.mul_mont(&x, &y);
+        let x = fld.to_residue(&p.x);
+        let y = fld.to_residue(&p.y);
+        let t = fld.mul(&x, &y, &mut MontgomeryScratch::new());
         Self {
             x,
             y,
-            z: ctx.one_mont().clone(),
+            z: fld.one(),
             t,
         }
     }
@@ -214,25 +335,25 @@ impl ExtendedPoint {
     /// `Z⁻¹ = Z^{p−2} mod p`.  The projective neutral `(0 : Z : Z : 0)` is
     /// canonicalized back to the affine identity `(0, 1)` so the explicit
     /// `neutral` flag always stays in sync with the coordinates.
-    fn to_affine(&self, curve: &TwistedEdwardsCurve) -> EdwardsPoint {
-        if self.is_neutral() {
+    fn to_affine(&self, fld: &EdwardsFieldCtx) -> EdwardsPoint {
+        if self.is_neutral(fld) {
             return EdwardsPoint::neutral();
         }
 
-        let ctx = &curve.field;
+        let ctx = fld.ctx();
 
         // Fast path: a freshly lifted affine point keeps `Z = 1` until it
         // actually goes through a non-trivial addition or doubling.  In that
         // case there is no need to pay for a Fermat inversion.
-        if self.z == *ctx.one_mont() {
-            return EdwardsPoint::new(ctx.decode(&self.x), ctx.decode(&self.y));
+        if self.z == ctx.one() {
+            return EdwardsPoint::new(fld.decode(&self.x), fld.decode(&self.y));
         }
 
-        let x = ctx.decode(&self.x);
-        let y = ctx.decode(&self.y);
-        let z = ctx.decode(&self.z);
+        let x = fld.decode(&self.x);
+        let y = fld.decode(&self.y);
+        let z = fld.decode(&self.z);
 
-        let p_minus_2 = curve.p.sub_ref(&BigUint::from_u64(2));
+        let p_minus_2 = ctx.modulus().sub(&BigUint::from_u64(2));
         let z_inv = ctx.pow(&z, &p_minus_2);
 
         let x = ctx.mul(&x, &z_inv);
@@ -247,9 +368,9 @@ impl ExtendedPoint {
 /// `(a + b) mod p`  (both inputs in `[0, p)`)
 #[inline]
 fn fadd(a: &BigUint, b: &BigUint, p: &BigUint) -> BigUint {
-    let s = a.add_ref(b);
+    let s = a.add(b);
     if &s >= p {
-        s.sub_ref(p)
+        s.sub(p)
     } else {
         s
     }
@@ -259,9 +380,9 @@ fn fadd(a: &BigUint, b: &BigUint, p: &BigUint) -> BigUint {
 #[inline]
 fn fsub(a: &BigUint, b: &BigUint, p: &BigUint) -> BigUint {
     if a >= b {
-        a.sub_ref(b)
+        a.sub(b)
     } else {
-        p.sub_ref(&b.sub_ref(a))
+        p.sub(&b.sub(a))
     }
 }
 
@@ -271,7 +392,7 @@ fn fneg(a: &BigUint, p: &BigUint) -> BigUint {
     if a.is_zero() {
         BigUint::zero()
     } else {
-        p.sub_ref(a)
+        p.sub(a)
     }
 }
 
@@ -294,42 +415,40 @@ fn fneg(a: &BigUint, p: &BigUint) -> BigUint {
 /// `P₁ = −P₂` (result is the neutral), and it is *complete* over any prime
 /// field with `−d` a non-square, which holds for Ed25519.
 fn point_add_extended(
-    curve: &TwistedEdwardsCurve,
+    fld: &EdwardsFieldCtx,
     p1: &ExtendedPoint,
     p2: &ExtendedPoint,
+    scratch: &mut MontgomeryScratch,
 ) -> ExtendedPoint {
-    let ctx = &curve.field;
-    let m = &curve.p;
-
     // A = (Y₁ − X₁)·(Y₂ − X₂)
-    let y1_m_x1 = fsub(&p1.y, &p1.x, m);
-    let y2_m_x2 = fsub(&p2.y, &p2.x, m);
-    let a = ctx.mul_mont(&y1_m_x1, &y2_m_x2);
+    let y1_m_x1 = fld.sub(&p1.y, &p1.x);
+    let y2_m_x2 = fld.sub(&p2.y, &p2.x);
+    let a = fld.mul(&y1_m_x1, &y2_m_x2, scratch);
 
     // B = (Y₁ + X₁)·(Y₂ + X₂)
-    let y1_p_x1 = fadd(&p1.y, &p1.x, m);
-    let y2_p_x2 = fadd(&p2.y, &p2.x, m);
-    let b = ctx.mul_mont(&y1_p_x1, &y2_p_x2);
+    let y1_p_x1 = fld.add(&p1.y, &p1.x);
+    let y2_p_x2 = fld.add(&p2.y, &p2.x);
+    let b = fld.mul(&y1_p_x1, &y2_p_x2, scratch);
 
-    // C = T₁·2d·T₂  (using the precomputed Montgomery-form d2 = 2d mod p)
-    let t2_scaled = ctx.mul_mont(&p2.t, &curve.d2_mont);
-    let c = ctx.mul_mont(&p1.t, &t2_scaled);
+    // C = T₁·2d·T₂  (using the precomputed residue d2 = 2d mod p)
+    let t2_scaled = fld.mul(&p2.t, fld.d2_mont(), scratch);
+    let c = fld.mul(&p1.t, &t2_scaled, scratch);
 
     // D = Z₁·2·Z₂  =  2·(Z₁·Z₂)
-    let z1z2 = ctx.mul_mont(&p1.z, &p2.z);
-    let d = fadd(&z1z2, &z1z2, m);
+    let z1z2 = fld.mul(&p1.z, &p2.z, scratch);
+    let d = fld.add(&z1z2, &z1z2);
 
     // E = B−A,  F = D−C,  G = D+C,  H = B+A
-    let e = fsub(&b, &a, m);
-    let f = fsub(&d, &c, m);
-    let g = fadd(&d, &c, m);
-    let h = fadd(&b, &a, m); // correct for a = −1: H = B − a·A = B + A
+    let e = fld.sub(&b, &a);
+    let f = fld.sub(&d, &c);
+    let g = fld.add(&d, &c);
+    let h = fld.add(&b, &a); // correct for a = −1: H = B − a·A = B + A
 
     ExtendedPoint {
-        x: ctx.mul_mont(&e, &f),
-        y: ctx.mul_mont(&g, &h),
-        z: ctx.mul_mont(&f, &g),
-        t: ctx.mul_mont(&e, &h),
+        x: fld.mul(&e, &f, scratch),
+        y: fld.mul(&g, &h, scratch),
+        z: fld.mul(&f, &g, scratch),
+        t: fld.mul(&e, &h, scratch),
     }
 }
 
@@ -338,33 +457,34 @@ fn point_add_extended(
 /// Uses the dedicated "dbl-2008-hwcd" formula for extended twisted Edwards
 /// coordinates. For the built-in Ed25519 domain (`a = -1`) this saves field
 /// multiplications compared with reusing the unified addition formula.
-fn point_double_extended(curve: &TwistedEdwardsCurve, p1: &ExtendedPoint) -> ExtendedPoint {
-    let ctx = &curve.field;
-    if p1.is_neutral() {
-        return ExtendedPoint::neutral(ctx);
+fn point_double_extended(
+    fld: &EdwardsFieldCtx,
+    p1: &ExtendedPoint,
+    scratch: &mut MontgomeryScratch,
+) -> ExtendedPoint {
+    if p1.is_neutral(fld) {
+        return ExtendedPoint::neutral(fld);
     }
 
-    let m = &curve.p;
-
-    let a = ctx.square_mont(&p1.x);
-    let b = ctx.square_mont(&p1.y);
-    let z2 = ctx.square_mont(&p1.z);
-    let c = fadd(&z2, &z2, m);
-    let d = ctx.mul_mont(&curve.a_mont, &a);
-    let x_plus_y = fadd(&p1.x, &p1.y, m);
+    let a = fld.sqr(&p1.x, scratch);
+    let b = fld.sqr(&p1.y, scratch);
+    let z2 = fld.sqr(&p1.z, scratch);
+    let c = fld.add(&z2, &z2);
+    let d = fld.mul(fld.a_mont(), &a, scratch);
+    let x_plus_y = fld.add(&p1.x, &p1.y);
     let e = {
-        let sum_sq = ctx.square_mont(&x_plus_y);
-        fsub(&fsub(&sum_sq, &a, m), &b, m)
+        let sum_sq = fld.sqr(&x_plus_y, scratch);
+        fld.sub(&fld.sub(&sum_sq, &a), &b)
     };
-    let g = fadd(&d, &b, m);
-    let f = fsub(&g, &c, m);
-    let h = fsub(&d, &b, m);
+    let g = fld.add(&d, &b);
+    let f = fld.sub(&g, &c);
+    let h = fld.sub(&d, &b);
 
     ExtendedPoint {
-        x: ctx.mul_mont(&e, &f),
-        y: ctx.mul_mont(&g, &h),
-        t: ctx.mul_mont(&e, &h),
-        z: ctx.mul_mont(&f, &g),
+        x: fld.mul(&e, &f, scratch),
+        y: fld.mul(&g, &h, scratch),
+        t: fld.mul(&e, &h, scratch),
+        z: fld.mul(&f, &g, scratch),
     }
 }
 
@@ -381,23 +501,29 @@ fn scalar_window(k: &BigUint, bit_offset: usize, width: usize) -> usize {
 }
 
 fn precompute_window_table(
-    curve: &TwistedEdwardsCurve,
+    fld: &EdwardsFieldCtx,
     point: &ExtendedPoint,
     window_bits: usize,
 ) -> Vec<ExtendedPoint> {
     let table_size = 1usize << window_bits;
+    let mut scratch = MontgomeryScratch::new();
     let mut table = Vec::with_capacity(table_size);
-    table.push(ExtendedPoint::neutral(&curve.field));
+    table.push(ExtendedPoint::neutral(fld));
     table.push(point.clone());
     for _ in 2..table_size {
-        let next = point_add_extended(curve, table.last().expect("table non-empty"), point);
+        let next = point_add_extended(
+            fld,
+            table.last().expect("table non-empty"),
+            point,
+            &mut scratch,
+        );
         table.push(next);
     }
     table
 }
 
 fn scalar_mul_with_table(
-    curve: &TwistedEdwardsCurve,
+    fld: &EdwardsFieldCtx,
     k: &BigUint,
     table: &[ExtendedPoint],
     window_bits: usize,
@@ -406,17 +532,19 @@ fn scalar_mul_with_table(
         return EdwardsPoint::neutral();
     }
 
-    let mut result = ExtendedPoint::neutral(&curve.field);
+    // One scratch buffer serves every multiply and square in the ladder.
+    let mut scratch = MontgomeryScratch::new();
+    let mut result = ExtendedPoint::neutral(fld);
     let windows = k.bits().div_ceil(window_bits);
     for window_index in (0..windows).rev() {
         for _ in 0..window_bits {
-            result = point_double_extended(curve, &result);
+            result = point_double_extended(fld, &result, &mut scratch);
         }
         let value = scalar_window(k, window_index * window_bits, window_bits);
-        result = point_add_extended(curve, &result, &table[value]);
+        result = point_add_extended(fld, &result, &table[value], &mut scratch);
     }
 
-    result.to_affine(curve)
+    result.to_affine(fld)
 }
 
 fn cached_ed25519() -> &'static TwistedEdwardsCurve {
@@ -440,7 +568,7 @@ fn ed25519_base_table() -> &'static [ExtendedPoint] {
         .get_or_init(|| {
             let curve = cached_ed25519();
             let base = ExtendedPoint::from_affine(&curve.base_point(), &curve.field);
-            precompute_window_table(curve, &base, ED25519_BASE_WINDOW_BITS)
+            precompute_window_table(&curve.field, &base, ED25519_BASE_WINDOW_BITS)
         })
         .as_slice()
 }
@@ -466,8 +594,8 @@ fn scalar_mul_extended(
     }
 
     let p_ext = ExtendedPoint::from_affine(point, &curve.field);
-    let table = precompute_window_table(curve, &p_ext, SCALAR_WINDOW_BITS);
-    scalar_mul_with_table(curve, k, &table, SCALAR_WINDOW_BITS)
+    let table = precompute_window_table(&curve.field, &p_ext, SCALAR_WINDOW_BITS);
+    scalar_mul_with_table(&curve.field, k, &table, SCALAR_WINDOW_BITS)
 }
 
 // ─── TwistedEdwardsCurve ────────────────────────────────────────────────────
@@ -476,7 +604,7 @@ impl TwistedEdwardsCurve {
     /// Construct curve parameters from raw field values.
     ///
     /// Returns `None` if the field prime `p` or subgroup order `n` is even,
-    /// which prevents building a `MontgomeryCtx`.
+    /// which prevents building a `MontgomeryContext`.
     #[must_use]
     pub fn new(
         p: BigUint,
@@ -486,30 +614,27 @@ impl TwistedEdwardsCurve {
         gx: BigUint,
         gy: BigUint,
     ) -> Option<Self> {
-        let field = MontgomeryCtx::new(&p)?;
-        let scalar = MontgomeryCtx::new(&n)?;
+        let field = MontgomeryContext::new(&p).ok()?;
+        let scalar = MontgomeryContext::new(&n).ok()?;
         let coord_len = p.bits().div_ceil(8);
         let d2 = {
-            let v = d.add_ref(&d);
+            let v = d.add(&d);
             if v.cmp(&p).is_ge() {
-                v.sub_ref(&p)
+                v.sub(&p)
             } else {
                 v
             }
         };
-        let a_mont = field.encode(&a);
-        let d2_mont = field.encode(&d2);
+        let field = EdwardsFieldCtx::new(field, &a, &d2);
         Some(Self {
             p,
             a,
             d,
-            a_mont,
-            d2_mont,
             n,
             gx,
             gy,
             field,
-            _scalar: scalar,
+            scalar,
             coord_len,
         })
     }
@@ -529,7 +654,7 @@ impl TwistedEdwardsCurve {
         if point.neutral {
             return true;
         }
-        let ctx = &self.field;
+        let ctx = self.field.ctx();
         let x2 = ctx.square(&point.x);
         let y2 = ctx.square(&point.y);
         // lhs = a·x² + y²
@@ -559,14 +684,16 @@ impl TwistedEdwardsCurve {
     pub fn add(&self, p: &EdwardsPoint, q: &EdwardsPoint) -> EdwardsPoint {
         let pe = ExtendedPoint::from_affine(p, &self.field);
         let qe = ExtendedPoint::from_affine(q, &self.field);
-        point_add_extended(self, &pe, &qe).to_affine(self)
+        point_add_extended(&self.field, &pe, &qe, &mut MontgomeryScratch::new())
+            .to_affine(&self.field)
     }
 
     /// Double an affine curve point (`2P`).
     #[must_use]
     pub fn double(&self, p: &EdwardsPoint) -> EdwardsPoint {
         let pe = ExtendedPoint::from_affine(p, &self.field);
-        point_double_extended(self, &pe).to_affine(self)
+        point_double_extended(&self.field, &pe, &mut MontgomeryScratch::new())
+            .to_affine(&self.field)
     }
 
     /// Scalar multiplication `k·P`.
@@ -591,7 +718,17 @@ impl TwistedEdwardsCurve {
             return EdwardsPoint::neutral();
         }
         if is_ed25519_curve(self) {
-            return scalar_mul_with_table(self, k, ed25519_base_table(), ED25519_BASE_WINDOW_BITS);
+            // Run the ladder on the cached curve, not `self`: the static
+            // table's residues belong to the cached curve's Montgomery
+            // context, and rump ties a residue to the exact context that made
+            // it (provenance, not modulus equality). The result is affine
+            // ordinary coordinates, so it is context-free.
+            return scalar_mul_with_table(
+                &cached_ed25519().field,
+                k,
+                ed25519_base_table(),
+                ED25519_BASE_WINDOW_BITS,
+            );
         }
         scalar_mul_extended(self, &self.base_point(), k)
     }
@@ -624,7 +761,8 @@ impl TwistedEdwardsCurve {
     pub(crate) fn precompute_mul_table(&self, point: &EdwardsPoint) -> EdwardsMulTable {
         let point_ext = ExtendedPoint::from_affine(point, &self.field);
         EdwardsMulTable {
-            table: precompute_window_table(self, &point_ext, CACHED_PUBLIC_WINDOW_BITS),
+            fld: self.field.clone(),
+            table: precompute_window_table(&self.field, &point_ext, CACHED_PUBLIC_WINDOW_BITS),
             window_bits: CACHED_PUBLIC_WINDOW_BITS,
         }
     }
@@ -632,7 +770,7 @@ impl TwistedEdwardsCurve {
     /// Multiply by a point represented by a cached precompute table.
     #[must_use]
     pub(crate) fn scalar_mul_cached(&self, table: &EdwardsMulTable, k: &BigUint) -> EdwardsPoint {
-        scalar_mul_with_table(self, k, &table.table, table.window_bits)
+        scalar_mul_with_table(&table.fld, k, &table.table, table.window_bits)
     }
 
     /// Compare the structural Edwards parameters, ignoring cached Montgomery state.
@@ -644,6 +782,12 @@ impl TwistedEdwardsCurve {
             && self.n == other.n
             && self.gx == other.gx
             && self.gy == other.gy
+    }
+
+    /// Return the Montgomery context for arithmetic modulo the subgroup
+    /// order `n` — the modulus the signature schemes multiply in.
+    pub(crate) fn scalar_ctx(&self) -> &MontgomeryContext {
+        &self.scalar
     }
 
     /// Compute `k⁻¹ mod n`.  Returns `None` if `k = 0`.
@@ -732,7 +876,7 @@ impl TwistedEdwardsCurve {
     ///
     /// Returns `None` if `x²` has no square root in `F_p`.
     fn field_recover_x(&self, y: &BigUint, x_odd: bool) -> Option<BigUint> {
-        let ctx = &self.field;
+        let ctx = self.field.ctx();
 
         // x² = (y² − 1) / (d·y² − a)
         // For a = p − 1 (i.e. a = −1): d·y² − a = d·y² + 1.
@@ -742,7 +886,7 @@ impl TwistedEdwardsCurve {
         let denominator = fsub(&dy2, &self.a, &self.p); // d·y² − a
 
         // Compute x² = numerator / denominator via Fermat inversion.
-        let p_minus_2 = self.p.sub_ref(&BigUint::from_u64(2));
+        let p_minus_2 = self.p.sub(&BigUint::from_u64(2));
         let denom_inv = ctx.pow(&denominator, &p_minus_2);
         let x_squared = ctx.mul(&numerator, &denom_inv);
 
@@ -766,15 +910,12 @@ impl TwistedEdwardsCurve {
     ///
     /// Returns `None` if `u` has no square root in `F_p`.
     fn field_sqrt(&self, u: &BigUint) -> Option<BigUint> {
-        let ctx = &self.field;
+        let ctx = self.field.ctx();
         let p_mod8 = self.p.rem_u64(8);
 
         if p_mod8 == 3 || p_mod8 == 7 {
             // p ≡ 3 (mod 4): candidate = u^{(p+1)/4}.
-            let (exp, _) = self
-                .p
-                .add_ref(&BigUint::one())
-                .div_rem(&BigUint::from_u64(4));
+            let (exp, _) = self.p.add(&BigUint::one()).div_rem(&BigUint::from_u64(4));
             let candidate = ctx.pow(u, &exp);
             if ctx.square(&candidate) == *u {
                 Some(candidate)
@@ -787,7 +928,7 @@ impl TwistedEdwardsCurve {
             // Step 1: candidate β = u^{(p+3)/8}
             let (exp, _) = self
                 .p
-                .add_ref(&BigUint::from_u64(3))
+                .add(&BigUint::from_u64(3))
                 .div_rem(&BigUint::from_u64(8));
             let beta = ctx.pow(u, &exp);
             let beta2 = ctx.square(&beta);
@@ -800,10 +941,7 @@ impl TwistedEdwardsCurve {
             let neg_u = fneg(u, &self.p);
             if beta2 == neg_u {
                 // Multiply by √(−1) = 2^{(p−1)/4} mod p.
-                let (sqrt_m1_exp, _) = self
-                    .p
-                    .sub_ref(&BigUint::one())
-                    .div_rem(&BigUint::from_u64(4));
+                let (sqrt_m1_exp, _) = self.p.sub(&BigUint::one()).div_rem(&BigUint::from_u64(4));
                 let sqrt_m1 = ctx.pow(&BigUint::from_u64(2), &sqrt_m1_exp);
                 return Some(ctx.mul(&beta, &sqrt_m1));
             }
@@ -866,7 +1004,7 @@ pub fn ed25519() -> TwistedEdwardsCurve {
     // p = 2^255 − 19
     let p = from_hex("7FFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFED");
     // a = −1 mod p = p − 1
-    let a = p.sub_ref(&BigUint::one());
+    let a = p.sub(&BigUint::one());
     // d = −121665/121666 mod p  (the specific constant from RFC 8032)
     let d = from_hex("52036CEE 2B6FFE73 8CC74079 7779E898 00700A4D 4141D8AB 75EB4DCA 135978A3");
     // n = 2^252 + 27742317777372353535851937790883648493

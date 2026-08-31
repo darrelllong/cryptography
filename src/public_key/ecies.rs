@@ -44,12 +44,12 @@ use core::fmt;
 use crate::ciphers::aes::Aes256;
 use crate::hash::sha2::Sha256;
 use crate::modes::Gcm;
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec::{AffinePoint, CurveParams};
 use crate::public_key::io::{
     decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap,
 };
 use crate::Csprng;
+use rump::BigUint;
 
 const ECIES_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ECIES PUBLIC KEY";
 const ECIES_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ECIES PRIVATE KEY";

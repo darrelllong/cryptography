@@ -36,7 +36,7 @@
 //! encodings. The PEM labels and XML root tags are the type discriminants when
 //! callers need a tagged interchange format.
 
-use crate::public_key::bigint::BigUint;
+use rump::BigUint;
 
 const UPPER_HEX: &[u8; 16] = b"0123456789ABCDEF";
 
@@ -225,7 +225,7 @@ macro_rules! impl_xml_serialization {
             #[must_use]
             pub fn to_xml(&self) -> String {
                 let values = self.serial_fields();
-                let pairs: ::std::vec::Vec<(&str, &crate::public_key::bigint::BigUint)> =
+                let pairs: ::std::vec::Vec<(&str, &crate::vt::BigUint)> =
                     [$($field),+].iter().copied().zip(values.iter()).collect();
                 crate::public_key::io::xml_wrap($root, &pairs)
             }
@@ -252,7 +252,7 @@ macro_rules! impl_blob_pem_serialization {
             #[must_use]
             pub fn to_key_blob(&self) -> ::std::vec::Vec<u8> {
                 let values = self.serial_fields();
-                let refs: ::std::vec::Vec<&crate::public_key::bigint::BigUint> =
+                let refs: ::std::vec::Vec<&crate::vt::BigUint> =
                     values.iter().collect();
                 crate::public_key::io::encode_biguints(&refs)
             }
@@ -534,7 +534,7 @@ fn decode_hex_char(ch: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::{decode_biguints, encode_biguints, pem_unwrap, pem_wrap, xml_unwrap, xml_wrap};
-    use crate::public_key::bigint::BigUint;
+    use rump::BigUint;
 
     #[test]
     fn binary_roundtrip() {

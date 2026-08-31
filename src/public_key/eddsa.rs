@@ -22,10 +22,10 @@
 use core::fmt;
 
 use crate::hash::Digest;
-use crate::public_key::bigint::BigUint;
 use crate::public_key::ec_edwards::{EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::Csprng;
+use rump::BigUint;
 
 const EDDSA_PUBLIC_LABEL: &str = "CRYPTOGRAPHY EDDSA PUBLIC KEY";
 const EDDSA_PRIVATE_LABEL: &str = "CRYPTOGRAPHY EDDSA PRIVATE KEY";
@@ -254,8 +254,8 @@ impl EdDsaPrivateKey {
             return None;
         }
         let challenge = challenge_scalar::<H>(&self.curve, &r_point, &self.a_point, message);
-        let ed = BigUint::mod_mul(&challenge, &self.d, &self.curve.n);
-        let s = nonce.add_ref(&ed).modulo(&self.curve.n);
+        let ed = self.curve.scalar_ctx().mul(&challenge, &self.d);
+        let s = nonce.add(&ed).rem(&self.curve.n);
         Some(EdDsaSignature { r_point, s })
     }
 
@@ -445,16 +445,16 @@ fn challenge_scalar<H: Digest>(
     let mut transcript = curve.encode_point(r_point);
     transcript.extend_from_slice(&curve.encode_point(a_point));
     transcript.extend_from_slice(message);
-    BigUint::from_be_bytes(&H::digest(&transcript)).modulo(&curve.n)
+    BigUint::from_be_bytes(&H::digest(&transcript)).rem(&curve.n)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{EdDsa, EdDsaPrivateKey, EdDsaPublicKey, EdDsaSignature};
-    use crate::public_key::bigint::BigUint;
     use crate::public_key::ec_edwards::ed25519;
     use crate::public_key::io::encode_biguints;
     use crate::{CtrDrbgAes256, Sha512};
+    use rump::BigUint;
 
     fn rng() -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[0x5a; 48])
@@ -506,7 +506,7 @@ mod tests {
         let mut sig = private
             .sign_message::<Sha512, _>(b"tamper", &mut rng())
             .expect("sign");
-        sig.s = sig.s.add_ref(&BigUint::one()).modulo(&public.curve().n);
+        sig.s = sig.s.add(&BigUint::one()).rem(&public.curve().n);
         if sig.s.is_zero() {
             sig.s = BigUint::one();
         }
