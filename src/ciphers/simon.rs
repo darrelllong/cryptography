@@ -10,7 +10,8 @@
 //! of the nonlinear function f.
 //!
 //! **Key** — m words *(k₀ ∥ ℓ₀ ∥ … ∥ ℓ_{m−2})* in little-endian word order,
-//! k₀ first.  This matches the C reference-implementation convention.
+//! k₀ first.  The paper states keys and blocks as words; the tests derive the
+//! byte strings from the Appendix B words under this convention.
 //!
 //! # Naming
 //!
@@ -23,33 +24,63 @@
 use super::simon_speck_util::{load_le, rotl, rotr, store_le};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Z sequences — Table 3.2
+// Constant sequences z0 … z4 — §3.2
 //
-// WHY they exist: without a varying constant, the key schedule recurrence
-//   k_i = ∼k_{i−m} ⊕ tmp
-// produces identical round keys whenever all master-key words are equal (e.g.
-// an all-zero key yields all-zero round keys).  Injecting a different bit each
-// round — drawn from a pseudo-random sequence — breaks that symmetry and
-// prevents slide and related-key attacks that exploit a degenerate schedule.
+// The key schedule XORs one bit of a constant sequence into every derived
+// round key, so that a master key with equal words does not expand into a
+// degenerate schedule and different family members sharing a block size are
+// separated from one another (§3.2).
 //
-// WHAT they are: five binary sequences of period 62, tabulated directly in
-// the paper (Table 3.2).  The paper states they were produced by binary LFSRs
-// with primitive feedback polynomials, but does not list those polynomials;
-// the sequences are reproduced verbatim from the NSA Python reference
-// implementation (2013).
+// §3.2 defines the five sequences from three period-31 sequences u, v, w
+// (each the output of a 5-bit LFSR with a primitive feedback polynomial) and
+// the period-2 sequence t = 0101…:
 //
-// HOW to access: bit i of sequence z_j is  (Z[j] >> (i % 62)) & 1  (LSB = bit 0).
-// The schedule uses  i' = (round_index − m)  so that the first key-schedule
-// step draws Z bit 0, the next draws bit 1, and so on, cycling every 62 steps.
+//   z0 = u,  z1 = v,  z2 = u ⊕ t,  z3 = v ⊕ t,  z4 = w ⊕ t,
+//
+// so z0 and z1 have period 31 and z2 … z4 have period 62. The three LFSRs are
+// written below as the linear recurrences of the printed sequences, started
+// from their first five printed bits:
+//
+//   u_{i+5} = u_{i+4} ⊕ u_{i+2} ⊕ u_{i+1} ⊕ u_i     x⁵ + x⁴ + x² + x + 1
+//   v_{i+5} = v_{i+3} ⊕ v_{i+2} ⊕ v_{i+1} ⊕ v_i     x⁵ + x³ + x² + x + 1
+//   w_{i+5} = w_{i+2} ⊕ w_i                          x⁵ + x² + 1
+//
+// The test `z_sequences_match_paper` regenerates u, v, w and z2 … z4 and
+// compares them bit for bit with the strings printed in §3.2.
+//
+// Bit i of sequence z_j is `(Z[j] >> (i % 62)) & 1`; the schedule draws bit
+// (round_index − m), so the first derived round key uses bit 0.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const Z: [u64; 5] = [
-    0b01_1001_1100_0011_0101_0010_0010_1111_1011_0011_1000_0110_1010_0100_0101_1111,
-    0b01_0110_1000_0110_0100_1111_1011_1000_1010_1101_0000_1100_1001_1111_0111_0001,
-    0b11_0011_0110_1001_1111_1000_1000_0101_0001_1001_0010_1100_0000_1110_1111_0101,
-    0b11_1100_0010_1100_1110_0101_0001_0010_0000_0111_1010_0110_0011_0101_1101_1011,
-    0b11_1101_1100_1001_0100_1100_0011_1010_0000_0100_0110_1101_0110_0111_1000_1011,
-];
+/// Run a 5-bit LFSR for 62 steps and pack its output, bit i at position i.
+///
+/// `state` bit j holds s_{i+j}; `taps` selects the state bits XORed to form
+/// s_{i+5}, which enters at the top as the register shifts right. For a
+/// period-31 sequence the 62 packed bits are two full periods, which is the
+/// form the period-62 sequences need.
+const fn lfsr5_62(taps: u8, seed: u8) -> u64 {
+    let mut state = seed;
+    let mut out = 0u64;
+    let mut i = 0;
+    while i < 62 {
+        out |= ((state & 1) as u64) << i;
+        let feedback = (state & taps).count_ones() & 1;
+        state = (state >> 1) | ((feedback as u8) << 4);
+        i += 1;
+    }
+    out
+}
+
+/// u: taps s_{i+4}, s_{i+2}, s_{i+1}, s_i; first bits 1 1 1 1 1.
+const U_SEQ: u64 = lfsr5_62(0b1_0111, 0b1_1111);
+/// v: taps s_{i+3}, s_{i+2}, s_{i+1}, s_i; first bits 1 0 0 0 1.
+const V_SEQ: u64 = lfsr5_62(0b0_1111, 0b1_0001);
+/// w: taps s_{i+2}, s_i; first bits 1 0 0 0 0.
+const W_SEQ: u64 = lfsr5_62(0b0_0101, 0b0_0001);
+/// t = 0101…: bit i is i mod 2.
+const T_SEQ: u64 = 0x2AAA_AAAA_AAAA_AAAA & ((1u64 << 62) - 1);
+
+const Z: [u64; 5] = [U_SEQ, V_SEQ, U_SEQ ^ T_SEQ, V_SEQ ^ T_SEQ, W_SEQ ^ T_SEQ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Key expansion — §3
@@ -145,11 +176,15 @@ macro_rules! simon_variant {
             round_keys: [u64; $T],
         }
         impl $Name {
-            /// Expand the paper-defined master key into this variant's round keys.
+            /// Expand the paper-defined master key into this variant's round
+            /// keys, written directly into the new instance.
+            #[must_use]
             pub fn new(key: &[u8; $key_len]) -> Self {
-                let mut rk = [0u64; $T];
-                simon_expand(key, $n, $m, $T, $z, $mask, &mut rk);
-                Self { round_keys: rk }
+                let mut cipher = Self {
+                    round_keys: [0u64; $T],
+                };
+                simon_expand(key, $n, $m, $T, $z, $mask, &mut cipher.round_keys);
+                cipher
             }
             /// Expand the key and then wipe the caller-owned key buffer.
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
@@ -160,12 +195,14 @@ macro_rules! simon_variant {
                 out
             }
             /// Encrypt one block using the already-expanded round keys.
+            #[must_use]
             pub fn encrypt_block(&self, block: &[u8; $blk_len]) -> [u8; $blk_len] {
                 let mut out = *block;
                 simon_enc(&mut out, &self.round_keys, $n, $mask);
                 out
             }
             /// Decrypt one block using the same round keys in reverse order.
+            #[must_use]
             pub fn decrypt_block(&self, block: &[u8; $blk_len]) -> [u8; $blk_len] {
                 let mut out = *block;
                 simon_dec(&mut out, &self.round_keys, $n, $mask);
@@ -212,8 +249,8 @@ simon_variant!(Simon128_192, 64, 3, 69, 3, u64::MAX, 24, 16); // Table 3.1 T=69
 simon_variant!(Simon128_256, 64, 4, 72, 4, u64::MAX, 32, 16); // Table 3.1 T=72
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tests — known-answer vectors from Appendix B of the 2013 paper;
-//         all other variants verified by encrypt→decrypt roundtrip.
+// Tests — known-answer vectors from Appendix B of the 2013 paper, one per
+//         variant (all ten), plus encrypt→decrypt round trips.
 //
 // Block bytes: (x ∥ y) little-endian, x first.
 // Key bytes:   (k₀ ∥ ℓ₀ ∥ … ∥ ℓ_{m-2}) little-endian, k₀ first.
@@ -229,13 +266,47 @@ simon_variant!(Simon128_256, 64, 4, 72, 4, u64::MAX, 32, 16); // Table 3.1 T=72
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex_array;
 
-    fn parse<const N: usize>(s: &str) -> [u8; N] {
-        let v: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        v.try_into().unwrap()
+    /// Render the first `len` bits of a packed sequence, bit 0 first.
+    fn bits(seq: u64, len: usize) -> String {
+        (0..len)
+            .map(|i| if (seq >> i) & 1 == 1 { '1' } else { '0' })
+            .collect()
+    }
+
+    /// The LFSR recurrences regenerate the sequences printed in §3.2 of the
+    /// paper: u, v, w (period 31) and z2, z3, z4 (period 62), bit for bit.
+    #[test]
+    fn z_sequences_match_paper() {
+        const U: &str = "1111101000100101011000011100110";
+        const V: &str = "1000111011111001001100001011010";
+        const W: &str = "1000010010110011111000110111010";
+        const Z2: &str = "10101111011100000011010010011000101000010001111110010110110011";
+        const Z3: &str = "11011011101011000110010111100000010010001010011100110100001111";
+        const Z4: &str = "11010001111001101011011000100000010111000011001010010011101111";
+        assert_eq!(bits(U_SEQ, 31), U, "u");
+        assert_eq!(bits(V_SEQ, 31), V, "v");
+        assert_eq!(bits(W_SEQ, 31), W, "w");
+        // u, v and w have period 31, so the packed 62 bits repeat.
+        assert_eq!(bits(U_SEQ, 62), format!("{U}{U}"), "u period");
+        assert_eq!(bits(V_SEQ, 62), format!("{V}{V}"), "v period");
+        assert_eq!(bits(W_SEQ, 62), format!("{W}{W}"), "w period");
+        assert_eq!(bits(Z[0], 62), format!("{U}{U}"), "z0 = u");
+        assert_eq!(bits(Z[1], 62), format!("{V}{V}"), "z1 = v");
+        assert_eq!(bits(Z[2], 62), Z2, "z2 = u xor t");
+        assert_eq!(bits(Z[3], 62), Z3, "z3 = v xor t");
+        assert_eq!(bits(Z[4], 62), Z4, "z4 = w xor t");
+    }
+
+    /// The `BlockCipher` entry points reject a wrong-length block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        use crate::BlockCipher;
+        let cipher = Simon32_64::new(&[0u8; 8]);
+        let mut short = [0u8; 3];
+        cipher.encrypt(&mut short);
     }
 
     // ── Simon 32/64 — Appendix B ─────────────────────────────────────────────
@@ -244,9 +315,9 @@ mod tests {
 
     #[test]
     fn simon32_64_kat() {
-        let key: [u8; 8] = parse("0001080910111819");
-        let pt: [u8; 4] = parse("65657768");
-        let ct: [u8; 4] = parse("9bc6bbe9");
+        let key: [u8; 8] = decode_hex_array("0001080910111819");
+        let pt: [u8; 4] = decode_hex_array("65657768");
+        let ct: [u8; 4] = decode_hex_array("9bc6bbe9");
         let c = Simon32_64::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -259,9 +330,9 @@ mod tests {
 
     #[test]
     fn simon64_128_kat() {
-        let key: [u8; 16] = parse("0001020308090a0b1011121318191a1b");
-        let pt: [u8; 8] = parse("6c696b65756e6420");
-        let ct: [u8; 8] = parse("20fcc8447aa0dfb9");
+        let key: [u8; 16] = decode_hex_array("0001020308090a0b1011121318191a1b");
+        let pt: [u8; 8] = decode_hex_array("6c696b65756e6420");
+        let ct: [u8; 8] = decode_hex_array("20fcc8447aa0dfb9");
         let c = Simon64_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -273,9 +344,9 @@ mod tests {
 
     #[test]
     fn simon48_72_kat() {
-        let key: [u8; 9] = parse("00010208090a101112");
-        let pt: [u8; 6] = parse("6720616c696e");
-        let ct: [u8; 6] = parse("ace5daac2c29");
+        let key: [u8; 9] = decode_hex_array("00010208090a101112");
+        let pt: [u8; 6] = decode_hex_array("6720616c696e");
+        let ct: [u8; 6] = decode_hex_array("ace5daac2c29");
         let c = Simon48_72::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -287,9 +358,9 @@ mod tests {
 
     #[test]
     fn simon48_96_kat() {
-        let key: [u8; 12] = parse("00010208090a10111218191a");
-        let pt: [u8; 6] = parse("6369726e6420");
-        let ct: [u8; 6] = parse("a5066e56f1ac");
+        let key: [u8; 12] = decode_hex_array("00010208090a10111218191a");
+        let pt: [u8; 6] = decode_hex_array("6369726e6420");
+        let ct: [u8; 6] = decode_hex_array("a5066e56f1ac");
         let c = Simon48_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -301,9 +372,9 @@ mod tests {
 
     #[test]
     fn simon64_96_kat() {
-        let key: [u8; 12] = parse("0001020308090a0b10111213");
-        let pt: [u8; 8] = parse("6720726f636c696e");
-        let ct: [u8; 8] = parse("7fe2a25cc88f1a11");
+        let key: [u8; 12] = decode_hex_array("0001020308090a0b10111213");
+        let pt: [u8; 8] = decode_hex_array("6720726f636c696e");
+        let ct: [u8; 8] = decode_hex_array("7fe2a25cc88f1a11");
         let c = Simon64_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -316,9 +387,9 @@ mod tests {
 
     #[test]
     fn simon96_96_kat() {
-        let key: [u8; 12] = parse("00010203040508090a0b0c0d");
-        let pt: [u8; 12] = parse("696c6c617220207468652070");
-        let ct: [u8; 12] = parse("b462a407286082f08f3d0669");
+        let key: [u8; 12] = decode_hex_array("00010203040508090a0b0c0d");
+        let pt: [u8; 12] = decode_hex_array("696c6c617220207468652070");
+        let ct: [u8; 12] = decode_hex_array("b462a407286082f08f3d0669");
         let c = Simon96_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -331,9 +402,9 @@ mod tests {
 
     #[test]
     fn simon96_144_kat() {
-        let key: [u8; 18] = parse("00010203040508090a0b0c0d101112131415");
-        let pt: [u8; 12] = parse("7420746861746f6620647573");
-        let ct: [u8; 12] = parse("1e456c1cadece91adbc5593f");
+        let key: [u8; 18] = decode_hex_array("00010203040508090a0b0c0d101112131415");
+        let pt: [u8; 12] = decode_hex_array("7420746861746f6620647573");
+        let ct: [u8; 12] = decode_hex_array("1e456c1cadece91adbc5593f");
         let c = Simon96_144::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -346,9 +417,9 @@ mod tests {
 
     #[test]
     fn simon128_128_kat() {
-        let key: [u8; 16] = parse("000102030405060708090a0b0c0d0e0f");
-        let pt: [u8; 16] = parse("65727320646573632074726176656c6c");
-        let ct: [u8; 16] = parse("3ffe541e1e1b6849bc0b4ef82a83aa65");
+        let key: [u8; 16] = decode_hex_array("000102030405060708090a0b0c0d0e0f");
+        let pt: [u8; 16] = decode_hex_array("65727320646573632074726176656c6c");
+        let ct: [u8; 16] = decode_hex_array("3ffe541e1e1b6849bc0b4ef82a83aa65");
         let c = Simon128_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -361,9 +432,9 @@ mod tests {
 
     #[test]
     fn simon128_192_kat() {
-        let key: [u8; 24] = parse("000102030405060708090a0b0c0d0e0f1011121314151617");
-        let pt: [u8; 16] = parse("6e207468657265207269626520776865");
-        let ct: [u8; 16] = parse("4f0ddcfcef61acc45bb897256e8d9c6c");
+        let key: [u8; 24] = decode_hex_array("000102030405060708090a0b0c0d0e0f1011121314151617");
+        let pt: [u8; 16] = decode_hex_array("6e207468657265207269626520776865");
+        let ct: [u8; 16] = decode_hex_array("4f0ddcfcef61acc45bb897256e8d9c6c");
         let c = Simon128_192::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -378,9 +449,9 @@ mod tests {
     #[test]
     fn simon128_256_kat() {
         let key: [u8; 32] =
-            parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
-        let pt: [u8; 16] = parse("6f6f6d20696e2074697320612073696d");
-        let ct: [u8; 16] = parse("a0a3c8af79552b8d68b8e7ef872af73b");
+            decode_hex_array("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt: [u8; 16] = decode_hex_array("6f6f6d20696e2074697320612073696d");
+        let ct: [u8; 16] = decode_hex_array("a0a3c8af79552b8d68b8e7ef872af73b");
         let c = Simon128_256::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");

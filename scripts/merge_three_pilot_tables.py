@@ -12,9 +12,31 @@ Each input file is the raw stdout of bench_all{,_hash,_pk_full}.sh.
 from __future__ import annotations
 
 import argparse
+import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Iterable
+
+
+# The confidence percent printed in an input table header, e.g. "±CI (95%)".
+CI_HEADER = re.compile(r"±CI \((\d+)%\)")
+# Pseudo-section under which parse_sections records the percents it saw.
+CI_KEY = "__ci_percent__"
+
+
+def confidence_percent(tables: list, requested: int | None) -> int:
+    """The one confidence percent every input header carries.
+
+    Headers that disagree with each other, or with ``--confidence-pct`` when
+    it is given, are an error: the merged header must not relabel intervals
+    it did not compute.
+    """
+    seen = {pct for t in tables for pct in t.get(CI_KEY, [])}
+    if requested is not None:
+        seen.add(str(requested))
+    if len(seen) != 1:
+        raise SystemExit(f"confidence percents disagree across inputs and flags: {sorted(seen)}")
+    return int(seen.pop())
 
 
 def parse_sections(path: Path) -> OrderedDict[str, list[list[str]]]:
@@ -35,6 +57,9 @@ def parse_sections(path: Path) -> OrderedDict[str, list[list[str]]]:
             "| Cipher" in line or "| Operation" in line or "| Hash" in line
         ):
             in_table = True
+            ci = CI_HEADER.search(line)
+            if ci is not None:
+                out.setdefault(CI_KEY, []).append(ci.group(1))
             continue
 
         if in_table and line.startswith("|---"):
@@ -168,8 +193,9 @@ def main() -> None:
     parser.add_argument(
         "--confidence-pct",
         type=int,
-        default=90,
-        help="confidence percent for the column header (default: 90)",
+        default=None,
+        help="confidence percent the inputs must carry in their headers "
+        "(default: read from the inputs, which must agree)",
     )
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
@@ -177,6 +203,9 @@ def main() -> None:
     a = parse_sections(args.a)
     b = parse_sections(args.b)
     c = parse_sections(args.c)
+    confidence_pct = confidence_percent([a, b, c], args.confidence_pct)
+    for table in (a, b, c):
+        table.pop(CI_KEY, None)
 
     section_names: list[str] = list(a.keys())
     for src in (b, c):
@@ -209,7 +238,7 @@ def main() -> None:
         merged,
         (args.a_label, args.b_label, args.c_label),
         args.mode,
-        args.confidence_pct,
+        confidence_pct,
     )
     args.out.write_text(text, encoding="utf-8")
 

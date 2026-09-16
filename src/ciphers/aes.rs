@@ -10,15 +10,22 @@
 //! into four 256-entry `u32` lookup tables computed at compile time from the
 //! FIPS 197 S-boxes.
 //!
-//! This software path is intentionally optimized for throughput, not
-//! constant-time behavior.  Use `Aes128Ct`, `Aes192Ct`, or `Aes256Ct` for the
-//! software-only Boyar-Peralta path when constant-time behavior matters.
-//! Hardware AES (for example AES-NI or `ARMv8` Crypto Extensions) is still the
-//! preferred option when it is available.
+//! This software path is optimized for throughput, not constant-time
+//! behavior: the table index is the secret state, so its running time and
+//! cache footprint depend on key and plaintext. `Aes128`, `Aes192` and
+//! `Aes256` are therefore variable-time. Use `Aes128Ct`, `Aes192Ct`, or
+//! `Aes256Ct`, whose S-box is the Boyar-Peralta boolean circuit, when
+//! constant-time behavior matters. This crate carries no hardware AES path
+//! (no intrinsics in-tree); the AES-NI and `ARMv8` comparators under `fast/`
+//! measure what one would buy.
 //!
 //! # Tests
-//! All vectors are from NIST CAVP `KAT_AES.zip` (CAVS 11.1, 2011-04-22),
-//! downloaded directly from csrc.nist.gov.
+//! Known answers come from three sources, each named where it is used:
+//! FIPS 197 Appendix C.1-C.3 (the worked examples) as literals; the NIST CAVP
+//! `KAT_AES.zip` archive (CAVS 11.1, 2011-04-22, from csrc.nist.gov) for the
+//! ECBGFSbox, ECBKeySbox, ECBVarKey and ECBVarTxt samples; and the installed
+//! `openssl` tool as a black-box oracle. Every table-driven vector is run
+//! through the T-table type and the `Ct` type, in both directions.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FIPS 197 S-boxes  (§ 4.2.1)
@@ -255,51 +262,36 @@ fn sub_word(w: u32) -> u32 {
         | u32::from(SBOX[(w & 0xff) as usize])
 }
 
-fn expand_128(key: &[u8; 16]) -> [u32; 44] {
-    let mut w = [0u32; 44];
-    for i in 0..4 {
-        w[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
+/// FIPS 197 § 5.2 `KeyExpansion`, written into `w` in place.
+///
+/// `key` is the cipher key (16, 24 or 32 bytes, so `Nk` = 4, 6 or 8) and `w`
+/// the caller's round-key array of `4 · (Nr + 1)` words, which is the field
+/// of the cipher struct itself: the schedule is never assembled in a
+/// separate local that would then be moved, leaving a dead copy behind. The
+/// only word-sized temporary is wiped before return.
+///
+/// `sub_word` is the `SubWord` evaluator: the S-box table for the T-table
+/// types, the Boyar-Peralta circuit for the `Ct` types, so the `Ct` key
+/// setup performs no secret-indexed reads either. The extra `SubWord` at
+/// `i mod Nk = 4` applies when `Nk > 6`, i.e. to AES-256 only.
+fn expand_key(key: &[u8], w: &mut [u32], sub_word: fn(u32) -> u32) {
+    let nk = key.len() / 4;
+    debug_assert!(matches!(nk, 4 | 6 | 8) && key.len() == 4 * nk);
+    debug_assert_eq!(w.len(), 4 * (nk + 7));
+    for (word, bytes) in w.iter_mut().zip(key.chunks_exact(4)) {
+        *word = u32::from_be_bytes(bytes.try_into().expect("four key bytes"));
     }
-    for i in 4..44 {
-        let mut t = w[i - 1];
-        if i % 4 == 0 {
-            t = sub_word(t.rotate_left(8)) ^ RCON[i / 4 - 1];
-        }
-        w[i] = w[i - 4] ^ t;
-    }
-    w
-}
-
-fn expand_192(key: &[u8; 24]) -> [u32; 52] {
-    let mut w = [0u32; 52];
-    for i in 0..6 {
-        w[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
-    }
-    for i in 6..52 {
-        let mut t = w[i - 1];
-        if i % 6 == 0 {
-            t = sub_word(t.rotate_left(8)) ^ RCON[i / 6 - 1];
-        }
-        w[i] = w[i - 6] ^ t;
-    }
-    w
-}
-
-fn expand_256(key: &[u8; 32]) -> [u32; 60] {
-    let mut w = [0u32; 60];
-    for i in 0..8 {
-        w[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
-    }
-    for i in 8..60 {
-        let mut t = w[i - 1];
-        if i % 8 == 0 {
-            t = sub_word(t.rotate_left(8)) ^ RCON[i / 8 - 1];
-        } else if i % 8 == 4 {
+    let mut t = 0u32;
+    for i in nk..w.len() {
+        t = w[i - 1];
+        if i % nk == 0 {
+            t = sub_word(t.rotate_left(8)) ^ RCON[i / nk - 1];
+        } else if nk > 6 && i % nk == 4 {
             t = sub_word(t);
-        } // extra SubWord for 256-bit
-        w[i] = w[i - 8] ^ t;
+        }
+        w[i] = w[i - nk] ^ t;
     }
-    w
+    crate::ct::zeroize_slice(core::slice::from_mut(&mut t));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -464,21 +456,37 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
 // Alternate software-only constant-time path — Boyar-Peralta S-box circuits
 //
 // This path keeps the AES round structure bytewise, but replaces S-box table
-// lookups with the depth-16 Boyar-Peralta straight-line circuits from
-// "A depth-16 circuit for the AES S-box" (NIST / IACR ePrint 2011/332).
+// lookups with the depth-16 straight-line circuits of J. Boyar and R.
+// Peralta, "A depth-16 circuit for the AES S-box", IACR Cryptology ePrint
+// Archive, Report 2011/332, the version received 2011-06-22 (the only one
+// posted). Section 6 of that paper lists the circuits as straight-line
+// programs over XOR (`+`), XNOR (`#`) and AND (`x`):
 //
-// The key idea is to pre-synthesize the AES S-box into a fixed boolean
-// network. Instead of computing the usual "GF(2^8) inverse, then affine
-// transform" directly at runtime, the published circuit rewrites the same
-// function as a sequence of XOR, XNOR, and AND gates. That gives a
-// software-only constant-time S-box without table lookups.
+//   Figure 5  top linear transform, forward     (U0..U7 → T1..T27)
+//   Figure 6  top linear transform, reverse     (U0..U7 → T*, R*, Y5)
+//   Figure 7  shared nonlinear part             (M1..M63; D = U7 forward,
+//                                                D = Y5 reverse)
+//   Figure 8  bottom linear transform, forward  (L0..L29 → S0..S7)
+//   Figure 9  bottom linear transform, reverse  (P0..P29 → W0..W7)
 //
-// This implementation evaluates the circuit one byte at a time. Each byte is
-// treated as eight 0/1 "wires" (`u0..u7`), the published intermediate nodes
-// are transcribed as local temporaries, and the final eight output bits are
-// packed back into a byte. The temporary names intentionally mirror the paper:
-// `t*` for the first linear layer, `m*` for the nonlinear core, and `l*`/`p*`
-// for the output linear layer.
+// The gates below are transcribed from those listings gate for gate, with
+// the paper's 1-based T/M names shifted to 0-based array slots: `t[k]` is
+// the paper's `T(k+1)`, `m[k]` its `M(k+1)`; the `l*` and `p*` names keep the
+// paper's numbers. Figure 9 numbers its gates P0..P29 with no P21 (P20 is
+// followed by P22), so `p21` is absent here too: it is a gap in the paper's
+// numbering, not a missing gate. Figure 6 lists the reverse top linear layer
+// out of order under two families of names (T and R) plus `Y5`; that layer
+// is stored in evaluation order instead, and `inv_sbox_bool_linear` gives the
+// slot-to-name table so each gate can be checked against the figure. The
+// paper reports that the circuits were verified exhaustively against FIPS
+// 197; `bool_sbox_matches_tables` repeats that check against `SBOX` and
+// `INV_SBOX` here.
+//
+// Each byte is treated as eight 0/1 "wires" (`u0..u7`, most significant
+// first), the intermediate nodes are local temporaries, and the eight output
+// wires are packed back into a byte. Every gate is an XOR, XNOR or AND of
+// single bits, so the evaluation has no secret-dependent memory access or
+// branch.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[inline]
@@ -506,11 +514,13 @@ fn pack_bits(bits: [u8; 8]) -> u8 {
         | bits[7]
 }
 
-/// Forward AES S-box via the published Boyar-Peralta straight-line circuit.
+/// Forward AES S-box via the Boyar-Peralta straight-line circuit (ePrint
+/// 2011/332, Figures 5, 7 and 8).
 ///
 /// The operation is exactly the same S-box as `SBOX[input]`; it is just
 /// represented as boolean logic instead of a lookup table. The `^ 1` terms in
-/// the final output stage encode the affine constant from the AES S-box.
+/// the final output stage are the paper's XNOR outputs (S1, S2, S6, S7) and
+/// encode the affine constant of the AES S-box.
 #[inline]
 fn sbox_bool(input: u8) -> u8 {
     let (bits, linear_terms) = sbox_bool_linear(input);
@@ -518,6 +528,7 @@ fn sbox_bool(input: u8) -> u8 {
     sbox_bool_output(non_linear_terms)
 }
 
+/// Figure 5: `t[k]` is the paper's `T(k+1)`.
 fn sbox_bool_linear(input: u8) -> ([u8; 8], [u8; 27]) {
     let bits = [
         bit(input, 0),
@@ -563,6 +574,7 @@ fn sbox_bool_linear(input: u8) -> ([u8; 8], [u8; 27]) {
     (bits, t)
 }
 
+/// Figure 7 with `D = U7`: `m[k]` is the paper's `M(k+1)`.
 fn sbox_bool_nonlinear(bits: [u8; 8], t: [u8; 27]) -> [u8; 63] {
     let u7 = bits[7];
     let mut m = [0u8; 63];
@@ -632,6 +644,7 @@ fn sbox_bool_nonlinear(bits: [u8; 8], t: [u8; 27]) -> [u8; 63] {
     m
 }
 
+/// Figure 8: `l*` keep the paper's numbers; the packed bits are S0..S7.
 fn sbox_bool_output(m: [u8; 63]) -> u8 {
     let l0 = m[60] ^ m[61];
     let l1 = m[49] ^ m[55];
@@ -676,11 +689,11 @@ fn sbox_bool_output(m: [u8; 63]) -> u8 {
     ])
 }
 
-/// Inverse AES S-box via the companion Boyar-Peralta straight-line circuit.
+/// Inverse AES S-box via the reverse-direction Boyar-Peralta circuit (ePrint
+/// 2011/332, Figures 6, 7 and 9).
 ///
 /// As above, this computes the same mapping as `INV_SBOX[input]` without using
-/// a secret-indexed lookup. The variable names follow the published circuit so
-/// the source can be checked against the paper directly.
+/// a secret-indexed lookup.
 #[inline]
 fn inv_sbox_bool(input: u8) -> u8 {
     let linear_terms = inv_sbox_bool_linear(input);
@@ -688,6 +701,17 @@ fn inv_sbox_bool(input: u8) -> u8 {
     inv_sbox_bool_output(non_linear_terms)
 }
 
+/// Figure 6, stored in evaluation order. Slot → paper name:
+///
+/// ```text
+/// t[0]  T23   t[1]  T22   t[2]  T2    t[3]  T1    t[4]  T24   t[5]  R5
+/// t[6]  T8    t[7]  T19   t[8]  T9    t[9]  T10   t[10] T13   t[11] T3
+/// t[12] T25   t[13] R13   t[14] T17   t[15] T20   t[16] T4    t[17] R17
+/// t[18] R18   t[19] R19   t[20] Y5    t[21] T6    t[22] T16   t[23] T27
+/// t[24] T15   t[25] T14   t[26] T26
+/// ```
+///
+/// `t[20]` is `Y5`, the reverse direction's `D` input to Figure 7.
 fn inv_sbox_bool_linear(input: u8) -> [u8; 27] {
     let u0 = bit(input, 0);
     let u1 = bit(input, 1);
@@ -729,6 +753,8 @@ fn inv_sbox_bool_linear(input: u8) -> [u8; 27] {
     t
 }
 
+/// Figure 7 with `D = Y5` (`t[20]`): `m[k]` is the paper's `M(k+1)`, and the
+/// `T` operands are read through the slot table on `inv_sbox_bool_linear`.
 fn inv_sbox_bool_nonlinear(t: [u8; 27]) -> [u8; 63] {
     let mut m = [0u8; 63];
     m[0] = t[10] & t[21];
@@ -797,6 +823,8 @@ fn inv_sbox_bool_nonlinear(t: [u8; 27]) -> [u8; 63] {
     m
 }
 
+/// Figure 9: `p*` keep the paper's numbers (which skip P21); the packed bits
+/// are W0..W7.
 fn inv_sbox_bool_output(m: [u8; 63]) -> u8 {
     let p0 = m[51] ^ m[60];
     let p1 = m[57] ^ m[58];
@@ -840,60 +868,13 @@ fn inv_sbox_bool_output(m: [u8; 63]) -> u8 {
     ])
 }
 
-// `SubWord` for the Ct key schedule: identical AES key expansion logic, but
-// with the Boyar-Peralta S-box replacing the table lookup.
+// `SubWord` for the Ct key schedule (passed to `expand_key`): the same
+// `KeyExpansion`, with the Boyar-Peralta S-box replacing the table lookup.
 fn sub_word_bool(w: u32) -> u32 {
     u32::from(sbox_bool((w >> 24) as u8)) << 24
         | u32::from(sbox_bool(((w >> 16) & 0xff) as u8)) << 16
         | u32::from(sbox_bool(((w >> 8) & 0xff) as u8)) << 8
         | u32::from(sbox_bool((w & 0xff) as u8))
-}
-
-fn expand_128_bool(key: &[u8; 16]) -> [u32; 44] {
-    let mut w = [0u32; 44];
-    for i in 0..4 {
-        w[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
-    }
-    for i in 4..44 {
-        let mut t = w[i - 1];
-        if i % 4 == 0 {
-            t = sub_word_bool(t.rotate_left(8)) ^ RCON[i / 4 - 1];
-        }
-        w[i] = w[i - 4] ^ t;
-    }
-    w
-}
-
-fn expand_192_bool(key: &[u8; 24]) -> [u32; 52] {
-    let mut w = [0u32; 52];
-    for i in 0..6 {
-        w[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
-    }
-    for i in 6..52 {
-        let mut t = w[i - 1];
-        if i % 6 == 0 {
-            t = sub_word_bool(t.rotate_left(8)) ^ RCON[i / 6 - 1];
-        }
-        w[i] = w[i - 6] ^ t;
-    }
-    w
-}
-
-fn expand_256_bool(key: &[u8; 32]) -> [u32; 60] {
-    let mut w = [0u32; 60];
-    for i in 0..8 {
-        w[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
-    }
-    for i in 8..60 {
-        let mut t = w[i - 1];
-        if i % 8 == 0 {
-            t = sub_word_bool(t.rotate_left(8)) ^ RCON[i / 8 - 1];
-        } else if i % 8 == 4 {
-            t = sub_word_bool(t);
-        }
-        w[i] = w[i - 8] ^ t;
-    }
-    w
 }
 
 // The bytewise Ct decrypt path uses the direct inverse round functions, so it
@@ -1043,234 +1024,167 @@ fn aes_decrypt_ct(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// AES-128 cipher: 128-bit key, 10 rounds.
-pub struct Aes128 {
-    enc_rk: [u32; 44],
-    dec_rk: [u32; 44],
-}
-impl Aes128 {
-    /// Expand the 16-byte key into the 10-round encryption schedule plus the
-    /// equivalent-inverse-cipher decryption schedule (FIPS 197, § 5.2/§ 5.3.5).
-    #[must_use]
-    pub fn new(key: &[u8; 16]) -> Self {
-        let enc_rk = expand_128(key);
-        let mut dec_rk = [0u32; 44];
-        make_dec_rk(&enc_rk, &mut dec_rk, 10);
-        Self { enc_rk, dec_rk }
-    }
-    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
-    pub fn new_wiping(key: &mut [u8; 16]) -> Self {
-        let out = Self::new(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-    /// Encrypt one 16-byte block through the 10 T-table rounds. This path is
-    /// keyed-table based and not constant-time; use `Aes128Ct` when that
-    /// matters.
-    #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_encrypt(block, &self.enc_rk, 10)
-    }
-    /// Decrypt one 16-byte block through the 10 inverse T-table rounds
-    /// (not constant-time).
-    #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_decrypt(block, &self.dec_rk, 10)
-    }
-}
-
-/// AES-192 cipher: 192-bit key, 12 rounds.
-pub struct Aes192 {
-    enc_rk: [u32; 52],
-    dec_rk: [u32; 52],
-}
-impl Aes192 {
-    /// Expand the 24-byte key into the 12-round encryption schedule plus the
-    /// equivalent-inverse-cipher decryption schedule (FIPS 197, § 5.2/§ 5.3.5).
-    #[must_use]
-    pub fn new(key: &[u8; 24]) -> Self {
-        let enc_rk = expand_192(key);
-        let mut dec_rk = [0u32; 52];
-        make_dec_rk(&enc_rk, &mut dec_rk, 12);
-        Self { enc_rk, dec_rk }
-    }
-    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
-    pub fn new_wiping(key: &mut [u8; 24]) -> Self {
-        let out = Self::new(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-    /// Encrypt one 16-byte block through the 12 T-table rounds. This path is
-    /// keyed-table based and not constant-time; use `Aes192Ct` when that
-    /// matters.
-    #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_encrypt(block, &self.enc_rk, 12)
-    }
-    /// Decrypt one 16-byte block through the 12 inverse T-table rounds
-    /// (not constant-time).
-    #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_decrypt(block, &self.dec_rk, 12)
-    }
-}
-
-/// AES-256 cipher: 256-bit key, 14 rounds.
-pub struct Aes256 {
-    enc_rk: [u32; 60],
-    dec_rk: [u32; 60],
-}
-impl Aes256 {
-    /// Expand the 32-byte key into the 14-round encryption schedule plus the
-    /// equivalent-inverse-cipher decryption schedule (FIPS 197, § 5.2/§ 5.3.5).
-    #[must_use]
-    pub fn new(key: &[u8; 32]) -> Self {
-        let enc_rk = expand_256(key);
-        let mut dec_rk = [0u32; 60];
-        make_dec_rk(&enc_rk, &mut dec_rk, 14);
-        Self { enc_rk, dec_rk }
-    }
-    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
-    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
-        let out = Self::new(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-    /// Encrypt one 16-byte block through the 14 T-table rounds. This path is
-    /// keyed-table based and not constant-time; use `Aes256Ct` when that
-    /// matters.
-    #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_encrypt(block, &self.enc_rk, 14)
-    }
-    /// Decrypt one 16-byte block through the 14 inverse T-table rounds
-    /// (not constant-time).
-    #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_decrypt(block, &self.dec_rk, 14)
-    }
-}
-
-/// AES-128 constant-time software path.
+/// Define one AES type: its round-key fields, key setup that expands
+/// straight into those fields, and the block functions.
 ///
-/// This keeps the same external API as `Aes128`, but swaps the T-table round
-/// core for a bytewise implementation whose S-box is an explicit
-/// Boyar-Peralta-style boolean circuit. The separate type keeps the default
-/// `Aes128` fast while still offering a software-only constant-time option.
-pub struct Aes128Ct {
-    enc_rk: [u32; 44],
-    dec_rk: [u32; 44],
-}
-impl Aes128Ct {
-    /// Expand the 16-byte key for the 10-round constant-time path. `SubWord`
-    /// runs through the Boyar-Peralta boolean S-box circuit, so key setup
-    /// itself performs no secret-indexed table reads.
-    #[must_use]
-    pub fn new(key: &[u8; 16]) -> Self {
-        let enc_rk = expand_128_bool(key);
-        let mut dec_rk = [0u32; 44];
-        make_dec_rk_ct(&enc_rk, &mut dec_rk, 10);
-        Self { enc_rk, dec_rk }
-    }
-    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
-    pub fn new_wiping(key: &mut [u8; 16]) -> Self {
-        let out = Self::new(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-    /// Encrypt one 16-byte block through the 10-round bytewise core. Every
-    /// S-box is computed as a boolean circuit, avoiding secret-dependent
-    /// memory access at a throughput cost versus `Aes128`.
-    #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_encrypt_ct(block, &self.enc_rk, 10)
-    }
-    /// Decrypt one 16-byte block through the 10-round bytewise constant-time
-    /// inverse core (direct inverse rounds; slower than `Aes128`).
-    #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_decrypt_ct(block, &self.dec_rk, 10)
-    }
+/// `$expand_sub` is the `SubWord` evaluator handed to `expand_key`,
+/// `$make_dec` builds the decryption schedule from the forward one, and
+/// `$enc`/`$dec` are the round cores. Both schedules live in the struct from
+/// the start (FIPS 197 § 5.2 for the forward schedule; § 5.3.5 for the
+/// equivalent-inverse schedule of the T-table types, a plain reversal for the
+/// `Ct` types), so repeated calls in either direction re-derive nothing.
+macro_rules! define_aes {
+    (
+        $(#[$meta:meta])*
+        $Name:ident, $key_len:literal, $words:literal, $nr:literal,
+        $expand_sub:ident, $make_dec:ident, $enc:ident, $dec:ident,
+        $timing:literal
+    ) => {
+        $(#[$meta])*
+        pub struct $Name {
+            enc_rk: [u32; $words],
+            dec_rk: [u32; $words],
+        }
+
+        impl $Name {
+            /// Expand the key into the forward round-key schedule and the
+            /// decryption schedule, both written directly into the new
+            /// instance's own arrays (no separately owned copy of a schedule
+            /// exists during setup).
+            #[must_use]
+            pub fn new(key: &[u8; $key_len]) -> Self {
+                let mut cipher = Self {
+                    enc_rk: [0u32; $words],
+                    dec_rk: [0u32; $words],
+                };
+                expand_key(key, &mut cipher.enc_rk, $expand_sub);
+                $make_dec(&cipher.enc_rk, &mut cipher.dec_rk, $nr);
+                cipher
+            }
+
+            /// Expand the key as `new` does, then wipe the caller-owned key
+            /// buffer.
+            pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
+                let out = Self::new(key);
+                crate::ct::zeroize_slice(key.as_mut_slice());
+                out
+            }
+
+            #[doc = concat!("Encrypt one 16-byte block through the ", stringify!($nr), " rounds. ", $timing)]
+            #[must_use]
+            pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+                $enc(block, &self.enc_rk, $nr)
+            }
+
+            #[doc = concat!("Decrypt one 16-byte block through the ", stringify!($nr), " inverse rounds. ", $timing)]
+            #[must_use]
+            pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+                $dec(block, &self.dec_rk, $nr)
+            }
+        }
+    };
 }
 
-/// AES-192 constant-time software path.
-///
-/// This is the software-only constant-time counterpart to `Aes192`, using the
-/// same Boyar-Peralta-style boolean S-box strategy as `Aes128Ct`.
-pub struct Aes192Ct {
-    enc_rk: [u32; 52],
-    dec_rk: [u32; 52],
-}
-impl Aes192Ct {
-    /// Expand the 24-byte key for the 12-round constant-time path. `SubWord`
-    /// runs through the Boyar-Peralta boolean S-box circuit, so key setup
-    /// itself performs no secret-indexed table reads.
-    #[must_use]
-    pub fn new(key: &[u8; 24]) -> Self {
-        let enc_rk = expand_192_bool(key);
-        let mut dec_rk = [0u32; 52];
-        make_dec_rk_ct(&enc_rk, &mut dec_rk, 12);
-        Self { enc_rk, dec_rk }
-    }
-    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
-    pub fn new_wiping(key: &mut [u8; 24]) -> Self {
-        let out = Self::new(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-    /// Encrypt one 16-byte block through the 12-round bytewise core. Every
-    /// S-box is computed as a boolean circuit, avoiding secret-dependent
-    /// memory access at a throughput cost versus `Aes192`.
-    #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_encrypt_ct(block, &self.enc_rk, 12)
-    }
-    /// Decrypt one 16-byte block through the 12-round bytewise constant-time
-    /// inverse core (direct inverse rounds; slower than `Aes192`).
-    #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_decrypt_ct(block, &self.dec_rk, 12)
-    }
-}
+define_aes!(
+    /// AES-128 cipher: 128-bit key, 10 rounds, T-table software path.
+    ///
+    /// Variable-time: the T-table indices are the secret state. Use
+    /// [`Aes128Ct`] when timing matters.
+    Aes128, 16, 44, 10, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
+    "T-table path: variable-time in key and data; the `Ct` sibling type is the constant-time choice."
+);
+define_aes!(
+    /// AES-192 cipher: 192-bit key, 12 rounds, T-table software path.
+    ///
+    /// Variable-time: the T-table indices are the secret state. Use
+    /// [`Aes192Ct`] when timing matters.
+    Aes192, 24, 52, 12, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
+    "T-table path: variable-time in key and data; the `Ct` sibling type is the constant-time choice."
+);
+define_aes!(
+    /// AES-256 cipher: 256-bit key, 14 rounds, T-table software path.
+    ///
+    /// Variable-time: the T-table indices are the secret state. Use
+    /// [`Aes256Ct`] when timing matters.
+    Aes256, 32, 60, 14, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
+    "T-table path: variable-time in key and data; the `Ct` sibling type is the constant-time choice."
+);
+define_aes!(
+    /// AES-128 constant-time software path.
+    ///
+    /// Same external API as [`Aes128`], with the T-table round core replaced
+    /// by a bytewise implementation whose S-box is the Boyar-Peralta boolean
+    /// circuit (ePrint 2011/332); `SubWord` in key setup goes through the
+    /// same circuit, so neither key setup nor the block functions perform a
+    /// secret-indexed table read.
+    Aes128Ct, 16, 44, 10, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
+    "Bytewise path with the Boyar-Peralta S-box circuit: no secret-dependent memory access or branch, at a throughput cost versus the T-table type."
+);
+define_aes!(
+    /// AES-192 constant-time software path: the counterpart of [`Aes192`]
+    /// built like [`Aes128Ct`].
+    Aes192Ct, 24, 52, 12, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
+    "Bytewise path with the Boyar-Peralta S-box circuit: no secret-dependent memory access or branch, at a throughput cost versus the T-table type."
+);
+define_aes!(
+    /// AES-256 constant-time software path: the counterpart of [`Aes256`]
+    /// built like [`Aes128Ct`].
+    Aes256Ct, 32, 60, 14, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
+    "Bytewise path with the Boyar-Peralta S-box circuit: no secret-dependent memory access or branch, at a throughput cost versus the T-table type."
+);
 
-/// AES-256 constant-time software path.
+/// Encryption-only AES-256 for `CTR_DRBG`.
 ///
-/// This is the software-only constant-time counterpart to `Aes256`, using the
-/// same Boyar-Peralta-style boolean S-box strategy as `Aes128Ct`.
-pub struct Aes256Ct {
-    enc_rk: [u32; 60],
-    dec_rk: [u32; 60],
-}
-impl Aes256Ct {
-    /// Expand the 32-byte key for the 14-round constant-time path. `SubWord`
-    /// runs through the Boyar-Peralta boolean S-box circuit, so key setup
-    /// itself performs no secret-indexed table reads.
-    #[must_use]
-    pub fn new(key: &[u8; 32]) -> Self {
-        let enc_rk = expand_256_bool(key);
-        let mut dec_rk = [0u32; 60];
-        make_dec_rk_ct(&enc_rk, &mut dec_rk, 14);
-        Self { enc_rk, dec_rk }
+/// SP 800-90A Rev. 1 § 10.2.1 calls only `Block_Encrypt`, and `CTR_DRBG`
+/// rekeys on every update, so a keyed instance there needs the forward
+/// schedule alone; building the inverse schedule each time would be
+/// discarded work. These types carry just that schedule and have no decrypt
+/// method, so nothing can call a decryption that was never keyed. The module
+/// is crate-visible only; the types are nominally `pub` so the DRBG's sealed
+/// cipher trait may name them.
+pub(crate) mod encrypt_only {
+    use super::{aes_encrypt, aes_encrypt_ct, expand_key, sub_word, sub_word_bool};
+
+    macro_rules! define_aes256_encryptor {
+        ($(#[$meta:meta])* $Name:ident, $expand_sub:ident, $enc:ident) => {
+            $(#[$meta])*
+            pub struct $Name {
+                rk: [u32; 60],
+            }
+
+            impl $Name {
+                /// Expand the forward schedule (FIPS 197 § 5.2) into the new
+                /// instance's own array.
+                pub(crate) fn new(key: &[u8; 32]) -> Self {
+                    let mut out = Self { rk: [0u32; 60] };
+                    expand_key(key, &mut out.rk, $expand_sub);
+                    out
+                }
+
+                /// Encrypt one block through the 14 rounds.
+                pub(crate) fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+                    $enc(block, &self.rk, 14)
+                }
+            }
+
+            impl Drop for $Name {
+                fn drop(&mut self) {
+                    crate::ct::zeroize_slice(self.rk.as_mut_slice());
+                }
+            }
+        };
     }
-    /// Expand the key as `new` does, then wipe the caller-owned key buffer.
-    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
-        let out = Self::new(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-    /// Encrypt one 16-byte block through the 14-round bytewise core. Every
-    /// S-box is computed as a boolean circuit, avoiding secret-dependent
-    /// memory access at a throughput cost versus `Aes256`.
-    #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_encrypt_ct(block, &self.enc_rk, 14)
-    }
-    /// Decrypt one 16-byte block through the 14-round bytewise constant-time
-    /// inverse core (direct inverse rounds; slower than `Aes256`).
-    #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-        aes_decrypt_ct(block, &self.dec_rk, 14)
-    }
+
+    define_aes256_encryptor!(
+        /// Forward-only AES-256 on the T-table path (variable-time, like
+        /// [`super::Aes256`]).
+        Aes256Encryptor, sub_word, aes_encrypt
+    );
+    define_aes256_encryptor!(
+        /// Forward-only AES-256 on the Boyar-Peralta path (constant-time, like
+        /// [`super::Aes256Ct`]).
+        Aes256CtEncryptor, sub_word_bool, aes_encrypt_ct
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1320,59 +1234,152 @@ impl_drop_aes!(Aes192Ct);
 impl_drop_aes!(Aes256Ct);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tests — NIST CAVP KAT_AES vectors (CAVS 11.1, csrc.nist.gov)
+// Tests — FIPS 197 Appendix C, NIST CAVP KAT_AES (CAVS 11.1), OpenSSL oracle
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex_array;
+    use crate::BlockCipher;
 
-    fn parse<const N: usize>(s: &str) -> [u8; N] {
-        let v: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        v.try_into().unwrap()
+    /// Both paths' encryption of one block under a key of the case's length.
+    type BothPaths = fn(&[u8], &[u8; 16]) -> ([u8; 16], [u8; 16]);
+
+    /// One known answer through both implementations of a key size: the
+    /// T-table type and the `Ct` type each encrypt `pt` to `ct` and decrypt
+    /// `ct` to `pt`, through the `BlockCipher` trait.
+    fn kat_pair<F: BlockCipher, S: BlockCipher>(fast: &F, slow: &S, key: &str, pt: &str, ct: &str) {
+        fn one<C: BlockCipher>(name: &str, cipher: &C, key: &str, pt: &str, ct: &str) {
+            let pt_bytes = decode_hex_array::<16>(pt);
+            let ct_bytes = decode_hex_array::<16>(ct);
+            let mut block = pt_bytes;
+            cipher.encrypt(&mut block);
+            assert_eq!(block, ct_bytes, "{name} enc {key}/{pt}");
+            cipher.decrypt(&mut block);
+            assert_eq!(block, pt_bytes, "{name} dec {key}/{ct}");
+        }
+        one("fast", fast, key, pt, ct);
+        one("Ct", slow, key, pt, ct);
     }
-
     fn kat128(key: &str, pt: &str, ct: &str) {
-        let c = Aes128::new(&parse(key));
-        assert_eq!(
-            c.encrypt_block(&parse(pt)),
-            parse::<16>(ct),
-            "enc {key}/{pt}"
-        );
-        assert_eq!(
-            c.decrypt_block(&parse(ct)),
-            parse::<16>(pt),
-            "dec {key}/{ct}"
-        );
+        let k = decode_hex_array::<16>(key);
+        kat_pair(&Aes128::new(&k), &Aes128Ct::new(&k), key, pt, ct);
     }
     fn kat192(key: &str, pt: &str, ct: &str) {
-        let c = Aes192::new(&parse(key));
-        assert_eq!(
-            c.encrypt_block(&parse(pt)),
-            parse::<16>(ct),
-            "enc {key}/{pt}"
-        );
-        assert_eq!(
-            c.decrypt_block(&parse(ct)),
-            parse::<16>(pt),
-            "dec {key}/{ct}"
-        );
+        let k = decode_hex_array::<24>(key);
+        kat_pair(&Aes192::new(&k), &Aes192Ct::new(&k), key, pt, ct);
     }
     fn kat256(key: &str, pt: &str, ct: &str) {
-        let c = Aes256::new(&parse(key));
-        assert_eq!(
-            c.encrypt_block(&parse(pt)),
-            parse::<16>(ct),
-            "enc {key}/{pt}"
+        let k = decode_hex_array::<32>(key);
+        kat_pair(&Aes256::new(&k), &Aes256Ct::new(&k), key, pt, ct);
+    }
+
+    // ── FIPS 197 Appendix C — example vectors ────────────────────────────────
+    // The worked examples: key bytes 00, 01, 02, ... and the plaintext
+    // 00112233445566778899aabbccddeeff. C.1 is AES-128, C.2 AES-192, C.3
+    // AES-256; the ciphertexts are the "output" lines of each.
+
+    #[test]
+    fn fips197_appendix_c1_aes128() {
+        kat128(
+            "000102030405060708090a0b0c0d0e0f",
+            "00112233445566778899aabbccddeeff",
+            "69c4e0d86a7b0430d8cdb78070b4c55a",
         );
-        assert_eq!(
-            c.decrypt_block(&parse(ct)),
-            parse::<16>(pt),
-            "dec {key}/{ct}"
+    }
+
+    #[test]
+    fn fips197_appendix_c2_aes192() {
+        kat192(
+            "000102030405060708090a0b0c0d0e0f1011121314151617",
+            "00112233445566778899aabbccddeeff",
+            "dda97ca4864cdfe06eaf70a0ec0d7191",
         );
+    }
+
+    #[test]
+    fn fips197_appendix_c3_aes256() {
+        kat256(
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            "00112233445566778899aabbccddeeff",
+            "8ea2b7ca516745bfeafc49904b496089",
+        );
+    }
+
+    /// FIPS 197 Appendix A.1: the last round key of the expanded AES-128 key
+    /// 2b7e151628aed2a6abf7158809cf4f3c is w[40..44] =
+    /// d014f9a8 c9ee2589 e13f0cc8 b6630ca6, for both `SubWord` evaluators.
+    #[test]
+    fn fips197_appendix_a1_key_expansion() {
+        let key = decode_hex_array::<16>("2b7e151628aed2a6abf7158809cf4f3c");
+        let expected = [0xd014_f9a8, 0xc9ee_2589, 0xe13f_0cc8, 0xb663_0ca6];
+        for sub in [sub_word as fn(u32) -> u32, sub_word_bool] {
+            let mut w = [0u32; 44];
+            expand_key(&key, &mut w, sub);
+            assert_eq!(w[40..44], expected);
+            assert_eq!(w[4], 0xa0fa_fe17, "w[4] of A.1");
+        }
+    }
+
+    /// Decryption on the two paths agrees on arbitrary blocks (the KATs cover
+    /// the tabulated ones): the equivalent-inverse schedule of the T-table
+    /// path and the plain reversed schedule of the `Ct` path invert the same
+    /// cipher.
+    #[test]
+    fn decrypt_fast_matches_ct_on_arbitrary_blocks() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |out: &mut [u8]| {
+            for chunk in out.chunks_mut(8) {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let bytes = state.to_le_bytes();
+                chunk.copy_from_slice(&bytes[..chunk.len()]);
+            }
+        };
+        for _ in 0..64 {
+            let mut k128 = [0u8; 16];
+            let mut k192 = [0u8; 24];
+            let mut k256 = [0u8; 32];
+            let mut block = [0u8; 16];
+            next(&mut k128);
+            next(&mut k192);
+            next(&mut k256);
+            next(&mut block);
+            assert_eq!(
+                Aes128::new(&k128).decrypt_block(&block),
+                Aes128Ct::new(&k128).decrypt_block(&block)
+            );
+            assert_eq!(
+                Aes192::new(&k192).decrypt_block(&block),
+                Aes192Ct::new(&k192).decrypt_block(&block)
+            );
+            assert_eq!(
+                Aes256::new(&k256).decrypt_block(&block),
+                Aes256Ct::new(&k256).decrypt_block(&block)
+            );
+            assert_eq!(
+                Aes256::new(&k256).encrypt_block(&block),
+                encrypt_only::Aes256Encryptor::new(&k256).encrypt_block(&block),
+                "forward-only schedule"
+            );
+            assert_eq!(
+                Aes256Ct::new(&k256).encrypt_block(&block),
+                encrypt_only::Aes256CtEncryptor::new(&k256).encrypt_block(&block),
+                "forward-only Ct schedule"
+            );
+        }
+    }
+
+    /// The `BlockCipher` trait refuses any length other than the 16-byte
+    /// block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_trait_refuses_wrong_block_length() {
+        let cipher = Aes128::new(&[0u8; 16]);
+        let mut block = [0u8; 17];
+        cipher.encrypt(&mut block);
     }
 
     #[test]
@@ -1492,43 +1499,9 @@ mod tests {
         ),
     ];
 
-    #[test]
-    fn ct_128_kat() {
-        let key = parse::<16>("00000000000000000000000000000000");
-        let pt = parse::<16>("f34481ec3cc627bacd5dc3fb08f273e6");
-        let ct = parse::<16>("0336763e966d92595a567cc9ce537f5e");
-        let fast = Aes128::new(&key);
-        let slow = Aes128Ct::new(&key);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(slow.decrypt_block(&ct), pt);
-        assert_eq!(slow.encrypt_block(&pt), fast.encrypt_block(&pt));
-    }
-
-    #[test]
-    fn ct_192_kat() {
-        let key = parse::<24>("000000000000000000000000000000000000000000000000");
-        let pt = parse::<16>("1b077a6af4b7f98229de786d7516b639");
-        let ct = parse::<16>("275cfc0413d8ccb70513c3859b1d0f72");
-        let fast = Aes192::new(&key);
-        let slow = Aes192Ct::new(&key);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(slow.decrypt_block(&ct), pt);
-        assert_eq!(slow.encrypt_block(&pt), fast.encrypt_block(&pt));
-    }
-
-    #[test]
-    fn ct_256_kat() {
-        let key = parse::<32>("0000000000000000000000000000000000000000000000000000000000000000");
-        let pt = parse::<16>("014730f80ac625fe84f026c60bfd547d");
-        let ct = parse::<16>("5c9d844ed46f9885085e5d6a4f94c7d7");
-        let fast = Aes256::new(&key);
-        let slow = Aes256Ct::new(&key);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(slow.decrypt_block(&ct), pt);
-        assert_eq!(slow.encrypt_block(&pt), fast.encrypt_block(&pt));
-    }
-
     // ── ECBGFSbox: key=0, plaintext chosen to stress the S-box ───────────────
+    // NIST CAVP KAT_AES: ECBGFSbox128/192/256.rsp, the ENCRYPT tables in
+    // full (7, 6 and 5 entries).
     #[test]
     fn gfsbox_128() {
         let v = [
@@ -1647,6 +1620,8 @@ mod tests {
     }
 
     // ── ECBKeySbox: plaintext=0, key chosen to stress the key schedule ────────
+    // NIST CAVP KAT_AES: ECBKeySbox128.rsp in full (21 entries); the first
+    // five of ECBKeySbox192.rsp and first ten of ECBKeySbox256.rsp.
     #[test]
     fn keysbox_128() {
         for (k, p, c) in KEYSBOX_128_CASES {
@@ -1747,7 +1722,10 @@ mod tests {
         }
     }
 
-    // ── ECBVarKey: one bit set in key, zero plaintext ─────────────────────────
+    // ── ECBVarKey: leading-ones key ramp, zero plaintext ─────────────────────
+    // NIST CAVP KAT_AES: ECBVarKey128/192/256.rsp, the first entries. The
+    // keys are 80.., c0.., e0.., f0.., ...: entry i has its i+1 leading bits
+    // set (the full table walks all 128, 192 or 256 bits), not a single bit.
     #[test]
     fn varkey_128() {
         let v = [
@@ -1875,7 +1853,9 @@ mod tests {
         }
     }
 
-    // ── ECBVarTxt: zero key, one bit set in plaintext ─────────────────────────
+    // ── ECBVarTxt: zero key, leading-ones plaintext ramp ──────────────────────
+    // NIST CAVP KAT_AES: ECBVarTxt128/192/256.rsp, the first entries; the
+    // plaintexts ramp 80.., c0.., e0.., ... as the VarKey keys do.
     #[test]
     fn vartxt_128() {
         let v = [
@@ -1925,6 +1905,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn vartxt_192() {
+        let v = [
+            (
+                "000000000000000000000000000000000000000000000000",
+                "80000000000000000000000000000000",
+                "6cd02513e8d4dc986b4afe087a60bd0c",
+            ),
+            (
+                "000000000000000000000000000000000000000000000000",
+                "c0000000000000000000000000000000",
+                "2ce1f8b7e30627c1c4519eada44bc436",
+            ),
+        ];
+        for (k, p, c) in v {
+            kat192(k, p, c);
+        }
+    }
+
+    #[test]
+    fn vartxt_256() {
+        let v = [
+            (
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "80000000000000000000000000000000",
+                "ddc6bf790c15760d8d9aeb6f9a75fd4e",
+            ),
+            (
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "c0000000000000000000000000000000",
+                "0a6bdc6d4c1e6280301fd8e97ddbe601",
+            ),
+        ];
+        for (k, p, c) in v {
+            kat256(k, p, c);
+        }
+    }
+
     // ── Compile-time table spot-checks (verify GF arithmetic) ────────────────
     #[test]
     fn te0_spot_check() {
@@ -1941,20 +1959,48 @@ mod tests {
         assert_eq!(TD0[0], 0x51f4_a750);
     }
 
+    /// OpenSSL `enc` as a black-box oracle for the three key sizes, on a key
+    /// and block that appear in no table above, for both paths. Skips loudly
+    /// when no `openssl` is installed.
     #[test]
-    fn aes128_matches_openssl_ecb() {
-        let key_hex = "000102030405060708090a0b0c0d0e0f";
-        let pt_hex = "00112233445566778899aabbccddeeff";
-        let Some(expected) =
-            crate::test_utils::run_openssl_enc("-aes-128-ecb", key_hex, None, &parse::<16>(pt_hex))
-        else {
-            return;
-        };
-
-        let cipher = Aes128::new(&parse(key_hex));
-        assert_eq!(
-            cipher.encrypt_block(&parse(pt_hex)).as_slice(),
-            expected.as_slice()
-        );
+    fn aes_matches_openssl_ecb() {
+        let key_hex = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
+        let pt_hex = "6bc1bee22e409f96e93d7e117393172a";
+        let pt = decode_hex_array::<16>(pt_hex);
+        let cases: [(&str, usize, BothPaths); 3] = [
+            ("-aes-128-ecb", 16, |k, p| {
+                let k: &[u8; 16] = k.try_into().expect("16-byte key");
+                (
+                    Aes128::new(k).encrypt_block(p),
+                    Aes128Ct::new(k).encrypt_block(p),
+                )
+            }),
+            ("-aes-192-ecb", 24, |k, p| {
+                let k: &[u8; 24] = k.try_into().expect("24-byte key");
+                (
+                    Aes192::new(k).encrypt_block(p),
+                    Aes192Ct::new(k).encrypt_block(p),
+                )
+            }),
+            ("-aes-256-ecb", 32, |k, p| {
+                let k: &[u8; 32] = k.try_into().expect("32-byte key");
+                (
+                    Aes256::new(k).encrypt_block(p),
+                    Aes256Ct::new(k).encrypt_block(p),
+                )
+            }),
+        ];
+        for (flag, key_len, ours) in cases {
+            let key_hex = &key_hex[..2 * key_len];
+            let Some(expected) = crate::test_utils::openssl_enc(flag, key_hex, None, &pt)
+                .or_skip(&format!("aes_matches_openssl_ecb {flag}"))
+            else {
+                continue;
+            };
+            let key = crate::test_utils::decode_hex(key_hex);
+            let (fast, slow) = ours(&key, &pt);
+            assert_eq!(fast.as_slice(), expected.as_slice(), "{flag} fast path");
+            assert_eq!(slow.as_slice(), expected.as_slice(), "{flag} Ct path");
+        }
     }
 }

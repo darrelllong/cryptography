@@ -82,34 +82,35 @@ fn run_microbench() -> Result<(), String> {
 
     const ITERS: usize = 2_000_000;
 
-    let mut seed_hw = 0x1234_5678_9abc_def0u64;
-    let mut seed_ct = seed_hw;
-    let mut seed_vt = seed_hw;
+    // Operands are generated before timing so all three loops measure the
+    // multiply alone, on the same operand sequence.
+    let mut seed = 0x1234_5678_9abc_def0u64;
+    let operands: Vec<(u128, u128)> = (0..ITERS)
+        .map(|_| {
+            let x = ((xorshift64(&mut seed) as u128) << 64) | (xorshift64(&mut seed) as u128);
+            let y = ((xorshift64(&mut seed) as u128) << 64) | (xorshift64(&mut seed) as u128);
+            (x, y)
+        })
+        .collect();
 
     let mut acc_hw = 0u128;
     let mut acc_ct = 0u128;
     let mut acc_vt = 0u128;
 
     let t0 = Instant::now();
-    for _ in 0..ITERS {
-        let x = ((xorshift64(&mut seed_hw) as u128) << 64) | (xorshift64(&mut seed_hw) as u128);
-        let y = ((xorshift64(&mut seed_hw) as u128) << 64) | (xorshift64(&mut seed_hw) as u128);
+    for &(x, y) in &operands {
         acc_hw ^= GhashArmv8::mul(x, y).map_err(|_| "ARM GHASH failed".to_string())?;
     }
     let hw_elapsed = t0.elapsed().as_secs_f64();
 
     let t1 = Instant::now();
-    for _ in 0..ITERS {
-        let x = ((xorshift64(&mut seed_ct) as u128) << 64) | (xorshift64(&mut seed_ct) as u128);
-        let y = ((xorshift64(&mut seed_ct) as u128) << 64) | (xorshift64(&mut seed_ct) as u128);
+    for &(x, y) in &operands {
         acc_ct ^= ghash_mul_ct_ref(x, y);
     }
     let ct_elapsed = t1.elapsed().as_secs_f64();
 
     let t2 = Instant::now();
-    for _ in 0..ITERS {
-        let x = ((xorshift64(&mut seed_vt) as u128) << 64) | (xorshift64(&mut seed_vt) as u128);
-        let y = ((xorshift64(&mut seed_vt) as u128) << 64) | (xorshift64(&mut seed_vt) as u128);
+    for &(x, y) in &operands {
         acc_vt ^= ghash_mul_vt_ref(x, y);
     }
     let vt_elapsed = t2.elapsed().as_secs_f64();

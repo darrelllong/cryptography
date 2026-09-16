@@ -7,7 +7,7 @@
 //!   decrypt_raw(encrypt_with_nonce(m, r)) == m
 #![no_main]
 
-use cryptography::public_key::{elgamal::ElGamal};
+use cryptography::public_key::elgamal::ElGamal;
 use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
 
@@ -36,5 +36,9 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let recovered = sk.decrypt_raw(&ct);
-    assert_eq!(recovered, message, "ElGamal: decrypt_raw(encrypt_with_nonce(m)) != m");
+    assert_eq!(
+        recovered,
+        Some(message),
+        "ElGamal: decrypt_raw(encrypt_with_nonce(m)) != m"
+    );
 });

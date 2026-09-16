@@ -17,6 +17,9 @@ fn main() {
     let cipher = Sm4::new(&key);
 
     let mut buf = vec![0u8; MIB];
+    for (i, b) in buf.iter_mut().enumerate() {
+        *b = i as u8;
+    }
 
     let t0 = Instant::now();
     for chunk in buf.chunks_exact_mut(BLOCK) {
@@ -25,7 +28,7 @@ fn main() {
     let elapsed = t0.elapsed();
     black_box(&buf);
 
-    // Print throughput in MB/s as a single CSV value.
-    let mb_per_sec = (BLOCKS as f64 * BLOCK as f64) / elapsed.as_secs_f64() / (1024.0 * 1024.0);
+    // Print throughput in MB/s (10^6 bytes per second) as a single CSV value.
+    let mb_per_sec = (BLOCKS as f64 * BLOCK as f64) / elapsed.as_secs_f64() / 1_000_000.0;
     println!("{:.3}", mb_per_sec);
 }

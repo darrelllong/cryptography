@@ -2,8 +2,7 @@
 #![no_main]
 
 use cryptography::{
-    BlockCipher, Camellia128, Camellia128Ct, Camellia192, Camellia192Ct, Camellia256,
-    Camellia256Ct,
+    BlockCipher, Camellia128, Camellia128Ct, Camellia192, Camellia192Ct, Camellia256, Camellia256Ct,
 };
 use libfuzzer_sys::fuzz_target;
 

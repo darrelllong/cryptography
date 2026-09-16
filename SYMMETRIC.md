@@ -42,7 +42,9 @@ new block-cipher families.
 - Hashes completed for compatibility: `Md5`, `Sha1`
 - Stream-cipher extended-nonce variant: `XChaCha20`
 - AEAD and misuse-resistant modes:
-  `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`, `ChaCha20Poly1305`
+  `Eax`, `Ocb`, `Siv`, `AesGcmSiv<C>` (aliases `Aes128GcmSiv`, `Aes256GcmSiv`
+  on the T-table AES and `Aes128GcmSivCt`, `Aes256GcmSivCt` on the
+  constant-time AES), `ChaCha20Poly1305`
 - AES key wrapping surface: `AesKeyWrap`
 
 ### Modes
@@ -58,7 +60,7 @@ The generic mode layer in `src/modes/` supplies:
 - RFC 5297: `Siv`
 - RFC 7253: `Ocb`
 - Bellare-Rogaway-Wagner EAX: `Eax`
-- RFC 8452: `Aes128GcmSiv`, `Aes256GcmSiv`
+- RFC 8452: `AesGcmSiv<C>` (`Aes128GcmSiv`, `Aes256GcmSiv`, `Aes128GcmSivCt`, `Aes256GcmSivCt`)
 - RFC 8439: `Poly1305`, `ChaCha20Poly1305`
 
 Reference set for the newly added mode paths:
@@ -68,7 +70,11 @@ Reference set for the newly added mode paths:
   (`pubs/rfc3394-aes-key-wrap.pdf`, `pubs/sp800-38f.pdf`)
 - `Siv`: RFC 5297 (`pubs/rfc5297-siv.pdf`)
 - `Ocb`: RFC 7253 (`pubs/rfc7253-ocb.pdf`)
-- `Aes128GcmSiv` / `Aes256GcmSiv`: RFC 8452 (`pubs/rfc8452-aes-gcm-siv.pdf`)
+- `AesGcmSiv<C>`: RFC 8452 (`pubs/rfc8452-aes-gcm-siv.pdf`); POLYVAL constant-time,
+  the AES calls those of `C`
+- GCM test cases 3–18: McGrew & Viega, *The Galois/Counter Mode of Operation
+  (GCM)*, revised 2005-05-31 (`pubs/mcgrew-viega-2005-gcm-revised-spec.pdf`,
+  Internet Archive capture of the NIST-hosted file; Appendix B)
 - `Poly1305` / `ChaCha20Poly1305`: RFC 8439 (`pubs/rfc8439-chacha20-poly1305.pdf`)
 
 These wrappers are generic over any `BlockCipher`, so the same mode code works
@@ -83,8 +89,13 @@ Operational caveats:
 - `GCM` requires nonce uniqueness and enforces the SP 800-38D per-call payload
   bound of $(2^{32}-2)$ counter blocks (`68_719_476_704` bytes) to prevent
   counter wrap. `Gcm`/`Gmac` are the default constant-time GHASH path and
-  `GcmVt`/`GmacVt` are explicit variable-time reference paths.
+  `GcmVt`/`GmacVt` are explicit variable-time reference paths whose GHASH
+  is variable-time in both operands (the data and the hash subkey `H`).
 - `XTS` is for storage-style sector encryption, not general message transport.
+  Data units are 1 to 2^20 blocks (`XTS_MAX_DATA_UNIT_BLOCKS`, SP 800-38E §4).
+- `Siv` (RFC 5297) accepts at most 2^36 − 16 bytes per message (32-bit counter
+  addition, §2.5) and 126 associated-data components (§7); `decrypt` returns
+  `false` beyond either bound.
 
 ### Hashes and XOFs
 
@@ -123,10 +134,13 @@ These provide integrity and authenticity, not signatures or non-repudiation.
 
 Implemented generators:
 
-- `CtrDrbgAes256`
+- `CtrDrbgAes256` (`CtrDrbg<Aes256>`, T-table AES, variable-time)
+- `CtrDrbgAes256Ct` (`CtrDrbg<Aes256Ct>`, constant-time AES)
 
-The shipped generator is `CtrDrbgAes256`, which follows SP 800-90A Rev. 1
-CTR_DRBG with AES-256.
+The shipped generator is `CtrDrbg<C>`, which follows SP 800-90A Rev. 1
+CTR_DRBG with AES-256 and keys an encrypt-only schedule once per update; the
+two aliases produce identical output and differ only in whether the DRBG key
+can leak through the cache.
 
 ## Cipher Families
 
@@ -155,8 +169,8 @@ Design philosophy by family:
   permutations reflect gate-count and wiring concerns more than modern software
   taste. The implementation preserves the traditional fast table-driven shape
   because the whole point of DES in software is how far that old design can be
-  pushed, while `DesCt` makes the constant-time tradeoff explicit instead of
-  pretending the two goals coincide.
+  pushed, while `DesCt` and `TripleDesCt` make the constant-time tradeoff
+  explicit instead of pretending the two goals coincide.
 - `AES`: the U.S. federal standard selected by NIST, but designed in Belgium
   as Rijndael. Its SP-network structure is a software/hardware compromise: fast
   table-driven software on one hand, compact byte-oriented hardware on the
@@ -261,6 +275,17 @@ Design philosophy by family:
 
 ## Symmetric Performance
 
+> **Stale figures (2026-09-10).** The `snow3g`, `snow3gct`, `zuc128`, and
+> `zuc128ct` rows predate the rewrite of their LFSR and FSM arithmetic from the
+> ETSI/SAGE specifications and have not been re-swept. GCM, GMAC, and
+> AES-GCM-SIV now use a GHASH/POLYVAL multiply written from SP 800-38D: on the
+> development machine GCM tag computation runs at 0.31× and GCM encryption at
+> 0.63× its former throughput. That also changes the baseline the go-fast GHASH
+> comparisons below were measured against. The MD5, SHA-1, and SHA-2 rows
+> predate the rewrite of their compression functions in their specifications'
+> notation; on the development machine MD5 became about 2.3× faster and SHA-1,
+> SHA-256, and SHA-512 slightly faster.
+
 Measured with [pilot-bench](https://github.com/darrelllong/pilot-bench)
 driving `pilot_cipher`, a dedicated Rust binary that encrypts a fixed
 workload per round and prints MB/s to stdout. Pilot repeats the round until
@@ -308,6 +333,14 @@ crate v0.7.0 (commit `1aae1df`). The tables below are parallel runs on:
 
 ### DES / 3DES
 
+FIPS 46-3 (single DES) was withdrawn on 19 May 2005 (70 FR 28907). Under SP
+800-131A Rev. 2 §2.1, three-key TDEA encryption was deprecated through 2023 and
+is disallowed after 31 December 2023, two-key TDEA encryption is disallowed, and
+decryption is legacy use only; SP 800-67 Rev. 2 withdrew keying option 3
+(three equal keys) and limits a key bundle to 2^20 blocks. The crate therefore
+exposes no public constructor for a single-key bundle, and its checked
+constructors refuse weak, semi-weak and repeated key components.
+
 | Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | des | 64 | 56 | 56.99 | ±0.1843 | 80 | 53.45 | ±0.3116 | 50 | 23.31 | ±1.06 | 110 |
@@ -346,14 +379,15 @@ crate v0.7.0 (commit `1aae1df`). The tables below are parallel runs on:
 
 ### Serpent
 
+`Serpent128Ct`/`Serpent192Ct`/`Serpent256Ct` are aliases of the fast types:
+the bitsliced round function is already constant-time, so there is no second
+path to measure.
+
 | Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | serpent128 | 128 | 128 | 7.986 | ±0.005284 | 50 | 4.699 | ±0.01364 | 50 | 2.433 | ±0.0153 | 50 |
-| serpent128ct | 128 | 128 | 5.818 | ±0.002268 | 81 | 1.823 | ±0.003141 | 58 | 1.565 | ±0.005114 | 110 |
 | serpent192 | 128 | 192 | 7.984 | ±0.004522 | 471 | 4.696 | ±0.00828 | 50 | 2.441 | ±0.0142 | 50 |
-| serpent192ct | 128 | 192 | 5.821 | ±0.003559 | 50 | 1.826 | ±0.002755 | 50 | 1.561 | ±0.004187 | 59 |
 | serpent256 | 128 | 256 | 7.986 | ±0.00375 | 200 | 4.699 | ±0.01032 | 80 | 2.43 | ±0.0154 | 110 |
-| serpent256ct | 128 | 256 | 5.817 | ±0.003501 | 110 | 1.827 | ±0.002513 | 50 | 1.561 | ±0.003214 | 84 |
 
 ### SM4
 

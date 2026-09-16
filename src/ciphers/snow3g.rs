@@ -1,8 +1,12 @@
-//! SNOW 3G stream cipher core from the ETSI/SAGE v1.1 specification.
+//! SNOW 3G stream cipher core, from ETSI/SAGE "Specification of the 3GPP
+//! Confidentiality and Integrity Algorithms UEA2 & UIA2, Document 2: SNOW 3G
+//! Specification", version 1.1 (6 September 2006).
 //!
-//! SNOW 3G is the 128-bit stream cipher used underneath 3GPP UEA2/UIA2.
-//! This module implements the raw keystream generator from Document 2
-//! ("SNOW 3G Specification"), not the higher-level UEA2/UIA2 framing.
+//! SNOW 3G is the 128-bit stream cipher used underneath 3GPP UEA2/UIA2. This
+//! module implements the keystream generator of Document 2's normative
+//! sections 3–5, not the higher-level UEA2/UIA2 framing. The test vectors come
+//! from Document 3 of the same set, "Implementors' Test Data", version 1.1
+//! (25 October 2012), section 3.
 
 #[rustfmt::skip]
 const SR: [u8; 256] = [
@@ -47,44 +51,216 @@ const SQ: [u8; 256] = [
 const SR_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SR);
 const SQ_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SQ);
 
-// ETSI/SAGE Doc 2 defines multiplication/division by alpha in GF(2^8)
-// (reduction polynomial x^8 + x^7 + x^5 + x^3 + 1, encoded as 0xA9 here).
-// These are the four-byte packed coefficients used in the LFSR feedback.
+// MULα and DIVα (Document 2 §3.4.2, §3.4.3) map a byte c to the word
+// MULxPOW(c, e0, 0xA9) || MULxPOW(c, e1, 0xA9) || MULxPOW(c, e2, 0xA9) ||
+// MULxPOW(c, e3, 0xA9), with exponents (23, 245, 48, 239) for MULα and
+// (16, 39, 6, 64) for DIVα. The constant 0xA9 = 1010_1001 spells
+// x^8 + x^7 + x^5 + x^3 + 1 (Annex 1 §1.5). The tables serve the fast path.
+// Because MULxPOW(c, e, 0xA9) = c·β^e (Annex 1 §1.1), the constant-time path
+// instead multiplies c by the factors β^e = MULxPOW(1, e, 0xA9) bit by bit.
 const MUL_ALPHA: [u32; 256] = build_alpha_table([23, 245, 48, 239]);
 const DIV_ALPHA: [u32; 256] = build_alpha_table([16, 39, 6, 64]);
 const MUL_ALPHA_FACTORS: [u8; 4] = alpha_factors([23, 245, 48, 239]);
 const DIV_ALPHA_FACTORS: [u8; 4] = alpha_factors([16, 39, 6, 64]);
 
+// ── MULx and MULxPOW (Document 2 §3.1.1, §3.1.2) ─────────────────────────────
+
+/// §3.1.1 `MULx(V, c)`: `V <<8 1`, XORed with `c` when the leftmost bit of `V`
+/// is 1.
+///
+/// Branch-free: `v >> 7` is that leftmost bit and `0 - bit` is `0x00` or
+/// `0xFF`, which gates `c`. Annex 1 §1.1 reads this as multiplication by the
+/// root β of the polynomial whose low coefficients `c` spells.
 #[inline]
-fn load_be_u32(bytes: &[u8]) -> u32 {
-    let mut word = [0u8; 4];
-    word.copy_from_slice(bytes);
-    u32::from_be_bytes(word)
+const fn mul_x(v: u8, c: u8) -> u8 {
+    (v << 1) ^ (c & 0u8.wrapping_sub(v >> 7))
 }
 
+/// §3.1.2 `MULxPOW(V, i, c)`: `V` when `i = 0`, otherwise
+/// `MULx(MULxPOW(V, i - 1, c), c)` — the recursion unrolled into `i`
+/// applications of `MULx`.
+const fn mul_x_pow(v: u8, i: u8, c: u8) -> u8 {
+    let mut acc = v;
+    let mut remaining = i;
+    while remaining > 0 {
+        acc = mul_x(acc, c);
+        remaining -= 1;
+    }
+    acc
+}
+
+// ── FSM S-boxes S1 and S2 (Document 2 §3.3.1, §3.3.2) ────────────────────────
+//
+// Both split w = w0 || w1 || w2 || w3 (w0 most significant), substitute each
+// byte through an 8-bit S-box (SR for S1, SQ for S2), and mix the four results
+// with MULx under a constant (0x1B for S1, 0x69 for S2). With a_i the
+// substituted bytes and x_i = MULx(a_i, c), the tables in §3.3.1 and §3.3.2
+// give the output bytes (r0 most significant) as
+//
+//     r0 = x0      ⊕ a1      ⊕ a2      ⊕ x3 ⊕ a3
+//     r1 = x0 ⊕ a0 ⊕ x1      ⊕ a2      ⊕ a3
+//     r2 = a0      ⊕ x1 ⊕ a1 ⊕ x2      ⊕ a3
+//     r3 = a0      ⊕ a1      ⊕ x2 ⊕ a2 ⊕ x3
+
+/// The byte mixing of §3.3.1 and §3.3.2, applied to the substituted bytes.
 #[inline]
-const fn mulx(v: u8, c: u8) -> u8 {
-    if (v & 0x80) != 0 {
-        (v << 1) ^ c
+fn mix_substituted(a: [u8; 4], c: u8) -> u32 {
+    let x = [
+        mul_x(a[0], c),
+        mul_x(a[1], c),
+        mul_x(a[2], c),
+        mul_x(a[3], c),
+    ];
+    u32::from_be_bytes([
+        x[0] ^ a[1] ^ a[2] ^ x[3] ^ a[3],
+        x[0] ^ a[0] ^ x[1] ^ a[2] ^ a[3],
+        a[0] ^ x[1] ^ a[1] ^ x[2] ^ a[3],
+        a[0] ^ a[1] ^ x[2] ^ a[2] ^ x[3],
+    ])
+}
+
+/// §3.3.1 S-box S1: SR on each byte, mixed under `MULx(·, 0x1B)`.
+///
+/// With `CT`, SR is evaluated from its packed ANF instead of indexed.
+#[inline]
+fn fsm_s1<const CT: bool>(w: u32) -> u32 {
+    let a = w.to_be_bytes().map(|byte| {
+        if CT {
+            sbox_eval(&SR_ANF, byte)
+        } else {
+            SR[usize::from(byte)]
+        }
+    });
+    mix_substituted(a, 0x1B)
+}
+
+/// §3.3.2 S-box S2: SQ on each byte, mixed under `MULx(·, 0x69)`.
+///
+/// With `CT`, SQ is evaluated from its packed ANF instead of indexed.
+#[inline]
+fn fsm_s2<const CT: bool>(w: u32) -> u32 {
+    let a = w.to_be_bytes().map(|byte| {
+        if CT {
+            sbox_eval(&SQ_ANF, byte)
+        } else {
+            SQ[usize::from(byte)]
+        }
+    });
+    mix_substituted(a, 0x69)
+}
+
+// ── Clocking and operation (Document 2 §3.4, §4) ─────────────────────────────
+
+/// §3.4.4 and §3.4.5: clock the LFSR once, feeding in `fsm_word`.
+///
+/// Initialisation Mode passes the FSM output F. Keystream Mode's `v` is the
+/// same expression without the `⊕ F` term, so it passes 0.
+///
+/// In `v`, `(s0,1 || s0,2 || s0,3 || 0x00)` is `s0 << 8` and
+/// `(0x00 || s11,0 || s11,1 || s11,2)` is `s11 >> 8`; the bytes those shifts
+/// drop, `s0,0` and `s11,3`, are the inputs to MULα (§3.4.2) and DIVα
+/// (§3.4.3).
+#[inline]
+fn lfsr_clock<const CT: bool>(core: &mut Snow3gCore, fsm_word: u32) {
+    let s0 = core.s[0];
+    let s11 = core.s[11];
+    let s0_high = s0.to_be_bytes()[0];
+    let s11_low = s11.to_be_bytes()[3];
+    let (alpha_term, alpha_inverse_term) = if CT {
+        (
+            alpha_word_ct(s0_high, MUL_ALPHA_FACTORS),
+            alpha_word_ct(s11_low, DIV_ALPHA_FACTORS),
+        )
     } else {
-        v << 1
-    }
+        (
+            MUL_ALPHA[usize::from(s0_high)],
+            DIV_ALPHA[usize::from(s11_low)],
+        )
+    };
+    let v = (s0 << 8) ^ alpha_term ^ core.s[2] ^ (s11 >> 8) ^ alpha_inverse_term ^ fsm_word;
+    core.s.copy_within(1.., 0);
+    core.s[15] = v;
 }
 
+/// §3.4.6: clock the FSM on `s15` and `s5` and return its output word F.
 #[inline]
-fn mulx_ct(v: u8, c: u8) -> u8 {
-    let hi = 0u8.wrapping_sub(v >> 7);
-    (v << 1) ^ (c & hi)
+fn fsm_clock<const CT: bool>(core: &mut Snow3gCore) -> u32 {
+    let f = core.s[15].wrapping_add(core.r1) ^ core.r2;
+    let r = core.r2.wrapping_add(core.r3 ^ core.s[5]);
+    core.r3 = fsm_s2::<CT>(core.r2);
+    core.r2 = fsm_s1::<CT>(core.r1);
+    core.r1 = r;
+    f
 }
 
-#[inline]
-const fn mulx_pow(mut v: u8, i: u8, c: u8) -> u8 {
-    let mut n = 0;
-    while n < i {
-        v = mulx(v, c);
-        n += 1;
+/// The four 32-bit words of a 128-bit key or IV, most significant first
+/// (§4.1's `k0..k3` and `IV0..IV3`, split as §2.2.2 numbers sub-strings).
+fn be_words(bytes: &[u8; 16]) -> [u32; 4] {
+    let mut words = [0u32; 4];
+    for (word, chunk) in words.iter_mut().zip(bytes.chunks_exact(4)) {
+        *word = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
     }
-    v
+    words
+}
+
+/// §4.1 Initialisation, before the first clock: load the LFSR from the key
+/// and IV words and zero the FSM registers.
+fn load_key_iv(key: &[u8; 16], iv: &[u8; 16]) -> Snow3gCore {
+    let mut k = be_words(key);
+    let mut v = be_words(iv);
+    // §4.1: "Let 1 be the all-ones word (0xffffffff)."
+    let ones = u32::MAX;
+    let core = Snow3gCore {
+        ks: [0; 4],
+        ks_len: 0,
+        s: [
+            k[0] ^ ones,
+            k[1] ^ ones,
+            k[2] ^ ones,
+            k[3] ^ ones,
+            k[0],
+            k[1],
+            k[2],
+            k[3],
+            k[0] ^ ones,
+            k[1] ^ ones ^ v[3],
+            k[2] ^ ones ^ v[2],
+            k[3] ^ ones,
+            k[0] ^ v[1],
+            k[1],
+            k[2],
+            k[3] ^ v[0],
+        ],
+        r1: 0,
+        r2: 0,
+        r3: 0,
+    };
+    crate::ct::zeroize_slice(k.as_mut_slice());
+    crate::ct::zeroize_slice(v.as_mut_slice());
+    core
+}
+
+/// §4.1 and the start of §4.2: load key and IV, run the 32 initialisation
+/// clocks, then clock the FSM once (output discarded) and the LFSR once in
+/// Keystream Mode, so that the next `keystream_word` is `z1`.
+fn initialise<const CT: bool>(key: &[u8; 16], iv: &[u8; 16]) -> Snow3gCore {
+    let mut core = load_key_iv(key, iv);
+    for _ in 0..32 {
+        let f = fsm_clock::<CT>(&mut core);
+        lfsr_clock::<CT>(&mut core, f);
+    }
+    let _ = fsm_clock::<CT>(&mut core);
+    lfsr_clock::<CT>(&mut core, 0);
+    core
+}
+
+/// One pass of the §4.2 loop: clock the FSM for F, output `z = F ⊕ s0`, and
+/// clock the LFSR in Keystream Mode.
+#[inline]
+fn keystream_word<const CT: bool>(core: &mut Snow3gCore) -> u32 {
+    let z = fsm_clock::<CT>(core) ^ core.s[0];
+    lfsr_clock::<CT>(core, 0);
+    z
 }
 
 const fn build_alpha_table(pows: [u8; 4]) -> [u32; 256] {
@@ -93,10 +269,10 @@ const fn build_alpha_table(pows: [u8; 4]) -> [u32; 256] {
     while i < 256 {
         let c = i as u8;
         table[i] = u32::from_be_bytes([
-            mulx_pow(c, pows[0], 0xA9),
-            mulx_pow(c, pows[1], 0xA9),
-            mulx_pow(c, pows[2], 0xA9),
-            mulx_pow(c, pows[3], 0xA9),
+            mul_x_pow(c, pows[0], 0xA9),
+            mul_x_pow(c, pows[1], 0xA9),
+            mul_x_pow(c, pows[2], 0xA9),
+            mul_x_pow(c, pows[3], 0xA9),
         ]);
         i += 1;
     }
@@ -105,10 +281,10 @@ const fn build_alpha_table(pows: [u8; 4]) -> [u32; 256] {
 
 const fn alpha_factors(pows: [u8; 4]) -> [u8; 4] {
     [
-        mulx_pow(1, pows[0], 0xA9),
-        mulx_pow(1, pows[1], 0xA9),
-        mulx_pow(1, pows[2], 0xA9),
-        mulx_pow(1, pows[3], 0xA9),
+        mul_x_pow(1, pows[0], 0xA9),
+        mul_x_pow(1, pows[1], 0xA9),
+        mul_x_pow(1, pows[2], 0xA9),
+        mul_x_pow(1, pows[3], 0xA9),
     ]
 }
 
@@ -119,7 +295,7 @@ fn gf_mul_const_ct(mut value: u8, mut factor: u8, poly: u8) -> u8 {
     while i < 8 {
         let bit_mask = 0u8.wrapping_sub(factor & 1);
         out ^= value & bit_mask;
-        value = mulx_ct(value, poly);
+        value = mul_x(value, poly);
         factor >>= 1;
         i = i.wrapping_add(1);
     }
@@ -141,184 +317,77 @@ fn sbox_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
     crate::ct::eval_byte_sbox(coeffs, input)
 }
 
-#[inline]
-fn s1<const CT: bool>(w: u32) -> u32 {
-    let (srw0, srw1, srw2, srw3) = if CT {
-        (
-            sbox_eval(&SR_ANF, (w >> 24) as u8),
-            sbox_eval(&SR_ANF, ((w >> 16) & 0xFF) as u8),
-            sbox_eval(&SR_ANF, ((w >> 8) & 0xFF) as u8),
-            sbox_eval(&SR_ANF, (w & 0xFF) as u8),
-        )
-    } else {
-        (
-            SR[(w >> 24) as usize],
-            SR[((w >> 16) & 0xFF) as usize],
-            SR[((w >> 8) & 0xFF) as usize],
-            SR[(w & 0xFF) as usize],
-        )
-    };
-    let mul = if CT { mulx_ct } else { mulx };
-    let r0 = mul(srw0, 0x1B) ^ srw1 ^ srw2 ^ mul(srw3, 0x1B) ^ srw3;
-    let r1 = mul(srw0, 0x1B) ^ srw0 ^ mul(srw1, 0x1B) ^ srw2 ^ srw3;
-    let r2 = srw0 ^ mul(srw1, 0x1B) ^ srw1 ^ mul(srw2, 0x1B) ^ srw3;
-    let r3 = srw0 ^ srw1 ^ mul(srw2, 0x1B) ^ srw2 ^ mul(srw3, 0x1B);
-    u32::from_be_bytes([r0, r1, r2, r3])
-}
-
-#[inline]
-fn s2<const CT: bool>(w: u32) -> u32 {
-    let (sqw0, sqw1, sqw2, sqw3) = if CT {
-        (
-            sbox_eval(&SQ_ANF, (w >> 24) as u8),
-            sbox_eval(&SQ_ANF, ((w >> 16) & 0xFF) as u8),
-            sbox_eval(&SQ_ANF, ((w >> 8) & 0xFF) as u8),
-            sbox_eval(&SQ_ANF, (w & 0xFF) as u8),
-        )
-    } else {
-        (
-            SQ[(w >> 24) as usize],
-            SQ[((w >> 16) & 0xFF) as usize],
-            SQ[((w >> 8) & 0xFF) as usize],
-            SQ[(w & 0xFF) as usize],
-        )
-    };
-    let mul = if CT { mulx_ct } else { mulx };
-    let r0 = mul(sqw0, 0x69) ^ sqw1 ^ sqw2 ^ mul(sqw3, 0x69) ^ sqw3;
-    let r1 = mul(sqw0, 0x69) ^ sqw0 ^ mul(sqw1, 0x69) ^ sqw2 ^ sqw3;
-    let r2 = sqw0 ^ mul(sqw1, 0x69) ^ sqw1 ^ mul(sqw2, 0x69) ^ sqw3;
-    let r3 = sqw0 ^ sqw1 ^ mul(sqw2, 0x69) ^ sqw2 ^ mul(sqw3, 0x69);
-    u32::from_be_bytes([r0, r1, r2, r3])
-}
-
 struct Snow3gCore {
+    /// Keystream bytes of a partially consumed word, right-aligned:
+    /// `ks[4 - ks_len..]` are still unused.
+    ks: [u8; 4],
+    ks_len: u8,
     s: [u32; 16],
     r1: u32,
     r2: u32,
     r3: u32,
 }
 
-#[inline]
-fn clock_fsm<const CT: bool>(core: &mut Snow3gCore) -> u32 {
-    let f = core.s[15].wrapping_add(core.r1) ^ core.r2;
-    let r = core.r2.wrapping_add(core.r3 ^ core.s[5]);
-    core.r3 = s2::<CT>(core.r2);
-    core.r2 = s1::<CT>(core.r1);
-    core.r1 = r;
-    f
-}
-
-#[inline]
-fn lfsr_feedback<const CT: bool>(core: &Snow3gCore) -> u32 {
-    let mul_alpha = if CT {
-        alpha_word_ct((core.s[0] >> 24) as u8, MUL_ALPHA_FACTORS)
-    } else {
-        MUL_ALPHA[(core.s[0] >> 24) as usize]
-    };
-    let div_alpha = if CT {
-        alpha_word_ct((core.s[11] & 0xFF) as u8, DIV_ALPHA_FACTORS)
-    } else {
-        DIV_ALPHA[(core.s[11] & 0xFF) as usize]
-    };
-    ((core.s[0] << 8) & 0xFFFF_FF00)
-        ^ mul_alpha
-        ^ core.s[2]
-        ^ ((core.s[11] >> 8) & 0x00FF_FFFF)
-        ^ div_alpha
-}
-
-#[inline]
-fn clock_lfsr<const CT: bool>(core: &mut Snow3gCore, f: Option<u32>) {
-    let mut v = lfsr_feedback::<CT>(core);
-    if let Some(fsm_word) = f {
-        v ^= fsm_word;
+impl Snow3gCore {
+    /// Forget the unused bytes of a partially consumed word. Unused keystream
+    /// is as secret as the state that made it, so it is wiped, not just
+    /// forgotten.
+    fn discard_pending(&mut self) {
+        crate::ct::zeroize_slice(self.ks.as_mut_slice());
+        self.ks_len = 0;
     }
-    core.s.copy_within(1..16, 0);
-    core.s[15] = v;
 }
 
-fn init_core<const CT: bool>(key: &[u8; 16], iv: &[u8; 16]) -> Snow3gCore {
-    let k = [
-        load_be_u32(&key[0..4]),
-        load_be_u32(&key[4..8]),
-        load_be_u32(&key[8..12]),
-        load_be_u32(&key[12..16]),
-    ];
-    let iv = [
-        load_be_u32(&iv[0..4]),
-        load_be_u32(&iv[4..8]),
-        load_be_u32(&iv[8..12]),
-        load_be_u32(&iv[12..16]),
-    ];
-
-    let mut core = Snow3gCore {
-        s: [
-            k[0] ^ 0xFFFF_FFFF,
-            k[1] ^ 0xFFFF_FFFF,
-            k[2] ^ 0xFFFF_FFFF,
-            k[3] ^ 0xFFFF_FFFF,
-            k[0],
-            k[1],
-            k[2],
-            k[3],
-            k[0] ^ 0xFFFF_FFFF,
-            k[1] ^ 0xFFFF_FFFF ^ iv[3],
-            k[2] ^ 0xFFFF_FFFF ^ iv[2],
-            k[3] ^ 0xFFFF_FFFF,
-            k[0] ^ iv[1],
-            k[1],
-            k[2],
-            k[3] ^ iv[0],
-        ],
-        r1: 0,
-        r2: 0,
-        r3: 0,
-    };
-
-    for _ in 0..32 {
-        let f = clock_fsm::<CT>(&mut core);
-        clock_lfsr::<CT>(&mut core, Some(f));
+fn fill_core<const CT: bool>(core: &mut Snow3gCore, mut buf: &mut [u8]) {
+    // Drain the unused bytes of the last partial word first, so a sequence
+    // of `fill` calls sees one continuous keystream regardless of how the
+    // caller chunks its buffers.
+    let pending = usize::from(core.ks_len);
+    if pending > 0 {
+        let take = pending.min(buf.len());
+        let start = 4 - pending;
+        for (b, k) in buf[..take].iter_mut().zip(&core.ks[start..start + take]) {
+            *b ^= k;
+        }
+        core.ks_len = u8::try_from(pending - take).expect("at most 3");
+        buf = &mut buf[take..];
     }
-
-    let _ = clock_fsm::<CT>(&mut core);
-    clock_lfsr::<CT>(&mut core, None);
-    core
-}
-
-#[inline]
-fn next_word_core<const CT: bool>(core: &mut Snow3gCore) -> u32 {
-    let z = clock_fsm::<CT>(core) ^ core.s[0];
-    clock_lfsr::<CT>(core, None);
-    z
-}
-
-fn fill_core<const CT: bool>(core: &mut Snow3gCore, buf: &mut [u8]) {
     let mut chunks = buf.chunks_exact_mut(4);
     for chunk in &mut chunks {
-        let ks = next_word_core::<CT>(core).to_be_bytes();
+        let ks = keystream_word::<CT>(core).to_be_bytes();
         for (b, k) in chunk.iter_mut().zip(ks.iter()) {
             *b ^= k;
         }
     }
     let rem = chunks.into_remainder();
     if !rem.is_empty() {
-        let ks = next_word_core::<CT>(core).to_be_bytes();
+        let ks = keystream_word::<CT>(core).to_be_bytes();
         for (b, k) in rem.iter_mut().zip(ks.iter()) {
             *b ^= k;
         }
+        core.ks = ks;
+        core.ks_len = u8::try_from(4 - rem.len()).expect("at most 3");
     }
 }
 
-/// SNOW 3G stream cipher (ETSI/SAGE v1.1).
+/// SNOW 3G stream cipher (ETSI/SAGE Document 2, version 1.1).
+///
+/// **Not constant-time.** Every clock reads MULα and DIVα (§3.4.2, §3.4.3),
+/// two 1 KiB tables, at indices that are bytes of the secret LFSR cells `s0`
+/// and `s11`, and the FSM's S1 and S2 (§3.3) read the SR and SQ tables at
+/// bytes of the secret registers R1 and R2. The memory access pattern
+/// therefore depends on the key. Where an attacker may observe timing or
+/// cache behaviour, use [`Snow3gCt`], which computes the same keystream
+/// without secret-indexed reads.
 pub struct Snow3g {
     core: Snow3gCore,
 }
 
 /// SNOW 3G constant-time software path.
 ///
-/// `Snow3gCt` preserves the same LFSR and FSM structure as [`Snow3g`] but
-/// replaces secret-indexed S-box and alpha-table reads with constant-time
-/// evaluators and fixed-scan lookups.
+/// `Snow3gCt` runs the same LFSR and FSM as [`Snow3g`] but never indexes a
+/// table with secret data: SR and SQ are evaluated from their packed ANF, and
+/// MULα and DIVα multiply by their constant GF(2^8) factors bit by bit.
 pub struct Snow3gCt {
     core: Snow3gCore,
 }
@@ -328,7 +397,7 @@ impl Snow3g {
     #[must_use]
     pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
         Self {
-            core: init_core::<false>(key, iv),
+            core: initialise::<false>(key, iv),
         }
     }
 
@@ -341,11 +410,19 @@ impl Snow3g {
     }
 
     /// Generate the next 32-bit keystream word.
+    ///
+    /// Starts a fresh word: any bytes left over from a partial-word `fill` are
+    /// discarded (and wiped).
     pub fn next_word(&mut self) -> u32 {
-        next_word_core::<false>(&mut self.core)
+        self.core.discard_pending();
+        keystream_word::<false>(&mut self.core)
     }
 
     /// XOR `buf` with keystream bytes in big-endian word order.
+    ///
+    /// Successive calls continue the same keystream byte for byte: a partially
+    /// consumed word is carried over, so chunked and one-shot encryption of the
+    /// same data agree.
     pub fn fill(&mut self, buf: &mut [u8]) {
         fill_core::<false>(&mut self.core, buf);
     }
@@ -356,7 +433,7 @@ impl Snow3gCt {
     #[must_use]
     pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
         Self {
-            core: init_core::<true>(key, iv),
+            core: initialise::<true>(key, iv),
         }
     }
 
@@ -369,11 +446,19 @@ impl Snow3gCt {
     }
 
     /// Generate the next 32-bit keystream word.
+    ///
+    /// Starts a fresh word: any bytes left over from a partial-word `fill` are
+    /// discarded (and wiped).
     pub fn next_word(&mut self) -> u32 {
-        next_word_core::<true>(&mut self.core)
+        self.core.discard_pending();
+        keystream_word::<true>(&mut self.core)
     }
 
     /// XOR `buf` with keystream bytes in big-endian word order.
+    ///
+    /// Successive calls continue the same keystream byte for byte: a partially
+    /// consumed word is carried over, so chunked and one-shot encryption of the
+    /// same data agree.
     pub fn fill(&mut self, buf: &mut [u8]) {
         fill_core::<true>(&mut self.core, buf);
     }
@@ -382,6 +467,8 @@ impl Snow3gCt {
 impl Drop for Snow3g {
     fn drop(&mut self) {
         crate::ct::zeroize_slice(self.core.s.as_mut_slice());
+        crate::ct::zeroize_slice(self.core.ks.as_mut_slice());
+        self.core.ks_len = 0;
         self.core.r1 = 0;
         self.core.r2 = 0;
         self.core.r3 = 0;
@@ -391,6 +478,8 @@ impl Drop for Snow3g {
 impl Drop for Snow3gCt {
     fn drop(&mut self) {
         crate::ct::zeroize_slice(self.core.s.as_mut_slice());
+        crate::ct::zeroize_slice(self.core.ks.as_mut_slice());
+        self.core.ks_len = 0;
         self.core.r1 = 0;
         self.core.r2 = 0;
         self.core.r3 = 0;
@@ -400,6 +489,131 @@ impl Drop for Snow3gCt {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The keystream is one continuous byte stream: chunked fills must agree
+    /// with a single fill regardless of where the chunk boundaries fall
+    /// relative to the 32-bit word boundaries.
+    #[test]
+    fn chunked_fill_matches_one_shot() {
+        let key = [0x5Au8; 16];
+        let iv = [0xA5u8; 16];
+        let mut one_shot = [0u8; 29];
+        let mut chunked = [0u8; 29];
+        Snow3g::new(&key, &iv).fill(&mut one_shot);
+        let mut z = Snow3g::new(&key, &iv);
+        let mut off = 0;
+        for len in [1usize, 3, 7, 4, 9, 5] {
+            z.fill(&mut chunked[off..off + len]);
+            off += len;
+        }
+        assert_eq!(chunked, one_shot);
+
+        let mut one_shot_ct = [0u8; 29];
+        let mut chunked_ct = [0u8; 29];
+        Snow3gCt::new(&key, &iv).fill(&mut one_shot_ct);
+        let mut z = Snow3gCt::new(&key, &iv);
+        let mut off = 0;
+        for len in [1usize, 3, 7, 4, 9, 5] {
+            z.fill(&mut chunked_ct[off..off + len]);
+            off += len;
+        }
+        assert_eq!(chunked_ct, one_shot_ct);
+        assert_eq!(one_shot_ct, one_shot);
+    }
+
+    /// Fills shorter than the pending remainder of a word: one word is
+    /// consumed a byte (or three, then one) at a time, so a partial word is
+    /// carried across several calls and drained from successive offsets.
+    #[test]
+    fn sub_word_fills_drain_one_pending_word_across_calls() {
+        let key = [0x5Au8; 16];
+        let iv = [0xA5u8; 16];
+        let mut one_shot = [0u8; 12];
+        Snow3g::new(&key, &iv).fill(&mut one_shot);
+        let mut one_shot_ct = [0u8; 12];
+        Snow3gCt::new(&key, &iv).fill(&mut one_shot_ct);
+        assert_eq!(one_shot_ct, one_shot);
+
+        for lens in [
+            [1usize; 12].as_slice(),
+            &[3, 1, 1, 1, 2, 1, 1, 2],
+            &[2, 1, 1, 3, 3, 2],
+        ] {
+            let mut chunked = [0u8; 12];
+            let mut snow = Snow3g::new(&key, &iv);
+            let mut off = 0;
+            for &len in lens {
+                snow.fill(&mut chunked[off..off + len]);
+                off += len;
+            }
+            assert_eq!(off, 12);
+            assert_eq!(chunked, one_shot, "chunking {lens:?}");
+
+            let mut chunked_ct = [0u8; 12];
+            let mut snow = Snow3gCt::new(&key, &iv);
+            let mut off = 0;
+            for &len in lens {
+                snow.fill(&mut chunked_ct[off..off + len]);
+                off += len;
+            }
+            assert_eq!(chunked_ct, one_shot, "chunking {lens:?} (ct)");
+        }
+    }
+
+    /// `next_word` after a partial-word `fill` starts a fresh word and leaves
+    /// no pending keystream bytes behind.
+    #[test]
+    fn next_word_discards_and_wipes_pending_bytes() {
+        let key = [0x5Au8; 16];
+        let iv = [0xA5u8; 16];
+        let mut reference = Snow3g::new(&key, &iv);
+        let _ = reference.next_word();
+        let second = reference.next_word();
+
+        let mut snow = Snow3g::new(&key, &iv);
+        snow.fill(&mut [0u8; 1]);
+        assert_eq!(snow.core.ks_len, 3);
+        assert_eq!(snow.next_word(), second);
+        assert_eq!(snow.core.ks_len, 0);
+        assert_eq!(snow.core.ks, [0u8; 4]);
+
+        let mut snow = Snow3gCt::new(&key, &iv);
+        snow.fill(&mut [0u8; 1]);
+        assert_eq!(snow.next_word(), second);
+        assert_eq!(snow.core.ks_len, 0);
+        assert_eq!(snow.core.ks, [0u8; 4]);
+    }
+
+    /// `new_wiping` zeroes the caller's key and IV and yields the same stream
+    /// as `new`, on both paths.
+    #[test]
+    fn new_wiping_zeroes_inputs_and_matches_new() {
+        let key: [u8; 16] = core::array::from_fn(|i| u8::try_from(i * 9).expect("< 144"));
+        let iv: [u8; 16] = core::array::from_fn(|i| u8::try_from(i * 13).expect("< 208"));
+
+        let mut expected = [0u8; 40];
+        Snow3g::new(&key, &iv).fill(&mut expected);
+        let mut key_buf = key;
+        let mut iv_buf = iv;
+        let mut snow = Snow3g::new_wiping(&mut key_buf, &mut iv_buf);
+        assert_eq!(key_buf, [0u8; 16]);
+        assert_eq!(iv_buf, [0u8; 16]);
+        let mut out = [0u8; 40];
+        snow.fill(&mut out);
+        assert_eq!(out, expected);
+
+        let mut expected_ct = [0u8; 40];
+        Snow3gCt::new(&key, &iv).fill(&mut expected_ct);
+        assert_eq!(expected_ct, expected);
+        let mut key_buf = key;
+        let mut iv_buf = iv;
+        let mut snow = Snow3gCt::new_wiping(&mut key_buf, &mut iv_buf);
+        assert_eq!(key_buf, [0u8; 16]);
+        assert_eq!(iv_buf, [0u8; 16]);
+        let mut out = [0u8; 40];
+        snow.fill(&mut out);
+        assert_eq!(out, expected_ct);
+    }
 
     fn xorshift64(state: &mut u64) -> u64 {
         let mut x = *state;
@@ -443,37 +657,8 @@ mod tests {
         }
     }
 
-    fn initial_lfsr_from_key_iv(key: &[u8; 16], iv: &[u8; 16]) -> [u32; 16] {
-        let k = [
-            load_be_u32(&key[0..4]),
-            load_be_u32(&key[4..8]),
-            load_be_u32(&key[8..12]),
-            load_be_u32(&key[12..16]),
-        ];
-        let iv = [
-            load_be_u32(&iv[0..4]),
-            load_be_u32(&iv[4..8]),
-            load_be_u32(&iv[8..12]),
-            load_be_u32(&iv[12..16]),
-        ];
-        [
-            k[0] ^ 0xFFFF_FFFF,
-            k[1] ^ 0xFFFF_FFFF,
-            k[2] ^ 0xFFFF_FFFF,
-            k[3] ^ 0xFFFF_FFFF,
-            k[0],
-            k[1],
-            k[2],
-            k[3],
-            k[0] ^ 0xFFFF_FFFF,
-            k[1] ^ 0xFFFF_FFFF ^ iv[3],
-            k[2] ^ 0xFFFF_FFFF ^ iv[2],
-            k[3] ^ 0xFFFF_FFFF,
-            k[0] ^ iv[1],
-            k[1],
-            k[2],
-            k[3] ^ iv[0],
-        ]
+    fn full_state(core: &Snow3gCore) -> ([u32; 16], [u32; 3]) {
+        (core.s, [core.r1, core.r2, core.r3])
     }
 
     #[derive(Clone, Copy)]
@@ -488,29 +673,24 @@ mod tests {
         outputs: [u32; 2],
     }
 
+    /// Step the production key loading and clocks alongside Document 3's
+    /// trace, then check that `initialise` lands on the same state as the
+    /// stepped trace does.
     fn assert_official_trace<const CT: bool>(case: &OfficialTraceCase) {
-        assert_eq!(
-            initial_lfsr_from_key_iv(&case.key, &case.iv),
-            case.initial_lfsr
-        );
-
-        let mut core = Snow3gCore {
-            s: case.initial_lfsr,
-            r1: 0,
-            r2: 0,
-            r3: 0,
-        };
+        let mut core = load_key_iv(&case.key, &case.iv);
+        assert_eq!(core.s, case.initial_lfsr, "initial LFSR (§4.1 loading)");
+        assert_eq!([core.r1, core.r2, core.r3], [0; 3], "initial FSM");
 
         assert_eq!(trace_row(&core), case.init_rows[0], "initial row");
         for (i, expected) in case.init_rows.iter().enumerate().skip(1) {
-            let f = clock_fsm::<CT>(&mut core);
-            clock_lfsr::<CT>(&mut core, Some(f));
+            let f = fsm_clock::<CT>(&mut core);
+            lfsr_clock::<CT>(&mut core, f);
             assert_eq!(trace_row(&core), *expected, "init row {i}");
         }
 
         for _ in (case.init_rows.len() - 1)..32 {
-            let f = clock_fsm::<CT>(&mut core);
-            clock_lfsr::<CT>(&mut core, Some(f));
+            let f = fsm_clock::<CT>(&mut core);
+            lfsr_clock::<CT>(&mut core, f);
         }
 
         assert_eq!(core.s, case.final_lfsr, "final LFSR after init");
@@ -520,15 +700,20 @@ mod tests {
             "final FSM after init"
         );
 
-        let _ = clock_fsm::<CT>(&mut core);
-        clock_lfsr::<CT>(&mut core, None);
+        let _ = fsm_clock::<CT>(&mut core);
+        lfsr_clock::<CT>(&mut core, 0);
         assert_eq!(trace_row(&core), case.keystream_rows[0], "keystream row 0");
+        assert_eq!(
+            full_state(&initialise::<CT>(&case.key, &case.iv)),
+            full_state(&core),
+            "initialise() ends where the traced initialisation ends"
+        );
 
-        let z1 = next_word_core::<CT>(&mut core);
+        let z1 = keystream_word::<CT>(&mut core);
         assert_eq!(z1, case.outputs[0], "z1");
         assert_eq!(trace_row(&core), case.keystream_rows[1], "keystream row 1");
 
-        let z2 = next_word_core::<CT>(&mut core);
+        let z2 = keystream_word::<CT>(&mut core);
         assert_eq!(z2, case.outputs[1], "z2");
         assert_eq!(trace_row(&core), case.keystream_rows[2], "keystream row 2");
     }
@@ -543,16 +728,17 @@ mod tests {
             0xC2, 0x33,
         ];
 
-        let mut core = init_core::<CT>(&key, &iv);
-        assert_eq!(next_word_core::<CT>(&mut core), 0xD712_C05C, "z1");
-        assert_eq!(next_word_core::<CT>(&mut core), 0xA937_C2A6, "z2");
-        assert_eq!(next_word_core::<CT>(&mut core), 0xEB7E_AAE3, "z3");
+        let mut core = initialise::<CT>(&key, &iv);
+        assert_eq!(keystream_word::<CT>(&mut core), 0xD712_C05C, "z1");
+        assert_eq!(keystream_word::<CT>(&mut core), 0xA937_C2A6, "z2");
+        assert_eq!(keystream_word::<CT>(&mut core), 0xEB7E_AAE3, "z3");
         for _ in 0..2496 {
-            let _ = next_word_core::<CT>(&mut core);
+            let _ = keystream_word::<CT>(&mut core);
         }
-        assert_eq!(next_word_core::<CT>(&mut core), 0x9C0D_B3AA, "z2500");
+        assert_eq!(keystream_word::<CT>(&mut core), 0x9C0D_B3AA, "z2500");
     }
 
+    /// Document 3 §3.3, Test Set 1: z1 and z2.
     #[test]
     fn keystream_test_set_1() {
         let key = [
@@ -568,6 +754,7 @@ mod tests {
         assert_eq!(snow.next_word(), 0x7AC3_1373);
     }
 
+    /// Document 3 §3.4, Test Set 2: z1 and z2.
     #[test]
     fn keystream_test_set_2() {
         let key = [
@@ -583,6 +770,7 @@ mod tests {
         assert_eq!(snow.next_word(), 0xF751_480F);
     }
 
+    /// Document 3 §3.5, Test Set 3: z1 and z2.
     #[test]
     fn keystream_test_set_3() {
         let key = [
@@ -598,6 +786,7 @@ mod tests {
         assert_eq!(snow.next_word(), 0x7AE7_C4F8);
     }
 
+    /// Document 3 §3.3, Test Set 1: z1 and z2, through the constant-time path.
     #[test]
     fn keystream_test_set_1_ct() {
         let key = [
@@ -613,6 +802,7 @@ mod tests {
         assert_eq!(snow.next_word(), 0x7AC3_1373);
     }
 
+    /// Document 3 §3.4, Test Set 2: z1 and z2, through the constant-time path.
     #[test]
     fn keystream_test_set_2_ct() {
         let key = [
@@ -628,6 +818,7 @@ mod tests {
         assert_eq!(snow.next_word(), 0xF751_480F);
     }
 
+    /// Document 3 §3.5, Test Set 3: z1 and z2, through the constant-time path.
     #[test]
     fn keystream_test_set_3_ct() {
         let key = [
@@ -738,6 +929,9 @@ mod tests {
         }
     }
 
+    /// Document 3 §3.3, Test Set 1: the initial LFSR, the first 8 initialisation
+    /// steps, the state after initialisation, the first 3 keystream steps, and
+    /// z1, z2, through both paths.
     #[test]
     fn official_test_set_1_trace_fast_and_ct() {
         let key = [
@@ -915,6 +1109,7 @@ mod tests {
         assert_official_trace::<true>(&case);
     }
 
+    /// Document 3 §3.4, Test Set 2: the same trace points as Test Set 1.
     #[test]
     fn official_test_set_2_trace_fast_and_ct() {
         let key = [
@@ -1092,6 +1287,7 @@ mod tests {
         assert_official_trace::<true>(&case);
     }
 
+    /// Document 3 §3.5, Test Set 3: the same trace points as Test Set 1.
     #[test]
     fn official_test_set_3_trace_fast_and_ct() {
         let key = [
@@ -1269,6 +1465,8 @@ mod tests {
         assert_official_trace::<true>(&case);
     }
 
+    /// Document 3 §3.6, Test Set 4, "Iterated test for full tables coverage":
+    /// z1, z2, z3, and z2500, through both paths.
     #[test]
     fn official_test_set_4_iterated_fast_and_ct() {
         assert_iterated_test_set_4::<false>();

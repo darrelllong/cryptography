@@ -38,11 +38,12 @@ use cryptography::{
     Simon128_192, Simon128_256, Simon32_64, Simon48_72, Simon48_96, Simon64_128, Simon64_96,
     Simon96_144, Simon96_96, Sm4, Sm4Ct, Speck128_128, Speck128_192, Speck128_256, Speck32_64,
     Speck48_72, Speck48_96, Speck64_128, Speck64_96, Speck96_144, Speck96_96, TripleDes,
-    Twofish128, Twofish128Ct, Twofish192, Twofish192Ct, Twofish256, Twofish256Ct,
+    TripleDesCt, Twofish128, Twofish128Ct, Twofish192, Twofish192Ct, Twofish256, Twofish256Ct,
 };
 use cryptography::{Snow3g, Snow3gCt};
 
-const MIB: usize = 1024 * 1024;
+/// Bytes per megabyte: the throughput columns are labelled MB/s and mean 10^6 bytes.
+const MB: usize = 1_000_000;
 const DEFAULT_WORKLOAD_BYTES: usize = 256 * 1024;
 
 fn workload_bytes() -> usize {
@@ -53,28 +54,39 @@ fn workload_bytes() -> usize {
         .unwrap_or(DEFAULT_WORKLOAD_BYTES)
 }
 
+/// Write every byte of the workload so that page faults on a freshly mapped
+/// buffer land before the timed region rather than inside it.
+fn touch(buf: &mut [u8]) {
+    for (i, b) in buf.iter_mut().enumerate() {
+        *b = i as u8;
+    }
+    black_box(&buf);
+}
+
 fn bench_block<C: BlockCipher>(cipher: C, bytes: usize) -> f64 {
     let mut buf_len = bytes - (bytes % C::BLOCK_LEN);
     if buf_len == 0 {
         buf_len = C::BLOCK_LEN;
     }
     let mut buf = vec![0u8; buf_len];
+    touch(&mut buf);
     let t0 = Instant::now();
     for chunk in buf.chunks_exact_mut(C::BLOCK_LEN) {
         cipher.encrypt(black_box(chunk));
     }
     let elapsed = t0.elapsed();
     black_box(&buf);
-    buf_len as f64 / elapsed.as_secs_f64() / (MIB as f64)
+    buf_len as f64 / elapsed.as_secs_f64() / (MB as f64)
 }
 
 fn bench_stream<F: FnMut(&mut [u8])>(mut fill: F, bytes: usize) -> f64 {
     let mut buf = vec![0u8; bytes.max(1)];
+    touch(&mut buf);
     let t0 = Instant::now();
     fill(&mut buf);
     let elapsed = t0.elapsed();
     black_box(&buf);
-    buf.len() as f64 / elapsed.as_secs_f64() / (MIB as f64)
+    buf.len() as f64 / elapsed.as_secs_f64() / (MB as f64)
 }
 
 fn main() {
@@ -120,6 +132,10 @@ fn main() {
         "desct" => bench_block(DesCt::new(k8).expect("non-weak DES benchmark key"), bytes),
         "3des" => bench_block(
             TripleDes::new_3key(k24).expect("non-weak TDES benchmark key"),
+            bytes,
+        ),
+        "3desct" => bench_block(
+            TripleDesCt::new_3key(k24).expect("non-weak TDES benchmark key"),
             bytes,
         ),
         // ── Grasshopper (Кузнечик) ────────────────────────────────────────────

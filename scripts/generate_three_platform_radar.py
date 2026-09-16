@@ -78,6 +78,12 @@ def auto_log2_bounds(values: list[float]) -> tuple[float, float]:
     return (lo_pow, hi_pow)
 
 
+def xml_escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    )
+
+
 def value_radius(value: float, lo: float, hi: float) -> float:
     if value is None or not math.isfinite(value) or value <= 0:
         return 0.0
@@ -149,8 +155,13 @@ def generate_svg(args) -> str:
     spokes: list[tuple[float, float]] = [polar(RADIUS, a) for a in angles]
 
     # Curves.
-    def curve(values: list[float]) -> list[tuple[float, float]]:
-        return [polar(value_radius(v if v == v else lo, lo, hi), a) for v, a in zip(values, angles)]
+    def curve(values: list[float]) -> list[tuple[float, float] | None]:
+        # An unmeasured axis (NaN in the CSV) is left out of the polygon and
+        # gets no marker, rather than being drawn at the bottom of the scale.
+        return [
+            polar(value_radius(v, lo, hi), a) if v == v else None
+            for v, a in zip(values, angles)
+        ]
 
     wigner_pts = curve(wigner_v)
     moore_pts = curve(moore_v)
@@ -215,12 +226,15 @@ def generate_svg(args) -> str:
         (moore_pts, MOORE_COLOR),
         (darby_pts, DARBY_COLOR),
     ):
-        poly = fmt_points(pts)
+        measured = [pt for pt in pts if pt is not None]
+        if len(measured) < len(pts):
+            print(f"  warning: {len(pts) - len(measured)} unmeasured axes left as gaps", file=sys.stderr)
+        poly = fmt_points(measured)
         parts.append(
             f'<polygon points="{poly}" fill="{color}" fill-opacity="0.10" '
             f'stroke="{color}" stroke-width="2.0" stroke-linejoin="round"/>'
         )
-        for x, y in pts:
+        for x, y in measured:
             parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.0" fill="{color}"/>')
 
     # Axis labels.
@@ -228,7 +242,7 @@ def generate_svg(args) -> str:
         parts.append(
             f'<text x="{float(entry["x"]):.1f}" y="{float(entry["y"]):.1f}" '
             f'font-size="12" fill="{TEXT_COLOR}" text-anchor="{entry["anchor"]}">'
-            f'{entry["label"]}</text>'
+            f'{xml_escape(str(entry["label"]))}</text>'
         )
 
     # Legend: --legend "a;b;c" wins, then the historical wigner/moore/darby

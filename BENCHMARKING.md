@@ -163,13 +163,17 @@ different level.
 `--preset quick` targets 20 % CI.  Use `--preset normal` for 10 % or
 `--preset strict` for tighter bounds.
 
-For Pilot-driven reference-C baselines from the vendored Kyber code, run:
+For Pilot-driven timing baselines of the pq-crystals Kyber reference C, run the
+script below. `scripts/fetch_mlkem_refs.sh` downloads that code into the ignored
+`third_party/` directory; it is not vendored, and none of it is compiled into the
+crate:
 
 ```bash
 bash scripts/bench_mlkem_ref.sh
 ```
 
-For Pilot-driven reference-C baselines from the vendored Dilithium code, run:
+For the pq-crystals Dilithium reference C, fetched the same way by
+`scripts/fetch_mldsa_refs.sh`, run:
 
 ```bash
 bash scripts/bench_mldsa_ref.sh

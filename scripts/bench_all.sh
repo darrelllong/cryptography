@@ -33,6 +33,11 @@ measure() {
     mean=$(echo  "$out" | awk '/Reading mean/{print $5}')
     ci=$(echo    "$out" | awk '/Reading CI/{print $5}')
     rounds=$(echo "$out" | awk '/^Rounds:/{print $2}')
+    if [[ -z "$mean" || -z "$ci" || -z "$rounds" ]]; then
+        echo "pilot-bench output for $name carried no mean, CI or round count:" >&2
+        echo "$out" >&2
+        exit 1
+    fi
     printf "| %-20s | %5s | %5s | %8s | %8s | %5s |\n" \
            "$name" "$block" "$key" "$mean" "±$ci" "$rounds"
 }
@@ -71,6 +76,7 @@ hdr "DES / 3DES"
 measure des    64  56
 measure desct  64  56
 measure 3des   64 168
+measure 3desct 64 168
 
 hdr "Grasshopper (GOST R 34.12-2015)"
 measure grasshopper    128 256
@@ -92,11 +98,8 @@ measure seedct  128 128
 
 hdr "Serpent"
 measure serpent128    128 128
-measure serpent128ct  128 128
 measure serpent192    128 192
-measure serpent192ct  128 192
 measure serpent256    128 256
-measure serpent256ct  128 256
 
 hdr "SM4"
 measure sm4    128 128

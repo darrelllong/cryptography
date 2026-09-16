@@ -6,6 +6,9 @@
 //!
 //! The goal is to catch architectural drift early (naming regressions, Ct policy
 //! regressions, unsafe root exports) without introducing a separate lint tool.
+//! Every check here reads text: it establishes what the sources say, not what
+//! the compiled code does. The behavioural counterparts live in the ordinary
+//! tests and in `tests/wipe_behaviour.rs`.
 
 #[cfg(test)]
 mod tests {
@@ -66,8 +69,12 @@ mod tests {
         assert!(edwards.contains("agree_compressed_point("));
     }
 
+    /// A spelling gate, nothing more: two idioms that turn a comparison into
+    /// a branch-and-widen (`u8::from(a == b)`, and multiplying by it) may not
+    /// appear in `ct.rs`. It proves nothing about the emitted code; the
+    /// documentation of `constant_time_eq_mask` records what does.
     #[test]
-    fn ct_mask_helper_stays_arithmetic_only() {
+    fn ct_rs_does_not_spell_comparisons_as_bool_casts() {
         let ct = include_str!("ct.rs");
         assert_none("ct.rs", ct, &["u8::from(a == b)", "wrapping_mul(u8::from("]);
         assert!(ct.contains("fn constant_time_eq_mask"));
@@ -83,8 +90,12 @@ mod tests {
         );
     }
 
+    /// The crate root re-exports no public-key type. `vt` labels the
+    /// variable-time surface, it does not gate it: `public_key` reaches the
+    /// same types by their module paths. This checks only that the flat
+    /// re-exports stay under `vt`, so the label is on every short path.
     #[test]
-    fn root_exports_do_not_expose_variable_time_pk_directly() {
+    fn public_key_types_have_no_root_level_reexport() {
         let lib = include_str!("lib.rs");
         assert!(lib.contains("pub mod vt"));
         assert_none("lib.rs", lib, &["pub use public_key::"]);
@@ -111,9 +122,10 @@ mod tests {
     fn unsafe_code_stays_confined_to_audited_sites() {
         // Policy gate:
         // - the crate root must deny unsafe_code;
-        // - ct.rs may contain exactly one unsafe block (volatile zeroization);
+        // - ct.rs may contain exactly one unsafe block (zeroize_slice), active
+        //   in every build;
         // - sha3.rs unsafe is allowed only behind the opt-in `arm-sha3`
-        //   feature, so a default build is pure safe Rust besides ct.rs.
+        //   feature, so a default build is entirely safe Rust.
         let lib = include_str!("lib.rs");
         assert!(
             lib.contains("#![deny(unsafe_code)]"),
@@ -133,6 +145,214 @@ mod tests {
         assert!(
             sha3.matches(gate).count() >= 2,
             "sha3.rs hardware path must be gated on the arm-sha3 feature (dispatch + impl)"
+        );
+
+        // - and no other Rust source in the repository may hold unsafe code
+        //   or relax the lint. `fast/` is the exception: its two crates are
+        //   the platform-intrinsics experiments (AES-NI, ARMv8 AES, SHA and
+        //   SHA-3 instructions), unsafe by nature and outside the published
+        //   package. `tests/wipe_behaviour.rs` is the other: it observes
+        //   drop-time wiping by reading a dropped value's storage back, which
+        //   only raw pointers can express.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let audited = [
+            root.join("src").join("ct.rs"),
+            root.join("src").join("hash").join("sha3.rs"),
+            root.join("src").join("scrub.rs"),
+            root.join("tests").join("wipe_behaviour.rs"),
+            // Drop-observation tests on private types (`SubkeyTable`,
+            // `TagState`, `NonceKeys`): `#[cfg(test)]` modules that read a
+            // dropped value's storage back, the same instrument as
+            // tests/wipe_behaviour.rs, kept in-tree because the types they
+            // observe are private.
+            root.join("src").join("modes").join("ghash.rs"),
+            root.join("src").join("modes").join("poly1305.rs"),
+            root.join("src").join("modes").join("gcm_siv.rs"),
+            root.join("src").join("modes").join("ocb.rs"),
+            root.join("tests").join("wipe_modes.rs"),
+        ];
+        let markers = [
+            concat!("unsafe", " {"),
+            concat!("unsafe", " fn"),
+            concat!("unsafe", " impl"),
+            concat!("unsafe", " trait"),
+            concat!("unsafe", " extern"),
+            concat!("allow(unsafe", "_code)"),
+            concat!("expect(unsafe", "_code)"),
+        ];
+        let mut offenders = Vec::new();
+        for path in repository_rust_sources()
+            .iter()
+            .filter(|p| !audited.contains(p))
+        {
+            let text = std::fs::read_to_string(path).expect("source is UTF-8");
+            for marker in markers {
+                if text.contains(marker) {
+                    offenders.push(format!("{} contains `{marker}`", path.display()));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "unsafe code outside the audited sites: {offenders:?}"
+        );
+    }
+
+    /// Every Rust source file the unsafe gate covers: `src/`, `tests/`,
+    /// `fuzz/` and `benchmarks/`, without their build directories. `fast/`
+    /// is left out as the intrinsics crates (see the gate).
+    fn repository_rust_sources() -> Vec<std::path::PathBuf> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut out = Vec::new();
+        for dir in ["src", "tests", "fuzz", "benchmarks"] {
+            let dir = root.join(dir);
+            if dir.is_dir() {
+                visit_rust_files(&dir, &mut out);
+            }
+        }
+        out
+    }
+
+    fn visit_rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("directory is readable") {
+            let path = entry.expect("directory entry").path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|name| name == "target") {
+                    continue;
+                }
+                visit_rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Every Rust source file under `src/`, for policy gates that must hold
+    /// crate-wide rather than for a hand-maintained list of files.
+    fn rust_sources() -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        visit_rust_files(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut out,
+        );
+        out
+    }
+
+    /// The keys and string or array values of one TOML inline table,
+    /// `{ key = value, ... }`, as written in `Cargo.toml`.
+    fn parse_inline_table(text: &str) -> std::collections::BTreeMap<String, String> {
+        let inner = text
+            .trim()
+            .strip_prefix('{')
+            .and_then(|rest| rest.strip_suffix('}'))
+            .unwrap_or_else(|| panic!("not an inline table: {text}"));
+        let mut entries = std::collections::BTreeMap::new();
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut field = String::new();
+        let mut fields = Vec::new();
+        for ch in inner.chars() {
+            match ch {
+                '"' => in_string = !in_string,
+                '[' if !in_string => depth += 1,
+                ']' if !in_string => depth -= 1,
+                ',' if !in_string && depth == 0 => {
+                    fields.push(std::mem::take(&mut field));
+                    continue;
+                }
+                _ => {}
+            }
+            field.push(ch);
+        }
+        fields.push(field);
+        for field in fields.iter().map(|f| f.trim()).filter(|f| !f.is_empty()) {
+            let (key, value) = field
+                .split_once('=')
+                .unwrap_or_else(|| panic!("not a key = value pair: {field}"));
+            entries.insert(key.trim().to_owned(), value.trim().to_owned());
+        }
+        entries
+    }
+
+    /// The strings of a TOML array of strings, `["a", "b"]`.
+    fn parse_string_array(text: &str) -> Vec<String> {
+        text.trim()
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+            .unwrap_or_else(|| panic!("not an array: {text}"))
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(|item| {
+                item.strip_prefix('"')
+                    .and_then(|rest| rest.strip_suffix('"'))
+                    .unwrap_or_else(|| panic!("not a string: {item}"))
+                    .to_owned()
+            })
+            .collect()
+    }
+
+    /// The keys defined in one `[section]` of a TOML file.
+    fn section_keys(toml: &str, section: &str) -> Vec<String> {
+        let header = format!("[{section}]");
+        toml.lines()
+            .map(str::trim)
+            .skip_while(|line| *line != header)
+            .skip(1)
+            .take_while(|line| !line.starts_with('['))
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter_map(|line| line.split_once('=').map(|(key, _)| key.trim().to_owned()))
+            .collect()
+    }
+
+    /// Manifest gate: cryptographic code wipes its secrets in every build.
+    /// rump keeps its limb wiping opt-in because it is general-purpose, so
+    /// this crate's `rust-mp` dependency entry must enable rump's `wipe`
+    /// feature, no cargo feature of this crate may control wiping, and no
+    /// source may gate on one. This reads the manifest and the sources; that
+    /// a dropped value's bytes are in fact zero is what
+    /// `tests/wipe_behaviour.rs` observes.
+    #[test]
+    fn manifest_enables_rump_wipe_and_declares_no_wipe_feature() {
+        let cargo = include_str!("../Cargo.toml");
+        let dependency = cargo
+            .lines()
+            .find_map(|line| line.strip_prefix("rust-mp = "))
+            .expect("Cargo.toml declares the rust-mp dependency");
+        let entry = parse_inline_table(dependency);
+        assert_eq!(
+            entry.get("path").map(String::as_str),
+            Some("\"../rump\""),
+            "rust-mp is the sibling checkout: {dependency}"
+        );
+        let features = entry
+            .get("features")
+            .map(|list| parse_string_array(list))
+            .unwrap_or_default();
+        assert!(
+            features.iter().any(|feature| feature == "wipe"),
+            "the rust-mp dependency must enable rump's wipe feature: {dependency}"
+        );
+        assert!(
+            !section_keys(cargo, "features")
+                .iter()
+                .any(|key| key == "wipe"),
+            "no cargo feature may control wiping"
+        );
+
+        let needle = concat!("feature = ", "\"wipe\"");
+        let hits: Vec<String> = rust_sources()
+            .into_iter()
+            .filter(|path| {
+                std::fs::read_to_string(path)
+                    .expect("source is UTF-8")
+                    .contains(needle)
+            })
+            .map(|path| path.display().to_string())
+            .collect();
+        assert!(
+            hits.is_empty(),
+            "wiping must not be gated on a wipe feature: {hits:?}"
         );
     }
 
@@ -199,6 +419,7 @@ mod tests {
             "DesCt",
             "GrasshopperCt",
             "MagmaCt",
+            "Present128Ct",
             "Present80Ct",
             "SeedCt",
             "Serpent128Ct",
@@ -233,12 +454,13 @@ mod tests {
         // boolean circuit (`sbox_bool`).
         let ct_indicators: &[&str] = &[
             "eval_byte_sbox", // generic 8-bit ANF (Grasshopper, Camellia, SEED, SM4, SNOW 3G, ZUC)
-            "eval_nibble_sbox", // generic 4-bit ANF (PRESENT, Serpent)
+            "eval_nibble_sbox", // generic 4-bit ANF (PRESENT)
+            "apply_sbox_words", // word-parallel bitsliced ANF (Serpent)
             "ct_lookup_u32",  // full-table-scan 256-entry (CAST-128)
             "ct_lookup_u8_16", // full-table-scan 16-entry (Twofish)
             "sbox_bool",      // synthesized boolean circuit (AES)
             "sbox_ct",        // custom ANF per-S-box (DES)
-            "pi_ct",          // custom ANF per-S-box (Magma)
+            "nibble_monomials", // custom ANF per-S-box (Magma)
         ];
 
         let ct_module_sources: &[(&str, &str)] = &[

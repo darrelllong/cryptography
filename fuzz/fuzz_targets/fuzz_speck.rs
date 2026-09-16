@@ -29,15 +29,15 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
     match data[0] % 10 {
-        0 => roundtrip!(&data[1..],  8,  4, Speck32_64),    // Speck 32/64
-        1 => roundtrip!(&data[1..],  9,  6, Speck48_72),    // Speck 48/72
-        2 => roundtrip!(&data[1..], 12,  6, Speck48_96),    // Speck 48/96
-        3 => roundtrip!(&data[1..], 12,  8, Speck64_96),    // Speck 64/96
-        4 => roundtrip!(&data[1..], 16,  8, Speck64_128),   // Speck 64/128
-        5 => roundtrip!(&data[1..], 12, 12, Speck96_96),    // Speck 96/96
-        6 => roundtrip!(&data[1..], 18, 12, Speck96_144),   // Speck 96/144
-        7 => roundtrip!(&data[1..], 16, 16, Speck128_128),  // Speck 128/128
-        8 => roundtrip!(&data[1..], 24, 16, Speck128_192),  // Speck 128/192
-        _ => roundtrip!(&data[1..], 32, 16, Speck128_256),  // Speck 128/256
+        0 => roundtrip!(&data[1..], 8, 4, Speck32_64), // Speck 32/64
+        1 => roundtrip!(&data[1..], 9, 6, Speck48_72), // Speck 48/72
+        2 => roundtrip!(&data[1..], 12, 6, Speck48_96), // Speck 48/96
+        3 => roundtrip!(&data[1..], 12, 8, Speck64_96), // Speck 64/96
+        4 => roundtrip!(&data[1..], 16, 8, Speck64_128), // Speck 64/128
+        5 => roundtrip!(&data[1..], 12, 12, Speck96_96), // Speck 96/96
+        6 => roundtrip!(&data[1..], 18, 12, Speck96_144), // Speck 96/144
+        7 => roundtrip!(&data[1..], 16, 16, Speck128_128), // Speck 128/128
+        8 => roundtrip!(&data[1..], 24, 16, Speck128_192), // Speck 128/192
+        _ => roundtrip!(&data[1..], 32, 16, Speck128_256), // Speck 128/256
     }
 });

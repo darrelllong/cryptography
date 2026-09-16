@@ -2,27 +2,43 @@
 //! implemented in pure, safe, portable Rust directly from their published
 //! specifications.
 //!
-//! Public-key primitives are variable-time and intentionally live under
-//! [`crate::vt`] to make that side-channel property explicit.
+//! Timing policy:
+//! - Public-key primitives are variable-time. They live under [`crate::vt`],
+//!   a namespace that labels that property; the same types are reachable
+//!   through [`crate::public_key`], so the label documents, it does not gate.
+//! - Root-level symmetric types with bare names (`Aes128/192/256`, `Des`,
+//!   `TripleDes`, `Camellia128/192/256` and the other table-driven ciphers)
+//!   are the fast software paths and are variable-time: their table indices
+//!   are secret key and data. Each has a `*Ct` sibling (`Aes128Ct`, `DesCt`,
+//!   `TripleDesCt`, `Camellia128Ct`, …) with no secret-dependent memory access
+//!   or branch; the two agree bit for bit, and the `Ct` type is the choice
+//!   whenever timing matters. The same holds for [`CtrDrbgAes256`] (T-table
+//!   AES) versus [`CtrDrbgAes256Ct`].
 //!
 //! Entropy warning:
 //! - This crate does not provide an operating-system entropy source.
-//! - [`CtrDrbgAes256`] is a deterministic DRBG, not a seed generator.
+//! - [`CtrDrbgAes256`] and [`CtrDrbgAes256Ct`] are deterministic DRBGs, not
+//!   seed generators.
 //! - Callers must provide high-entropy external seed material for all
 //!   randomness-dependent operations.
 //!
-//! Safety policy:
-//! - `#![deny(unsafe_code)]` is enforced crate-wide. The only exception in a
-//!   default build is the audited volatile-write zeroization helper
-//!   [`zeroize_slice`], which cannot be expressed in safe Rust. The sole
-//!   dependency, the sibling `rump` multiprecision crate (extracted from this
-//!   tree), is built with its `wipe` feature — always enabled by this crate —
-//!   so every `BigUint` volatile-wipes its live limbs on drop and rump's
-//!   shrink paths, exponentiation ladder, and samplers wipe the buffers they
-//!   abandon, behind rump's own copy of the same audited helper.
-//! - The opt-in `arm-sha3` cargo feature additionally enables an `unsafe`
-//!   NEON Keccak path on aarch64 (FEAT_SHA3, runtime-detected). Builds
-//!   without that feature contain no other `unsafe`.
+//! Safety and memory policy:
+//! - This crate scrubs its own secrets in every build: expanded key schedules
+//!   and DRBG state on drop, caller key buffers in the `*_wiping`
+//!   constructors, and secret temporaries (speculative AEAD plaintext, KDF
+//!   inputs, nonce material) before they are freed, all through
+//!   [`zeroize_slice`].
+//! - `BigUint` values come from the sibling `rump` crate. rump is
+//!   general-purpose and keeps its limb wiping off by default because wiping
+//!   costs speed; this crate turns it on, so every `BigUint` wipes its limbs on
+//!   drop and rump's arithmetic workspaces wipe on exit. Cargo features are
+//!   additive, so any build that includes this crate wipes every rump value.
+//! - Wiping is best effort: copies, reallocations, registers and swap are not
+//!   all covered. It does not change the variable-time public-key algorithms.
+//! - `#![deny(unsafe_code)]` holds crate-wide. The only exception in a default
+//!   build is the audited volatile-write helper [`zeroize_slice`], which safe
+//!   Rust cannot express; the opt-in `arm-sha3` feature adds the
+//!   runtime-detected aarch64 FEAT_SHA3 Keccak path.
 
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
@@ -31,7 +47,7 @@ mod ct;
 #[cfg(test)]
 mod test_utils;
 
-pub use ct::zeroize_slice;
+pub use ct::{zeroize_slice, Zeroable};
 
 #[cfg(feature = "ct_profile")]
 pub use ct::{
@@ -131,7 +147,7 @@ pub use ciphers::camellia::{
 };
 pub use ciphers::cast128::{Cast128, Cast128Ct, Cast5, Cast5Ct};
 pub use ciphers::chacha20::{ChaCha20, XChaCha20};
-pub use ciphers::des::{key_schedule, Des, DesCt, KeySchedule, TDesMode, TripleDes};
+pub use ciphers::des::{Des, DesCt, DesKeyError, TDesMode, TripleDes, TripleDesCt};
 pub use ciphers::grasshopper::{Grasshopper, GrasshopperCt};
 pub use ciphers::magma::{Magma, MagmaCt};
 pub use ciphers::present::{Present, Present128, Present128Ct, Present80, Present80Ct, PresentCt};
@@ -158,7 +174,7 @@ pub use ciphers::twofish::{
 };
 pub use ciphers::zuc::{Zuc128, Zuc128Ct};
 
-pub use cprng::ctr_drbg::CtrDrbgAes256;
+pub use cprng::ctr_drbg::{CtrDrbg, CtrDrbgAes256, CtrDrbgAes256Ct, CtrDrbgCipher};
 pub use hash::hkdf::Hkdf;
 pub use hash::hmac::Hmac;
 pub use hash::md5::Md5;
@@ -168,8 +184,9 @@ pub use hash::sha2::{Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 pub use hash::sha3::{Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128, Shake256};
 pub use hash::{Digest, Xof};
 pub use modes::{
-    Aes128GcmSiv, Aes256GcmSiv, AesKeyWrap, Cbc, Ccm, Cfb, Cfb8, ChaCha20Poly1305, Cmac, Ctr, Eax,
-    Ecb, Gcm, GcmVt, Gmac, GmacVt, Ocb, Ofb, Poly1305, Siv, Xts,
+    Aes128GcmSiv, Aes128GcmSivCt, Aes256GcmSiv, Aes256GcmSivCt, AesGcmSiv, AesKeyWrap, Cbc, Ccm,
+    Cfb, Cfb8, ChaCha20Poly1305, Cmac, Ctr, Eax, Ecb, Gcm, GcmSivBlockCipher, GcmVt, Gmac, GmacVt,
+    Ocb, Ofb, Poly1305, Siv, Xts,
 };
 
 impl StreamCipher for ChaCha20 {
@@ -232,6 +249,8 @@ impl<C: BlockCipher> Aead for Gcm<C> {
     }
 }
 
+/// The variable-time GHASH path: running time depends on the hash subkey `H`
+/// and on the data (see [`GcmVt`]); not for data an adversary can time.
 impl<C: BlockCipher> Aead for GcmVt<C> {
     type Tag = [u8; 16];
 
@@ -302,8 +321,8 @@ impl<C: BlockCipher> Aead for Eax<C> {
     }
 }
 
-impl<C: BlockCipher> Aead for Ocb<C> {
-    type Tag = [u8; 16];
+impl<C: BlockCipher, const TAG_LEN: usize> Aead for Ocb<C, TAG_LEN> {
+    type Tag = [u8; TAG_LEN];
 
     fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
         self.encrypt(nonce, aad, data)
@@ -314,27 +333,7 @@ impl<C: BlockCipher> Aead for Ocb<C> {
     }
 }
 
-impl Aead for Aes128GcmSiv {
-    type Tag = [u8; 16];
-
-    /// Panics if `nonce.len() != 12`.
-    fn encrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> Self::Tag {
-        let nonce: &[u8; 12] = nonce
-            .try_into()
-            .expect("AES-GCM-SIV nonce must be 12 bytes");
-        self.encrypt(nonce, aad, data)
-    }
-
-    /// Panics if `nonce.len() != 12`.
-    fn decrypt_in_place(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &Self::Tag) -> bool {
-        let nonce: &[u8; 12] = nonce
-            .try_into()
-            .expect("AES-GCM-SIV nonce must be 12 bytes");
-        self.decrypt(nonce, aad, data, tag)
-    }
-}
-
-impl Aead for Aes256GcmSiv {
+impl<C: GcmSivBlockCipher> Aead for AesGcmSiv<C> {
     type Tag = [u8; 16];
 
     /// Panics if `nonce.len() != 12`.
@@ -356,27 +355,36 @@ impl Aead for Aes256GcmSiv {
 
 /// Explicit variable-time public-key surface.
 ///
-/// Most items in this namespace use variable-time big-integer and ECC arithmetic
-/// and are unsuitable for side-channel exposed production signing/decryption.
+/// Assume everything in this namespace is variable-time. The classical schemes
+/// (RSA, DSA, DH, ElGamal, Paillier, Rabin, Cocks, Schmidt-Samoa, and every
+/// Weierstrass and Edwards curve scheme) run big-integer and curve arithmetic
+/// whose timing depends on secrets, and are unsuitable for side-channel-exposed
+/// signing, decryption, or key agreement.
 ///
-/// Exception: `X25519` and `X448` (RFC 7748) are constant-time. They live
-/// here because they share serialization conventions with the rest of the
-/// public-key surface, but the scalar-mult primitive itself is hardened
-/// against timing side channels on the secret scalar.
+/// A few modules are written to keep secret-dependent branches, table indices,
+/// and divisions out of their secret-key operations, and state the extent of
+/// that in their own documentation: [`x25519`](crate::public_key::x25519) and
+/// [`x448`](crate::public_key::x448) (RFC 7748 Montgomery ladders),
+/// [`ml_kem`](crate::public_key::ml_kem) (decapsulation, including the
+/// implicit-rejection selection), and the NTRU round-3 KEMs. They live here
+/// because they share the public-key serialization conventions.
 pub mod vt {
     pub use crate::public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
     pub use crate::public_key::dh::{Dh, DhParams, DhPrivateKey, DhPublicKey};
-    pub use crate::public_key::dsa::{Dsa, DsaPrivateKey, DsaPublicKey, DsaSignature};
+    pub use crate::public_key::dsa::{Dsa, DsaParams, DsaPrivateKey, DsaPublicKey, DsaSignature};
     pub use crate::public_key::ec::{
         b163, b233, b283, b409, b571, k163, k233, k283, k409, k571, p192, p224, p256, p384, p521,
-        secp256k1, AffinePoint, CurveParams,
+        secp256k1, AffinePoint, CurveParams, ExplicitField,
     };
     pub use crate::public_key::ec_elgamal::{
         EcElGamal, EcElGamalCiphertext, EcElGamalPrivateKey, EcElGamalPublicKey,
     };
     pub use crate::public_key::ecdh::{Ecdh, EcdhPrivateKey, EcdhPublicKey};
     pub use crate::public_key::ecdsa::{Ecdsa, EcdsaPrivateKey, EcdsaPublicKey, EcdsaSignature};
-    pub use crate::public_key::ecies::{Ecies, EciesPrivateKey, EciesPublicKey};
+    pub use crate::public_key::ecies::{
+        Ecies, EciesDhPrimitive, EciesEncryption, EciesError, EciesHash, EciesKdf, EciesMac,
+        EciesPointFormat, EciesPrivateKey, EciesPublicKey, EciesSetup,
+    };
     pub use crate::public_key::ed25519::{
         Ed25519, Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature,
     };
@@ -440,6 +448,7 @@ pub mod vt {
         NtruHrss701SharedSecret,
     };
     pub use crate::public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
+    pub use crate::public_key::primes::{FfcHash, FfcParameterSize, FfcSeed};
     pub use crate::public_key::rabin::{Rabin, RabinPrivateKey, RabinPublicKey};
     pub use crate::public_key::rsa::{Rsa, RsaPrivateKey, RsaPublicKey};
     pub use crate::public_key::rsa_pkcs1::{RsaOaep, RsaPss};
@@ -454,3 +463,13 @@ pub mod vt {
 
 #[cfg(test)]
 mod scrub;
+
+/// Every Rust code block in the manual and the README is a doctest.
+#[cfg(doctest)]
+#[doc = include_str!("../MANUAL.md")]
+pub struct ManualDoctests;
+
+/// Every Rust code block in the README is a doctest.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;

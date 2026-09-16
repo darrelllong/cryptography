@@ -14,6 +14,14 @@
 //!
 //! Rabbit is naturally byte-oriented like the other stream ciphers in this
 //! crate: `apply_keystream` `XOR`s the keystream into caller-owned buffers.
+//!
+//! Usage rules from RFC 4503 §3: one key encrypts at most 2^64 128-bit blocks
+//! (§3.1), and a generator run without the IV setup must never be reset under
+//! the same key (§3.2). See [`Rabbit::new`] and [`Rabbit::without_iv`].
+//!
+//! Timing: the state update is arithmetic only (no table lookups), but the
+//! `g`-function squares a secret 32-bit sum into 64 bits, so its running time
+//! is constant only where the hardware multiplier's is.
 
 // Rabbit counter increments `A[i]` from RFC 4503 §2.5 (derived from the
 // fractional part of sqrt(pi) in the original Rabbit specification).
@@ -54,7 +62,6 @@ fn g_func(x: u32, c: u32) -> u32 {
     (square as u32) ^ ((square >> 32) as u32)
 }
 
-#[derive(Clone)]
 struct RabbitCore {
     x: [u32; 8],
     c: [u32; 8],
@@ -100,6 +107,8 @@ impl RabbitCore {
             core.c[i] ^= core.x[(i + 4) & 7];
         }
 
+        // `k` is the key split into its eight 16-bit subkeys.
+        crate::ct::zeroize_slice(k.as_mut_slice());
         core
     }
 
@@ -125,7 +134,7 @@ impl RabbitCore {
 
     #[inline]
     fn next_state(&mut self) {
-        let old_c = self.c;
+        let mut old_c = self.c;
         let mut carry = self.carry;
         for i in 0..8 {
             let sum = u64::from(old_c[i]) + u64::from(A[i]) + u64::from(carry);
@@ -155,17 +164,22 @@ impl RabbitCore {
             .wrapping_add(g[5].rotate_left(16))
             .wrapping_add(g[4].rotate_left(16));
         self.x[7] = g[7].wrapping_add(g[6].rotate_left(8)).wrapping_add(g[5]);
+
+        // `old_c` copies the secret counter words and `g` the next state's
+        // inputs; neither may outlive the step.
+        crate::ct::zeroize_slice(old_c.as_mut_slice());
+        crate::ct::zeroize_slice(g.as_mut_slice());
     }
 
     #[inline]
     fn keystream_block(&mut self) -> [u8; 16] {
         self.next_state();
 
-        let s = [
-            self.x[0] ^ (self.x[5] >> 16) ^ self.x[3].wrapping_shl(16),
-            self.x[2] ^ (self.x[7] >> 16) ^ self.x[5].wrapping_shl(16),
-            self.x[4] ^ (self.x[1] >> 16) ^ self.x[7].wrapping_shl(16),
-            self.x[6] ^ (self.x[3] >> 16) ^ self.x[1].wrapping_shl(16),
+        let mut s = [
+            self.x[0] ^ (self.x[5] >> 16) ^ (self.x[3] << 16),
+            self.x[2] ^ (self.x[7] >> 16) ^ (self.x[5] << 16),
+            self.x[4] ^ (self.x[1] >> 16) ^ (self.x[7] << 16),
+            self.x[6] ^ (self.x[3] >> 16) ^ (self.x[1] << 16),
         ];
 
         // RFC 4503 publishes Rabbit test vectors in octet form using I2OSP, so
@@ -175,6 +189,7 @@ impl RabbitCore {
         out[4..8].copy_from_slice(&s[2].to_be_bytes());
         out[8..12].copy_from_slice(&s[1].to_be_bytes());
         out[12..16].copy_from_slice(&s[0].to_be_bytes());
+        crate::ct::zeroize_slice(s.as_mut_slice());
         out
     }
 }
@@ -184,6 +199,10 @@ impl RabbitCore {
 /// The `new` constructor applies both the key setup and the RFC IV setup.
 /// `without_iv` leaves the cipher in the key-only state used by the RFC's
 /// key-setup test vectors.
+///
+/// RFC 4503 §3.1: one key is good for at most 2^64 128-bit keystream blocks;
+/// past that the key must be replaced, whether or not IVs are rotated. The
+/// instance keeps no block count; that budget is the caller's.
 pub struct Rabbit {
     core: RabbitCore,
     block: [u8; 16],
@@ -191,7 +210,10 @@ pub struct Rabbit {
 }
 
 impl Rabbit {
-    /// Create Rabbit from a 128-bit key and 64-bit IV.
+    /// Create Rabbit from a 128-bit key and 64-bit IV (RFC 4503 §2.3 key
+    /// setup followed by the §2.4 IV setup).
+    ///
+    /// RFC 4503 §3.2: no IV may be reused under the same key.
     #[must_use]
     pub fn new(key: &[u8; 16], iv: &[u8; 8]) -> Self {
         let mut core = RabbitCore::from_key(key);
@@ -203,7 +225,14 @@ impl Rabbit {
         }
     }
 
-    /// Create Rabbit from a 128-bit key without applying the optional IV setup.
+    /// Create Rabbit from a 128-bit key without applying the optional IV setup
+    /// (RFC 4503 §2.3 key setup only).
+    ///
+    /// RFC 4503 §3.2: a generator run without the IV setup "must never be
+    /// reset under the same key". Every instance built by this constructor
+    /// from a given key produces the same keystream, so a key given to it
+    /// may be used for exactly one instance, for one continuous stream. Use
+    /// [`Rabbit::new`] with a fresh IV wherever the cipher is re-synchronised.
     #[must_use]
     pub fn without_iv(key: &[u8; 16]) -> Self {
         Self {
@@ -222,6 +251,8 @@ impl Rabbit {
     }
 
     /// Create without IV setup and wipe the caller's key buffer.
+    ///
+    /// The same one-instance-per-key rule as [`Rabbit::without_iv`] applies.
     pub fn without_iv_wiping(key: &mut [u8; 16]) -> Self {
         let out = Self::without_iv(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
@@ -276,62 +307,99 @@ impl Drop for Rabbit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex;
 
-    fn decode_hex(s: &str) -> Vec<u8> {
-        assert!(
-            s.len().is_multiple_of(2),
-            "hex string must have even length"
-        );
-        let mut out = Vec::with_capacity(s.len() / 2);
-        let bytes = s.as_bytes();
-        for i in (0..bytes.len()).step_by(2) {
-            let hi = (bytes[i] as char).to_digit(16).expect("hex") as u8;
-            let lo = (bytes[i + 1] as char).to_digit(16).expect("hex") as u8;
-            out.push((hi << 4) | lo);
-        }
+    fn array<const N: usize>(hex: &str) -> [u8; N] {
+        let bytes = decode_hex(hex);
+        let mut out = [0u8; N];
+        out.copy_from_slice(&bytes);
         out
     }
 
+    /// RFC 4503 Appendix A.1, "Testing without IV Setup": the three keys and
+    /// their first three keystream blocks S[0], S[1], S[2].
     #[test]
-    fn rabbit_zero_key_rfc_keystream() {
-        let mut rabbit = Rabbit::without_iv(&[0u8; 16]);
-        let mut out = [0u8; 48];
-        rabbit.fill(&mut out);
-        let expected = decode_hex(
-            "B15754F036A5D6ECF56B45261C4AF702\
-             88E8D815C59C0C397B696C4789C68AA7\
-             F416A1C3700CD451DA68D1881673D696",
-        );
-        assert_eq!(out.as_slice(), expected.as_slice());
+    fn rfc4503_appendix_a1_without_iv_setup() {
+        let cases = [
+            (
+                "00000000000000000000000000000000",
+                "B15754F036A5D6ECF56B45261C4AF702\
+                 88E8D815C59C0C397B696C4789C68AA7\
+                 F416A1C3700CD451DA68D1881673D696",
+            ),
+            (
+                "912813292E3D36FE3BFC62F1DC51C3AC",
+                "3D2DF3C83EF627A1E97FC38487E2519C\
+                 F576CD61F4405B8896BF53AA8554FC19\
+                 E5547473FBDB43508AE53B20204D4C5E",
+            ),
+            (
+                "8395741587E0C733E9E9AB01C09B0043",
+                "0CB10DCDA041CDAC32EB5CFD02D0609B\
+                 95FC9FCA0F17015A7B7092114CFF3EAD\
+                 9649E5DE8BFC7F3F924147AD3A947428",
+            ),
+        ];
+        for (key, expected) in cases {
+            let mut rabbit = Rabbit::without_iv(&array::<16>(key));
+            let mut out = [0u8; 48];
+            rabbit.fill(&mut out);
+            assert_eq!(out.as_slice(), decode_hex(expected).as_slice(), "key {key}");
+        }
     }
 
+    /// RFC 4503 Appendix A.2, "Testing with IV Setup": the all-zero master key
+    /// under the three published IVs, first three blocks S[0], S[1], S[2].
     #[test]
-    fn rabbit_key_only_rfc_vector_two() {
-        let key = decode_hex("912813292E3D36FE3BFC62F1DC51C3AC");
-        let mut key_arr = [0u8; 16];
-        key_arr.copy_from_slice(&key);
-        let mut rabbit = Rabbit::without_iv(&key_arr);
-        let mut out = [0u8; 48];
-        rabbit.fill(&mut out);
-        let expected = decode_hex(
-            "3D2DF3C83EF627A1E97FC38487E2519C\
-             F576CD61F4405B8896BF53AA8554FC19\
-             E5547473FBDB43508AE53B20204D4C5E",
-        );
-        assert_eq!(out.as_slice(), expected.as_slice());
+    fn rfc4503_appendix_a2_with_iv_setup() {
+        let key = [0u8; 16];
+        let cases = [
+            (
+                "0000000000000000",
+                "C6A7275EF85495D87CCD5D376705B7ED\
+                 5F29A6AC04F5EFD47B8F293270DC4A8D\
+                 2ADE822B29DE6C1EE52BDB8A47BF8F66",
+            ),
+            (
+                "C373F575C1267E59",
+                "1FCD4EB9580012E2E0DCCC9222017D6D\
+                 A75F4E10D12125017B2499FFED936F2E\
+                 EBC112C393E738392356BDD012029BA7",
+            ),
+            (
+                "A6EB561AD2F41727",
+                "445AD8C805858DBF70B6AF23A151104D\
+                 96C8F27947F42C5BAEAE67C6ACC35B03\
+                 9FCBFC895FA71C17313DF034F01551CB",
+            ),
+        ];
+        for (iv, expected) in cases {
+            let mut rabbit = Rabbit::new(&key, &array::<8>(iv));
+            let mut out = [0u8; 48];
+            rabbit.fill(&mut out);
+            assert_eq!(out.as_slice(), decode_hex(expected).as_slice(), "iv {iv}");
+        }
     }
 
+    /// The keystream is one continuous byte stream across `fill` calls of any
+    /// length, including many calls shorter than one 16-byte block.
     #[test]
-    fn rabbit_zero_key_zero_iv_rfc_keystream() {
-        let mut rabbit = Rabbit::new(&[0u8; 16], &[0u8; 8]);
-        let mut out = [0u8; 48];
-        rabbit.fill(&mut out);
-        let expected = decode_hex(
-            "C6A7275EF85495D87CCD5D376705B7ED\
-             5F29A6AC04F5EFD47B8F293270DC4A8D\
-             2ADE822B29DE6C1EE52BDB8A47BF8F66",
-        );
-        assert_eq!(out.as_slice(), expected.as_slice());
+    fn chunked_fill_matches_one_shot() {
+        let key = array::<16>("912813292E3D36FE3BFC62F1DC51C3AC");
+        let iv = array::<8>("C373F575C1267E59");
+        let mut one_shot = [0u8; 48];
+        Rabbit::new(&key, &iv).fill(&mut one_shot);
+        for lens in [[1usize; 48].as_slice(), &[3, 1, 1, 1, 15, 1, 26]] {
+            let mut chunked = [0u8; 48];
+            let mut rabbit = Rabbit::new(&key, &iv);
+            let mut off = 0;
+            for &len in lens {
+                rabbit.fill(&mut chunked[off..off + len]);
+                off += len;
+            }
+            assert_eq!(off, 48);
+            assert_eq!(chunked, one_shot, "chunking {lens:?}");
+        }
     }
 
     #[test]
@@ -348,5 +416,40 @@ mod tests {
         dec.apply_keystream(&mut ct);
 
         assert_eq!(ct, plain);
+    }
+
+    /// `new_wiping` zeroes the caller's key and IV and yields the same stream
+    /// as `new`.
+    #[test]
+    fn new_wiping_zeroes_inputs_and_matches_new() {
+        let key = array::<16>("8395741587E0C733E9E9AB01C09B0043");
+        let iv = array::<8>("A6EB561AD2F41727");
+        let mut expected = [0u8; 40];
+        Rabbit::new(&key, &iv).fill(&mut expected);
+
+        let mut key_buf = key;
+        let mut iv_buf = iv;
+        let mut rabbit = Rabbit::new_wiping(&mut key_buf, &mut iv_buf);
+        assert_eq!(key_buf, [0u8; 16]);
+        assert_eq!(iv_buf, [0u8; 8]);
+        let mut out = [0u8; 40];
+        rabbit.fill(&mut out);
+        assert_eq!(out, expected);
+    }
+
+    /// `without_iv_wiping` zeroes the caller's key and yields the same stream
+    /// as `without_iv`.
+    #[test]
+    fn without_iv_wiping_zeroes_key_and_matches_without_iv() {
+        let key = array::<16>("912813292E3D36FE3BFC62F1DC51C3AC");
+        let mut expected = [0u8; 40];
+        Rabbit::without_iv(&key).fill(&mut expected);
+
+        let mut key_buf = key;
+        let mut rabbit = Rabbit::without_iv_wiping(&mut key_buf);
+        assert_eq!(key_buf, [0u8; 16]);
+        let mut out = [0u8; 40];
+        rabbit.fill(&mut out);
+        assert_eq!(out, expected);
     }
 }

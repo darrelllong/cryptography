@@ -15,7 +15,9 @@
 //! - [`CurveParams`] — curve parameters with precomputed field and scalar
 //!   Montgomery contexts.
 //! - [`AffinePoint`] — a curve point in affine `(x, y)` coordinates, or `∞`.
-//! - Named-curve constructors: [`p256`], [`p384`], [`secp256k1`].
+//! - Named-curve constructors: the NIST prime curves [`p192`], [`p224`],
+//!   [`p256`], [`p384`], [`p521`], the Koblitz curve [`secp256k1`], and the
+//!   NIST binary curves [`b163`]…[`b571`] and [`k163`]…[`k571`].
 //! - SEC 1 byte encoding and decoding for uncompressed and compressed points.
 //! - Random scalar sampling and ECDH shared-point computation.
 //!
@@ -36,14 +38,15 @@
 //!
 //! ## Side-channel note
 //!
-//! The scalar multiplication in this module uses a left-to-right double-and-add
-//! loop and is **not constant-time**.  Branches and memory accesses depend on
-//! the secret scalar, so the current implementation is unsuitable in an
-//! adversarial environment where a side-channel attacker can observe timing or
-//! power consumption.  A constant-time Montgomery ladder should replace the
-//! loop before exposing scalar multiplication to such an environment.
+//! The scalar multiplication in this module (a fixed 4-bit window over
+//! Jacobian coordinates on prime curves, López–Dahab coordinates on binary
+//! curves) is **not constant-time**.  Table indices and the number of
+//! additions depend on the secret scalar, so the current implementation is
+//! unsuitable in an adversarial environment where a side-channel attacker can
+//! observe timing or power consumption.  A constant-time ladder should replace
+//! it before exposing scalar multiplication to such an environment.
 
-use crate::public_key::primes::random_nonzero_below;
+use crate::public_key::primes::{is_probable_prime_untrusted, random_nonzero_below};
 use crate::Csprng;
 use rump::finite_field::Gf2m;
 use rump::modular::{
@@ -188,7 +191,9 @@ pub struct CurveParams {
     pub b: BigUint,
     /// Prime order of the base-point subgroup.
     pub n: BigUint,
-    /// Cofactor `h`.  For all named curves here `h = 1`.
+    /// Cofactor `h`.  The prime curves here have `h = 1`; the binary B/K
+    /// curves have `h = 2` or `4`, which is why decoders check subgroup
+    /// membership ([`Self::is_valid_public_point`]).
     pub h: u64,
     /// x-coordinate of the standard base point `G`.
     pub gx: BigUint,
@@ -210,6 +215,22 @@ pub struct CurveParams {
     /// Used for fixed-length point encoding; coordinates are zero-padded to
     /// this length so that every encoded coordinate has the same width.
     pub coord_len: usize,
+}
+
+/// The field of explicit domain parameters, as a serialized key names it:
+/// the modulus of a prime field, or the reduction polynomial and degree of a
+/// binary field. [`CurveParams::from_explicit`] takes one.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExplicitField {
+    /// `F_p` for the odd prime `p`.
+    Prime(BigUint),
+    /// `F_2^m` under a reduction polynomial `f(x)` of degree `m`.
+    Binary {
+        /// `f(x)` as a bit pattern, bit `i` the coefficient of `x^i`.
+        modulus: BigUint,
+        /// The degree `m` of `f(x)`.
+        degree: usize,
+    },
 }
 
 /// An affine curve point, or the point at infinity.
@@ -356,44 +377,6 @@ impl JacobianPoint {
 
 // ─── Field helpers ──────────────────────────────────────────────────────────
 
-/// `(a + b) mod p`.
-///
-/// Both inputs must be in `[0, p)`.  The sum is at most `2p − 2`, so at most
-/// one subtraction is needed to reduce back into `[0, p)`.
-#[inline]
-fn field_add(a: &BigUint, b: &BigUint, p: &BigUint) -> BigUint {
-    let sum = a.add(b);
-    if &sum >= p {
-        sum.sub(p)
-    } else {
-        sum
-    }
-}
-
-/// `(−a) mod p`.
-#[inline]
-fn field_neg(a: &BigUint, p: &BigUint) -> BigUint {
-    if a.is_zero() {
-        BigUint::zero()
-    } else {
-        p.sub(a)
-    }
-}
-
-/// Pad `bytes` to `len` bytes by prepending zero bytes.
-///
-/// `BigUint::to_be_bytes` strips leading zero bytes; point encoding needs
-/// fixed-width coordinates so that every field element occupies the same
-/// number of bytes regardless of its value.
-fn pad_to(bytes: Vec<u8>, len: usize) -> Vec<u8> {
-    if bytes.len() >= len {
-        return bytes;
-    }
-    let mut out = vec![0u8; len - bytes.len()];
-    out.extend_from_slice(&bytes);
-    out
-}
-
 // ─── Point arithmetic ───────────────────────────────────────────────────────
 
 /// Point doubling in Jacobian coordinates.
@@ -470,14 +453,16 @@ fn point_double_jacobian(
 
 /// Point addition in Jacobian coordinates.
 ///
-/// Uses the standard complete-Jacobian formulas (EFD `add-2007-bl`):
+/// Uses the Cohen–Miyaji–Ono 1998 Jacobian addition (their formula (5)) in
+/// the common-subexpression order the Explicit-Formulas Database lists as
+/// `add-1998-cmo-2`, with `HH = H²`, `HHH = H·HH`, and `V = U₁·HH`:
 ///
 /// ```text
 /// U₁ = X₁·Z₂²,   U₂ = X₂·Z₁²
 /// S₁ = Y₁·Z₂³,   S₂ = Y₂·Z₁³
 /// H  = U₂ − U₁,  R  = S₂ − S₁
-/// X₃ = R² − H³ − 2·U₁·H²
-/// Y₃ = R·(U₁·H² − X₃) − S₁·H³
+/// X₃ = R² − HHH − 2·V
+/// Y₃ = R·(V − X₃) − S₁·HHH
 /// Z₃ = H·Z₁·Z₂
 /// ```
 ///
@@ -962,10 +947,134 @@ fn scalar_mul_binary(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> A
     result.to_affine(field)
 }
 
+// ─── SEC 1 domain-parameter validation ───────────────────────────────────────
+
+/// The constructors of the named curves this module defines. Parameters
+/// equal to one of these, field for field, are valid by SEC 1 §3.1.1.2 and
+/// §3.1.2.2 method 3: SEC 2 and FIPS 186-4 attest them, and this module's
+/// tests run the validation primitive over every one.
+const NAMED_CURVES: [fn() -> CurveParams; 16] = [
+    p192, p224, p256, p384, p521, secp256k1, b163, k163, b233, k233, b283, k283, b409, k409, b571,
+    k571,
+];
+
+/// The security level `t` that SEC 1 §3.1.1.2.1 step 1 pairs with a prime
+/// field of `bits = ⌈log2 p⌉`: `2t` for `80 < t < 256`, 521 for `t = 256`
+/// and 192 for `t = 80`. `None` for a width the primitive does not admit.
+fn prime_field_security_level(bits: usize) -> Option<u32> {
+    match bits {
+        192 => Some(80),
+        224 => Some(112),
+        256 => Some(128),
+        384 => Some(192),
+        521 => Some(256),
+        _ => None,
+    }
+}
+
+/// The security level `t` that SEC 1 §3.1.2.2.1 step 1 pairs with a binary
+/// field of degree `m`: `m ∈ {163, 233, 239, 283, 409, 571}` with
+/// `2t < m < 2t′`, `t′` the next level above `t` in `{112, 128, 192, 256, 512}`.
+/// `None` for a degree the primitive does not admit.
+fn binary_field_security_level(degree: usize) -> Option<u32> {
+    match degree {
+        163 => Some(80),
+        233 | 239 => Some(112),
+        283 => Some(128),
+        409 => Some(192),
+        571 => Some(256),
+        _ => None,
+    }
+}
+
+/// SEC 1 §2.1.2 Table 1, the reduction polynomials of `F_2^m`, each as its
+/// degree and the exponents of its nonzero terms.
+const SEC1_REDUCTION_POLYNOMIALS: [(usize, &[usize]); 7] = [
+    (163, &[163, 7, 6, 3, 0]),
+    (233, &[233, 74, 0]),
+    (239, &[239, 36, 0]),
+    (239, &[239, 158, 0]),
+    (283, &[283, 12, 7, 5, 0]),
+    (409, &[409, 87, 0]),
+    (571, &[571, 10, 5, 2, 0]),
+];
+
+/// The binary polynomial with the given nonzero terms, as a bit pattern.
+fn binary_polynomial(exponents: &[usize]) -> BigUint {
+    let top = exponents.iter().copied().max().unwrap_or(0);
+    let mut bytes = vec![0u8; top / 8 + 1];
+    for &e in exponents {
+        let byte = bytes.len() - 1 - e / 8;
+        bytes[byte] |= 1 << (e % 8);
+    }
+    BigUint::from_be_bytes(&bytes)
+}
+
+/// Whether `h = ⌊(√q + 1)² / n⌋` (SEC 1 §3.1.1.2.1 step 6, §3.1.2.2.1 step 7),
+/// decided in integers: `(√q + 1)² = q + 1 + 2√q`, so `hn ≤ (√q + 1)²`
+/// exactly when `hn ≤ q + 1` or `(hn − q − 1)² ≤ 4q`, and `(h + 1)n > (√q + 1)²`
+/// exactly when `(h + 1)n > q + 1` and `((h + 1)n − q − 1)² > 4q`.
+fn cofactor_is_hasse_quotient(h: u64, n: &BigUint, q: &BigUint) -> bool {
+    let Some(h_plus_one) = h.checked_add(1) else {
+        return false;
+    };
+    let q_plus_one = q.add(&BigUint::one());
+    let four_q = q.mul(&BigUint::from_u64(4));
+    let lower = n.mul(&BigUint::from_u64(h));
+    let upper = n.mul(&BigUint::from_u64(h_plus_one));
+    let lower_holds = lower <= q_plus_one || lower.sub(&q_plus_one).square() <= four_q;
+    let upper_holds = upper > q_plus_one && upper.sub(&q_plus_one).square() > four_q;
+    lower_holds && upper_holds
+}
+
+/// Whether `h ≤ 2^(t/8)`, the cofactor bound of SEC 1 §3.1.1.2.1 step 6 and
+/// §3.1.2.2.1 step 7 at security level `t`.
+fn cofactor_within_security_level(h: u64, t: u32) -> bool {
+    h <= 1u64 << (t / 8)
+}
+
+/// Whether the multiplicative order of `base` modulo `n` is at least
+/// `bound`: `base^B ≢ 1 (mod n)` for every `1 ≤ B < bound`, decided by
+/// `bound − 1` multiplications modulo `n`.
+///
+/// SEC 1 §3.1.1.2.1 step 8 applies this with `base = p` and `bound = 100`,
+/// §3.1.2.2.1 step 9 with `base = 2` and `bound = 100m`. The embedding degree
+/// of the order-`n` subgroup is the order of `q` modulo `n`, the smallest `k`
+/// with `n | q^k − 1`. Over `F_p` it is `ord_n(p)` itself, bounded directly.
+/// Over `F_2^m` it is `ord_n(2^m) = ord_n(2) / gcd(ord_n(2), m) ≥
+/// ord_n(2) / m`, so `ord_n(2) ≥ 100m` again gives an embedding degree of at
+/// least 100. Both bounds keep the Menezes–Okamoto–Vanstone and Frey–Rück
+/// reductions from moving the discrete logarithm into a field small enough
+/// to attack.
+fn multiplicative_order_at_least(base: &BigUint, n: &BigUint, bound: usize) -> bool {
+    let base = base.rem(n);
+    let mut power = base.clone();
+    for _ in 1..bound {
+        if power.is_one() {
+            return false;
+        }
+        power = BigUint::mod_mul(&power, &base, n);
+    }
+    true
+}
+
+/// Whether the curve is anomalous, `#E(F_q) = hn = q`, the case the
+/// Semaev–Smart–Satoh–Araki reduction solves in linear time by mapping the
+/// group into the additive group of `F_q`. SEC 1 §3.1.2.2.1 step 9 writes
+/// the exclusion as `nh ≠ 2^m`; §3.1.1.2.1 step 8 writes it as `n ≠ p`, and
+/// under step 6 the two agree, since `n = p` forces
+/// `h = ⌊(√p + 1)²/p⌋ = 1`.
+fn is_anomalous(n: &BigUint, h: u64, q: &BigUint) -> bool {
+    n.mul(&BigUint::from_u64(h)) == *q
+}
+
 // ─── CurveParams ────────────────────────────────────────────────────────────
 
 impl CurveParams {
-    /// Construct curve parameters from raw field values.
+    /// Construct curve parameters from raw field values the caller vouches
+    /// for: the named-curve constructors and callers that generated the
+    /// parameters themselves. Parameters that arrive from outside the process
+    /// go through [`Self::from_explicit`], which validates them.
     ///
     /// Returns `None` if the field prime `p` or subgroup order `n` is even,
     /// which would prevent building a Montgomery context.  Well-formed
@@ -981,6 +1090,9 @@ impl CurveParams {
         base_x: BigUint,
         base_y: BigUint,
     ) -> Option<Self> {
+        if subgroup_order <= BigUint::one() {
+            return None;
+        }
         let field = MontgomeryContext::new(&field_prime).ok()?;
         let scalar = MontgomeryContext::new(&subgroup_order).ok()?;
         let coord_len = field_prime.bits().div_ceil(8);
@@ -1007,8 +1119,18 @@ impl CurveParams {
     /// - `n` must be an odd prime (the scalar-field Montgomery context
     ///   requires this).
     ///
-    /// Returns `None` if `n` is even (which would indicate malformed curve
-    /// parameters).
+    /// Returns `None` if `n ≤ 1` or even, if `poly` is not irreducible over
+    /// GF(2) (a reducible modulus gives a ring with zero divisors, and the
+    /// point formulas would then hit an uninvertible element), if its degree
+    /// is not `degree`, or if `degree` is even. The last is a choice of
+    /// solver, not a limit of the arithmetic: point decompression solves
+    /// `z² + z = β` (SEC 1 §2.3.4 step 2.4.3, which leaves the method open)
+    /// by the half-trace of IEEE Std 1363-2000 A.4.7, a solver for odd `m`
+    /// only, and every degree SEC 1 §3.1.2.2.1 admits, `{163, 233, 239, 283,
+    /// 409, 571}`, is odd, so nothing standard is excluded.
+    ///
+    /// The irreducibility test costs work quadratic in the polynomial's
+    /// size; [`Self::from_explicit`] bounds that size before calling here.
     #[must_use]
     pub fn new_binary(
         modulus_poly: BigUint,
@@ -1020,7 +1142,13 @@ impl CurveParams {
         base_point: (BigUint, BigUint),
     ) -> Option<Self> {
         let (base_x, base_y) = base_point;
+        if subgroup_order <= BigUint::one() || degree.is_multiple_of(2) {
+            return None;
+        }
         let scalar = MontgomeryContext::new(&subgroup_order).ok()?;
+        if !Gf2m::is_irreducible(&modulus_poly) {
+            return None;
+        }
         let gf2m = Gf2m::new(modulus_poly)?;
         if gf2m.degree() != degree {
             return None;
@@ -1039,6 +1167,200 @@ impl CurveParams {
             scalar,
             coord_len,
         })
+    }
+
+    /// Domain parameters received from outside the process, as a key blob or
+    /// XML document carries them.
+    ///
+    /// Nothing is built until the input is within the sizes the SEC 1
+    /// primitives admit, so the work an input of any length can cause is
+    /// that of one curve at an admitted size: step 1 of §3.1.1.2.1 fixes
+    /// `⌈log2 p⌉`, step 1 of §3.1.2.2.1 fixes `m`, with `f(x)` required to
+    /// have degree exactly `m`; steps 2 and 3 keep the coefficients and base
+    /// point inside the field; and Hasse's bound `n ≤ hn ≤ (√q + 1)² < 4q`
+    /// keeps `n` within two bits of `q`. Only then are the parameters built
+    /// as [`Self::new`] or [`Self::new_binary`] builds them: a Montgomery
+    /// context or an irreducibility test on at most 572 bits.
+    ///
+    /// They are accepted on one of the two grounds SEC 1 §3.1.1.2 and
+    /// §3.1.2.2 allow an entity that did not generate them: they equal,
+    /// field for field, a named curve of SEC 2 and FIPS 186-4 that this
+    /// module defines (method 3, a trusted party's assurance), or they pass
+    /// [`Self::validate_domain_parameters`] (method 1). `None` otherwise.
+    #[must_use]
+    pub fn from_explicit(
+        field: ExplicitField,
+        curve_a: BigUint,
+        curve_b: BigUint,
+        subgroup_order: BigUint,
+        cofactor: u64,
+        base_x: BigUint,
+        base_y: BigUint,
+    ) -> Option<Self> {
+        let elements = [&curve_a, &curve_b, &base_x, &base_y];
+        let field_bits = match &field {
+            ExplicitField::Prime(p) => {
+                prime_field_security_level(p.bits())?;
+                if elements.into_iter().any(|v| v >= p) {
+                    return None;
+                }
+                p.bits()
+            }
+            ExplicitField::Binary { modulus, degree } => {
+                binary_field_security_level(*degree)?;
+                if modulus.bits() != degree + 1 || elements.into_iter().any(|v| v.bits() > *degree)
+                {
+                    return None;
+                }
+                *degree
+            }
+        };
+        if subgroup_order.bits() > field_bits + 2 {
+            return None;
+        }
+        let curve = match field {
+            ExplicitField::Prime(p) => Self::new(
+                p,
+                curve_a,
+                curve_b,
+                subgroup_order,
+                cofactor,
+                base_x,
+                base_y,
+            )?,
+            ExplicitField::Binary { modulus, degree } => Self::new_binary(
+                modulus,
+                degree,
+                curve_a,
+                curve_b,
+                subgroup_order,
+                cofactor,
+                (base_x, base_y),
+            )?,
+        };
+        (curve.is_named_curve() || curve.validate_domain_parameters()).then_some(curve)
+    }
+
+    /// Whether these parameters equal, field for field, one of the named
+    /// curves this module defines.
+    fn is_named_curve(&self) -> bool {
+        NAMED_CURVES.iter().any(|build| self.same_curve(&build()))
+    }
+
+    /// The SEC 1 v2.0 domain-parameter validation primitive, every step:
+    /// §3.1.1.2.1 over `F_p` or §3.1.2.2.1 over `F_2^m`, at the security
+    /// level `t` the field size implies. Step 1 admits only
+    /// `⌈log2 p⌉ ∈ {192, 224, 256, 384, 521}` and
+    /// `m ∈ {163, 233, 239, 283, 409, 571}` under a reduction polynomial of
+    /// SEC 1 Table 1; the remaining steps check that `p` and `n` are prime
+    /// (by the hardened test for untrusted candidates), that the coefficients
+    /// and base point are reduced, that the curve is non-singular
+    /// (`4a³ + 27b² ≢ 0` or `b ≠ 0`), that `G` lies on it, that `h ≤ 2^(t/8)`
+    /// and `h = ⌊(√q + 1)²/n⌋`, that `nG = O`, and that the curve is neither
+    /// anomalous nor of small embedding degree.
+    ///
+    /// Over `F_p` the two primality tests are most of the cost: about 3.6 ms
+    /// for P-256 and 15 ms for P-521 in a release build on an Apple M4 Pro.
+    /// Over `F_2^m` the field needs no primality test, but the last step's
+    /// `100m − 1` multiplications modulo `n` weigh as much as the test on
+    /// `n` and the scalar multiplication `nG` together on B-163 (2.5 ms in
+    /// all) and a third of B-571's 19 ms. A debug build takes 16 to 32 times
+    /// as long. [`Self::from_explicit`] runs the primitive on parameters
+    /// that are not a named curve.
+    #[must_use]
+    pub fn validate_domain_parameters(&self) -> bool {
+        match &self.field {
+            FieldCtx::Prime(field) => self.prime_domain_is_valid(field),
+            FieldCtx::Binary(field) => self.binary_domain_is_valid(field),
+        }
+    }
+
+    /// SEC 1 §3.1.1.2.1, steps 1 to 8 in order.
+    fn prime_domain_is_valid(&self, field: &PrimeFieldCtx) -> bool {
+        let p = &self.p;
+        let Some(t) = prime_field_security_level(p.bits()) else {
+            return false;
+        };
+        if !p.is_odd() || !is_probable_prime_untrusted(p) {
+            return false;
+        }
+        if [&self.a, &self.b, &self.gx, &self.gy]
+            .into_iter()
+            .any(|v| v >= p)
+        {
+            return false;
+        }
+        let ctx = field.ctx();
+        let a_cubed = ctx.mul(&ctx.square(&self.a), &self.a);
+        let b_squared = ctx.square(&self.b);
+        let discriminant = BigUint::mod_add(
+            &BigUint::mod_mul(&BigUint::from_u64(4), &a_cubed, p),
+            &BigUint::mod_mul(&BigUint::from_u64(27), &b_squared, p),
+            p,
+        );
+        if discriminant.is_zero() {
+            return false;
+        }
+        let g = self.base_point();
+        if !self.is_on_curve(&g) {
+            return false;
+        }
+        if !is_probable_prime_untrusted(&self.n) {
+            return false;
+        }
+        if !cofactor_within_security_level(self.h, t)
+            || !cofactor_is_hasse_quotient(self.h, &self.n, p)
+        {
+            return false;
+        }
+        if !self.scalar_mul(&g, &self.n).is_infinity() {
+            return false;
+        }
+        multiplicative_order_at_least(p, &self.n, 100) && !is_anomalous(&self.n, self.h, p)
+    }
+
+    /// SEC 1 §3.1.2.2.1, steps 1 to 9 in order. Irreducibility of the
+    /// reduction polynomial is established by [`Self::new_binary`]; step 2
+    /// here requires it to be one of Table 1's.
+    fn binary_domain_is_valid(&self, field: &Gf2m) -> bool {
+        let m = field.degree();
+        let Some(t) = binary_field_security_level(m) else {
+            return false;
+        };
+        if !SEC1_REDUCTION_POLYNOMIALS
+            .iter()
+            .any(|(degree, terms)| *degree == m && binary_polynomial(terms) == *field.modulus())
+        {
+            return false;
+        }
+        if [&self.a, &self.b, &self.gx, &self.gy]
+            .into_iter()
+            .any(|v| v.bits() > m)
+        {
+            return false;
+        }
+        if self.b.is_zero() {
+            return false;
+        }
+        let g = self.base_point();
+        if !self.is_on_curve(&g) {
+            return false;
+        }
+        if !is_probable_prime_untrusted(&self.n) {
+            return false;
+        }
+        let mut q = BigUint::one();
+        q.shl_bits(m);
+        if !cofactor_within_security_level(self.h, t)
+            || !cofactor_is_hasse_quotient(self.h, &self.n, &q)
+        {
+            return false;
+        }
+        if !self.scalar_mul(&g, &self.n).is_infinity() {
+            return false;
+        }
+        multiplicative_order_at_least(&BigUint::from_u64(2), &self.n, 100 * m)
+            && !is_anomalous(&self.n, self.h, &q)
     }
 
     /// Return a reference to the prime-field Montgomery context.
@@ -1108,7 +1430,7 @@ impl CurveParams {
                 let x2 = ctx.square(&point.x);
                 let x3 = ctx.mul(&x2, &point.x);
                 let ax = ctx.mul(&self.a, &point.x);
-                let rhs = field_add(&field_add(&x3, &ax, &self.p), &self.b, &self.p);
+                let rhs = BigUint::mod_add(&BigUint::mod_add(&x3, &ax, &self.p), &self.b, &self.p);
                 lhs == rhs
             }
             FieldCtx::Binary(field) => {
@@ -1127,7 +1449,9 @@ impl CurveParams {
             return point.clone();
         }
         match &self.field {
-            FieldCtx::Prime(_) => AffinePoint::new(point.x.clone(), field_neg(&point.y, &self.p)),
+            FieldCtx::Prime(_) => {
+                AffinePoint::new(point.x.clone(), BigUint::mod_neg(&point.y, &self.p))
+            }
             FieldCtx::Binary(_) => {
                 // −P = (xP, xP ⊕ yP)
                 let neg_y = Gf2m::add(&point.x, &point.y);
@@ -1186,6 +1510,81 @@ impl CurveParams {
         self.scalar_mul(point, &self.n).is_infinity()
     }
 
+    /// `true` if `v` is a reduced field element: `v < p` on a prime field,
+    /// `deg(v) < m` on GF(2^m).
+    ///
+    /// The Montgomery context reduces any representative on encode, so a
+    /// coordinate of `x + p` would pass the curve equation while breaking
+    /// point equality and fixed-width encoding; SEC 1 §2.3.4 requires
+    /// decoders to reject it.
+    fn coordinate_is_canonical(&self, v: &BigUint) -> bool {
+        match &self.field {
+            FieldCtx::Prime(_) => v < &self.p,
+            FieldCtx::Binary(field) => v.bits() <= field.degree(),
+        }
+    }
+
+    /// Full public-key validation (SEC 1 §3.2.2.1, SP 800-56A Rev. 3
+    /// §5.6.2.3.3): the point is not `∞`, both coordinates are canonical, it
+    /// satisfies the curve equation, and it lies in the prime-order subgroup.
+    ///
+    /// Every decoder that accepts a point from outside the process must use
+    /// this rather than [`Self::is_on_curve`] alone. The prime-field Jacobian
+    /// formulas never read `b`, so they multiply a point of any curve
+    /// `y² = x³ + ax + b′` over the same `p` as if it lay on this one (the
+    /// invalid-curve attack); the López–Dahab formulas do read `b`, so on a
+    /// point off the curve they perform no group operation at all, and no
+    /// statement about this curve covers what they return. On the cofactor
+    /// curves (`h = 2` or `4`) a low-order point is on the curve. Any of
+    /// these would hand an attacker `d` modulo a small order per query. Nor
+    /// is [`Self::is_in_prime_subgroup`] enough: `n·∞ = ∞`, and
+    /// [`Self::decode_point`] rightly returns `∞` for the octet `00` (SEC 1
+    /// §2.3.4 step 1), but `∞` is never a public key. Under `Q = ∞` ECDSA
+    /// verification reduces to `u₁·G`, which anyone can satisfy.
+    #[must_use]
+    pub fn is_valid_public_point(&self, point: &AffinePoint) -> bool {
+        !point.infinity
+            && self.coordinate_is_canonical(&point.x)
+            && self.coordinate_is_canonical(&point.y)
+            && self.is_on_curve(point)
+            && self.is_in_prime_subgroup(point)
+    }
+
+    /// The public point `Q = d·G` for a private scalar `d` handed in from
+    /// outside, or `None` unless `1 ≤ d ≤ n − 1` (SEC 1 §3.2.1) and `Q` is a
+    /// valid public key ([`Self::is_valid_public_point`]).
+    ///
+    /// With valid domain parameters every such `Q` is valid; parameters the
+    /// caller built with [`Self::new`] carry no such guarantee, and if their
+    /// `n` is a multiple of the order of `G`, `d·G` can be `∞`, a public key
+    /// every public-key decoder refuses. Every private-key constructor that
+    /// takes `d` goes through here, so no key pair is ever formed around it.
+    pub(crate) fn public_point_for_scalar(&self, d: &BigUint) -> Option<AffinePoint> {
+        if d.is_zero() || d >= &self.n {
+            return None;
+        }
+        let q = self.scalar_mul(&self.base_point(), d);
+        self.is_valid_public_point(&q).then_some(q)
+    }
+
+    /// `true` if `other` describes the same curve: same field, coefficients,
+    /// base point, order, and cofactor.
+    ///
+    /// Key agreement must check this before combining a private scalar with
+    /// a peer's point; a peer key that validated against *its own* embedded
+    /// curve is otherwise a point on an arbitrary curve.
+    #[must_use]
+    pub fn same_curve(&self, other: &Self) -> bool {
+        self.p == other.p
+            && self.a == other.a
+            && self.b == other.b
+            && self.n == other.n
+            && self.h == other.h
+            && self.gx == other.gx
+            && self.gy == other.gy
+            && self.gf2m_degree() == other.gf2m_degree()
+    }
+
     /// Compute the ECDH shared point `d·Q`.
     ///
     /// In Diffie-Hellman, Alice holds private scalar `d` and receives Bob's
@@ -1240,71 +1639,99 @@ impl CurveParams {
         mod_inverse(k, &self.n)
     }
 
-    /// Encode a point as an uncompressed SEC 1 byte string.
+    /// The canonical representative of the field element `v` denotes: the
+    /// residue in `[0, p)`, or the polynomial of degree below `m`. The
+    /// identity on every coordinate this module produces; only a value a
+    /// caller assembled from a representative outside the field is reduced.
+    fn canonical_coordinate(&self, v: &BigUint) -> BigUint {
+        match &self.field {
+            FieldCtx::Prime(_) if v >= &self.p => v.rem(&self.p),
+            FieldCtx::Binary(field) if v.bits() > field.degree() => {
+                // The product reduces its operands; 1 leaves the class alone.
+                field.mul(v, &BigUint::one())
+            }
+            FieldCtx::Prime(_) | FieldCtx::Binary(_) => v.clone(),
+        }
+    }
+
+    /// Encode a point as an uncompressed SEC 1 §2.3.3 octet string:
+    /// `04 || X || Y` with each coordinate in `coord_len` big-endian octets
+    /// (step 3, the field-element conversion of §2.3.5), or the single octet
+    /// `00` for `∞` (step 1).
     ///
-    /// Format: `04 || x (coord_len bytes big-endian) || y (coord_len bytes big-endian)`.
-    ///
-    /// The leading `04` tag is the SEC 1 v2.0 uncompressed-point identifier.
-    /// The total length is `1 + 2·coord_len` bytes.  The point at infinity
-    /// encodes as the single byte `00`.
+    /// The coordinates are encoded as the field elements they denote: a
+    /// representative outside `[0, p)`, or of degree `m` or more, is reduced
+    /// first, so the encoding is total, and
+    /// `decode_point(encode_point(P)) == P` exactly when `P` carries
+    /// canonical coordinates, as every point this module produces does.
     #[must_use]
     pub fn encode_point(&self, point: &AffinePoint) -> Vec<u8> {
         if point.infinity {
             return vec![0x00];
         }
+        let x = self.canonical_coordinate(&point.x);
+        let y = self.canonical_coordinate(&point.y);
         let mut out = Vec::with_capacity(1 + 2 * self.coord_len);
         out.push(0x04);
-        out.extend_from_slice(&pad_to(point.x.to_be_bytes(), self.coord_len));
-        out.extend_from_slice(&pad_to(point.y.to_be_bytes(), self.coord_len));
+        out.extend_from_slice(&x.to_be_bytes_padded(self.coord_len));
+        out.extend_from_slice(&y.to_be_bytes_padded(self.coord_len));
         out
     }
 
-    /// Encode a point in compressed SEC 1 form.
+    /// Encode a point in compressed SEC 1 §2.3.3 form (step 2): `02 || X` or
+    /// `03 || X`, the tag carrying `ỹ`. Over `F_p`, `ỹ = y mod 2` (step
+    /// 2.2.1); over `F_2^m`, `ỹ = 0` when `x = 0` and otherwise the constant
+    /// term of `z = y·x⁻¹` (step 2.2.2). The identity encodes as `00`.
     ///
-    /// Prime curves: format `02 || x` if `y` is even, `03 || x` if `y` is odd.
-    /// Binary curves: format `02 || x` if LSB(y·x⁻¹) = 0, `03 || x` otherwise
-    /// (per FIPS 186-4 §4.3.6; falls back to `02` when `x = 0`).
-    ///
-    /// The point at infinity encodes as `00`.
+    /// Coordinates are reduced to their canonical representatives first, as
+    /// in [`Self::encode_point`], so the encoding is total.
     ///
     /// # Panics
     ///
-    /// Panics only if an internal binary-field invariant is violated after the
-    /// explicit `x = 0` guard, which would indicate a bug in the compression
-    /// logic.
+    /// Only if the binary field fails to invert a canonical non-zero `x`,
+    /// which an irreducible reduction polynomial rules out.
     #[must_use]
     pub fn encode_point_compressed(&self, point: &AffinePoint) -> Vec<u8> {
         if point.infinity {
             return vec![0x00];
         }
+        let x = self.canonical_coordinate(&point.x);
+        let y = self.canonical_coordinate(&point.y);
         let parity = match &self.field {
-            FieldCtx::Prime(_) => point.y.is_odd(),
+            FieldCtx::Prime(_) => y.is_odd(),
+            FieldCtx::Binary(_) if x.is_zero() => false,
             FieldCtx::Binary(field) => {
-                if point.x.is_zero() {
-                    false
-                } else {
-                    let x_inv = field
-                        .inverse(&point.x)
-                        .expect("x is non-zero in binary curve");
-                    let z = field.mul(&point.y, &x_inv);
-                    z.is_odd()
-                }
+                let x_inv = field
+                    .inverse(&x)
+                    .expect("a canonical non-zero element of a field has an inverse");
+                field.mul(&y, &x_inv).is_odd()
             }
         };
         let tag = if parity { 0x03u8 } else { 0x02u8 };
         let mut out = Vec::with_capacity(1 + self.coord_len);
         out.push(tag);
-        out.extend_from_slice(&pad_to(point.x.to_be_bytes(), self.coord_len));
+        out.extend_from_slice(&x.to_be_bytes_padded(self.coord_len));
         out
     }
 
-    /// Decode an uncompressed or compressed SEC 1 point.
+    /// Decode a SEC 1 §2.3.4 octet string: `00` to `∞` (step 1), `02`/`03`
+    /// followed by `coord_len` octets as a compressed point (step 2), `04`
+    /// followed by `2·coord_len` octets as an uncompressed one (step 3).
     ///
-    /// Returns `None` for any of:
-    /// - wrong byte length for the tag,
-    /// - unrecognised tag byte,
-    /// - coordinates that fail the on-curve check,
-    /// - binary-field compressed encoding with an invalid x-coordinate.
+    /// Returns `None`, the routine's "invalid", for any of:
+    /// - a length that matches no form, or a first octet other than these,
+    /// - a coordinate that is not a field element (`≥ p`, or of degree `≥ m`
+    ///   over `F_2^m`; §2.3.6),
+    /// - uncompressed coordinates that fail the curve equation (step 3.5),
+    /// - a compressed `x` with no `y` on the curve: over `F_p` an `α` with no
+    ///   square root, or the root `0` under the tag `03` (step 2.4.1 then
+    ///   gives `y = p`, outside the field); over `F_2^m` a `β` with no root
+    ///   of `z² + z = β` (step 2.4.3).
+    ///
+    /// The point decoded need not be a valid public key:
+    /// [`Self::is_valid_public_point`] refuses `∞` and the 2-torsion points
+    /// `(x, 0)` and `(0, √b)` that this routine decodes as the standard
+    /// directs.
     #[must_use]
     pub fn decode_point(&self, bytes: &[u8]) -> Option<AffinePoint> {
         if bytes == [0x00] {
@@ -1320,6 +1747,9 @@ impl CurveParams {
                 let coord_bytes = &bytes[1..];
                 let x = BigUint::from_be_bytes(&coord_bytes[..self.coord_len]);
                 let y = BigUint::from_be_bytes(&coord_bytes[self.coord_len..]);
+                if !self.coordinate_is_canonical(&x) || !self.coordinate_is_canonical(&y) {
+                    return None;
+                }
                 let pt = AffinePoint::new(x, y);
                 if self.is_on_curve(&pt) {
                     Some(pt)
@@ -1334,6 +1764,9 @@ impl CurveParams {
                     return None;
                 }
                 let x = BigUint::from_be_bytes(&bytes[1..]);
+                if !self.coordinate_is_canonical(&x) {
+                    return None;
+                }
                 let odd_tag = *tag == 0x03;
                 match &self.field {
                     FieldCtx::Prime(_) => {
@@ -1347,13 +1780,22 @@ impl CurveParams {
         }
     }
 
-    /// Recover a binary-curve y-coordinate from a compressed x and parity bit.
+    /// SEC 1 §2.3.4 step 2.4 over `F_2^m`: the `y` that a compressed `x` and
+    /// the tag bit `ỹ` determine.
     ///
-    /// Uses the standard FIPS 186-4 decompression algorithm:
-    /// 1. Compute β = x + a + b·x⁻² in GF(2^m).
-    /// 2. Solve z² + z = β via the half-trace (valid for odd m and Tr(β) = 0).
-    /// 3. Recover y = z·x; select z or z+1 based on `odd_z` (LSB of y·x⁻¹).
-    /// 4. Verify the point lies on the curve.
+    /// - Step 2.4.2: `x = 0` gives `y = b^(2^(m−1))`, the square root of `b`
+    ///   ([`Gf2m::sqrt`]). The tag carries nothing here, since §2.3.3 step
+    ///   2.2.2 encodes such a point with `ỹ = 0`, and the step reads it
+    ///   under either tag. `(0, √b)` is its own negative, so it has order 2:
+    ///   it decodes, and [`Self::is_valid_public_point`] refuses it.
+    /// - Step 2.4.3: otherwise `β = x + a + b·x⁻²` and `z` is a root of
+    ///   `z² + z = β`, here the half-trace of IEEE Std 1363-2000 A.4.7, which
+    ///   is a root exactly when `Tr(β) = 0`; `y = x·z` or `x·(z + 1)`,
+    ///   whichever root has constant term `ỹ`.
+    ///
+    /// The point is checked against the curve equation before it is
+    /// returned; when `z² + z = β` has no root that check is what yields
+    /// "invalid".
     fn decompress_binary_point(
         &self,
         x: &BigUint,
@@ -1361,9 +1803,7 @@ impl CurveParams {
         field: &Gf2m,
     ) -> Option<AffinePoint> {
         if x.is_zero() {
-            // x = 0 implies 2P = ∞; decompression for this edge case requires
-            // a field square root which we omit (not used by any FIPS base point).
-            return None;
+            return Some(AffinePoint::new(BigUint::zero(), field.sqrt(&self.b)));
         }
         // β = x + a + b·x⁻²
         let x_inv = field.inverse(x)?;
@@ -1371,9 +1811,8 @@ impl CurveParams {
         let b_x_inv2 = field.mul(&self.b, &x_inv2);
         let beta = Gf2m::add(&Gf2m::add(x, &self.a), &b_x_inv2);
 
-        // Solve z² + z = β.
+        // The two roots of z² + z = β differ by 1; ỹ picks the constant term.
         let z0 = field.half_trace(&beta);
-        // The two solutions differ by 1; choose by LSB parity.
         let z = if z0.is_odd() == odd_z {
             z0
         } else {
@@ -1382,42 +1821,34 @@ impl CurveParams {
 
         let y = field.mul(&z, x);
         let pt = AffinePoint::new(x.clone(), y);
-        if self.is_on_curve(&pt) {
-            Some(pt)
-        } else {
-            None
-        }
+        self.is_on_curve(&pt).then_some(pt)
     }
 
-    /// Recover the `y`-coordinate from `x` using the curve equation, selecting
-    /// the root with the requested parity.
+    /// SEC 1 §2.3.4 step 2.4.1 over `F_p`: the `y` that a compressed `x` and
+    /// the tag bit `ỹ` determine. With `α = x³ + ax + b` and `β` a square
+    /// root of `α` modulo `p` (`rump::modular::mod_sqrt`, every odd prime
+    /// field included, the root verified by squaring before it is returned),
+    /// `y = β` when `β ≡ ỹ (mod 2)` and `y = p − β` otherwise.
     ///
-    /// The square root comes from `rump::mod_sqrt` (Tonelli–Shanks with the
-    /// `u^{(p+1)/4}` shortcut for `p ≡ 3 (mod 4)`), so every odd prime field
-    /// decompresses — including P-224, whose `p ≡ 1 (mod 4)` this crate
-    /// previously refused. The root is verified by squaring inside
-    /// `mod_sqrt` before it is returned.
-    ///
-    /// Returns `None` if `x` produces no square root in `F_p` (the `x`
-    /// coordinate is not on the curve).
+    /// `None` when `α` has no square root, and when `β = 0` under `ỹ = 1`:
+    /// the step then gives `y = p`, which is not a field element. The point
+    /// `(x, 0)` has order 2 and one encoding, under the tag `02`.
     fn field_sqrt_from_x(&self, x: &BigUint, odd_y: bool) -> Option<BigUint> {
         let ctx = self.prime_ctx();
 
-        // Curve equation: rhs = x³ + a·x + b (mod p).
         let x2 = ctx.square(x);
         let x3 = ctx.mul(&x2, x);
         let ax = ctx.mul(&self.a, x);
-        let rhs = field_add(&field_add(&x3, &ax, &self.p), &self.b, &self.p);
+        let alpha = BigUint::mod_add(&BigUint::mod_add(&x3, &ax, &self.p), &self.b, &self.p);
 
-        let y_candidate = mod_sqrt(&rhs, &self.p)?;
-
-        // Select the root with the requested parity.
-        let y = if y_candidate.is_odd() == odd_y {
-            y_candidate
+        let beta = mod_sqrt(&alpha, &self.p)?;
+        if beta.is_odd() == odd_y {
+            Some(beta)
+        } else if beta.is_zero() {
+            None
         } else {
-            field_neg(&y_candidate, &self.p)
-        };
-        Some(y)
+            Some(BigUint::mod_neg(&beta, &self.p))
+        }
     }
 }
 
@@ -1431,15 +1862,7 @@ fn from_hex(hex: &str) -> BigUint {
     // Strip spaces so the hex strings in the constants below can be written
     // as the familiar 8-nibble groups that match the NIST/SEC 2 specifications.
     let cleaned: String = hex.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-    assert!(
-        cleaned.len().is_multiple_of(2),
-        "hex string must have even length: {cleaned}"
-    );
-    let bytes: Vec<u8> = (0..cleaned.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex digit"))
-        .collect();
-    BigUint::from_be_bytes(&bytes)
+    BigUint::from_str_radix(&cleaned, 16).expect("named-curve constant is valid hex")
 }
 
 /// NIST P-256 (secp256r1).
@@ -1584,7 +2007,6 @@ pub fn secp256k1() -> CurveParams {
 ///
 /// Security level: ~96-bit classical, ~48-bit quantum (Grover).
 ///
-/// Note: p ≡ 3 (mod 4), so compressed-point decoding is supported.
 ///
 /// # Panics
 ///
@@ -1868,8 +2290,10 @@ pub fn b409() -> CurveParams {
     let b = from_hex(
         "0021A5C2C8EE9FEB5C4B9A753B7B476B7FD6422EF1F3DD674761FA99D6AC27C8A9A197B272822F6CD57A55AA4F50AE317B13545F",
     );
+    // Subgroup order n from FIPS 186-4 §D.1.3.4.2 (Curve B-409), converted
+    // from the published decimal; it equals RFC 6979 §A.2.16's q.
     let n = from_hex(
-        "010000000000000000000000000000000000000000000000012F7B6E4B64E2C26F2B04E76B1B9D77B6CCBB99EE3A7BCED5CB4ECB",
+        "010000000000000000000000000000000000000000000000000001E2AAD6A612F33307BE5FA47C3C9E052F838164CD37D9A21173",
     );
     let gx = from_hex(
         "015D4860D088DDB3496B0C6064756260441CDE4AF1771D4DB01FFE5B34E59703DC255A868A1180515603AEAB60794E54BB7996A7",
@@ -1975,6 +2399,591 @@ pub fn k571() -> CurveParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every named curve's base point lies on the curve and has the stated
+    /// order, `n·G = ∞`. The differential ladder tests share one `n` between
+    /// both sides, so a wrong order constant passes them; this checks `n`
+    /// against the group itself.
+    #[test]
+    fn named_curves_base_point_is_on_curve_with_order_n() {
+        let curves: [(&str, CurveParams); 16] = [
+            ("P-192", p192()),
+            ("P-224", p224()),
+            ("P-256", p256()),
+            ("P-384", p384()),
+            ("P-521", p521()),
+            ("secp256k1", secp256k1()),
+            ("B-163", b163()),
+            ("K-163", k163()),
+            ("B-233", b233()),
+            ("K-233", k233()),
+            ("B-283", b283()),
+            ("K-283", k283()),
+            ("B-409", b409()),
+            ("K-409", k409()),
+            ("B-571", b571()),
+            ("K-571", k571()),
+        ];
+        for (name, curve) in curves {
+            let g = curve.base_point();
+            assert!(curve.is_on_curve(&g), "{name}: G is not on the curve");
+            assert!(
+                curve.scalar_mul(&g, &curve.n).is_infinity(),
+                "{name}: n·G is not the point at infinity"
+            );
+        }
+    }
+
+    /// Every named curve passes the SEC 1 validation primitive itself, not
+    /// the named-curve lookup: the constants the constructors carry satisfy
+    /// the standard's arithmetic requirements, step by step.
+    #[test]
+    fn named_curves_pass_the_sec1_validation_primitive() {
+        for build in NAMED_CURVES {
+            let curve = build();
+            assert!(
+                curve.validate_domain_parameters(),
+                "field of {} bits, degree {:?}",
+                curve.p.bits(),
+                curve.gf2m_degree()
+            );
+        }
+    }
+
+    /// `from_explicit` on parameters that are not a named curve runs the
+    /// primitive: P-256 and B-163 with `−G` as base point are sound curves no
+    /// name covers and pass; a single defect at any step is refused.
+    #[test]
+    fn explicit_parameters_are_accepted_only_by_the_sec1_primitive() {
+        let named = p256();
+        let prime = |a: &BigUint, b: &BigUint, n: &BigUint, h: u64, gy: &BigUint| {
+            CurveParams::from_explicit(
+                ExplicitField::Prime(named.p.clone()),
+                a.clone(),
+                b.clone(),
+                n.clone(),
+                h,
+                named.gx.clone(),
+                gy.clone(),
+            )
+        };
+        let neg_gy = named.p.sub(&named.gy);
+        let sound = prime(&named.a, &named.b, &named.n, 1, &neg_gy).expect("P-256 under −G");
+        assert!(!sound.is_named_curve());
+        assert!(prime(&named.a, &named.b, &named.n, 1, &named.gy)
+            .expect("P-256")
+            .is_named_curve());
+        // Step 2: a coefficient at p.
+        assert!(prime(&named.p, &named.b, &named.n, 1, &neg_gy).is_none());
+        // Step 4: G off the curve.
+        let b_plus_one = named.b.add(&BigUint::one());
+        assert!(prime(&named.a, &b_plus_one, &named.n, 1, &neg_gy).is_none());
+        // Steps 5 and 7: a composite order that still annihilates G.
+        let tripled = named.n.mul(&BigUint::from_u64(3));
+        assert!(prime(&named.a, &named.b, &tripled, 1, &neg_gy).is_none());
+        // Step 6: a cofactor the Hasse interval excludes.
+        assert!(prime(&named.a, &named.b, &named.n, 2, &neg_gy).is_none());
+        // Step 1: a field width the primitive does not admit.
+        assert!(CurveParams::from_explicit(
+            ExplicitField::Prime(BigUint::from_u64(17)),
+            BigUint::from_u64(2),
+            BigUint::from_u64(2),
+            BigUint::from_u64(19),
+            1,
+            BigUint::from_u64(5),
+            BigUint::one(),
+        )
+        .is_none());
+
+        let named = b163();
+        let binary = |b: &BigUint, n: &BigUint, h: u64, gy: &BigUint| {
+            CurveParams::from_explicit(
+                ExplicitField::Binary {
+                    modulus: named.p.clone(),
+                    degree: 163,
+                },
+                named.a.clone(),
+                b.clone(),
+                n.clone(),
+                h,
+                named.gx.clone(),
+                gy.clone(),
+            )
+        };
+        // −G = (x, x ⊕ y) on a binary curve.
+        let neg_gy = Gf2m::add(&named.gx, &named.gy);
+        let sound = binary(&named.b, &named.n, named.h, &neg_gy).expect("B-163 under −G");
+        assert!(!sound.is_named_curve());
+        // Step 4: b = 0.
+        assert!(binary(&BigUint::zero(), &named.n, named.h, &neg_gy).is_none());
+        // Steps 6 and 8: a composite order.
+        let tripled = named.n.mul(&BigUint::from_u64(3));
+        assert!(binary(&named.b, &tripled, named.h, &neg_gy).is_none());
+        // Step 7: the wrong cofactor.
+        assert!(binary(&named.b, &named.n, 4, &neg_gy).is_none());
+    }
+
+    /// The integer decision of `h = ⌊(√q + 1)²/n⌋` agrees with a
+    /// floating-point evaluation wherever the latter is exact, and the
+    /// neighbours `h ± 1` are refused.
+    #[test]
+    fn hasse_quotient_cofactor_agrees_with_a_floating_point_reference() {
+        for q in [17u64, 101, 1009, 65_537, 1_000_003] {
+            let root = (q as f64).sqrt();
+            let big_q = BigUint::from_u64(q);
+            let candidates = (1..300).chain(q.saturating_sub(60).max(1)..q + 60);
+            for n in candidates {
+                let h = ((root + 1.0).powi(2) / n as f64).floor() as u64;
+                let big_n = BigUint::from_u64(n);
+                assert!(
+                    cofactor_is_hasse_quotient(h, &big_n, &big_q),
+                    "q {q}, n {n}, h {h}"
+                );
+                assert!(
+                    !cofactor_is_hasse_quotient(h + 1, &big_n, &big_q),
+                    "q {q}, n {n}"
+                );
+                if h > 0 {
+                    assert!(
+                        !cofactor_is_hasse_quotient(h - 1, &big_n, &big_q),
+                        "q {q}, n {n}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The multiplicative-order bound: 2 has order 3 modulo 7 and order 10
+    /// modulo 11, so the bound decides exactly at those orders. Table 1's
+    /// polynomials rebuild from their terms into the named curves' moduli.
+    #[test]
+    fn multiplicative_order_bound_and_table_1_polynomials() {
+        let two = BigUint::from_u64(2);
+        let seven = BigUint::from_u64(7);
+        let eleven = BigUint::from_u64(11);
+        assert!(multiplicative_order_at_least(&two, &seven, 3));
+        assert!(!multiplicative_order_at_least(&two, &seven, 4));
+        assert!(multiplicative_order_at_least(&two, &eleven, 10));
+        assert!(!multiplicative_order_at_least(&two, &eleven, 11));
+        // 9 ≡ 2 (mod 7): the base is reduced first.
+        assert!(!multiplicative_order_at_least(
+            &BigUint::from_u64(9),
+            &seven,
+            4
+        ));
+
+        assert_eq!(binary_polynomial(&[163, 7, 6, 3, 0]), b163().p);
+        assert_eq!(binary_polynomial(&[233, 74, 0]), k233().p);
+        assert_eq!(binary_polynomial(&[283, 12, 7, 5, 0]), b283().p);
+        assert_eq!(binary_polynomial(&[409, 87, 0]), k409().p);
+        assert_eq!(binary_polynomial(&[571, 10, 5, 2, 0]), b571().p);
+    }
+
+    /// `from_explicit` decides admissibility before it builds anything, so an
+    /// input of any size costs the work of a curve at an admitted size. A
+    /// reduction polynomial of degree 64001, an admitted degree claimed for
+    /// that polynomial, a 1 MiB field prime and a 1 MiB order are refused
+    /// with no irreducibility test, Montgomery context or primality test run
+    /// on them, which a debug build shows by finishing well inside 50 ms.
+    #[test]
+    fn oversized_explicit_parameters_are_refused_before_any_arithmetic() {
+        use std::time::Instant;
+        let named = p256();
+        let one = BigUint::one();
+        let mut huge_poly = BigUint::one();
+        huge_poly.shl_bits(64001);
+        huge_poly = huge_poly.add(&BigUint::from_u64(0b11));
+        let mut huge_prime = BigUint::one();
+        huge_prime.shl_bits(8 * 1024 * 1024);
+        huge_prime = huge_prime.add(&one);
+        let binary = |modulus: &BigUint, degree: usize| {
+            CurveParams::from_explicit(
+                ExplicitField::Binary {
+                    modulus: modulus.clone(),
+                    degree,
+                },
+                one.clone(),
+                one.clone(),
+                BigUint::from_u64(7),
+                2,
+                one.clone(),
+                one.clone(),
+            )
+        };
+        let prime = |p: &BigUint, n: &BigUint| {
+            CurveParams::from_explicit(
+                ExplicitField::Prime(p.clone()),
+                named.a.clone(),
+                named.b.clone(),
+                n.clone(),
+                1,
+                named.gx.clone(),
+                named.gy.clone(),
+            )
+        };
+        let start = Instant::now();
+        assert!(binary(&huge_poly, 64001).is_none());
+        assert!(binary(&huge_poly, 163).is_none());
+        assert!(prime(&huge_prime, &named.n).is_none());
+        assert!(prime(&named.p, &huge_prime).is_none());
+        let elapsed = start.elapsed();
+        assert!(elapsed.as_millis() < 50, "{elapsed:?}");
+    }
+
+    /// SEC 1 §2.3.4 step 2.4.2: on a binary curve the compressed `x = 0`
+    /// decodes to `(0, b^(2^(m−1))) = (0, √b)` under either tag, and §2.3.3
+    /// step 2.2.2 encodes that point with the tag `02`. It is its own
+    /// negative, so it has order 2: it decodes from each of its encodings
+    /// and is refused as a public key. On the Koblitz curves `b = 1`, so the
+    /// point is `(0, 1)`.
+    #[test]
+    fn binary_two_torsion_point_round_trips_through_compression() {
+        for build in [k163, k233, k283, k409, k571, b163, b233, b283, b409, b571] {
+            let curve = build();
+            let FieldCtx::Binary(field) = &curve.field else {
+                panic!("binary curve");
+            };
+            let point = AffinePoint::new(BigUint::zero(), field.sqrt(&curve.b));
+            assert!(curve.is_on_curve(&point));
+            assert_eq!(curve.negate(&point), point);
+            assert!(curve.double(&point).is_infinity());
+            if curve.b.is_one() {
+                assert_eq!(point.y, BigUint::one());
+            }
+            let compressed = curve.encode_point_compressed(&point);
+            assert_eq!(compressed[0], 0x02);
+            assert!(compressed[1..].iter().all(|&octet| octet == 0));
+            assert_eq!(curve.decode_point(&compressed), Some(point.clone()));
+            let mut other_tag = compressed.clone();
+            other_tag[0] = 0x03;
+            assert_eq!(curve.decode_point(&other_tag), Some(point.clone()));
+            assert_eq!(
+                curve.decode_point(&curve.encode_point(&point)),
+                Some(point.clone())
+            );
+            assert!(!curve.is_in_prime_subgroup(&point));
+            assert!(!curve.is_valid_public_point(&point));
+        }
+    }
+
+    /// The encoders encode the field elements the coordinates denote: a
+    /// representative outside the field, which `is_on_curve` accepts through
+    /// the reducing arithmetic, is reduced first, so encoding is total and
+    /// the point decodes to its canonical form.
+    #[test]
+    fn encoding_reduces_non_canonical_coordinates() {
+        let curve = p256();
+        let g = curve.base_point();
+        let shifted = AffinePoint::new(g.x.add(&curve.p), g.y.add(&curve.p));
+        assert!(curve.is_on_curve(&shifted));
+        assert_ne!(shifted, g);
+        assert_eq!(curve.encode_point(&shifted), curve.encode_point(&g));
+        assert_eq!(
+            curve.encode_point_compressed(&shifted),
+            curve.encode_point_compressed(&g)
+        );
+        assert_eq!(
+            curve.decode_point(&curve.encode_point(&shifted)),
+            Some(g.clone())
+        );
+
+        let curve = b163();
+        let g = curve.base_point();
+        // x + f(x) is another representative of x, of degree 163.
+        let shifted = AffinePoint::new(Gf2m::add(&g.x, &curve.p), Gf2m::add(&g.y, &curve.p));
+        assert!(curve.is_on_curve(&shifted));
+        assert_ne!(shifted, g);
+        assert_eq!(curve.encode_point(&shifted), curve.encode_point(&g));
+        assert_eq!(
+            curve.encode_point_compressed(&shifted),
+            curve.encode_point_compressed(&g)
+        );
+        assert_eq!(
+            curve.decode_point(&curve.encode_point_compressed(&shifted)),
+            Some(g)
+        );
+    }
+
+    /// SEC 1 §2.3.4 step 2.4.1 on a 2-torsion point: `y² = x³ + x` over
+    /// `F_23` (24 points; `(18, 10)` has order 3) has `(0, 0)`, whose
+    /// `β = 0`. Under the tag `02` it decodes; under `03` the step gives
+    /// `y = 23 − 0 = 23`, no field element, so the decoder refuses it rather
+    /// than return `(0, 0)` a second time.
+    #[test]
+    fn prime_compressed_two_torsion_has_one_encoding() {
+        let curve = CurveParams::new(
+            BigUint::from_u64(23),
+            BigUint::one(),
+            BigUint::zero(),
+            BigUint::from_u64(3),
+            8,
+            BigUint::from_u64(18),
+            BigUint::from_u64(10),
+        )
+        .expect("toy curve");
+        let g = curve.base_point();
+        assert!(curve.is_on_curve(&g));
+        assert!(curve.scalar_mul(&g, &curve.n).is_infinity());
+        let torsion = AffinePoint::new(BigUint::zero(), BigUint::zero());
+        assert!(curve.is_on_curve(&torsion));
+        assert!(curve.double(&torsion).is_infinity());
+        assert_eq!(curve.encode_point_compressed(&torsion), [0x02, 0x00]);
+        assert_eq!(curve.decode_point(&[0x02, 0x00]), Some(torsion.clone()));
+        assert_eq!(curve.decode_point(&[0x03, 0x00]), None);
+        assert!(!curve.is_valid_public_point(&torsion));
+        // An ordinary point and its negative still decode under their tags.
+        let neg_g = curve.negate(&g);
+        assert_eq!(
+            curve.decode_point(&curve.encode_point_compressed(&g)),
+            Some(g)
+        );
+        assert_eq!(
+            curve.decode_point(&curve.encode_point_compressed(&neg_g)),
+            Some(neg_g)
+        );
+    }
+
+    /// Step 6's first clause on its own, `h ≤ 2^(t/8)`: P-256 (`t = 128`)
+    /// admits `h ≤ 65536`, and with `h = 65537` the parameters are refused.
+    #[test]
+    fn cofactor_above_the_security_level_is_refused() {
+        assert!(cofactor_within_security_level(65536, 128));
+        assert!(!cofactor_within_security_level(65537, 128));
+        assert!(cofactor_within_security_level(1024, 80));
+        assert!(!cofactor_within_security_level(1025, 80));
+        let named = p256();
+        assert!(CurveParams::from_explicit(
+            ExplicitField::Prime(named.p.clone()),
+            named.a.clone(),
+            named.b.clone(),
+            named.n.clone(),
+            65537,
+            named.gx.clone(),
+            named.p.sub(&named.gy),
+        )
+        .is_none());
+    }
+
+    /// Step 1 on a composite field size: P-256's `p + 2` is a 256-bit odd
+    /// multiple of 3 (`p ≡ 1 (mod 3)`), the hardened primality test rejects
+    /// it, and so does `from_explicit`.
+    #[test]
+    fn composite_field_prime_is_refused() {
+        let named = p256();
+        let composite = named.p.add(&BigUint::from_u64(2));
+        assert_eq!(composite.rem_u64(3), 0);
+        assert_eq!(composite.bits(), 256);
+        assert!(composite.is_odd());
+        assert!(!is_probable_prime_untrusted(&composite));
+        assert!(CurveParams::from_explicit(
+            ExplicitField::Prime(composite),
+            named.a.clone(),
+            named.b.clone(),
+            named.n.clone(),
+            1,
+            named.gx.clone(),
+            named.gy.clone(),
+        )
+        .is_none());
+    }
+
+    /// Step 7 in isolation: P-256 with `n` replaced by the next prime above
+    /// it passes steps 1 to 6 (`n′` is prime and the Hasse quotient is still
+    /// 1) and fails only because `n′G ≠ O`.
+    #[test]
+    fn order_that_does_not_annihilate_the_base_point_is_refused() {
+        let named = p256();
+        let two = BigUint::from_u64(2);
+        let mut next = named.n.add(&two);
+        while !is_probable_prime_untrusted(&next) {
+            next = next.add(&two);
+        }
+        assert!(cofactor_is_hasse_quotient(1, &next, &named.p));
+        let claimed = CurveParams::new(
+            named.p.clone(),
+            named.a.clone(),
+            named.b.clone(),
+            next.clone(),
+            1,
+            named.gx.clone(),
+            named.gy.clone(),
+        )
+        .expect("odd prime order");
+        assert!(!claimed
+            .scalar_mul(&claimed.base_point(), &next)
+            .is_infinity());
+        assert!(!claimed.validate_domain_parameters());
+        assert!(CurveParams::from_explicit(
+            ExplicitField::Prime(named.p.clone()),
+            named.a.clone(),
+            named.b.clone(),
+            next,
+            1,
+            named.gx.clone(),
+            named.gy.clone(),
+        )
+        .is_none());
+    }
+
+    /// The anomalous test `hn = q`: P-256's `n` against itself and against
+    /// `p`, and a binary-field order with `nh = 2^m`.
+    #[test]
+    fn anomalous_curves_are_recognised_at_the_helper() {
+        let named = p256();
+        assert!(is_anomalous(&named.n, 1, &named.n));
+        assert!(!is_anomalous(&named.n, 1, &named.p));
+        assert!(!is_anomalous(&named.n, 2, &named.n));
+        let mut q = BigUint::one();
+        q.shl_bits(163);
+        let mut n = BigUint::one();
+        n.shl_bits(161);
+        assert!(is_anomalous(&n, 4, &q));
+        assert!(!is_anomalous(&n, 2, &q));
+        let k163 = k163();
+        assert!(!is_anomalous(&k163.n, k163.h, &q));
+    }
+
+    /// A curve that passes steps 1 to 7 and fails step 8 on its embedding
+    /// degree. Derived offline in integer arithmetic: `y² = x³ + 1` over
+    /// `F_p` with `p ≡ 2 (mod 3)` is supersingular, `#E(F_p) = p + 1`. Let
+    /// `n` be the least prime above `⌈2^191/6⌉` with `p = 6n − 1` also
+    /// prime; then `p` has 192 bits, `p ≡ 2 (mod 3)`, `#E = 6n`, and
+    /// `h = 6 = ⌊(√p + 1)²/n⌋`. `Q = (4, √65)` lies on the curve with
+    /// `6Q ≠ O`, so `G = 6Q` has order `n`. Since `p ≡ −1 (mod n)`,
+    /// `p² ≡ 1 (mod n)`: the embedding degree is 2, the pairing reduction
+    /// applies, and step 8 refuses the curve.
+    #[test]
+    fn supersingular_curve_is_refused_by_the_embedding_degree_step() {
+        let p = from_hex("8000000000000000000000000000000000000000000000e1");
+        let n = from_hex("15555555555555555555555555555555555555555555557b");
+        let gx = from_hex("07446a2b2373d55fb6a29485637bda00d4f202173147c11e");
+        let gy = from_hex("227b9fecf919cbbbde06d20142d845c542c12dba187b6487");
+        let (a, b, h) = (BigUint::zero(), BigUint::one(), 6u64);
+        assert_eq!(n.mul(&BigUint::from_u64(h)), p.add(&BigUint::one()));
+        assert_eq!(p.rem_u64(3), 2);
+        let curve = CurveParams::new(
+            p.clone(),
+            a.clone(),
+            b.clone(),
+            n.clone(),
+            h,
+            gx.clone(),
+            gy.clone(),
+        )
+        .expect("odd p and n");
+        // Steps 1 to 7 hold.
+        assert_eq!(prime_field_security_level(p.bits()), Some(80));
+        assert!(is_probable_prime_untrusted(&p));
+        assert!(is_probable_prime_untrusted(&n));
+        let g = curve.base_point();
+        assert!(curve.is_on_curve(&g));
+        assert!(cofactor_within_security_level(h, 80));
+        assert!(cofactor_is_hasse_quotient(h, &n, &p));
+        assert!(curve.scalar_mul(&g, &n).is_infinity());
+        assert!(!is_anomalous(&n, h, &p));
+        // Step 8: p has order 2 modulo n.
+        assert_eq!(p.rem(&n), n.sub(&BigUint::one()));
+        assert!(multiplicative_order_at_least(&p, &n, 2));
+        assert!(!multiplicative_order_at_least(&p, &n, 3));
+        assert!(!curve.validate_domain_parameters());
+        assert!(CurveParams::from_explicit(ExplicitField::Prime(p), a, b, n, h, gx, gy).is_none());
+    }
+
+    /// The Hasse-quotient decision at the sizes it is used at: for every
+    /// named curve the stated cofactor is `⌊(√q + 1)²/n⌋` and neither
+    /// neighbour is.
+    #[test]
+    fn hasse_quotient_holds_for_every_named_curve_and_no_neighbour() {
+        for build in NAMED_CURVES {
+            let curve = build();
+            let q = match curve.gf2m_degree() {
+                Some(m) => {
+                    let mut q = BigUint::one();
+                    q.shl_bits(m);
+                    q
+                }
+                None => curve.p.clone(),
+            };
+            assert!(cofactor_is_hasse_quotient(curve.h, &curve.n, &q));
+            assert!(!cofactor_is_hasse_quotient(curve.h + 1, &curve.n, &q));
+            assert!(!cofactor_is_hasse_quotient(curve.h - 1, &curve.n, &q));
+        }
+    }
+
+    /// A reducible or even-degree binary-field modulus must be refused at
+    /// construction: with zero divisors in the ring the point formulas hit an
+    /// uninvertible element and would panic on an attacker-supplied key blob.
+    #[test]
+    fn new_binary_rejects_reducible_or_even_degree_modulus() {
+        let n = BigUint::from_u64(7);
+        let one = BigUint::one();
+        let base = (one.clone(), one.clone());
+        // x³ + 1 = (x + 1)(x² + x + 1): reducible.
+        assert!(CurveParams::new_binary(
+            BigUint::from_u64(0b1001),
+            3,
+            one.clone(),
+            one.clone(),
+            n.clone(),
+            1,
+            base.clone()
+        )
+        .is_none());
+        // x⁴ + x + 1 is irreducible but of even degree: no half-trace.
+        assert!(CurveParams::new_binary(
+            BigUint::from_u64(0b10011),
+            4,
+            one.clone(),
+            one.clone(),
+            n.clone(),
+            1,
+            base.clone()
+        )
+        .is_none());
+        // x³ + x + 1: irreducible, odd degree.
+        assert!(CurveParams::new_binary(
+            BigUint::from_u64(0b1011),
+            3,
+            one.clone(),
+            one.clone(),
+            n.clone(),
+            1,
+            base
+        )
+        .is_some());
+        // A subgroup order of 1 makes scalar sampling impossible.
+        assert!(CurveParams::new_binary(
+            BigUint::from_u64(0b1011),
+            3,
+            one.clone(),
+            one.clone(),
+            one.clone(),
+            1,
+            (one.clone(), one)
+        )
+        .is_none());
+    }
+
+    /// `x + p` satisfies the curve equation once the Montgomery context
+    /// reduces it, but it is not a canonical field element: it breaks point
+    /// equality and fixed-width encoding, and SEC 1 requires its rejection.
+    #[test]
+    fn public_point_validation_rejects_non_canonical_coordinates() {
+        let curve = p256();
+        let shifted = AffinePoint::new(curve.gx.add(&curve.p), curve.gy.clone());
+        assert!(curve.is_on_curve(&shifted));
+        assert!(!curve.is_valid_public_point(&shifted));
+        assert!(curve.is_valid_public_point(&curve.base_point()));
+        assert!(!curve.is_valid_public_point(&AffinePoint::infinity()));
+    }
+
+    #[test]
+    fn same_curve_distinguishes_named_curves() {
+        assert!(p256().same_curve(&p256()));
+        assert!(!p256().same_curve(&p384()));
+        assert!(!p256().same_curve(&secp256k1()));
+        assert!(!b163().same_curve(&k163()));
+    }
 
     // ── P-256 ──────────────────────────────────────────────────────────────
 
@@ -2471,17 +3480,20 @@ mod tests {
         assert!(!shared_a.is_infinity());
     }
 
-    // ── Differential test: windowed / López–Dahab scalar_mul vs a simple,
-    //    independent double-and-add reference ──────────────────────────────
+    // ── Differential test: windowed / López–Dahab scalar_mul vs an affine
+    //    double-and-add reference ───────────────────────────────────────────
     //
-    // For every curve we compare `curve.scalar_mul(G, k)` (the optimised path:
-    // 4-bit fixed window for prime curves, López–Dahab projective coordinates
-    // for binary curves) against `reference_scalar_mul`, a plain left-to-right
-    // binary double-and-add built only from the single-operation affine
-    // `add`/`double`.  The reference shares none of the windowing bookkeeping
-    // or the López–Dahab arithmetic, so it is an independent oracle.  Scalars
-    // include the edge cases 0, 1, 2, n−1, n, n+1 plus deterministic
-    // pseudo-random full-width values, so all window boundaries are exercised.
+    // For every curve `curve.scalar_mul(G, k)` (a 4-bit fixed window in
+    // Jacobian coordinates on prime curves, López–Dahab projective
+    // coordinates on binary curves) is compared with `reference_scalar_mul`,
+    // a bit-serial double-and-add over affine formulas: on prime curves the
+    // chord-and-tangent formulas of `affine_add_prime` below, one modular
+    // inversion per step and no code in common with the Jacobian path; on
+    // binary curves `add_binary`/`double_binary`, which share nothing with
+    // the López–Dahab formulas. The comparison therefore checks the
+    // projective formulas as well as the window bookkeeping. Scalars include
+    // the edge cases 0, 1, 2, n−1, n, n+1 plus deterministic pseudo-random
+    // full-width values, so every window boundary is exercised.
 
     /// A tiny deterministic xorshift64* PRNG for reproducible test scalars.
     struct XorShift64 {
@@ -2513,32 +3525,58 @@ mod tests {
         }
     }
 
-    /// Independent reference scalar multiplication: plain (non-windowed)
-    /// left-to-right binary double-and-add.
-    ///
-    /// It deliberately shares none of the logic under test.  For prime curves
-    /// it runs a bit-serial double-and-add in Jacobian coordinates — the same
-    /// trusted point formulas used elsewhere, but without any of the 4-bit
-    /// window bookkeeping (table, digit extraction) that is being validated.
-    /// For binary curves it runs a bit-serial double-and-add in *affine*
-    /// coordinates via [`add_binary`]/[`double_binary`], which share no
-    /// arithmetic with the López–Dahab projective path under test.
+    /// Chord-and-tangent addition on `y² = x³ + ax + b` over `F_p` in affine
+    /// coordinates, one modular inversion per step (SEC 1 §2.2.1):
+    /// `λ = (y₂ − y₁)/(x₂ − x₁)`, or `(3x₁² + a)/(2y₁)` when `P = Q`;
+    /// `x₃ = λ² − x₁ − x₂`, `y₃ = λ(x₁ − x₃) − y₁`. `P + (−P) = ∞`, which
+    /// covers doubling a point with `y = 0`.
+    fn affine_add_prime(curve: &CurveParams, p: &AffinePoint, q: &AffinePoint) -> AffinePoint {
+        if p.is_infinity() {
+            return q.clone();
+        }
+        if q.is_infinity() {
+            return p.clone();
+        }
+        let m = &curve.p;
+        let mul = |a: &BigUint, b: &BigUint| BigUint::mod_mul(a, b, m);
+        let sub = |a: &BigUint, b: &BigUint| BigUint::mod_sub(a, b, m);
+        let add = |a: &BigUint, b: &BigUint| BigUint::mod_add(a, b, m);
+        let (numerator, denominator) = if p.x == q.x {
+            if add(&p.y, &q.y).is_zero() {
+                return AffinePoint::infinity();
+            }
+            let three_x_squared = mul(&BigUint::from_u64(3), &mul(&p.x, &p.x));
+            (add(&three_x_squared, &curve.a), add(&p.y, &p.y))
+        } else {
+            (sub(&q.y, &p.y), sub(&q.x, &p.x))
+        };
+        let lambda = mul(
+            &numerator,
+            &mod_inverse(&denominator, m).expect("non-zero denominator"),
+        );
+        let x3 = sub(&sub(&mul(&lambda, &lambda), &p.x), &q.x);
+        let y3 = sub(&mul(&lambda, &sub(&p.x, &x3)), &p.y);
+        AffinePoint::new(x3, y3)
+    }
+
+    /// Reference scalar multiplication: bit-serial left-to-right
+    /// double-and-add over affine formulas, [`affine_add_prime`] on prime
+    /// curves and [`add_binary`]/[`double_binary`] on binary ones. Neither
+    /// shares code with the projective paths under test.
     fn reference_scalar_mul(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> AffinePoint {
         if k.is_zero() || point.is_infinity() {
             return AffinePoint::infinity();
         }
         match &curve.field {
-            FieldCtx::Prime(fld) => {
-                let mut scratch = MontgomeryScratch::new();
-                let mut result = JacobianPoint::infinity(fld);
-                let p_jac = JacobianPoint::from_affine(fld, point);
+            FieldCtx::Prime(_) => {
+                let mut result = AffinePoint::infinity();
                 for i in (0..k.bits()).rev() {
-                    result = point_double_jacobian(fld, &result, &mut scratch);
+                    result = affine_add_prime(curve, &result, &result);
                     if k.bit(i) {
-                        result = point_add_jacobian(fld, &result, &p_jac, &mut scratch);
+                        result = affine_add_prime(curve, &result, point);
                     }
                 }
-                result.to_affine(curve)
+                result
             }
             FieldCtx::Binary(_) => {
                 let mut result = AffinePoint::infinity();
@@ -2622,4 +3660,42 @@ mod tests {
     differential_test!(diff_k409, k409, 3);
     differential_test!(diff_b571, b571, 2);
     differential_test!(diff_k571, k571, 2);
+
+    /// SEC 1 §2.3.4 step 1 decodes the octet `00` to `∞`, which passes the
+    /// subgroup test (`n·∞ = ∞`) but never public-key validation (§3.2.2.1
+    /// step 1). A private scalar yields a public point only when `d·G` is a
+    /// valid one, which fails when the stated `n` is not the order of `G`.
+    #[test]
+    fn identity_decodes_but_is_never_a_valid_public_point() {
+        let curve = p256();
+        let identity = curve.decode_point(&[0x00]).expect("SEC 1 §2.3.4 step 1");
+        assert!(identity.is_infinity());
+        assert!(curve.is_in_prime_subgroup(&identity));
+        assert!(!curve.is_valid_public_point(&identity));
+        assert!(curve.is_valid_public_point(&curve.base_point()));
+
+        assert_eq!(
+            curve.public_point_for_scalar(&BigUint::one()),
+            Some(curve.base_point())
+        );
+        assert!(curve.public_point_for_scalar(&BigUint::zero()).is_none());
+        assert!(curve.public_point_for_scalar(&curve.n).is_none());
+
+        // P-256 claiming the order 3n: d = n is in range, and n·G = ∞.
+        let tripled = CurveParams::new(
+            curve.p.clone(),
+            curve.a.clone(),
+            curve.b.clone(),
+            curve.n.mul(&BigUint::from_u64(3)),
+            curve.h,
+            curve.gx.clone(),
+            curve.gy.clone(),
+        )
+        .expect("3n is odd");
+        assert_eq!(
+            tripled.public_point_for_scalar(&BigUint::one()),
+            Some(tripled.base_point())
+        );
+        assert!(tripled.public_point_for_scalar(&curve.n).is_none());
+    }
 }

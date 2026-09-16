@@ -120,46 +120,25 @@ impl<H: Digest> Drop for Hkdf<H> {
 #[cfg(test)]
 mod tests {
     use super::Hkdf;
+    use crate::test_utils::{decode_hex, encode_hex};
     use crate::{Sha1, Sha256};
-
-    fn hex(bytes: &[u8]) -> String {
-        let mut out = String::with_capacity(bytes.len() * 2);
-        for b in bytes {
-            use core::fmt::Write;
-            let _ = write!(&mut out, "{b:02x}");
-        }
-        out
-    }
-
-    fn unhex(input: &str) -> Vec<u8> {
-        let mut out = Vec::with_capacity(input.len() / 2);
-        let bytes = input.as_bytes();
-        let mut i = 0usize;
-        while i + 1 < bytes.len() {
-            let hi = (bytes[i] as char).to_digit(16).expect("hex") as u8;
-            let lo = (bytes[i + 1] as char).to_digit(16).expect("hex") as u8;
-            out.push((hi << 4) | lo);
-            i += 2;
-        }
-        out
-    }
 
     #[test]
     fn rfc5869_case_1_sha256() {
         let ikm = vec![0x0b; 22];
-        let salt = unhex("000102030405060708090a0b0c");
-        let info = unhex("f0f1f2f3f4f5f6f7f8f9");
+        let salt = decode_hex("000102030405060708090a0b0c");
+        let info = decode_hex("f0f1f2f3f4f5f6f7f8f9");
 
         let hkdf = Hkdf::<Sha256>::extract(Some(&salt), &ikm);
         assert_eq!(
-            hex(hkdf.prk()),
+            encode_hex(hkdf.prk()),
             "077709362c2e32df0ddc3f0dc47bba63".to_owned() + "90b6c73bb50f9c3122ec844ad7c2b3e5"
         );
 
         let mut okm = vec![0u8; 42];
         assert!(hkdf.expand(&info, &mut okm));
         assert_eq!(
-            hex(&okm),
+            encode_hex(&okm),
             "3cb25f25faacd57a90434f64d0362f2a".to_owned()
                 + "2d2d0a90cf1a5a4c5db02d56ecc4c5bf"
                 + "34007208d5b887185865"
@@ -168,21 +147,21 @@ mod tests {
 
     #[test]
     fn rfc5869_case_2_sha256_long_inputs() {
-        let ikm = unhex(
+        let ikm = decode_hex(
             "000102030405060708090a0b0c0d0e0f\
              101112131415161718191a1b1c1d1e1f\
              202122232425262728292a2b2c2d2e2f\
              303132333435363738393a3b3c3d3e3f\
              404142434445464748494a4b4c4d4e4f",
         );
-        let salt = unhex(
+        let salt = decode_hex(
             "606162636465666768696a6b6c6d6e6f\
              707172737475767778797a7b7c7d7e7f\
              808182838485868788898a8b8c8d8e8f\
              909192939495969798999a9b9c9d9e9f\
              a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
         );
-        let info = unhex(
+        let info = decode_hex(
             "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf\
              c0c1c2c3c4c5c6c7c8c9cacbcccdcecf\
              d0d1d2d3d4d5d6d7d8d9dadbdcdddedf\
@@ -192,14 +171,14 @@ mod tests {
 
         let hkdf = Hkdf::<Sha256>::extract(Some(&salt), &ikm);
         assert_eq!(
-            hex(hkdf.prk()),
+            encode_hex(hkdf.prk()),
             "06a6b88c5853361a06104c9ceb35b45c".to_owned() + "ef760014904671014a193f40c15fc244"
         );
 
         let mut okm = vec![0u8; 82];
         assert!(hkdf.expand(&info, &mut okm));
         assert_eq!(
-            hex(&okm),
+            encode_hex(&okm),
             "b11e398dc80327a1c8e7f78c596a4934".to_owned()
                 + "4f012eda2d4efad8a050cc4c19afa97c"
                 + "59045a99cac7827271cb41c65e590e09"
@@ -217,7 +196,7 @@ mod tests {
         let hkdf = Hkdf::<Sha256>::extract(None, &ikm);
         assert!(hkdf.expand(&info, &mut okm));
         assert_eq!(
-            hex(&okm),
+            encode_hex(&okm),
             "8da4e775a563c18f715f802a063c5a31".to_owned()
                 + "b8a11f5c5ee1879ec3454e5f3c738d2d"
                 + "9d201395faa4b61a96c8"
@@ -226,17 +205,20 @@ mod tests {
 
     #[test]
     fn rfc5869_case_4_sha1() {
-        let ikm = unhex("0b0b0b0b0b0b0b0b0b0b0b");
-        let salt = unhex("000102030405060708090a0b0c");
-        let info = unhex("f0f1f2f3f4f5f6f7f8f9");
+        let ikm = decode_hex("0b0b0b0b0b0b0b0b0b0b0b");
+        let salt = decode_hex("000102030405060708090a0b0c");
+        let info = decode_hex("f0f1f2f3f4f5f6f7f8f9");
 
         let hkdf = Hkdf::<Sha1>::extract(Some(&salt), &ikm);
-        assert_eq!(hex(hkdf.prk()), "9b6c18c432a7bf8f0e71c8eb88f4b30baa2ba243");
+        assert_eq!(
+            encode_hex(hkdf.prk()),
+            "9b6c18c432a7bf8f0e71c8eb88f4b30baa2ba243"
+        );
 
         let mut okm = vec![0u8; 42];
         assert!(hkdf.expand(&info, &mut okm));
         assert_eq!(
-            hex(&okm),
+            encode_hex(&okm),
             "085a01ea1b10f36933068b56efa5ad81".to_owned()
                 + "a4f14b822f5b091568a9cdd4f155fda2"
                 + "c22e422478d305f3f896"
@@ -245,21 +227,21 @@ mod tests {
 
     #[test]
     fn rfc5869_case_5_sha1_long_inputs() {
-        let ikm = unhex(
+        let ikm = decode_hex(
             "000102030405060708090a0b0c0d0e0f\
              101112131415161718191a1b1c1d1e1f\
              202122232425262728292a2b2c2d2e2f\
              303132333435363738393a3b3c3d3e3f\
              404142434445464748494a4b4c4d4e4f",
         );
-        let salt = unhex(
+        let salt = decode_hex(
             "606162636465666768696a6b6c6d6e6f\
              707172737475767778797a7b7c7d7e7f\
              808182838485868788898a8b8c8d8e8f\
              909192939495969798999a9b9c9d9e9f\
              a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
         );
-        let info = unhex(
+        let info = decode_hex(
             "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf\
              c0c1c2c3c4c5c6c7c8c9cacbcccdcecf\
              d0d1d2d3d4d5d6d7d8d9dadbdcdddedf\
@@ -268,12 +250,15 @@ mod tests {
         );
 
         let hkdf = Hkdf::<Sha1>::extract(Some(&salt), &ikm);
-        assert_eq!(hex(hkdf.prk()), "8adae09a2a307059478d309b26c4115a224cfaf6");
+        assert_eq!(
+            encode_hex(hkdf.prk()),
+            "8adae09a2a307059478d309b26c4115a224cfaf6"
+        );
 
         let mut okm = vec![0u8; 82];
         assert!(hkdf.expand(&info, &mut okm));
         assert_eq!(
-            hex(&okm),
+            encode_hex(&okm),
             "0bd770a74d1160f7c9f12cd5912a06eb".to_owned()
                 + "ff6adcae899d92191fe4305673ba2ffe"
                 + "8fa3f1a4e5ad79f3f334b3b202b2173c"
@@ -289,12 +274,15 @@ mod tests {
         let info = [];
 
         let hkdf = Hkdf::<Sha1>::extract(Some(&[]), &ikm);
-        assert_eq!(hex(hkdf.prk()), "da8c8a73c7fa77288ec6f5e7c297786aa0d32d01");
+        assert_eq!(
+            encode_hex(hkdf.prk()),
+            "da8c8a73c7fa77288ec6f5e7c297786aa0d32d01"
+        );
 
         let mut okm = vec![0u8; 42];
         assert!(hkdf.expand(&info, &mut okm));
         assert_eq!(
-            hex(&okm),
+            encode_hex(&okm),
             "0ac1af7002b3d761d1e55298da9d0506".to_owned()
                 + "b9ae52057220a306e07b6b87e8df21d0"
                 + "ea00033de03984d34918"
@@ -307,23 +295,124 @@ mod tests {
         let info = [];
 
         let hkdf = Hkdf::<Sha1>::extract(None, &ikm);
-        assert_eq!(hex(hkdf.prk()), "2adccada18779e7c2077ad2eb19d3f3e731385dd");
+        assert_eq!(
+            encode_hex(hkdf.prk()),
+            "2adccada18779e7c2077ad2eb19d3f3e731385dd"
+        );
 
         let mut okm = vec![0u8; 42];
         assert!(hkdf.expand(&info, &mut okm));
         assert_eq!(
-            hex(&okm),
+            encode_hex(&okm),
             "2c91117204d745f3500d636a62f64f0a".to_owned()
                 + "b3bae548aa53d423b0d1f27ebba6f5e5"
                 + "673a081d70cce7acfc48"
         );
     }
 
+    /// RFC 5869 §2.3: L ≤ 255·HashLen. One byte over is refused, for both
+    /// digest widths.
     #[test]
     fn expand_rejects_overlong_output() {
         let hkdf = Hkdf::<Sha256>::extract(Some(&[0x01, 0x02]), b"ikm");
         let mut out = vec![0u8; 255 * 32 + 1];
         assert!(!hkdf.expand(b"info", &mut out));
+        let hkdf = Hkdf::<Sha1>::extract(Some(&[0x01, 0x02]), b"ikm");
+        let mut out = vec![0u8; 255 * 20 + 1];
+        assert!(!hkdf.expand(b"info", &mut out));
+    }
+
+    /// RFC 5869 §2.3 at the bound, L = 255·HashLen, with Test Case 1's
+    /// inputs: the expansion succeeds, its first 42 bytes are Test Case 1's
+    /// OKM (T(1) and T(2) do not depend on L), and every byte through T(255)
+    /// matches `openssl kdf ... HKDF` (loud skip without an OpenSSL 3 tool).
+    #[test]
+    fn expand_at_the_maximum_length() {
+        let ikm = vec![0x0b; 22];
+        let salt = decode_hex("000102030405060708090a0b0c");
+        let info = decode_hex("f0f1f2f3f4f5f6f7f8f9");
+        let hkdf = Hkdf::<Sha256>::extract(Some(&salt), &ikm);
+        let mut okm = vec![0u8; 255 * 32];
+        assert!(hkdf.expand(&info, &mut okm));
+        assert_eq!(
+            encode_hex(&okm[..42]),
+            "3cb25f25faacd57a90434f64d0362f2a".to_owned()
+                + "2d2d0a90cf1a5a4c5db02d56ecc4c5bf"
+                + "34007208d5b887185865"
+        );
+        assert_eq!(
+            Hkdf::<Sha256>::derive(Some(&salt), &ikm, &info, 255 * 32).as_deref(),
+            Some(okm.as_slice())
+        );
+
+        let Some(expected) = crate::test_utils::openssl(
+            &[
+                "kdf",
+                "-keylen",
+                "8160",
+                "-kdfopt",
+                "digest:SHA256",
+                "-kdfopt",
+                &format!("hexkey:{}", encode_hex(&ikm)),
+                "-kdfopt",
+                &format!("hexsalt:{}", encode_hex(&salt)),
+                "-kdfopt",
+                &format!("hexinfo:{}", encode_hex(&info)),
+                "-binary",
+                "HKDF",
+            ],
+            &[],
+        )
+        .or_skip("expand_at_the_maximum_length") else {
+            return;
+        };
+        assert_eq!(okm, expected);
+    }
+
+    /// L = 0 is a valid length: `expand` succeeds and writes nothing, and
+    /// `derive` returns an empty key.
+    #[test]
+    fn expand_zero_length_output() {
+        let hkdf = Hkdf::<Sha256>::extract(Some(b"salt"), b"ikm");
+        let mut out = [];
+        assert!(hkdf.expand(b"info", &mut out));
+        assert_eq!(
+            Hkdf::<Sha256>::derive(Some(b"salt"), b"ikm", b"info", 0),
+            Some(Vec::new())
+        );
+    }
+
+    /// `from_prk` accepts exactly a HashLen-byte PRK (RFC 5869 §2.2 and
+    /// §2.3) and rejects every other length; an accepted PRK expands exactly
+    /// as the `extract` that produced it does.
+    #[test]
+    fn from_prk_accepts_only_a_digest_width_prk() {
+        for wrong in [0usize, 1, 31, 33, 64] {
+            assert!(
+                Hkdf::<Sha256>::from_prk(&vec![0x5a; wrong]).is_none(),
+                "{wrong}-byte PRK"
+            );
+        }
+        assert!(Hkdf::<Sha1>::from_prk(&[0x5a; 32]).is_none());
+        assert!(Hkdf::<Sha1>::from_prk(&[0x5a; 20]).is_some());
+
+        let ikm = vec![0x0b; 22];
+        let salt = decode_hex("000102030405060708090a0b0c");
+        let info = decode_hex("f0f1f2f3f4f5f6f7f8f9");
+        let extracted = Hkdf::<Sha256>::extract(Some(&salt), &ikm);
+        let imported = Hkdf::<Sha256>::from_prk(extracted.prk()).expect("a 32-byte PRK");
+        assert_eq!(imported.prk(), extracted.prk());
+        let mut from_extracted = vec![0u8; 42];
+        let mut from_imported = vec![0u8; 42];
+        assert!(extracted.expand(&info, &mut from_extracted));
+        assert!(imported.expand(&info, &mut from_imported));
+        assert_eq!(from_imported, from_extracted);
+        assert_eq!(
+            encode_hex(&from_imported),
+            "3cb25f25faacd57a90434f64d0362f2a".to_owned()
+                + "2d2d0a90cf1a5a4c5db02d56ecc4c5bf"
+                + "34007208d5b887185865"
+        );
     }
 
     #[test]

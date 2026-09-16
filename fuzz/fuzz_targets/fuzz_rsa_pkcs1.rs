@@ -51,14 +51,14 @@ fuzz_target!(|data: &[u8]| {
     // PSS-SHA-256 roundtrip.
     if let Some(sig) = RsaPss::<Sha256>::sign(sk, message, pss_salt) {
         assert!(
-            RsaPss::<Sha256>::verify(pk, message, &sig),
+            RsaPss::<Sha256>::verify(pk, message, &sig, pss_salt.len()),
             "PSS: verify returned false for a freshly generated signature",
         );
         if !message.is_empty() {
             let mut bad = message.to_vec();
             bad[0] ^= 1;
             assert!(
-                !RsaPss::<Sha256>::verify(pk, &bad, &sig),
+                !RsaPss::<Sha256>::verify(pk, &bad, &sig, pss_salt.len()),
                 "PSS: verify returned true for a modified message",
             );
         }

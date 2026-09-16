@@ -63,7 +63,7 @@ impl EdwardsDhPublicKey {
     #[must_use]
     pub fn from_wire_bytes(curve: TwistedEdwardsCurve, bytes: &[u8]) -> Option<Self> {
         let q = curve.decode_point(bytes)?;
-        if !validate_public_point(&curve, &q) {
+        if !curve.is_valid_public_point(&q) {
             return None;
         }
         let q_table = curve.precompute_mul_table(&q);
@@ -95,9 +95,9 @@ impl EdwardsDhPublicKey {
         let gy = fields.next()?;
         let qx = fields.next()?;
         let qy = fields.next()?;
-        let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
+        let curve = TwistedEdwardsCurve::from_explicit(p, a, d_curve, n, gx, gy)?;
         let q = EdwardsPoint::new(qx, qy);
-        if !validate_public_point(&curve, &q) {
+        if !curve.is_valid_public_point(&q) {
             return None;
         }
         let q_table = curve.precompute_mul_table(&q);
@@ -139,7 +139,15 @@ impl EdwardsDhPrivateKey {
         }
     }
 
-    /// Compute the shared point and return its compressed Edwards encoding.
+    /// Compute the shared point and return its compressed Edwards encoding,
+    /// or `None` when `peer` is on another curve.
+    ///
+    /// The shared point is never the neutral element: every public-key
+    /// import path checks `Q` into the prime-order subgroup and away from
+    /// the neutral element ([`TwistedEdwardsCurve::is_valid_public_point`]),
+    /// so `Q` has order exactly `n`, and `d ∈ [1, n)` is no multiple of `n`.
+    /// That validation on import is the defence against small-subgroup
+    /// inputs; nothing is re-checked here.
     ///
     /// Returning the encoded point keeps the wrapper purely in Edwards form;
     /// callers should pass the bytes through a KDF before using them as key
@@ -150,9 +158,6 @@ impl EdwardsDhPrivateKey {
             return None;
         }
         let shared = self.curve.scalar_mul_cached(&peer.q_table, &self.d);
-        if shared.is_neutral() {
-            return None;
-        }
         Some(self.curve.encode_point(&shared))
     }
 
@@ -179,7 +184,7 @@ impl EdwardsDhPrivateKey {
         let gx = fields.next()?;
         let gy = fields.next()?;
         let d = fields.next()?;
-        let curve = TwistedEdwardsCurve::new(p, a, d_curve, n, gx, gy)?;
+        let curve = TwistedEdwardsCurve::from_explicit(p, a, d_curve, n, gx, gy)?;
         if d.is_zero() || d >= curve.n {
             return None;
         }
@@ -225,29 +230,14 @@ impl EdwardsDh {
     }
 }
 
-fn validate_public_point(curve: &TwistedEdwardsCurve, point: &EdwardsPoint) -> bool {
-    !point.is_neutral()
-        && curve.is_on_curve(point)
-        && curve.scalar_mul(point, &curve.n).is_neutral()
-}
-
 #[cfg(test)]
 mod tests {
     use super::{EdwardsDh, EdwardsDhPrivateKey, EdwardsDhPublicKey};
     use crate::public_key::ec_edwards::ed25519;
+    use crate::public_key::io::{encode_biguints, xml_wrap};
+    use crate::test_utils::decode_hex;
     use crate::CtrDrbgAes256;
     use rump::BigUint;
-
-    fn decode_hex(hex: &str) -> Vec<u8> {
-        let bytes = hex.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len() / 2);
-        for chunk in bytes.chunks_exact(2) {
-            let hi = (chunk[0] as char).to_digit(16).expect("hex") as u8;
-            let lo = (chunk[1] as char).to_digit(16).expect("hex") as u8;
-            out.push((hi << 4) | lo);
-        }
-        out
-    }
 
     fn rng(seed: u8) -> CtrDrbgAes256 {
         CtrDrbgAes256::new(&[seed; 48])
@@ -262,8 +252,14 @@ mod tests {
         assert_eq!(shared_a, shared_b);
     }
 
+    /// Regression fixture: the private scalar 7 agreed with the peer point
+    /// `11·G` gives `77·G`. The two encodings are this implementation's RFC
+    /// 8032 §5.1.2 encodings of `11·G` and `77·G`, the same values
+    /// `ec_edwards` pins for those base-point multiples; they have no external
+    /// source and guard against unintended change, not as independent known
+    /// answers.
     #[test]
-    fn agreement_fixture_matches_known_ed25519_encoding() {
+    fn agreement_of_7_with_11g_is_the_regression_encoding_of_77g() {
         let curve = ed25519();
         let private = EdwardsDhPrivateKey {
             curve: curve.clone(),
@@ -312,5 +308,50 @@ mod tests {
     fn debug_redacts_private_key() {
         let (_, private) = EdwardsDh::generate(ed25519(), &mut rng(0x55));
         assert_eq!(format!("{private:?}"), "EdwardsDhPrivateKey(<redacted>)");
+    }
+
+    /// The public-key schema fields with `p` added to field `index` (6 = `qx`,
+    /// 7 = `qy`): the same point modulo `p`, encoded non-canonically.
+    fn public_fields_offset_by_p(public: &EdwardsDhPublicKey, index: usize) -> Vec<BigUint> {
+        let mut fields = public.serial_fields();
+        fields[index] = fields[index].add(&public.curve.p);
+        fields
+    }
+
+    fn public_blob(fields: &[BigUint]) -> Vec<u8> {
+        let refs: Vec<&BigUint> = fields.iter().collect();
+        encode_biguints(&refs)
+    }
+
+    fn public_xml(fields: &[BigUint]) -> String {
+        let names = ["p", "a", "d", "n", "gx", "gy", "qx", "qy"];
+        let pairs: Vec<(&str, &BigUint)> = names.iter().copied().zip(fields.iter()).collect();
+        xml_wrap("EdwardsDhPublicKey", &pairs)
+    }
+
+    #[test]
+    fn public_blob_rejects_non_canonical_coordinates() {
+        let (public, _) = EdwardsDh::generate(ed25519(), &mut rng(0x55));
+        assert!(EdwardsDhPublicKey::from_key_blob(&public_blob(&public.serial_fields())).is_some());
+        for index in [6, 7] {
+            let blob = public_blob(&public_fields_offset_by_p(&public, index));
+            assert!(
+                EdwardsDhPublicKey::from_key_blob(&blob).is_none(),
+                "blob decode accepted field {index} + p"
+            );
+        }
+    }
+
+    #[test]
+    fn public_xml_rejects_non_canonical_coordinates() {
+        let (public, _) = EdwardsDh::generate(ed25519(), &mut rng(0x66));
+        assert!(EdwardsDhPublicKey::from_xml(&public_xml(&public.serial_fields())).is_some());
+        for index in [6, 7] {
+            let xml = public_xml(&public_fields_offset_by_p(&public, index));
+            assert!(
+                EdwardsDhPublicKey::from_xml(&xml).is_none(),
+                "XML decode accepted field {index} + p"
+            );
+        }
     }
 }

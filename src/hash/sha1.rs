@@ -15,61 +15,107 @@ const IV: [u32; 5] = [
     0xC3D2_E1F0,
 ];
 
+// FIPS 180-4 §4.1.1: the logical functions f_0, f_1, ..., f_79, each taking
+// three 32-bit words x, y, z to one. The Standard writes ∧ for bitwise AND,
+// ⊕ for XOR, and ¬ for the complement (§2.2.2).
+
+/// Ch(x, y, z) = (x ∧ y) ⊕ (¬x ∧ z), which is f_t for 0 ≤ t ≤ 19 (FIPS 180-4
+/// §4.1.1).
+#[allow(non_snake_case)]
 #[inline]
-fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
-    let mut schedule = [0u32; 80];
-    for (i, chunk) in block.chunks_exact(4).enumerate() {
-        schedule[i] = u32::from_be_bytes(chunk.try_into().unwrap());
+const fn Ch(x: u32, y: u32, z: u32) -> u32 {
+    (x & y) ^ (!x & z)
+}
+
+/// Parity(x, y, z) = x ⊕ y ⊕ z, which is f_t for 20 ≤ t ≤ 39 and for
+/// 60 ≤ t ≤ 79 (FIPS 180-4 §4.1.1).
+#[allow(non_snake_case)]
+#[inline]
+const fn Parity(x: u32, y: u32, z: u32) -> u32 {
+    x ^ y ^ z
+}
+
+/// Maj(x, y, z) = (x ∧ y) ⊕ (x ∧ z) ⊕ (y ∧ z), which is f_t for 40 ≤ t ≤ 59
+/// (FIPS 180-4 §4.1.1).
+#[allow(non_snake_case)]
+#[inline]
+const fn Maj(x: u32, y: u32, z: u32) -> u32 {
+    (x & y) ^ (x & z) ^ (y & z)
+}
+
+/// f_t(x, y, z), FIPS 180-4 §4.1.1 equation (4.1).
+#[inline]
+const fn f(t: usize, x: u32, y: u32, z: u32) -> u32 {
+    match t {
+        0..=19 => Ch(x, y, z),
+        20..=39 => Parity(x, y, z),
+        40..=59 => Maj(x, y, z),
+        60..=79 => Parity(x, y, z),
+        _ => panic!("f_t is defined for 0 <= t <= 79"),
     }
-    for word_idx in 16..80 {
-        schedule[word_idx] = (schedule[word_idx - 3]
-            ^ schedule[word_idx - 8]
-            ^ schedule[word_idx - 14]
-            ^ schedule[word_idx - 16])
-            .rotate_left(1);
+}
+
+/// K_t, the eighty constant 32-bit words of FIPS 180-4 §4.2.1 equation (4.14).
+#[allow(non_snake_case)]
+#[inline]
+const fn K(t: usize) -> u32 {
+    match t {
+        0..=19 => 0x5a82_7999,
+        20..=39 => 0x6ed9_eba1,
+        40..=59 => 0x8f1b_bcdc,
+        60..=79 => 0xca62_c1d6,
+        _ => panic!("K_t is defined for 0 <= t <= 79"),
+    }
+}
+
+/// FIPS 180-4 §6.1.2, SHA-1 hash computation: steps 1 to 4 for one message
+/// block M^(i). `H` holds the (i-1)st hash value H_0^(i-1), ..., H_4^(i-1) on
+/// entry and the ith, H_0^(i), ..., H_4^(i), on return. Addition (+) is
+/// performed modulo 2^32, and ROTL^n(x) is `x.rotate_left(n)` (§3.2).
+// Step 3 indexes W by the Standard's round index t, which f_t and K_t take as
+// well, rather than iterating over W as Clippy's needless_range_loop prefers.
+#[allow(non_snake_case, clippy::needless_range_loop)]
+#[inline]
+fn compress(H: &mut [u32; 5], block: &[u8; 64]) {
+    // 1. Prepare the message schedule, {W_t}. The first sixteen words are the
+    //    block's M_0^(i), ..., M_15^(i), each big-endian (§3.1, §5.2.1).
+    let mut W = [0u32; 80];
+    for (t, M_t) in block.chunks_exact(4).enumerate() {
+        W[t] = u32::from_be_bytes([M_t[0], M_t[1], M_t[2], M_t[3]]);
+    }
+    for t in 16..=79 {
+        W[t] = (W[t - 3] ^ W[t - 8] ^ W[t - 14] ^ W[t - 16]).rotate_left(1);
     }
 
-    let mut a_reg = state[0];
-    let mut b_reg = state[1];
-    let mut c_reg = state[2];
-    let mut d_reg = state[3];
-    let mut e_reg = state[4];
+    // 2. Initialize the five working variables, a, b, c, d, and e, with the
+    //    (i-1)st hash value.
+    let [mut a, mut b, mut c, mut d, mut e] = *H;
 
-    for (round_idx, &schedule_word) in schedule.iter().enumerate() {
-        // FIPS 180-4 round partition:
-        // 0..19: Ch, 0x5A827999
-        // 20..39: Parity, 0x6ED9EBA1
-        // 40..59: Maj, 0x8F1BBCDC
-        // 60..79: Parity, 0xCA62C1D6
-        //
-        // These constants are floor(sqrt(n) * 2^30) for n=2,3,5,10.
-        let (round_mix, round_const) = match round_idx {
-            0..=19 => ((b_reg & c_reg) | ((!b_reg) & d_reg), 0x5A82_7999),
-            20..=39 => (b_reg ^ c_reg ^ d_reg, 0x6ED9_EBA1),
-            40..=59 => (
-                (b_reg & c_reg) | (b_reg & d_reg) | (c_reg & d_reg),
-                0x8F1B_BCDC,
-            ),
-            _ => (b_reg ^ c_reg ^ d_reg, 0xCA62_C1D6),
-        };
-        let next_a = a_reg
+    // 3. For t=0 to 79:
+    for t in 0..=79 {
+        let T = a
             .rotate_left(5)
-            .wrapping_add(round_mix)
-            .wrapping_add(e_reg)
-            .wrapping_add(round_const)
-            .wrapping_add(schedule_word);
-        e_reg = d_reg;
-        d_reg = c_reg;
-        c_reg = b_reg.rotate_left(30);
-        b_reg = a_reg;
-        a_reg = next_a;
+            .wrapping_add(f(t, b, c, d))
+            .wrapping_add(e)
+            .wrapping_add(K(t))
+            .wrapping_add(W[t]);
+        e = d;
+        d = c;
+        c = b.rotate_left(30);
+        b = a;
+        a = T;
     }
 
-    state[0] = state[0].wrapping_add(a_reg);
-    state[1] = state[1].wrapping_add(b_reg);
-    state[2] = state[2].wrapping_add(c_reg);
-    state[3] = state[3].wrapping_add(d_reg);
-    state[4] = state[4].wrapping_add(e_reg);
+    // 4. Compute the ith intermediate hash value H^(i).
+    H[0] = a.wrapping_add(H[0]);
+    H[1] = b.wrapping_add(H[1]);
+    H[2] = c.wrapping_add(H[2]);
+    H[3] = d.wrapping_add(H[3]);
+    H[4] = e.wrapping_add(H[4]);
+
+    // The schedule expands the block's message words; under HMAC the first
+    // block is the key xor ipad.
+    crate::ct::zeroize_slice(W.as_mut_slice());
 }
 
 /// Streaming SHA-1 state (FIPS 180-4).
@@ -106,6 +152,73 @@ impl Sha1 {
     /// an empty (zero-length) message.
     #[must_use]
     pub fn new() -> Self {
+        <Self as Digest>::new()
+    }
+
+    /// Absorb more message bytes. May be called any number of times with
+    /// arbitrary chunk sizes; the digest depends only on the concatenation
+    /// of all chunks. The message length is tracked modulo 2^64 bits, as
+    /// FIPS 180-4 padding requires.
+    pub fn update(&mut self, data: &[u8]) {
+        Digest::update(self, data);
+    }
+
+    /// Apply the FIPS 180-4 `0x80` / length padding, consume the hasher, and
+    /// return the 20-byte digest (state words serialized big-endian). Keep a
+    /// [`Clone`] beforehand if the stream must continue past this point.
+    #[must_use]
+    pub fn finalize(mut self) -> [u8; 20] {
+        let mut out = [0u8; 20];
+        self.finalize_in_place(&mut out);
+        // `self` drops here, and `Drop` wipes the final chaining state.
+        out
+    }
+
+    /// One-shot convenience: hash `data` in a single call. Equivalent to
+    /// `new` + `update` + `finalize`, returning the 20-byte digest.
+    #[must_use]
+    pub fn digest(data: &[u8]) -> [u8; 20] {
+        let mut h = Self::new();
+        h.update(data);
+        h.finalize()
+    }
+
+    /// FIPS 180-4 §5.1.1 padding and the final §6.1.2 compression(s), then
+    /// the big-endian chaining value into `out` (§6.1.2, the final step). The
+    /// state is left holding the final chaining value; the callers decide
+    /// whether it is dropped (`finalize`) or replaced (`finalize_reset`).
+    fn finalize_in_place(&mut self, out: &mut [u8; 20]) {
+        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
+
+        self.block[self.pos] = 0x80;
+        self.pos += 1;
+
+        if self.pos > 56 {
+            self.block[self.pos..].fill(0);
+            compress(&mut self.state, &self.block);
+            self.block = [0u8; 64];
+            self.pos = 0;
+        }
+
+        self.block[self.pos..56].fill(0);
+        self.block[56..].copy_from_slice(&self.bit_len.to_be_bytes());
+        compress(&mut self.state, &self.block);
+
+        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
+            chunk.copy_from_slice(&word.to_be_bytes());
+        }
+    }
+}
+
+// The bodies of `new` and `update` live here; the same-named inherent
+// methods delegate through the trait path, so neither pair can turn into
+// silent recursion if one half is removed.
+impl Digest for Sha1 {
+    const BLOCK_LEN: usize = 64;
+    const OUTPUT_LEN: usize = 20;
+
+    /// The FIPS 180-4 §5.3.1 initial hash value and an empty message.
+    fn new() -> Self {
         Self {
             state: IV,
             block: [0u8; 64],
@@ -114,11 +227,7 @@ impl Sha1 {
         }
     }
 
-    /// Absorb more message bytes. May be called any number of times with
-    /// arbitrary chunk sizes; the digest depends only on the concatenation
-    /// of all chunks. The message length is tracked modulo 2^64 bits, as
-    /// FIPS 180-4 padding requires.
-    pub fn update(&mut self, mut data: &[u8]) {
+    fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             let take = (64 - self.pos).min(data.len());
             self.block[self.pos..self.pos + take].copy_from_slice(&data[..take]);
@@ -134,88 +243,17 @@ impl Sha1 {
         }
     }
 
-    /// Apply the FIPS 180-4 `0x80` / length padding, consume the hasher, and
-    /// return the 20-byte digest (state words serialized big-endian). Keep a
-    /// [`Clone`] beforehand if the stream must continue past this point.
-    #[must_use]
-    pub fn finalize(mut self) -> [u8; 20] {
-        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
-
-        self.block[self.pos] = 0x80;
-        self.pos += 1;
-
-        if self.pos > 56 {
-            self.block[self.pos..].fill(0);
-            compress(&mut self.state, &self.block);
-            self.block = [0u8; 64];
-            self.pos = 0;
-        }
-
-        self.block[self.pos..56].fill(0);
-        self.block[56..].copy_from_slice(&self.bit_len.to_be_bytes());
-        compress(&mut self.state, &self.block);
-
-        let mut out = [0u8; 20];
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
-            chunk.copy_from_slice(&word.to_be_bytes());
-        }
-        out
-    }
-
-    /// One-shot convenience: hash `data` in a single call. Equivalent to
-    /// `new` + `update` + `finalize`, returning the 20-byte digest.
-    #[must_use]
-    pub fn digest(data: &[u8]) -> [u8; 20] {
-        let mut h = Self::new();
-        h.update(data);
-        h.finalize()
-    }
-
-    fn finalize_into_reset(&mut self, out: &mut [u8; 20]) {
-        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
-
-        self.block[self.pos] = 0x80;
-        self.pos += 1;
-
-        if self.pos > 56 {
-            self.block[self.pos..].fill(0);
-            compress(&mut self.state, &self.block);
-            self.block = [0u8; 64];
-            self.pos = 0;
-        }
-
-        self.block[self.pos..56].fill(0);
-        self.block[56..].copy_from_slice(&self.bit_len.to_be_bytes());
-        compress(&mut self.state, &self.block);
-
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
-            chunk.copy_from_slice(&word.to_be_bytes());
-        }
-
-        self.zeroize();
-    }
-}
-
-impl Digest for Sha1 {
-    const BLOCK_LEN: usize = 64;
-    const OUTPUT_LEN: usize = 20;
-
-    fn new() -> Self {
-        Self::new()
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.update(data);
-    }
-
-    fn finalize_into(self, out: &mut [u8]) {
-        assert_eq!(out.len(), 20, "wrong digest length");
-        out.copy_from_slice(&self.finalize());
+    fn finalize_into(mut self, out: &mut [u8]) {
+        let out: &mut [u8; 20] = out.try_into().expect("wrong digest length");
+        self.finalize_in_place(out);
     }
 
     fn finalize_reset(&mut self, out: &mut [u8]) {
         let out: &mut [u8; 20] = out.try_into().expect("wrong digest length");
-        self.finalize_into_reset(out);
+        self.finalize_in_place(out);
+        // Assigning a fresh value drops the consumed one, and `Drop` wipes
+        // its chaining state and block buffer.
+        *self = <Self as Digest>::new();
     }
 
     fn zeroize(&mut self) {
@@ -226,23 +264,48 @@ impl Digest for Sha1 {
     }
 }
 
+impl Drop for Sha1 {
+    fn drop(&mut self) {
+        // Under HMAC the chaining state and buffered block are key material.
+        Digest::zeroize(self);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::encode_hex;
 
-    fn hex(bytes: &[u8]) -> String {
-        let mut out = String::with_capacity(bytes.len() * 2);
-        for b in bytes {
-            use core::fmt::Write;
-            let _ = write!(&mut out, "{b:02x}");
-        }
-        out
+    /// `finalize_reset` leaves a fresh instance, `zeroize` scrubs the whole
+    /// state, and the type wipes itself on drop.
+    #[test]
+    fn finalize_reset_and_zeroize_scrub_the_state() {
+        let msg = b"HMAC feeds key material through this state";
+        let mut h = Sha1::new();
+        h.update(msg);
+        let mut out = [0u8; 20];
+        crate::hash::Digest::finalize_reset(&mut h, &mut out);
+        assert_eq!(out, Sha1::digest(msg));
+        assert_eq!(
+            (h.state, h.block, h.pos, h.bit_len),
+            (IV, [0u8; 64], 0, 0),
+            "finalize_reset leaves a fresh instance"
+        );
+
+        let mut h = Sha1::new();
+        h.update(b"a partial block");
+        crate::hash::Digest::zeroize(&mut h);
+        assert_eq!(
+            (h.state, h.block, h.pos, h.bit_len),
+            ([0u32; 5], [0u8; 64], 0, 0)
+        );
+        assert!(core::mem::needs_drop::<Sha1>());
     }
 
     #[test]
     fn sha1_empty() {
         assert_eq!(
-            hex(&Sha1::digest(b"")),
+            encode_hex(&Sha1::digest(b"")),
             "da39a3ee5e6b4b0d3255bfef95601890afd80709"
         );
     }
@@ -254,7 +317,7 @@ mod tests {
         h.update(b"b");
         h.update(b"c");
         assert_eq!(
-            hex(&h.finalize()),
+            encode_hex(&h.finalize()),
             "a9993e364706816aba3e25717850c26c9cd0d89d"
         );
     }
@@ -262,7 +325,8 @@ mod tests {
     #[test]
     fn sha1_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha1", "-binary"], msg)
+        let Some(expected) = crate::test_utils::openssl(&["dgst", "-sha1", "-binary"], msg)
+            .or_skip("sha1_matches_openssl")
         else {
             return;
         };

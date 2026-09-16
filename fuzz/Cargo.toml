@@ -286,3 +286,53 @@ path = "fuzz_targets/fuzz_cprng.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_pkix_parse"
+path = "fuzz_targets/fuzz_pkix_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_aead_decrypt"
+path = "fuzz_targets/fuzz_aead_decrypt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ntru"
+path = "fuzz_targets/fuzz_ntru.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_x25519"
+path = "fuzz_targets/fuzz_x25519.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_edwards_dh"
+path = "fuzz_targets/fuzz_edwards_dh.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_mac"
+path = "fuzz_targets/fuzz_mac.rs"
+test = false
+doc = false
+bench = false
+
+# Writes the seed corpora under fuzz/corpus/: `cargo run --manifest-path fuzz/Cargo.toml --bin seed_corpus`.
+[[bin]]
+name = "seed_corpus"
+path = "seed_corpus.rs"
+test = false
+doc = false
+bench = false

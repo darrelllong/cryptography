@@ -117,6 +117,11 @@ measure() {
   mean=$(echo "$out" | awk '/Reading mean/{print $5}')
   ci=$(echo "$out" | awk '/Reading CI/{print $5}')
   reps=$(echo "$out" | awk '/^Rounds:/{print $2}')
+  if [[ -z "$mean" || -z "$ci" || -z "$reps" ]]; then
+    echo "pilot-bench output for ${set_name}_${op_name} carried no mean, CI or round count:" >&2
+    echo "$out" >&2
+    exit 1
+  fi
   printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "$set_name" "${op_name}_ref" "$mean" "±$ci" "$reps"
 }
 

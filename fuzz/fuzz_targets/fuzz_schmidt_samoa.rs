@@ -3,8 +3,8 @@
 //! Uses hardcoded primes.  Invariant: decrypt(encrypt(msg)) == msg.
 #![no_main]
 
-use cryptography::public_key::{
-    schmidt_samoa::{SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey},
+use cryptography::public_key::schmidt_samoa::{
+    SchmidtSamoa, SchmidtSamoaPrivateKey, SchmidtSamoaPublicKey,
 };
 use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
@@ -16,8 +16,7 @@ fn key() -> &'static (SchmidtSamoaPublicKey, SchmidtSamoaPrivateKey) {
     KEY.get_or_init(|| {
         let p = BigUint::from_u64(1009);
         let q = BigUint::from_u64(1013);
-        SchmidtSamoa::from_primes(&p, &q)
-            .expect("SchmidtSamoa keygen with p=1009,q=1013 failed")
+        SchmidtSamoa::from_primes(&p, &q).expect("SchmidtSamoa keygen with p=1009,q=1013 failed")
     })
 }
 

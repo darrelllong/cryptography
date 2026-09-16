@@ -32,6 +32,9 @@
 //! - `rsa_io` for standard RSA key serialization (`PKCS #1`, `PKCS #8`,
 //!   `SPKI`) plus an optional flat XML export for symmetry with the other
 //!   schemes
+//! - internal `pkix` containers under every standard key encoding: RFC 5280
+//!   `SubjectPublicKeyInfo`, RFC 5958 `OneAsymmetricKey` (PKCS #8), and the
+//!   RFC 7468 textual encoding
 //! - internal `io` helpers for the crate-defined non-RSA key formats: a DER
 //!   `SEQUENCE` of positive `INTEGER`s, custom PEM armor, and the shared flat
 //!   XML form
@@ -40,19 +43,68 @@
 //! - prefer `*_with_nonce` for deterministic/external-randomness entry points
 //! - prefer `to_wire_bytes` / `from_wire_bytes` for standard compact encodings
 //!   that omit curve or algorithm parameters
-//! - prefer `to_key_blob` / `from_key_blob` for crate-defined self-describing
-//!   binary formats
+//! - prefer `to_key_blob` / `from_key_blob` for crate-defined schema-shaped
+//!   binary formats (the PEM label or XML root tag names the type); the same
+//!   pair names the crate-defined blob of a signature or ciphertext, since the
+//!   framing is identical and the type, not the method, says what it holds
+//! - prefer `to_der` / `from_der` where a standard names the DER structure
+//!   (`EcdsaSignature` and `DsaSignature` are the X9.62 / RFC 3279
+//!   `Dss-Sig-Value` and RFC 3279 §2.2.3 `ECDSA-Sig-Value`)
+//!
+//! ## Parse-time validation policy
+//!
+//! Every parser — `from_key_blob`, `from_pem`, `from_xml`, and the standard
+//! containers (SPKI, PKCS #8, SEC 1, PKCS #1) — validates before it returns a
+//! key, and the amount of work depends only on whether the material is private
+//! or public:
+//!
+//! Every finite-field group modulus and subgroup order is size-checked
+//! (`q ≥ 2^15`, `p ≤ 16 384` bits, `q ≤ 512` bits) before any primality test
+//! runs, so a blob cannot buy arbitrary work.
+//!
+//! - **Private keys are validated completely.** Every prime the blob carries
+//!   passes the hash-hardened Miller-Rabin test
+//!   ([`primes::is_probable_prime_untrusted`]), the scheme's algebraic
+//!   relations are checked (`n = p·q`, Rabin `p ≡ q ≡ 3 (mod 4)`, RSA CRT
+//!   exponents and coefficient, `q | p − 1` and `g^q ≡ 1`, exponent ranges),
+//!   and derived values are recomputed rather than trusted. A blob that omits
+//!   the primes (Cocks `[pi, q]`, Paillier `[n, lambda, u]`, Schmidt-Samoa
+//!   `[d, gamma]`) is checked for the internal consistency its fields allow,
+//!   documented on each `from_serial_fields`.
+//! - **Public keys are validated structurally.** Ranges (`1 < y < p`,
+//!   `3 ≤ e < n`), parity and size constraints, subgroup membership where a
+//!   prime-order subgroup exists (`y^q ≡ 1 (mod p)` for DSA and DH), and one
+//!   fixed-base primality test per public prime
+//!   ([`rump::number_theory::is_probable_prime`]). The hardened test is not
+//!   used on public parameters: a forged pseudoprime in someone else's
+//!   public key weakens only that key, while re-running 76 modular
+//!   exponentiations on every load would make key parsing an amplification
+//!   vector.
+//! - **Groups this crate will generate a key pair over are validated as
+//!   private material.** `DhParams` and `DsaParams` are the public-looking
+//!   types that take the hardened test, and FIPS 186-4 A.1.1.3 and A.2.4 when
+//!   the domain-parameter seed is present: a composite modulus that fools fixed
+//!   bases splits `Z_p^*` by the Chinese remainder theorem into components
+//!   modulo its smaller prime factors, where the discrete logarithm of *our*
+//!   freshly generated secret is far cheaper. `DhPublicKey::params` and `DsaPublicKey::params` therefore re-validate
+//!   under that rule before handing out parameters.
+//!
+//! Every check has a negative test in its module: a tampered blob that must
+//! fail to parse.
 //!
 //! This follows the crate-wide design rule: keep the implementation in Rust,
 //! avoid intrinsics and FFI, and add dependencies only where they materially
 //! improve interoperability or maintenance.
 
 pub mod cocks;
+mod curve_pkix;
 pub mod dh;
 pub mod dsa;
 pub mod ec;
 pub mod ec_edwards;
 pub mod ec_elgamal;
+mod ec_io;
+mod ec_pkix;
 pub mod ecdh;
 pub mod ecdsa;
 pub mod ecies;
@@ -61,9 +113,11 @@ pub mod eddsa;
 pub mod edwards_dh;
 pub mod edwards_elgamal;
 pub mod elgamal;
+mod ffc_pkix;
 mod io;
 pub mod ml_dsa;
 pub mod ml_kem;
+mod ml_pkix;
 pub(crate) mod ntru_ees1087ep1;
 pub(crate) mod ntru_ees1087ep2;
 pub(crate) mod ntru_ees1171ep1;
@@ -81,8 +135,10 @@ pub(crate) mod ntru_hrss701;
 mod ntru_poly_mul;
 mod ntru_pqc_shared;
 pub mod paillier;
+mod pkix;
 pub mod primes;
 pub mod rabin;
+mod rfc6979;
 pub mod rsa;
 pub mod rsa_io;
 pub mod rsa_pkcs1;

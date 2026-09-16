@@ -3,10 +3,11 @@
 //! 128-bit block, 256-bit key, 10 rounds.
 //! All tables and test vectors from RFC 7801.
 //!
-//! `Grasshopper` keeps the original fast table-driven software path.
-//! `GrasshopperCt` is separate and keeps the same round structure, but removes
-//! secret-indexed tables by using a packed ANF bitset form for the S-box and
-//! direct arithmetic for the linear transform.
+//! `Grasshopper` is the fast table-driven software path (fused S∘L tables,
+//! secret-indexed; not constant-time). `GrasshopperCt` is separate and keeps
+//! the same round structure, but removes secret-indexed tables by using a
+//! packed ANF bitset form for the S-box and direct arithmetic for the linear
+//! transform; it is the constant-time path.
 
 // ── GF(2⁸) with primitive polynomial p(x) = x⁸ + x⁷ + x⁶ + x + 1 ──────────
 //
@@ -41,7 +42,7 @@ fn gf_mul(mut a: u8, mut b: u8) -> u8 {
     r
 }
 
-// ── S-box and inverse (RFC 7801 §A.1) ────────────────────────────────────────
+// ── S-box and inverse (RFC 7801 §4.1) ────────────────────────────────────────
 //
 // Pi  : forward substitution (256-entry bijection over GF(2⁸))
 // Pi' : inverse substitution
@@ -89,7 +90,7 @@ const fn build_pi_anf(table: &[u8; 256]) -> [[u128; 2]; 8] {
 const PI_ANF: [[u128; 2]; 8] = build_pi_anf(&PI);
 const PI_INV_ANF: [[u128; 2]; 8] = build_pi_anf(&PI_INV);
 
-// ── L-transform (RFC 7801 §2.2) ───────────────────────────────────────────────
+// ── Linear transformation l (RFC 7801 §4.2) and R, L (§4.3) ───────────────────
 //
 // l(a₁₅,...,a₀) = 148·a₁₅ ⊕ 32·a₁₄ ⊕ 133·a₁₃ ⊕ 16·a₁₂ ⊕ 194·a₁₁ ⊕ 192·a₁₀
 //               ⊕   1·a₉  ⊕ 251·a₈  ⊕   1·a₇  ⊕ 192·a₆  ⊕ 194·a₅  ⊕  16·a₄
@@ -129,9 +130,8 @@ static L_TABLES: [[u8; 256]; 16] = build_l_tables();
 
 // ── Fused S∘L lookup tables (fast path only) ─────────────────────────────────
 //
-// The classic GOST R 34.12-2015 software optimization. A full "S then L" round
-// is a GF(2⁸)-linear map applied to the substituted bytes, so — because L is
-// GF(2⁸)-linear — it collapses to
+// A full "S then L" round is L applied to the substituted bytes, and L is
+// GF(2⁸)-linear, so the round collapses to
 //
 //     round(state) = XOR_i  T[i][ state[i] ]
 //
@@ -143,11 +143,18 @@ static L_TABLES: [[u8; 256]; 16] = build_l_tables();
 //   LS_ENC[i][x] = L(eᵢ · Pi[x])         (forward: S then L)
 //   LS_DEC[i][x] = L⁻¹(eᵢ · Pi'[x])      (inverse: S⁻¹ then L⁻¹)
 //
-// Both tables are key-independent and built purely at compile time from the
-// fixed S-box and L matrix (same `const fn` machinery as `L_TABLES`), so no
-// runtime/lazy init is required. They index on secret bytes exactly like
-// `L_TABLES`, so the fast path keeps its existing (documented,
-// non-constant-time) side-channel posture.
+// Both tables are key-independent and built at compile time from the fixed
+// S-box and L matrix (same `const fn` machinery as `L_TABLES`), so no
+// runtime/lazy init is required.
+//
+// Side-channel posture of the fast path: every lookup is indexed by a secret
+// state byte. The entries are 16 bytes, so a 64-byte cache line holds four of
+// them and a cache-line-granular observer learns the top six bits of each
+// index (with the 1-byte entries of `L_TABLES`, 64 per line, it was the top
+// two). The working set is 16 × 256 × 16 B = 64 KiB per direction, 128 KiB
+// for encryption and decryption together, which exceeds a typical L1 data
+// cache. `Grasshopper` is therefore variable-time in both time and memory
+// access pattern; `GrasshopperCt` is the constant-time path.
 
 /// Const l-function, used only while building the fused tables at compile time.
 const fn l_func_const(block: &[u8; 16]) -> u8 {
@@ -385,7 +392,7 @@ fn apply_l_inv_ct(block: &mut [u8; 16]) {
     }
 }
 
-// ── Key schedule ──────────────────────────────────────────────────────────────
+// ── Key schedule (RFC 7801 §4.4) ──────────────────────────────────────────────
 //
 // Round constants C_i = L(Vec₁₂₈(i)), i = 1..32.
 // Vec₁₂₈(i): 128-bit big-endian representation of i (stored as [u8; 16]).
@@ -419,6 +426,9 @@ fn f_step(a1: &mut [u8; 16], a0: &mut [u8; 16], c: &[u8; 16]) {
     xor_block(&mut tmp, a0); // XOR a₀
     *a0 = *a1; // old a₁ becomes new a₀
     *a1 = tmp; // new a₁
+
+    // `tmp` still holds a copy of the new key-schedule half.
+    crate::ct::zeroize_slice(tmp.as_mut_slice());
 }
 
 fn f_step_ct(a1: &mut [u8; 16], a0: &mut [u8; 16], c: &[u8; 16]) {
@@ -429,10 +439,12 @@ fn f_step_ct(a1: &mut [u8; 16], a0: &mut [u8; 16], c: &[u8; 16]) {
     xor_block(&mut tmp, a0);
     *a0 = *a1;
     *a1 = tmp;
+    crate::ct::zeroize_slice(tmp.as_mut_slice());
 }
 
-fn key_schedule(key: &[u8; 32]) -> [[u8; 16]; 10] {
-    let mut rk = [[0u8; 16]; 10];
+/// Expand the key into the ten round keys, written directly into `rk` (the
+/// caller's struct field).
+fn key_schedule(key: &[u8; 32], rk: &mut [[u8; 16]; 10]) {
     rk[0].copy_from_slice(&key[0..16]); // K₁
     rk[1].copy_from_slice(&key[16..32]); // K₂
 
@@ -449,11 +461,13 @@ fn key_schedule(key: &[u8; 32]) -> [[u8; 16]; 10] {
         rk[3 + group * 2] = a0; // K₄, K₆, K₈, K₁₀
     }
 
-    rk
+    // The Feistel pair ends as copies of K₉ and K₁₀.
+    crate::ct::zeroize_slice(a1.as_mut_slice());
+    crate::ct::zeroize_slice(a0.as_mut_slice());
 }
 
-fn key_schedule_ct(key: &[u8; 32]) -> [[u8; 16]; 10] {
-    let mut rk = [[0u8; 16]; 10];
+/// [`key_schedule`] with the constant-time S and L layers.
+fn key_schedule_ct(key: &[u8; 32], rk: &mut [[u8; 16]; 10]) {
     rk[0].copy_from_slice(&key[0..16]);
     rk[1].copy_from_slice(&key[16..32]);
 
@@ -470,35 +484,44 @@ fn key_schedule_ct(key: &[u8; 32]) -> [[u8; 16]; 10] {
         rk[3 + group * 2] = a0;
     }
 
-    rk
+    crate::ct::zeroize_slice(a1.as_mut_slice());
+    crate::ct::zeroize_slice(a0.as_mut_slice());
 }
 
 // ── Public interface ──────────────────────────────────────────────────────────
 
-/// Kuznyechik (Grasshopper) block cipher — RFC 7801 / GOST R 34.12-2015.
+/// Kuznyechik (Grasshopper) block cipher — RFC 7801 / GOST R 34.12-2015,
+/// fast software path.
 ///
 /// 128-bit block, 256-bit key.  Pure Rust, no unsafe, no heap allocation.
+/// The rounds run through the fused S∘L tables, indexed by secret state
+/// bytes: not constant-time (see the table comments); [`GrasshopperCt`] is
+/// the constant-time path.
 pub struct Grasshopper {
     rk: [[u8; 16]; 10],
     /// `dk[i] = L⁻¹(rk[i])` for i = 1..=8, used by the fully-fused decryption
-    /// path (indices 0 and 9 are unused). Derived key material — zeroized on drop.
+    /// path (index 0 is unused). Derived key material — zeroized on drop.
     dk: [[u8; 16]; 9],
 }
 
 impl Grasshopper {
-    /// Construct from a 32-byte (256-bit) key.
+    /// Construct from a 32-byte (256-bit) key. The round keys and their
+    /// L⁻¹-transformed copies are written directly into the new instance's
+    /// fields.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
-        let rk = key_schedule(key);
-        // Precompute L⁻¹-transformed round keys for the restructured decryption
-        // that uses the fused inverse table (see `decrypt_block`).
-        let mut dk = [[0u8; 16]; 9];
+        let mut cipher = Grasshopper {
+            rk: [[0u8; 16]; 10],
+            dk: [[0u8; 16]; 9],
+        };
+        key_schedule(key, &mut cipher.rk);
+        // L⁻¹-transformed round keys for the restructured decryption that
+        // uses the fused inverse table (see `decrypt_block`).
         for i in 1..9 {
-            let mut t = rk[i];
-            apply_l_inv(&mut t);
-            dk[i] = t;
+            cipher.dk[i] = cipher.rk[i];
+            apply_l_inv(&mut cipher.dk[i]);
         }
-        Grasshopper { rk, dk }
+        cipher
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
@@ -559,12 +582,15 @@ pub struct GrasshopperCt {
 }
 
 impl GrasshopperCt {
-    /// Construct from a 32-byte (256-bit) key.
+    /// Construct from a 32-byte (256-bit) key. The round keys are written
+    /// directly into the new instance.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
-        GrasshopperCt {
-            rk: key_schedule_ct(key),
-        }
+        let mut cipher = GrasshopperCt {
+            rk: [[0u8; 16]; 10],
+        };
+        key_schedule_ct(key, &mut cipher.rk);
+        cipher
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
@@ -651,22 +677,7 @@ impl Drop for GrasshopperCt {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn h16(s: &str) -> [u8; 16] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
-    }
-
-    fn h32(s: &str) -> [u8; 32] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
-    }
+    use crate::test_utils::decode_hex_array;
 
     /// Deterministic xorshift64 PRNG — no external rng dependency.
     struct XorShift64(u64);
@@ -772,7 +783,7 @@ mod tests {
         }
     }
 
-    // ── S-transform (RFC 7801 §A.3) ───────────────────────────────────────────
+    // ── S-transform (RFC 7801 §5.1) ───────────────────────────────────────────
 
     #[test]
     fn s_vectors() {
@@ -795,13 +806,13 @@ mod tests {
             ),
         ];
         for (inp, exp) in cases {
-            let mut b = h16(inp);
+            let mut b = decode_hex_array::<16>(inp);
             apply_s(&mut b);
-            assert_eq!(b, h16(exp), "S({inp})");
+            assert_eq!(b, decode_hex_array::<16>(exp), "S({inp})");
         }
     }
 
-    // ── R-transform (RFC 7801 §A.4) ───────────────────────────────────────────
+    // ── R-transform (RFC 7801 §5.2) ───────────────────────────────────────────
 
     #[test]
     fn r_vectors() {
@@ -824,13 +835,13 @@ mod tests {
             ),
         ];
         for (inp, exp) in cases {
-            let mut b = h16(inp);
+            let mut b = decode_hex_array::<16>(inp);
             r_step(&mut b);
-            assert_eq!(b, h16(exp), "R({inp})");
+            assert_eq!(b, decode_hex_array::<16>(exp), "R({inp})");
         }
     }
 
-    // ── L-transform (RFC 7801 §A.5) ───────────────────────────────────────────
+    // ── L-transform (RFC 7801 §5.3) ───────────────────────────────────────────
 
     #[test]
     fn l_vectors() {
@@ -853,19 +864,21 @@ mod tests {
             ),
         ];
         for (inp, exp) in cases {
-            let mut b = h16(inp);
+            let mut b = decode_hex_array::<16>(inp);
             apply_l(&mut b);
-            assert_eq!(b, h16(exp), "L({inp})");
+            assert_eq!(b, decode_hex_array::<16>(exp), "L({inp})");
         }
     }
 
-    // ── Encrypt / Decrypt (RFC 7801 §5.5) ────────────────────────────────────
+    // ── Encrypt / Decrypt (RFC 7801 §5.5 / §5.6) ─────────────────────────────
 
     #[test]
     fn encrypt_decrypt_rfc() {
-        let key = h32("8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef");
-        let pt = h16("1122334455667700ffeeddccbbaa9988");
-        let ct = h16("7f679d90bebc24305a468d42b9d4edcd");
+        let key = decode_hex_array::<32>(
+            "8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef",
+        );
+        let pt = decode_hex_array::<16>("1122334455667700ffeeddccbbaa9988");
+        let ct = decode_hex_array::<16>("7f679d90bebc24305a468d42b9d4edcd");
         let c = Grasshopper::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -873,9 +886,11 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_rfc_ct() {
-        let key = h32("8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef");
-        let pt = h16("1122334455667700ffeeddccbbaa9988");
-        let ct = h16("7f679d90bebc24305a468d42b9d4edcd");
+        let key = decode_hex_array::<32>(
+            "8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef",
+        );
+        let pt = decode_hex_array::<16>("1122334455667700ffeeddccbbaa9988");
+        let ct = decode_hex_array::<16>("7f679d90bebc24305a468d42b9d4edcd");
         let fast = Grasshopper::new(&key);
         let slow = GrasshopperCt::new(&key);
         assert_eq!(slow.encrypt_block(&pt), ct, "encrypt");
@@ -891,14 +906,44 @@ mod tests {
 
     #[test]
     fn key_schedule_vectors() {
-        let key = h32("8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef");
-        let rk = key_schedule(&key);
-        assert_eq!(rk[0], h16("8899aabbccddeeff0011223344556677"), "K_1");
-        assert_eq!(rk[1], h16("fedcba98765432100123456789abcdef"), "K_2");
-        assert_eq!(rk[2], h16("db31485315694343228d6aef8cc78c44"), "K_3");
-        assert_eq!(rk[3], h16("3d4553d8e9cfec6815ebadc40a9ffd04"), "K_4");
-        assert_eq!(rk[4], h16("57646468c44a5e28d3e59246f429f1ac"), "K_5");
-        assert_eq!(rk[9], h16("72e9dd7416bcf45b755dbaa88e4a4043"), "K_10");
+        let key = decode_hex_array::<32>(
+            "8899aabbccddeeff0011223344556677fedcba98765432100123456789abcdef",
+        );
+        let mut rk = [[0u8; 16]; 10];
+        key_schedule(&key, &mut rk);
+        let mut rk_ct = [[0u8; 16]; 10];
+        key_schedule_ct(&key, &mut rk_ct);
+        assert_eq!(rk, rk_ct, "table and constant-time schedules agree");
+        assert_eq!(
+            rk[0],
+            decode_hex_array::<16>("8899aabbccddeeff0011223344556677"),
+            "K_1"
+        );
+        assert_eq!(
+            rk[1],
+            decode_hex_array::<16>("fedcba98765432100123456789abcdef"),
+            "K_2"
+        );
+        assert_eq!(
+            rk[2],
+            decode_hex_array::<16>("db31485315694343228d6aef8cc78c44"),
+            "K_3"
+        );
+        assert_eq!(
+            rk[3],
+            decode_hex_array::<16>("3d4553d8e9cfec6815ebadc40a9ffd04"),
+            "K_4"
+        );
+        assert_eq!(
+            rk[4],
+            decode_hex_array::<16>("57646468c44a5e28d3e59246f429f1ac"),
+            "K_5"
+        );
+        assert_eq!(
+            rk[9],
+            decode_hex_array::<16>("72e9dd7416bcf45b755dbaa88e4a4043"),
+            "K_10"
+        );
     }
 
     // ── Roundtrip ─────────────────────────────────────────────────────────────
@@ -911,48 +956,58 @@ mod tests {
         assert_eq!(c.decrypt_block(&c.encrypt_block(&pt)), pt);
     }
 
+    /// The `BlockCipher` entry points reject a wrong-length block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        use crate::BlockCipher;
+        let cipher = Grasshopper::new(&[0u8; 32]);
+        let mut short = [0u8; 15];
+        cipher.encrypt(&mut short);
+    }
+
     // ── Round constants (RFC 7801 §5.4) ──────────────────────────────────────
 
     #[test]
     fn round_const_vectors() {
         assert_eq!(
             round_const(1),
-            h16("6ea276726c487ab85d27bd10dd849401"),
+            decode_hex_array::<16>("6ea276726c487ab85d27bd10dd849401"),
             "C_1"
         );
         assert_eq!(
             round_const(2),
-            h16("dc87ece4d890f4b3ba4eb92079cbeb02"),
+            decode_hex_array::<16>("dc87ece4d890f4b3ba4eb92079cbeb02"),
             "C_2"
         );
         assert_eq!(
             round_const(3),
-            h16("b2259a96b4d88e0be7690430a44f7f03"),
+            decode_hex_array::<16>("b2259a96b4d88e0be7690430a44f7f03"),
             "C_3"
         );
         assert_eq!(
             round_const(4),
-            h16("7bcd1b0b73e32ba5b79cb140f2551504"),
+            decode_hex_array::<16>("7bcd1b0b73e32ba5b79cb140f2551504"),
             "C_4"
         );
         assert_eq!(
             round_const(5),
-            h16("156f6d791fab511deabb0c502fd18105"),
+            decode_hex_array::<16>("156f6d791fab511deabb0c502fd18105"),
             "C_5"
         );
         assert_eq!(
             round_const(6),
-            h16("a74af7efab73df160dd208608b9efe06"),
+            decode_hex_array::<16>("a74af7efab73df160dd208608b9efe06"),
             "C_6"
         );
         assert_eq!(
             round_const(7),
-            h16("c9e8819dc73ba5ae50f5b570561a6a07"),
+            decode_hex_array::<16>("c9e8819dc73ba5ae50f5b570561a6a07"),
             "C_7"
         );
         assert_eq!(
             round_const(8),
-            h16("f6593616e6055689adfba18027aa2a08"),
+            decode_hex_array::<16>("f6593616e6055689adfba18027aa2a08"),
             "C_8"
         );
     }

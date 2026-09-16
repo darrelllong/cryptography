@@ -27,13 +27,27 @@ cat >"$TMP_C" <<'EOF'
 #include "sign.h"
 #include "fips202.h"
 
-static keccak_state rngstate = {
-  {0x1F, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (1ULL << 63), 0, 0, 0, 0},
-  SHAKE128_RATE
-};
+/* The reference calls `randombytes` for key-generation seeds and hedged
+ * signing. For a timing benchmark any fixed, fast byte stream will do, so this
+ * harness supplies its own: SplitMix64 (Steele, Lea and Flood, "Fast
+ * splittable pseudorandom number generators", OOPSLA 2014), emitted
+ * little-endian eight bytes at a time. It is not a cryptographic generator. */
+static uint64_t bench_rng_state = 0x6d6c6473612d7265ULL;
 
-void randombytes(uint8_t *x, size_t xlen) {
-  shake128_squeeze(x, xlen, &rngstate);
+static uint64_t bench_splitmix64(void) {
+  uint64_t z = (bench_rng_state += 0x9e3779b97f4a7c15ULL);
+  z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+  return z ^ (z >> 31);
+}
+
+void randombytes(uint8_t *out, size_t outlen) {
+  while (outlen > 0) {
+    uint64_t word = bench_splitmix64();
+    for (int i = 0; i < 8 && outlen > 0; i++, outlen--) {
+      *out++ = (uint8_t)(word >> (8 * i));
+    }
+  }
 }
 
 static double now_ms(void) {
@@ -114,6 +128,11 @@ measure() {
   mean=$(echo "$out" | awk '/Reading mean/{print $5}')
   ci=$(echo "$out" | awk '/Reading CI/{print $5}')
   reps=$(echo "$out" | awk '/^Rounds:/{print $2}')
+  if [[ -z "$mean" || -z "$ci" || -z "$reps" ]]; then
+    echo "pilot-bench output for ${set_name}_${op_name} carried no mean, CI or round count:" >&2
+    echo "$out" >&2
+    exit 1
+  fi
   printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "$set_name" "${op_name}_ref" "$mean" "±$ci" "$reps"
 }
 

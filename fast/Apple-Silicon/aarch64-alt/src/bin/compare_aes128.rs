@@ -69,7 +69,12 @@ fn run_microbench() -> Result<(), String> {
     let arm = Aes128Armv8::new(&key).map_err(|_| "failed to init ARM AES".to_string())?;
     let baseline = Aes128::new(&key);
 
+    // Both buffers are written before timing so neither side pays page faults
+    // inside its measured span.
     let mut arm_buf = vec![0u8; 1024 * 1024];
+    for (i, b) in arm_buf.iter_mut().enumerate() {
+        *b = i as u8;
+    }
     let mut base_buf = arm_buf.clone();
 
     let t0 = Instant::now();

@@ -1,4 +1,5 @@
-//! SEED block cipher — RFC 4009 / RFC 4196.
+//! SEED block cipher — RFC 4269 (obsoletes RFC 4009; section and appendix
+//! numbering unchanged) / RFC 4196.
 //!
 //! 128-bit block, 128-bit key, 16-round Feistel network.
 //!
@@ -7,7 +8,7 @@
 //! ANF form so the round function and key schedule avoid secret-indexed table
 //! reads.
 
-// Byte masks from the SEED G-function linear map (RFC 4009 Appendix A).
+// Byte masks from the SEED G-function linear map (RFC 4269 Appendix A).
 const M0: u8 = 0xfc;
 const M1: u8 = 0xf3;
 const M2: u8 = 0xcf;
@@ -53,7 +54,7 @@ const S1: [u8; 256] = [
     0x37, 0xE7, 0x24, 0xA4, 0xCB, 0x53, 0x0A, 0x87, 0xD9, 0x4C, 0x83, 0x8F, 0xCE, 0x3B, 0x4A, 0xB7,
 ];
 
-// Round constants KC[0..15] from RFC 4009 Appendix A.
+// Round constants KC[0..15] from RFC 4269 Appendix A.
 const KC: [u32; 16] = [
     0x9e37_79b9,
     0x3c6e_f373,
@@ -132,36 +133,39 @@ fn round_f(r0: u32, r1: u32, k0: u32, k1: u32, use_ct: bool) -> (u32, u32) {
     (t0, t1)
 }
 
-fn expand_round_keys(key: &[u8; 16], use_ct: bool) -> [u32; 32] {
-    let mut k0 = u32::from_be_bytes(key[..4].try_into().unwrap());
-    let mut k1 = u32::from_be_bytes(key[4..8].try_into().unwrap());
-    let mut k2 = u32::from_be_bytes(key[8..12].try_into().unwrap());
-    let mut k3 = u32::from_be_bytes(key[12..].try_into().unwrap());
+/// RFC 4269 §2.3 key schedule, written directly into `out` (the caller's
+/// struct field): `out[2i] = K_{i+1,0}` and `out[2i+1] = K_{i+1,1}`.
+fn expand_round_keys(key: &[u8; 16], use_ct: bool, out: &mut [u32; 32]) {
+    // The key words K0..K3 and the rotated 64-bit halves they cycle through
+    // are the user key in other shapes; both are wiped before returning.
+    let mut k = [0u32; 4];
+    for (word, chunk) in k.iter_mut().zip(key.chunks_exact(4)) {
+        *word = u32::from_be_bytes(chunk.try_into().unwrap());
+    }
 
     let apply_g = if use_ct { g_ct } else { g };
-    let mut out = [0u32; 32];
+    let mut rot = 0u64;
 
     let mut i = 0usize;
     while i < 16 {
-        out[2 * i] = apply_g(k0.wrapping_add(k2).wrapping_sub(KC[i]));
-        out[2 * i + 1] = apply_g(k1.wrapping_sub(k3).wrapping_add(KC[i]));
+        out[2 * i] = apply_g(k[0].wrapping_add(k[2]).wrapping_sub(KC[i]));
+        out[2 * i + 1] = apply_g(k[1].wrapping_sub(k[3]).wrapping_add(KC[i]));
 
         if i.is_multiple_of(2) {
-            let pair = (u64::from(k0) << 32) | u64::from(k1);
-            let rot = pair.rotate_right(8);
-            k0 = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
-            k1 = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
+            rot = ((u64::from(k[0]) << 32) | u64::from(k[1])).rotate_right(8);
+            k[0] = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
+            k[1] = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
         } else {
-            let pair = (u64::from(k2) << 32) | u64::from(k3);
-            let rot = pair.rotate_left(8);
-            k2 = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
-            k3 = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
+            rot = ((u64::from(k[2]) << 32) | u64::from(k[3])).rotate_left(8);
+            k[2] = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
+            k[3] = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
         }
 
         i += 1;
     }
 
-    out
+    crate::ct::zeroize_slice(k.as_mut_slice());
+    crate::ct::zeroize_slice(core::slice::from_mut(&mut rot));
 }
 
 fn seed_encrypt(block: [u8; 16], round_keys: &[u32; 32], use_ct: bool) -> [u8; 16] {
@@ -227,13 +231,16 @@ pub struct Seed {
 
 impl Seed {
     /// Derive the 32 round-key words (two per Feistel round) from the
-    /// 128-bit key via the G-function schedule of RFC 4009, using the
-    /// direct (secret-indexed) S0/S1 table lookups inside G.
+    /// 128-bit key via the G-function schedule of RFC 4269 §2.3, written
+    /// directly into the new instance, using the direct (secret-indexed)
+    /// S0/S1 table lookups inside G.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
-        Self {
-            round_keys: expand_round_keys(key, false),
-        }
+        let mut cipher = Self {
+            round_keys: [0u32; 32],
+        };
+        expand_round_keys(key, false, &mut cipher.round_keys);
+        cipher
     }
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
@@ -245,8 +252,12 @@ impl Seed {
     }
 
     /// Encrypt one 128-bit block through the 16 Feistel rounds (final
-    /// half-swap omitted per RFC 4009); words are read and written
+    /// half-swap omitted per RFC 4269 §2); words are read and written
     /// big-endian. Returns the ciphertext; the input is untouched.
+    ///
+    /// Not constant-time: every G evaluation indexes the S0/S1 tables with
+    /// bytes derived from the data and the round keys. [`SeedCt`] is the
+    /// constant-time path.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_encrypt(*block, &self.round_keys, false)
@@ -254,6 +265,9 @@ impl Seed {
 
     /// Decrypt one 128-bit block by running the 16 Feistel rounds with the
     /// round-key pairs consumed in reverse order.
+    ///
+    /// Not constant-time, for the same reason as [`Self::encrypt_block`];
+    /// [`SeedCt`] is the constant-time path.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         seed_decrypt(*block, &self.round_keys, false)
@@ -266,14 +280,17 @@ pub struct SeedCt {
 }
 
 impl SeedCt {
-    /// Derive the 32 round-key words from the 128-bit key via the RFC 4009
-    /// G-function schedule, with the two 8-bit S-boxes evaluated in packed
-    /// ANF form so key expansion performs no secret-indexed table reads.
+    /// Derive the 32 round-key words from the 128-bit key via the RFC 4269
+    /// §2.3 G-function schedule, written directly into the new instance,
+    /// with the two 8-bit S-boxes evaluated in packed ANF form so key
+    /// expansion performs no secret-indexed table reads.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
-        Self {
-            round_keys: expand_round_keys(key, true),
-        }
+        let mut cipher = Self {
+            round_keys: [0u32; 32],
+        };
+        expand_round_keys(key, true, &mut cipher.round_keys);
+        cipher
     }
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
@@ -340,6 +357,7 @@ impl Drop for SeedCt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex_array;
 
     fn xorshift64(state: &mut u64) -> u64 {
         let mut x = *state;
@@ -358,14 +376,6 @@ mod tests {
         }
     }
 
-    fn h16(s: &str) -> [u8; 16] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
-    }
-
     #[test]
     fn ct_sboxes_match_tables() {
         for x in 0u8..=255 {
@@ -374,37 +384,107 @@ mod tests {
         }
     }
 
+    /// RFC 4269 §2.3 key schedule as its pseudo code reads, on the 64-bit
+    /// concatenations `Key0 || Key1` and `Key2 || Key3` with the §1.3
+    /// circular rotations, independent of the production loop's bookkeeping.
+    fn schedule_per_rfc4269_2_3(key: &[u8; 16]) -> [u32; 32] {
+        let word = |i: usize| u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
+        let mut key01 = (u64::from(word(0)) << 32) | u64::from(word(1));
+        let mut key23 = (u64::from(word(2)) << 32) | u64::from(word(3));
+        let mut out = [0u32; 32];
+        for i in 1..=16usize {
+            let key0 = (key01 >> 32) as u32;
+            let key1 = key01 as u32;
+            let key2 = (key23 >> 32) as u32;
+            let key3 = key23 as u32;
+            out[2 * (i - 1)] = g(key0.wrapping_add(key2).wrapping_sub(KC[i - 1]));
+            out[2 * (i - 1) + 1] = g(key1.wrapping_sub(key3).wrapping_add(KC[i - 1]));
+            if i % 2 == 1 {
+                key01 = key01.rotate_right(8);
+            } else {
+                key23 = key23.rotate_left(8);
+            }
+        }
+        out
+    }
+
+    /// RFC 4269 Appendix B.1 lists `Ki0 Ki1` for all 16 rounds of the
+    /// all-zero key; the production schedule and the §2.3 transcription both
+    /// reproduce the whole listing.
     #[test]
-    fn round_keys_zero_key_match_rfc() {
-        let rk = expand_round_keys(&[0u8; 16], false);
-        assert_eq!(rk[0], 0x7c8f_8c7e);
-        assert_eq!(rk[1], 0xc737_a22c);
-        assert_eq!(rk[30], 0x7189_1150);
-        assert_eq!(rk[31], 0x98b2_55b0);
+    fn round_keys_match_rfc4269_appendix_b1() {
+        #[rustfmt::skip]
+        const B1: [u32; 32] = [
+            0x7C8F_8C7E, 0xC737_A22C, 0xFF27_6CDB, 0xA7CA_684A,
+            0x2F9D_01A1, 0x7004_9E41, 0xAE59_B3C4, 0x4245_E90C,
+            0xA1D6_400F, 0xDBC1_394E, 0x8596_3508, 0x0C5F_1FCB,
+            0xB684_BDA7, 0x61A4_AEAE, 0xD17E_0741, 0xFEE9_0AA1,
+            0x76CC_05D5, 0xE97A_7394, 0x50AC_6F92, 0x1B26_66E5,
+            0x65B7_904A, 0x8EC3_A7B3, 0x2F7E_2E22, 0xA2B1_21B9,
+            0x4D0B_FDE4, 0x4E88_8D9B, 0x631C_8DDC, 0x4378_A6C4,
+            0x216A_F65F, 0x7878_C031, 0x7189_1150, 0x98B2_55B0,
+        ];
+        let key = [0u8; 16];
+        let mut fast = [0u32; 32];
+        expand_round_keys(&key, false, &mut fast);
+        let mut ct = [0u32; 32];
+        expand_round_keys(&key, true, &mut ct);
+        assert_eq!(fast, B1, "table schedule");
+        assert_eq!(ct, B1, "ANF schedule");
+        assert_eq!(
+            schedule_per_rfc4269_2_3(&key),
+            B1,
+            "section 2.3 transcription"
+        );
+    }
+
+    /// The production schedule agrees with the §2.3 transcription on random
+    /// keys, so the loop's rotation bookkeeping matches the pseudo code
+    /// beyond the single published key.
+    #[test]
+    fn round_keys_match_rfc4269_2_3_transcription() {
+        let mut seed_rng = 0x5eed_5eed_5eed_5eedu64;
+        for _ in 0..256 {
+            let mut key = [0u8; 16];
+            fill_bytes(&mut seed_rng, &mut key);
+            let mut fast = [0u32; 32];
+            expand_round_keys(&key, false, &mut fast);
+            assert_eq!(fast, schedule_per_rfc4269_2_3(&key));
+        }
+    }
+
+    /// The `BlockCipher` entry points reject a wrong-length block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        use crate::BlockCipher;
+        let cipher = Seed::new(&[0u8; 16]);
+        let mut short = [0u8; 8];
+        cipher.encrypt(&mut short);
     }
 
     #[test]
     fn seed_kats() {
         let cases = [
             (
-                h16("00000000000000000000000000000000"),
-                h16("000102030405060708090a0b0c0d0e0f"),
-                h16("5ebac6e0054e166819aff1cc6d346cdb"),
+                decode_hex_array::<16>("00000000000000000000000000000000"),
+                decode_hex_array::<16>("000102030405060708090a0b0c0d0e0f"),
+                decode_hex_array::<16>("5ebac6e0054e166819aff1cc6d346cdb"),
             ),
             (
-                h16("000102030405060708090a0b0c0d0e0f"),
-                h16("00000000000000000000000000000000"),
-                h16("c11f22f20140505084483597e4370f43"),
+                decode_hex_array::<16>("000102030405060708090a0b0c0d0e0f"),
+                decode_hex_array::<16>("00000000000000000000000000000000"),
+                decode_hex_array::<16>("c11f22f20140505084483597e4370f43"),
             ),
             (
-                h16("4706480851e61be85d74bfb3fd956185"),
-                h16("83a2f8a288641fb9a4e9a5cc2f131c7d"),
-                h16("ee54d13ebcae706d226bc3142cd40d4a"),
+                decode_hex_array::<16>("4706480851e61be85d74bfb3fd956185"),
+                decode_hex_array::<16>("83a2f8a288641fb9a4e9a5cc2f131c7d"),
+                decode_hex_array::<16>("ee54d13ebcae706d226bc3142cd40d4a"),
             ),
             (
-                h16("28dbc3bc49ffd87dcfa509b11d422be7"),
-                h16("b41e6be2eba84a148e2eed84593c5ec7"),
-                h16("9b9b7bfcd1813cb95d0b3618f40f5122"),
+                decode_hex_array::<16>("28dbc3bc49ffd87dcfa509b11d422be7"),
+                decode_hex_array::<16>("b41e6be2eba84a148e2eed84593c5ec7"),
+                decode_hex_array::<16>("9b9b7bfcd1813cb95d0b3618f40f5122"),
             ),
         ];
 
@@ -419,24 +499,24 @@ mod tests {
     fn seed_ct_kats() {
         let cases = [
             (
-                h16("00000000000000000000000000000000"),
-                h16("000102030405060708090a0b0c0d0e0f"),
-                h16("5ebac6e0054e166819aff1cc6d346cdb"),
+                decode_hex_array::<16>("00000000000000000000000000000000"),
+                decode_hex_array::<16>("000102030405060708090a0b0c0d0e0f"),
+                decode_hex_array::<16>("5ebac6e0054e166819aff1cc6d346cdb"),
             ),
             (
-                h16("000102030405060708090a0b0c0d0e0f"),
-                h16("00000000000000000000000000000000"),
-                h16("c11f22f20140505084483597e4370f43"),
+                decode_hex_array::<16>("000102030405060708090a0b0c0d0e0f"),
+                decode_hex_array::<16>("00000000000000000000000000000000"),
+                decode_hex_array::<16>("c11f22f20140505084483597e4370f43"),
             ),
             (
-                h16("4706480851e61be85d74bfb3fd956185"),
-                h16("83a2f8a288641fb9a4e9a5cc2f131c7d"),
-                h16("ee54d13ebcae706d226bc3142cd40d4a"),
+                decode_hex_array::<16>("4706480851e61be85d74bfb3fd956185"),
+                decode_hex_array::<16>("83a2f8a288641fb9a4e9a5cc2f131c7d"),
+                decode_hex_array::<16>("ee54d13ebcae706d226bc3142cd40d4a"),
             ),
             (
-                h16("28dbc3bc49ffd87dcfa509b11d422be7"),
-                h16("b41e6be2eba84a148e2eed84593c5ec7"),
-                h16("9b9b7bfcd1813cb95d0b3618f40f5122"),
+                decode_hex_array::<16>("28dbc3bc49ffd87dcfa509b11d422be7"),
+                decode_hex_array::<16>("b41e6be2eba84a148e2eed84593c5ec7"),
+                decode_hex_array::<16>("9b9b7bfcd1813cb95d0b3618f40f5122"),
             ),
         ];
 
@@ -470,15 +550,21 @@ mod tests {
     fn seed_matches_openssl_ecb() {
         let key_hex = "000102030405060708090a0b0c0d0e0f";
         let pt_hex = "00000000000000000000000000000000";
-        let Some(expected) =
-            crate::test_utils::run_openssl_enc("-seed-ecb", key_hex, None, &h16(pt_hex))
-        else {
+        let Some(expected) = crate::test_utils::openssl_enc(
+            "-seed-ecb",
+            key_hex,
+            None,
+            &decode_hex_array::<16>(pt_hex),
+        )
+        .or_skip("seed_matches_openssl_ecb") else {
             return;
         };
 
-        let cipher = Seed::new(&h16(key_hex));
+        let cipher = Seed::new(&decode_hex_array::<16>(key_hex));
         assert_eq!(
-            cipher.encrypt_block(&h16(pt_hex)).as_slice(),
+            cipher
+                .encrypt_block(&decode_hex_array::<16>(pt_hex))
+                .as_slice(),
             expected.as_slice()
         );
     }

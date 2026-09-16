@@ -71,6 +71,11 @@ measure_cipher() {
     mean=$(echo "$out" | awk '/Reading mean/{print $5; exit}')
     ci=$(echo "$out" | awk '/Reading CI/{print $5; exit}')
     rounds=$(echo "$out" | awk '/^Rounds:/{print $2; exit}')
+    if [[ -z "$mean" || -z "$ci" || -z "$rounds" ]]; then
+        echo "pilot-bench output carried no mean, CI or round count:" >&2
+        echo "$out" >&2
+        exit 1
+    fi
     printf "%s|%s|%s\n" "$mean" "$ci" "$rounds"
 }
 
@@ -83,6 +88,11 @@ measure_pk() {
     mean=$(echo "$out" | awk '/Reading mean/{print $5; exit}')
     ci=$(echo "$out" | awk '/Reading CI/{print $5; exit}')
     rounds=$(echo "$out" | awk '/^Rounds:/{print $2; exit}')
+    if [[ -z "$mean" || -z "$ci" || -z "$rounds" ]]; then
+        echo "pilot-bench output carried no mean, CI or round count:" >&2
+        echo "$out" >&2
+        exit 1
+    fi
     printf "%s|%s|%s\n" "$mean" "$ci" "$rounds"
 }
 

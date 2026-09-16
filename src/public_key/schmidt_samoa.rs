@@ -5,6 +5,22 @@
 //! On top of that arithmetic core, the byte helpers serialize ciphertexts as
 //! single-field DER `INTEGER` payloads so the scheme can be used directly on
 //! byte strings.
+//!
+//! Security notes, the same ones that apply to textbook RSA:
+//!
+//! - **Deterministic.** `c = m^n mod n` involves no randomness, so equal
+//!   messages give equal ciphertexts and the scheme is not IND-CPA; a
+//!   ciphertext can be tested against a guessed message with one public
+//!   operation. Nothing here plays the role OAEP plays for RSA.
+//! - **No chosen-ciphertext protection.** The map is multiplicative, so a
+//!   decryptor exposed to arbitrary ciphertexts is a plaintext oracle for
+//!   any ciphertext an adversary can derive from another.
+//!
+//! The private exponent `d = n⁻¹ mod lcm(p − 1, q − 1)` drives rump's
+//! variable-time exponentiation modulo `γ = pq`, whose sequence of
+//! squarings and multiplications is the exponent's window pattern; an
+//! adversary who observes it (a co-resident process reading the cache or
+//! branch predictor, a probe on the power rail) learns `d`.
 
 use core::fmt;
 
@@ -58,6 +74,8 @@ impl SchmidtSamoaPublicKey {
     /// Unlike textbook RSA, the public exponent is the modulus `n` itself.
     /// The inverse map recovers the original message only for values
     /// interpreted in the range `[0, gamma)`, where `gamma = p q`.
+    /// Deterministic — equal messages give equal ciphertexts (see the module
+    /// documentation).
     #[must_use]
     pub fn encrypt_raw(&self, message: &BigUint) -> BigUint {
         if let Some(ctx) = &self.n_ctx {
@@ -90,10 +108,15 @@ impl SchmidtSamoaPublicKey {
     }
 
     /// Validate schema fields and rebuild the key with its derived state.
+    ///
+    /// Structural validation (public material): `n = p²q` with distinct odd
+    /// primes (the divisibility restrictions in [`SchmidtSamoa::from_primes`]
+    /// exclude `2`), so `n` is odd and at least `3² · 5`. Compositeness is
+    /// not tested.
     fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
         let mut fields = fields.into_iter();
         let n = fields.next()?;
-        if n <= BigUint::one() {
+        if !n.is_odd() || n < BigUint::from_u64(45) {
             return None;
         }
         let n_ctx = MontgomeryContext::new(&n).ok();
@@ -138,14 +161,18 @@ impl SchmidtSamoaPrivateKey {
         }
     }
 
-    /// Decrypt a ciphertext back into the big-endian byte string that was
-    /// interpreted as the plaintext integer.
+    /// Decrypt a ciphertext with [`Self::decrypt_raw`] and return the
+    /// recovered integer's minimal big-endian encoding: no leading zero
+    /// octets, and `0x00` alone for the integer zero. A message that began
+    /// with zero octets, or was empty, therefore comes back without them.
     #[must_use]
     pub fn decrypt(&self, ciphertext: &BigUint) -> Vec<u8> {
         self.decrypt_raw(ciphertext).to_be_bytes()
     }
 
-    /// Decrypt a byte-encoded ciphertext produced by [`SchmidtSamoaPublicKey::encrypt_bytes`].
+    /// Decrypt a byte-encoded ciphertext produced by
+    /// [`SchmidtSamoaPublicKey::encrypt_bytes`]; the plaintext bytes are
+    /// those of [`Self::decrypt`].
     #[must_use]
     pub fn decrypt_bytes(&self, ciphertext: &[u8]) -> Option<Vec<u8>> {
         let mut fields = decode_biguints(ciphertext)?.into_iter();
@@ -162,11 +189,16 @@ impl SchmidtSamoaPrivateKey {
     }
 
     /// Validate schema fields and rebuild the key with its derived state.
+    ///
+    /// The blob carries `d = n⁻¹ mod λ` and `gamma = p·q`, not the primes,
+    /// so this is the consistency those fields allow: `gamma` odd and at
+    /// least `3 · 5`; `d` odd (`d·n ≡ 1` modulo the even `λ`) and
+    /// `1 ≤ d < λ < gamma`. Nothing ties `d` to `gamma` without `n`.
     fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
         let mut fields = fields.into_iter();
         let d = fields.next()?;
         let gamma = fields.next()?;
-        if d.is_zero() || gamma <= BigUint::one() {
+        if !gamma.is_odd() || gamma < BigUint::from_u64(15) || !d.is_odd() || d >= gamma {
             return None;
         }
         let gamma_ctx = MontgomeryContext::new(&gamma).ok();
@@ -199,7 +231,7 @@ impl SchmidtSamoa {
     /// Derive a raw Schmidt-Samoa key pair from explicit primes.
     ///
     /// Returns `None` if the primes are equal, composite, or violate the
-    /// divisibility checks from the Python reference.
+    /// divisibility restrictions `p ∤ (q - 1)` and `q ∤ (p - 1)`.
     #[must_use]
     pub fn from_primes(
         p: &BigUint,
@@ -212,7 +244,7 @@ impl SchmidtSamoa {
         let p_minus_one = p.sub(&BigUint::one());
         let q_minus_one = q.sub(&BigUint::one());
         // This explicit divisibility check is equivalent to the later
-        // `mod_inverse(...)?` failure, but keeping it here makes the Python
+        // `mod_inverse(...)?` failure, but keeping it here makes the
         // parameter restriction visible at the key-derivation boundary.
         if q_minus_one.rem(p).is_zero() || p_minus_one.rem(q).is_zero() {
             return None;
@@ -326,6 +358,12 @@ mod tests {
         let (public, private) = SchmidtSamoa::from_primes(&p, &q).expect("valid Schmidt-Samoa key");
         let ciphertext = public.encrypt(&[0x05]).expect("message fits");
         assert_eq!(private.decrypt(&ciphertext), vec![0x05]);
+        // Bytes go through the integer: leading zero octets are dropped and
+        // the zero message comes back as one `0x00` octet.
+        let ciphertext = public.encrypt(&[0x00, 0x05]).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x05]);
+        let ciphertext = public.encrypt(&[]).expect("message fits");
+        assert_eq!(private.decrypt(&ciphertext), vec![0x00]);
     }
 
     #[test]
@@ -377,6 +415,30 @@ mod tests {
             SchmidtSamoaPrivateKey::from_xml(&private_xml),
             Some(private)
         );
+    }
+
+    #[test]
+    fn key_parse_rejects_tampered_fields() {
+        use crate::public_key::io::encode_biguints;
+        let u = BigUint::from_u64;
+        // p = 3, q = 5: n = 45, gamma = 15, d = 1.
+        assert!(SchmidtSamoaPublicKey::from_key_blob(&encode_biguints(&[&u(45)])).is_some());
+        for n in [44u64, 27, 1, 0] {
+            assert!(
+                SchmidtSamoaPublicKey::from_key_blob(&encode_biguints(&[&u(n)])).is_none(),
+                "{n}"
+            );
+        }
+        assert!(
+            SchmidtSamoaPrivateKey::from_key_blob(&encode_biguints(&[&u(1), &u(15)])).is_some()
+        );
+        for (d, gamma) in [(1u64, 14u64), (1, 9), (0, 15), (2, 15), (15, 15), (17, 15)] {
+            let blob = encode_biguints(&[&u(d), &u(gamma)]);
+            assert!(
+                SchmidtSamoaPrivateKey::from_key_blob(&blob).is_none(),
+                "d={d} gamma={gamma}"
+            );
+        }
     }
 
     #[test]

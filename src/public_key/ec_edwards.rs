@@ -29,39 +29,58 @@
 //!
 //! ## Point encoding
 //!
-//! Ed25519 uses the RFC 8032 §5.1.2 encoding:
+//! Points are encoded as RFC 8032 §5.1.2 and §5.2.2 encode them: `y` as a
+//! little-endian string of `b` bits with the low bit of `x` (its sign) in the
+//! most-significant bit, where `b` is the least multiple of 8 above the bit
+//! length of `p`. That is 256 bits (32 octets) for Ed25519's 255-bit `p` and
+//! 456 bits (57 octets) for Ed448's 448-bit `p`; the sign bit never overlaps
+//! `y`, whose bits all lie below the bit length of `p`.
 //!
-//! - 32 bytes: the little-endian encoding of `y`.
-//! - The most-significant bit of the last byte carries the low bit (sign) of `x`.
+//! ## Domain parameters
 //!
-//! This is a 255-bit `y` value plus one parity bit, packed into 32 bytes.
+//! [`TwistedEdwardsCurve::new`] builds a curve from parameters the caller
+//! vouches for. Parameters that arrive from outside the process go through
+//! [`TwistedEdwardsCurve::from_explicit`], which validates them as SEC 1
+//! §3.1.1.2.1 validates short-Weierstrass parameters, with the cheap size
+//! checks first so a hostile encoding cannot buy a long computation.
 //!
 //! ## Side-channel note
 //!
-//! Scalar multiplication uses variable-time fixed-window tables. The generic
-//! path and the specialized Ed25519 base-point path both select precomputed
-//! entries based on secret scalar windows, so this code is **not
-//! constant-time**. It is unsuitable for environments where timing or power
-//! measurements of the scalar are possible.
+//! Scalar multiplication is variable-time: the fixed-window ladders select
+//! precomputed entries by secret scalar windows, their iteration count follows
+//! the scalar's bit length, and the doubling formula branches on a neutral
+//! accumulator. The generic path and the specialized Ed25519 base-point path
+//! are alike in this, so this code is **not constant-time** and is unsuitable
+//! where timing or power measurements of the scalar are possible.
 //!
 //! ## Field square root
 //!
-//! For `p = 2^255 − 19`, which satisfies `p ≡ 5 (mod 8)`, point decompression
-//! uses the RFC 8032 §5.1.3 square-root algorithm:
-//!
-//! 1. Compute the candidate `β = u^{(p+3)/8}`.
-//! 2. If `β² = u`, return `β`.
-//! 3. If `β² = −u`, return `β · √(−1)` where `√(−1) = 2^{(p−1)/4} mod p`.
-//! 4. Otherwise `u` has no square root.
-//!
-//! This uses two modular exponentiations plus a comparison.
+//! Point decompression recovers `x` from `x² = (y² − 1) / (d·y² − a)` and
+//! takes the square root with `rump::modular::mod_sqrt`, which works in any
+//! odd prime field, so one path serves Ed25519 (`p ≡ 5 (mod 8)`) and curves
+//! such as Ed448 (`p ≡ 3 (mod 4)`) alike. When `x²` is a non-residue the
+//! decode fails; otherwise the root whose low bit matches the encoded sign
+//! bit is kept, as in RFC 8032 §5.1.3 step 4.
 
-use crate::public_key::primes::random_nonzero_below;
+use crate::public_key::primes::{is_probable_prime_untrusted, random_nonzero_below};
 use crate::Csprng;
 use rump::modular::mod_inverse;
-use rump::modular::{MontgomeryContext, MontgomeryResidue, MontgomeryScratch};
+use rump::modular::{mod_sqrt, MontgomeryContext, MontgomeryResidue, MontgomeryScratch};
+use rump::number_theory::legendre;
 use rump::BigUint;
 use std::sync::OnceLock;
+
+/// The largest field prime [`TwistedEdwardsCurve::from_explicit`] accepts, in
+/// bits. This is a denial-of-service bound, not a security parameter: the
+/// primality tests and the `[n]G` ladder that validation runs cost time
+/// proportional to a power of the field size, and the bound caps what an
+/// imported key can make the parser spend. Every standardised Edwards curve
+/// (Ed25519's 255-bit `p`, Ed448's 448-bit `p`) lies well inside it.
+pub const MAX_EXPLICIT_FIELD_BITS: usize = 1024;
+
+/// The largest cofactor [`TwistedEdwardsCurve::from_explicit`] accepts. Both
+/// RFC 8032 curves have `h ≤ 8` (`8` for Ed25519, `4` for Ed448).
+pub const MAX_EXPLICIT_COFACTOR: u64 = 8;
 
 // ─── Core types ─────────────────────────────────────────────────────────────
 
@@ -93,7 +112,10 @@ pub struct TwistedEdwardsCurve {
     /// reached through [`Self::scalar_ctx`] by the signature schemes for
     /// their products modulo the subgroup order.
     scalar: MontgomeryContext,
-    /// Byte length of a field element: `⌈p.bits() / 8⌉`.
+    /// Octet length of a point encoding: `⌈(p.bits() + 1) / 8⌉`, which is
+    /// `b / 8` in RFC 8032's terms. The extra bit over the length of `p`
+    /// holds the sign of `x`; it is the most-significant bit of the last
+    /// octet, which no bit of a canonical `y < p` reaches.
     pub coord_len: usize,
 }
 
@@ -113,6 +135,11 @@ pub(crate) struct EdwardsFieldCtx {
     ctx: MontgomeryContext,
     /// Curve coefficient `a`, encoded once into the Montgomery domain.
     a_mont: MontgomeryResidue,
+    /// `true` when `a ≡ −1 (mod p)`, which selects the cheaper `a = −1`
+    /// addition formula (Ed25519); other `a` take the general formula.
+    a_is_minus_one: bool,
+    /// `d mod p`, encoded once into the Montgomery domain.
+    d_mont: MontgomeryResidue,
     /// `2·d mod p`, encoded once into the Montgomery domain.
     d2_mont: MontgomeryResidue,
     /// The zero residue of the field.
@@ -122,13 +149,17 @@ pub(crate) struct EdwardsFieldCtx {
 impl EdwardsFieldCtx {
     const SAME_CTX: &'static str = "curve residues share the curve's field context";
 
-    fn new(ctx: MontgomeryContext, a: &BigUint, d2: &BigUint) -> Self {
+    fn new(ctx: MontgomeryContext, a: &BigUint, d: &BigUint, d2: &BigUint) -> Self {
         let a_mont = ctx.to_residue(a);
+        let a_is_minus_one = *a == ctx.modulus().sub(&BigUint::one());
+        let d_mont = ctx.to_residue(d);
         let d2_mont = ctx.to_residue(d2);
         let zero = ctx.to_residue(&BigUint::zero());
         Self {
             ctx,
             a_mont,
+            a_is_minus_one,
+            d_mont,
             d2_mont,
             zero,
         }
@@ -191,7 +222,13 @@ impl EdwardsFieldCtx {
         &self.a_mont
     }
 
-    /// `2·d mod p` as a residue.
+    /// `d mod p` as a residue, which the general-`a` addition multiplies by.
+    #[inline]
+    fn d_mont(&self) -> &MontgomeryResidue {
+        &self.d_mont
+    }
+
+    /// `2·d mod p` as a residue, which the `a = −1` addition multiplies by.
     #[inline]
     fn d2_mont(&self) -> &MontgomeryResidue {
         &self.d2_mont
@@ -335,9 +372,20 @@ impl ExtendedPoint {
     /// `Z⁻¹ = Z^{p−2} mod p`.  The projective neutral `(0 : Z : Z : 0)` is
     /// canonicalized back to the affine identity `(0, 1)` so the explicit
     /// `neutral` flag always stays in sync with the coordinates.
+    ///
+    /// `Z = 0` names no point. The addition law is complete on the curves
+    /// this module admits (see [`point_add_extended`]), so `Z = 0` cannot
+    /// arise from curve points; it can arise from coordinates that were never
+    /// on the curve, fed in through [`EdwardsPoint::new`] unchecked. Such a
+    /// value comes back as the affine pair `(0, 0)`, which lies on no twisted
+    /// Edwards curve (`a·0 + 0 ≠ 1`), so [`TwistedEdwardsCurve::is_on_curve`]
+    /// reports it rather than passing garbage off as a point.
     fn to_affine(&self, fld: &EdwardsFieldCtx) -> EdwardsPoint {
         if self.is_neutral(fld) {
             return EdwardsPoint::neutral();
+        }
+        if fld.is_zero(&self.z) {
+            return EdwardsPoint::new(BigUint::zero(), BigUint::zero());
         }
 
         let ctx = fld.ctx();
@@ -363,39 +411,6 @@ impl ExtendedPoint {
     }
 }
 
-// ─── Field helpers ──────────────────────────────────────────────────────────
-
-/// `(a + b) mod p`  (both inputs in `[0, p)`)
-#[inline]
-fn fadd(a: &BigUint, b: &BigUint, p: &BigUint) -> BigUint {
-    let s = a.add(b);
-    if &s >= p {
-        s.sub(p)
-    } else {
-        s
-    }
-}
-
-/// `(a − b) mod p`  (both inputs in `[0, p)`)
-#[inline]
-fn fsub(a: &BigUint, b: &BigUint, p: &BigUint) -> BigUint {
-    if a >= b {
-        a.sub(b)
-    } else {
-        p.sub(&b.sub(a))
-    }
-}
-
-/// `(−a) mod p`
-#[inline]
-fn fneg(a: &BigUint, p: &BigUint) -> BigUint {
-    if a.is_zero() {
-        BigUint::zero()
-    } else {
-        p.sub(a)
-    }
-}
-
 // ─── Point arithmetic ───────────────────────────────────────────────────────
 
 /// Unified addition `P₁ + P₂` in extended twisted Edwards coordinates.
@@ -412,14 +427,47 @@ fn fneg(a: &BigUint, p: &BigUint) -> BigUint {
 /// ```
 ///
 /// The formula is *unified*: it works when `P₁ = P₂` (doubling) or
-/// `P₁ = −P₂` (result is the neutral), and it is *complete* over any prime
-/// field with `−d` a non-square, which holds for Ed25519.
+/// `P₁ = −P₂` (result is the neutral). It is *complete*, working for every
+/// pair of curve points, under the condition RFC 8032 §5.1.4 states for it,
+/// from §3.1 of Hisil, Wong, Carter and Dawson's "Twisted Edwards Curves
+/// Revisited": `a` a square and `d` a non-square in the field. With `a = −1`
+/// that requires `p ≡ 1 (mod 4)`; Ed25519's `p = 2²⁵⁵ − 19 ≡ 5 (mod 8)`
+/// satisfies it, and its `d` is a non-square.
+///
+/// That formula is specific to `a = −1`. For any other `a` the function
+/// takes the general unified addition of the same paper (§3.1, `add-2008-hwcd`
+/// in the EFD): `A = X₁X₂`, `B = Y₁Y₂`, `C = d·T₁T₂`, `D = Z₁Z₂`,
+/// `E = (X₁+Y₁)(X₂+Y₂) − A − B`, `F = D − C`, `G = D + C`, `H = B − a·A`,
+/// one multiplication by `a` dearer and complete under the same condition
+/// (Ed448: `a = 1`, `d = −39081` a non-square). [`TwistedEdwardsCurve::from_explicit`]
+/// admits only curves that meet it.
 fn point_add_extended(
     fld: &EdwardsFieldCtx,
     p1: &ExtendedPoint,
     p2: &ExtendedPoint,
     scratch: &mut MontgomeryScratch,
 ) -> ExtendedPoint {
+    if !fld.a_is_minus_one {
+        let a = fld.mul(&p1.x, &p2.x, scratch);
+        let b = fld.mul(&p1.y, &p2.y, scratch);
+        let t2d = fld.mul(&p2.t, fld.d_mont(), scratch);
+        let c = fld.mul(&p1.t, &t2d, scratch);
+        let d = fld.mul(&p1.z, &p2.z, scratch);
+        let x1y1 = fld.add(&p1.x, &p1.y);
+        let x2y2 = fld.add(&p2.x, &p2.y);
+        let e = fld.sub(&fld.sub(&fld.mul(&x1y1, &x2y2, scratch), &a), &b);
+        let f = fld.sub(&d, &c);
+        let g = fld.add(&d, &c);
+        let a_a = fld.mul(fld.a_mont(), &a, scratch);
+        let h = fld.sub(&b, &a_a);
+        return ExtendedPoint {
+            x: fld.mul(&e, &f, scratch),
+            y: fld.mul(&g, &h, scratch),
+            z: fld.mul(&f, &g, scratch),
+            t: fld.mul(&e, &h, scratch),
+        };
+    }
+
     // A = (Y₁ − X₁)·(Y₂ − X₂)
     let y1_m_x1 = fld.sub(&p1.y, &p1.x);
     let y2_m_x2 = fld.sub(&p2.y, &p2.x);
@@ -442,7 +490,7 @@ fn point_add_extended(
     let e = fld.sub(&b, &a);
     let f = fld.sub(&d, &c);
     let g = fld.add(&d, &c);
-    let h = fld.add(&b, &a); // correct for a = −1: H = B − a·A = B + A
+    let h = fld.add(&b, &a); // a = −1: H = B − a·A = B + A
 
     ExtendedPoint {
         x: fld.mul(&e, &f, scratch),
@@ -576,14 +624,13 @@ fn ed25519_base_table() -> &'static [ExtendedPoint] {
 /// Scalar multiplication `k·P` via a fixed-window left-to-right method.
 ///
 /// The loop stays in extended coordinates throughout; a single conversion
-/// to affine is paid at the end.
+/// to affine is paid at the end. One table-backed addition per window
+/// replaces the conditional additions of bit-by-bit double-and-add.
 ///
-/// This reduces the number of additions compared with simple bit-by-bit
-/// double-and-add and avoids data-dependent branches in the main loop by
-/// always performing one table-backed add per window.
-///
-/// **Side-channel note**: table selection still depends on the scalar, so this
-/// remains a variable-time software implementation.
+/// **Side-channel note**: this ladder is variable-time in the scalar. The
+/// window count follows `k.bits()`, the table index is a window of `k`, and
+/// [`point_double_extended`] branches on a neutral accumulator, which the
+/// leading zero windows of a short scalar keep neutral.
 fn scalar_mul_extended(
     curve: &TwistedEdwardsCurve,
     point: &EdwardsPoint,
@@ -598,13 +645,52 @@ fn scalar_mul_extended(
     scalar_mul_with_table(&curve.field, k, &table, SCALAR_WINDOW_BITS)
 }
 
+// ─── Domain-parameter validation ────────────────────────────────────────────
+
+/// Whether `h = ⌊(√p + 1)² / n⌋` (SEC 1 §3.1.1.2.1 step 6), decided in
+/// integers: `(√p + 1)² = p + 1 + 2√p`, so `hn ≤ (√p + 1)²` exactly when
+/// `hn ≤ p + 1` or `(hn − p − 1)² ≤ 4p`, and `(h + 1)n > (√p + 1)²` exactly
+/// when `(h + 1)n > p + 1` and `((h + 1)n − p − 1)² > 4p`.
+fn cofactor_is_hasse_quotient(h: u64, n: &BigUint, p: &BigUint) -> bool {
+    let Some(h_plus_one) = h.checked_add(1) else {
+        return false;
+    };
+    let p_plus_one = p.add(&BigUint::one());
+    let four_p = p.mul(&BigUint::from_u64(4));
+    let lower = n.mul(&BigUint::from_u64(h));
+    let upper = n.mul(&BigUint::from_u64(h_plus_one));
+    let lower_holds = lower <= p_plus_one || lower.sub(&p_plus_one).square() <= four_p;
+    let upper_holds = upper > p_plus_one && upper.sub(&p_plus_one).square() > four_p;
+    lower_holds && upper_holds
+}
+
+/// Whether `base^B ≢ 1 (mod n)` for every `1 ≤ B < bound`: SEC 1
+/// §3.1.1.2.1 step 7 with `base = p` and `bound = 100`. This excludes the
+/// curves whose embedding degree is small enough for the
+/// Menezes–Okamoto–Vanstone and Frey–Rück reductions.
+fn no_small_embedding_degree(base: &BigUint, n: &BigUint, bound: usize) -> bool {
+    let base = base.rem(n);
+    let mut power = base.clone();
+    for _ in 1..bound {
+        if power.is_one() {
+            return false;
+        }
+        power = BigUint::mod_mul(&power, &base, n);
+    }
+    true
+}
+
 // ─── TwistedEdwardsCurve ────────────────────────────────────────────────────
 
 impl TwistedEdwardsCurve {
-    /// Construct curve parameters from raw field values.
+    /// Construct curve parameters from raw field values the caller vouches
+    /// for: the named-curve constructor and callers that generated the
+    /// parameters themselves. Parameters that arrive from outside the process
+    /// go through [`Self::from_explicit`], which validates them.
     ///
     /// Returns `None` if the field prime `p` or subgroup order `n` is even,
-    /// which prevents building a `MontgomeryContext`.
+    /// which prevents building a `MontgomeryContext`, or is `1`, which would
+    /// leave no scalar for [`Self::random_scalar`] to draw from.
     #[must_use]
     pub fn new(
         p: BigUint,
@@ -614,9 +700,12 @@ impl TwistedEdwardsCurve {
         gx: BigUint,
         gy: BigUint,
     ) -> Option<Self> {
+        if p <= BigUint::one() || n <= BigUint::one() {
+            return None;
+        }
         let field = MontgomeryContext::new(&p).ok()?;
         let scalar = MontgomeryContext::new(&n).ok()?;
-        let coord_len = p.bits().div_ceil(8);
+        let coord_len = (p.bits() + 1).div_ceil(8);
         let d2 = {
             let v = d.add(&d);
             if v.cmp(&p).is_ge() {
@@ -625,7 +714,7 @@ impl TwistedEdwardsCurve {
                 v
             }
         };
-        let field = EdwardsFieldCtx::new(field, &a, &d2);
+        let field = EdwardsFieldCtx::new(field, &a, &d, &d2);
         Some(Self {
             p,
             a,
@@ -637,6 +726,105 @@ impl TwistedEdwardsCurve {
             scalar,
             coord_len,
         })
+    }
+
+    /// Construct curve parameters that arrived from outside the process,
+    /// validating them first.
+    ///
+    /// This is the twisted Edwards analogue of SEC 1 §3.1.1.2.1's validation
+    /// primitive. The checks run cheapest first, so a hostile encoding is
+    /// refused before it can buy a long computation:
+    ///
+    /// 1. The named Ed25519 parameters are accepted by comparison.
+    /// 2. `p` has at most [`MAX_EXPLICIT_FIELD_BITS`] bits (the
+    ///    denial-of-service bound), `n` at most `p.bits() + 1` (Hasse's bound
+    ///    puts `n ≤ #E < (√p + 1)² < 2p`), and `a`, `d`, `gx`, `gy` are reduced
+    ///    below `p`, with `a` and `d` non-zero and `a ≠ d` (otherwise the
+    ///    equation is not a twisted Edwards curve).
+    /// 3. `p` and `n` are odd primes by the hardened test, and `n ≠ p`
+    ///    (SEC 1 step 8 excludes anomalous curves).
+    /// 4. `a` is a square and `d` a non-square modulo `p`: the condition
+    ///    under which the addition law is complete (RFC 8032 §5.1.4, citing
+    ///    §3.1 of Hisil, Wong, Carter and Dawson).
+    /// 5. `G` lies on the curve.
+    /// 6. The cofactor `h = ⌊(√p + 1)² / n⌋`, decided in integers as SEC 1
+    ///    step 6 does, is at most [`MAX_EXPLICIT_COFACTOR`] and even: every
+    ///    twisted Edwards curve contains the point `(0, −1)` of order 2, so
+    ///    the group order `h·n` is even while `n` is odd.
+    /// 7. `n` has no small embedding degree: `p^B ≢ 1 (mod n)` for
+    ///    `1 ≤ B < 100` (SEC 1 step 7).
+    /// 8. `[n]G` is the neutral element (SEC 1 step 5), the one scalar
+    ///    multiplication, bounded by the sizes checked above.
+    ///
+    /// Returns `None` when any check fails.
+    #[must_use]
+    pub fn from_explicit(
+        p: BigUint,
+        a: BigUint,
+        d: BigUint,
+        n: BigUint,
+        gx: BigUint,
+        gy: BigUint,
+    ) -> Option<Self> {
+        let named = cached_ed25519();
+        if p == named.p
+            && a == named.a
+            && d == named.d
+            && n == named.n
+            && gx == named.gx
+            && gy == named.gy
+        {
+            return Some(named.clone());
+        }
+
+        // Sizes and ranges: constant work in the encoding's length.
+        if p.bits() > MAX_EXPLICIT_FIELD_BITS || n.bits() > p.bits() + 1 {
+            return None;
+        }
+        if [&a, &d, &gx, &gy].into_iter().any(|v| v >= &p) {
+            return None;
+        }
+        if a.is_zero() || d.is_zero() || a == d {
+            return None;
+        }
+        if n == p {
+            return None;
+        }
+
+        // Primality of p and n, then the Montgomery contexts.
+        if !p.is_odd() || !is_probable_prime_untrusted(&p) {
+            return None;
+        }
+        if !n.is_odd() || !is_probable_prime_untrusted(&n) {
+            return None;
+        }
+        let curve = Self::new(p, a, d, n, gx, gy)?;
+
+        // Completeness of the addition law: a a square, d a non-square.
+        if legendre(&curve.a, &curve.p) != Some(1) || legendre(&curve.d, &curve.p) != Some(-1) {
+            return None;
+        }
+
+        let g = curve.base_point();
+        if !curve.is_on_curve(&g) {
+            return None;
+        }
+
+        let h = (1..=MAX_EXPLICIT_COFACTOR)
+            .find(|&h| cofactor_is_hasse_quotient(h, &curve.n, &curve.p))?;
+        if h % 2 != 0 {
+            return None;
+        }
+
+        if !no_small_embedding_degree(&curve.p, &curve.n, 100) {
+            return None;
+        }
+
+        // The one full scalar multiplication, last.
+        if !scalar_mul_extended(&curve, &g, &curve.n).is_neutral() {
+            return None;
+        }
+        Some(curve)
     }
 
     /// The base point `G`.
@@ -659,12 +847,44 @@ impl TwistedEdwardsCurve {
         let y2 = ctx.square(&point.y);
         // lhs = a·x² + y²
         let ax2 = ctx.mul(&self.a, &x2);
-        let lhs = fadd(&ax2, &y2, &self.p);
+        let lhs = BigUint::mod_add(&ax2, &y2, &self.p);
         // rhs = 1 + d·x²·y²
         let x2y2 = ctx.mul(&x2, &y2);
         let dx2y2 = ctx.mul(&self.d, &x2y2);
-        let rhs = fadd(&BigUint::one(), &dx2y2, &self.p);
+        let rhs = BigUint::mod_add(&BigUint::one(), &dx2y2, &self.p);
         lhs == rhs
+    }
+
+    /// `true` if `point` is a canonical point of this curve: the neutral
+    /// element, or a pair with both coordinates reduced below `p` (as RFC
+    /// 8032 §5.1.3 requires of encodings and SEC 1 §3.2.2.1 of field
+    /// elements) that satisfies the curve equation.
+    ///
+    /// Canonicity is checked before the curve equation: `is_on_curve` reduces
+    /// its inputs mod `p`, so a coordinate `x + p` would otherwise pass as `x`.
+    /// Membership in the prime-order subgroup is not checked; that is
+    /// [`Self::is_valid_public_point`].
+    #[must_use]
+    pub fn is_canonical_point(&self, point: &EdwardsPoint) -> bool {
+        point.is_neutral() || (point.x < self.p && point.y < self.p && self.is_on_curve(point))
+    }
+
+    /// `true` if `point` is a usable public point on this curve: not the
+    /// neutral element, canonical and on the curve
+    /// ([`Self::is_canonical_point`]), and in the prime-order subgroup.
+    ///
+    /// Every Edwards key and ciphertext decoder in the crate validates through
+    /// this one predicate.
+    #[must_use]
+    pub fn is_valid_public_point(&self, point: &EdwardsPoint) -> bool {
+        !point.is_neutral() && self.is_canonical_point(point) && self.is_in_prime_subgroup(point)
+    }
+
+    /// `true` if `n·P` is the neutral element, so `P` lies in the subgroup of
+    /// prime order `n`.
+    #[must_use]
+    pub fn is_in_prime_subgroup(&self, point: &EdwardsPoint) -> bool {
+        self.scalar_mul(point, &self.n).is_neutral()
     }
 
     /// Negate a point: `(x, y)` → `(−x mod p, y)`.
@@ -676,7 +896,7 @@ impl TwistedEdwardsCurve {
         if point.neutral {
             return point.clone();
         }
-        EdwardsPoint::new(fneg(&point.x, &self.p), point.y.clone())
+        EdwardsPoint::new(BigUint::mod_neg(&point.x, &self.p), point.y.clone())
     }
 
     /// Add two affine curve points.
@@ -694,6 +914,21 @@ impl TwistedEdwardsCurve {
         let pe = ExtendedPoint::from_affine(p, &self.field);
         point_double_extended(&self.field, &pe, &mut MontgomeryScratch::new())
             .to_affine(&self.field)
+    }
+
+    /// `[2^k]P`: `k` doublings in extended coordinates, then one conversion
+    /// back to affine.
+    ///
+    /// This is how a cofactor `2^c` is applied; RFC 8032 §5.1.7 multiplies
+    /// both sides of its verification equation by `[8]`.
+    #[must_use]
+    pub(crate) fn mul_by_pow2(&self, p: &EdwardsPoint, k: u32) -> EdwardsPoint {
+        let mut scratch = MontgomeryScratch::new();
+        let mut acc = ExtendedPoint::from_affine(p, &self.field);
+        for _ in 0..k {
+            acc = point_double_extended(&self.field, &acc, &mut scratch);
+        }
+        acc.to_affine(&self.field)
     }
 
     /// Scalar multiplication `k·P`.
@@ -768,8 +1003,18 @@ impl TwistedEdwardsCurve {
     }
 
     /// Multiply by a point represented by a cached precompute table.
+    ///
+    /// The ladder runs on the table's own field context, not on `self`'s:
+    /// the table's residues are bound to the context that made them (see
+    /// [`EdwardsMulTable`]). `self` is required to be a curve over the same
+    /// field, which the debug build asserts; the result is affine ordinary
+    /// coordinates and so belongs to any structurally-equal curve instance.
     #[must_use]
     pub(crate) fn scalar_mul_cached(&self, table: &EdwardsMulTable, k: &BigUint) -> EdwardsPoint {
+        debug_assert!(
+            *table.fld.ctx().modulus() == self.p,
+            "cached table belongs to a curve over another field"
+        );
         scalar_mul_with_table(&table.fld, k, &table.table, table.window_bits)
     }
 
@@ -796,13 +1041,17 @@ impl TwistedEdwardsCurve {
         mod_inverse(k, &self.n)
     }
 
-    /// Encode a point using the RFC 8032 §5.1.2 encoding.
+    /// Encode a point as RFC 8032 §5.1.2 (Ed25519) and §5.2.2 (Ed448) do.
     ///
-    /// Output: `coord_len` bytes, little-endian `y`, with the LSB of `x`
-    /// stored in the most-significant bit of the last byte.
+    /// Output: `coord_len` octets, little-endian `y`, with the low bit of `x`
+    /// stored in the most-significant bit of the last octet (bit
+    /// `8·coord_len − 1`). That bit lies above every bit of `y < p`, since
+    /// `coord_len` is `⌈(p.bits() + 1) / 8⌉`: 32 octets for Ed25519 and 57
+    /// for Ed448, whose §5.2.2 says "the final octet is always zero" before
+    /// the sign is copied in.
     ///
-    /// The neutral element `(0, 1)` encodes as all-zero bytes except the
-    /// last byte which is `0x01` (i.e. the encoding of `y = 1` with sign 0).
+    /// The neutral element `(0, 1)` encodes as the encoding of `y = 1` with
+    /// sign 0: a first octet of `0x01` and the rest zero.
     #[must_use]
     pub fn encode_point(&self, point: &EdwardsPoint) -> Vec<u8> {
         // For the neutral element (0, 1): y = 1, x = 0 (even); encoding is
@@ -813,9 +1062,9 @@ impl TwistedEdwardsCurve {
             (&point.x, &point.y)
         };
 
-        // y in big-endian, then reverse to get little-endian.
-        let y_be = pad_to(y_ref.to_be_bytes(), self.coord_len);
-        let mut out: Vec<u8> = y_be.into_iter().rev().collect();
+        // y in little-endian, written straight into one buffer: encoding a
+        // shared point (Edwards-DH) leaves no second copy behind.
+        let mut out = y_ref.to_le_bytes_padded(self.coord_len);
 
         // Set MSB of last byte to the LSB (sign) of x.
         if x_ref.is_odd() {
@@ -824,11 +1073,17 @@ impl TwistedEdwardsCurve {
         out
     }
 
-    /// Decode a point from its RFC 8032 §5.1.2 encoding.
+    /// Decode a point from its RFC 8032 §5.1.3 (Ed25519) or §5.2.3 (Ed448)
+    /// encoding.
     ///
-    /// Returns `None` for wrong-length input, for an `x`-coordinate with no
-    /// square root on this curve (the `y` value is not on the curve), or if
-    /// the field prime does not satisfy `p ≡ 3 (mod 4)` or `p ≡ 5 (mod 8)`.
+    /// The sign of `x` is the most-significant bit of the last octet, bit
+    /// `8·coord_len − 1` (bit 255 for Ed25519, bit 455 for Ed448, as those
+    /// sections say); `y` is the rest, read little-endian. Returns `None` for
+    /// input of another length, for `y ≥ p` (step 1, which also refuses any
+    /// set bit between the length of `p` and the sign bit, since such a `y`
+    /// exceeds `p`), for a `y` whose `x²` has no square root on this curve
+    /// (step 3), and for `x = 0` with the sign bit set (step 4). The root
+    /// comes from `rump::mod_sqrt`, so every odd prime field decodes.
     #[must_use]
     pub fn decode_point(&self, bytes: &[u8]) -> Option<EdwardsPoint> {
         if bytes.len() != self.coord_len {
@@ -837,9 +1092,7 @@ impl TwistedEdwardsCurve {
         let x_odd = (bytes[self.coord_len - 1] & 0x80) != 0;
         let mut y_le = bytes.to_vec();
         *y_le.last_mut().expect("length > 0") &= 0x7f;
-        // Convert little-endian y to BigUint (big-endian internally).
-        let y_be: Vec<u8> = y_le.into_iter().rev().collect();
-        let y = BigUint::from_be_bytes(&y_be);
+        let y = BigUint::from_le_bytes(&y_le);
         if y >= self.p {
             return None;
         }
@@ -869,10 +1122,8 @@ impl TwistedEdwardsCurve {
     ///
     /// For `a = −1` this simplifies to `x² = (y² − 1) / (d·y² + 1)`.
     ///
-    /// The square root is computed using the algorithm appropriate for `p mod 8`:
-    ///
-    /// - `p ≡ 3 (mod 4)`: `x = (x²)^{(p+1)/4}`
-    /// - `p ≡ 5 (mod 8)`: RFC 8032 two-step method (covers Ed25519's prime)
+    /// The square root comes from `rump::modular::mod_sqrt`, which handles any
+    /// odd prime `p`; the root is negated when its parity differs from `x_odd`.
     ///
     /// Returns `None` if `x²` has no square root in `F_p`.
     fn field_recover_x(&self, y: &BigUint, x_odd: bool) -> Option<BigUint> {
@@ -881,9 +1132,9 @@ impl TwistedEdwardsCurve {
         // x² = (y² − 1) / (d·y² − a)
         // For a = p − 1 (i.e. a = −1): d·y² − a = d·y² + 1.
         let y2 = ctx.square(y);
-        let numerator = fsub(&y2, &BigUint::one(), &self.p);
+        let numerator = BigUint::mod_sub(&y2, &BigUint::one(), &self.p);
         let dy2 = ctx.mul(&self.d, &y2);
-        let denominator = fsub(&dy2, &self.a, &self.p); // d·y² − a
+        let denominator = BigUint::mod_sub(&dy2, &self.a, &self.p); // d·y² − a
 
         // Compute x² = numerator / denominator via Fermat inversion.
         let p_minus_2 = self.p.sub(&BigUint::from_u64(2));
@@ -891,83 +1142,16 @@ impl TwistedEdwardsCurve {
         let x_squared = ctx.mul(&numerator, &denom_inv);
 
         // Compute the square root of x_squared mod p.
-        let x_candidate = self.field_sqrt(&x_squared)?;
+        let x_candidate = mod_sqrt(&x_squared, &self.p)?;
 
         // Select the root with the requested sign.
         let x = if x_candidate.is_odd() == x_odd {
             x_candidate
         } else {
-            fneg(&x_candidate, &self.p)
+            BigUint::mod_neg(&x_candidate, &self.p)
         };
         Some(x)
     }
-
-    /// Compute `√u mod p`.
-    ///
-    /// Dispatches on `p mod 8`:
-    /// - `p ≡ 3 (mod 4)`: uses `u^{(p+1)/4}`.
-    /// - `p ≡ 5 (mod 8)`: uses the RFC 8032 two-step method.
-    ///
-    /// Returns `None` if `u` has no square root in `F_p`.
-    fn field_sqrt(&self, u: &BigUint) -> Option<BigUint> {
-        let ctx = self.field.ctx();
-        let p_mod8 = self.p.rem_u64(8);
-
-        if p_mod8 == 3 || p_mod8 == 7 {
-            // p ≡ 3 (mod 4): candidate = u^{(p+1)/4}.
-            let (exp, _) = self.p.add(&BigUint::one()).div_rem(&BigUint::from_u64(4));
-            let candidate = ctx.pow(u, &exp);
-            if ctx.square(&candidate) == *u {
-                Some(candidate)
-            } else {
-                None
-            }
-        } else if p_mod8 == 5 {
-            // p ≡ 5 (mod 8): RFC 8032 §5.1.3 algorithm.
-            //
-            // Step 1: candidate β = u^{(p+3)/8}
-            let (exp, _) = self
-                .p
-                .add(&BigUint::from_u64(3))
-                .div_rem(&BigUint::from_u64(8));
-            let beta = ctx.pow(u, &exp);
-            let beta2 = ctx.square(&beta);
-
-            if beta2 == *u {
-                return Some(beta);
-            }
-
-            // Step 2: check if β² = −u  (i.e. β² + u = 0 mod p)
-            let neg_u = fneg(u, &self.p);
-            if beta2 == neg_u {
-                // Multiply by √(−1) = 2^{(p−1)/4} mod p.
-                let (sqrt_m1_exp, _) = self.p.sub(&BigUint::one()).div_rem(&BigUint::from_u64(4));
-                let sqrt_m1 = ctx.pow(&BigUint::from_u64(2), &sqrt_m1_exp);
-                return Some(ctx.mul(&beta, &sqrt_m1));
-            }
-
-            None // no square root
-        } else {
-            // General case (p ≡ 1 mod 8) is not implemented; return None.
-            // A Tonelli-Shanks implementation would handle this.
-            None
-        }
-    }
-}
-
-/// Pad `bytes` to `len` bytes by prepending zeros (big-endian padding).
-fn pad_to(bytes: Vec<u8>, len: usize) -> Vec<u8> {
-    if bytes.len() >= len {
-        debug_assert_eq!(
-            bytes.len(),
-            len,
-            "field encodings must fit exactly in coord_len bytes"
-        );
-        return bytes;
-    }
-    let mut out = vec![0u8; len - bytes.len()];
-    out.extend_from_slice(&bytes);
-    out
 }
 
 // ─── Named curves ────────────────────────────────────────────────────────────
@@ -975,15 +1159,7 @@ fn pad_to(bytes: Vec<u8>, len: usize) -> Vec<u8> {
 /// Parse a compact hexadecimal string (spaces ignored) into a `BigUint`.
 fn from_hex(hex: &str) -> BigUint {
     let cleaned: String = hex.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-    assert!(
-        cleaned.len().is_multiple_of(2),
-        "hex string must have even length"
-    );
-    let bytes: Vec<u8> = (0..cleaned.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).expect("valid hex digit"))
-        .collect();
-    BigUint::from_be_bytes(&bytes)
+    BigUint::from_str_radix(&cleaned, 16).expect("named-curve constant is valid hex")
 }
 
 /// Ed25519 twisted Edwards curve.
@@ -1022,16 +1198,238 @@ pub fn ed25519() -> TwistedEdwardsCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex;
 
-    fn decode_hex(hex: &str) -> Vec<u8> {
-        let bytes = hex.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len() / 2);
-        for chunk in bytes.chunks_exact(2) {
-            let hi = (chunk[0] as char).to_digit(16).expect("hex") as u8;
-            let lo = (chunk[1] as char).to_digit(16).expect("hex") as u8;
-            out.push((hi << 4) | lo);
+    /// The Ed448 parameters of RFC 8032 §5.2.1, in the RFC's decimal:
+    /// `(p, a, d, n, gx, gy)` with `a = 1` and `d = −39081`.
+    fn ed448_parameters() -> (BigUint, BigUint, BigUint, BigUint, BigUint, BigUint) {
+        let decimal = |s: &str| BigUint::from_str_radix(s, 10).expect("decimal");
+        let p = decimal(
+            "726838724295606890549323807888004534353641360687318060281490199180612328166730772686396383698676545930088884461843637361053498018365439",
+        );
+        let a = BigUint::one();
+        let d = p.sub(&BigUint::from_u64(39081));
+        let n = decimal(
+            "181709681073901722637330951972001133588410340171829515070372549795146003961539585716195755291692375963310293709091662304773755859649779",
+        );
+        let gx = decimal(
+            "224580040295924300187604334099896036246789641632564134246125461686950415467406032909029192869357953282578032075146446173674602635247710",
+        );
+        let gy = decimal(
+            "298819210078481492676017930443930673437544040154080242095928241372331506189835876003536878655418784733982303233503462500531545062832660",
+        );
+        (p, a, d, n, gx, gy)
+    }
+
+    /// Ed448 as a caller-vouched curve.
+    fn ed448() -> TwistedEdwardsCurve {
+        let (p, a, d, n, gx, gy) = ed448_parameters();
+        TwistedEdwardsCurve::new(p, a, d, n, gx, gy).expect("Ed448 parameters")
+    }
+
+    /// Ed448 (RFC 8032 §5.2.1) has `a = 1`, so it exercises the general
+    /// twisted-Edwards addition rather than the `a = −1` shortcut. The base
+    /// point must lie on the curve, addition must agree with doubling, and
+    /// `n·G` must be the neutral element while `(n + 1)·G = G`.
+    #[test]
+    fn general_a_addition_agrees_with_doubling_on_ed448() {
+        let curve = ed448();
+        let n = curve.n.clone();
+        let g = curve.base_point();
+        assert!(curve.is_on_curve(&g));
+
+        let two_g = curve.double(&g);
+        assert_eq!(curve.add(&g, &g), two_g);
+        assert!(curve.is_on_curve(&two_g));
+        assert_eq!(curve.add(&two_g, &g), curve.add(&g, &two_g));
+
+        assert!(curve.scalar_mul(&g, &n).is_neutral());
+        assert_eq!(curve.scalar_mul(&g, &n.add(&BigUint::one())), g);
+    }
+
+    /// RFC 8032 §5.2.2: an Ed448 point is 57 octets, `y` in the first 56 and
+    /// a final octet that is zero but for the sign of `x`. `p` has 448 bits,
+    /// so a 56-octet encoding would have no room for the sign; the multiples
+    /// `k·G`, `k = 1..=12`, must round-trip whichever parity `x` has, and
+    /// both parities must occur among them.
+    #[test]
+    fn ed448_encodes_in_57_octets_and_round_trips_both_parities() {
+        let curve = ed448();
+        assert_eq!(curve.p.bits(), 448);
+        assert_eq!(curve.coord_len, 57);
+        let g = curve.base_point();
+        let (mut odd, mut even) = (0, 0);
+        for k in 1u64..=12 {
+            let point = curve.scalar_mul(&g, &BigUint::from_u64(k));
+            let encoding = curve.encode_point(&point);
+            assert_eq!(encoding.len(), 57, "{k}G");
+            assert_eq!(
+                encoding[56] & 0x7f,
+                0,
+                "{k}G: final octet carries only the sign"
+            );
+            if point.x.is_odd() {
+                odd += 1;
+                assert_eq!(encoding[56], 0x80, "{k}G has odd x");
+            } else {
+                even += 1;
+                assert_eq!(encoding[56], 0x00, "{k}G has even x");
+            }
+            let decoded = curve.decode_point(&encoding).expect("decode k·G");
+            assert_eq!(decoded, point, "{k}G round trip");
+            // The point with the other sign is −k·G, not k·G.
+            let mut flipped = encoding.clone();
+            flipped[56] ^= 0x80;
+            assert_eq!(
+                curve.decode_point(&flipped).expect("decode −k·G"),
+                curve.negate(&point),
+                "{k}G with the sign flipped"
+            );
         }
-        out
+        assert!(odd > 0 && even > 0, "{odd} odd, {even} even");
+    }
+
+    /// The first Ed448 public key of RFC 8032 §7.4 decodes by §5.2.3 to a
+    /// point on the curve, in the prime-order subgroup, that encodes back to
+    /// the same 57 octets.
+    #[test]
+    fn ed448_decodes_the_rfc8032_section_7_4_public_key() {
+        let curve = ed448();
+        let encoding = decode_hex(concat!(
+            "5fd7449b59b461fd2ce787ec616ad46a1da1342485a70e1f8a0ea75d80e96778",
+            "edf124769b46c7061bd6783df1e50f6cd1fa1abeafe8256180",
+        ));
+        assert_eq!(encoding.len(), 57);
+        let point = curve.decode_point(&encoding).expect("§7.4 public key");
+        assert!(curve.is_on_curve(&point));
+        assert!(curve.is_valid_public_point(&point));
+        assert!(point.x.is_odd(), "the final octet 0x80 says x is odd");
+        assert_eq!(curve.encode_point(&point), encoding);
+    }
+
+    /// Ed448 also refuses what §5.2.3 refuses: 56 octets, a `y ≥ p` (here
+    /// `p` itself, whose bit 448 would sit in the final octet), and any bit
+    /// in the final octet other than the sign.
+    #[test]
+    fn ed448_decode_refuses_non_canonical_encodings() {
+        let curve = ed448();
+        let g = curve.base_point();
+        let encoding = curve.encode_point(&g);
+        assert!(curve.decode_point(&encoding[..56]).is_none());
+        assert!(curve
+            .decode_point(&curve.p.to_le_bytes_padded(57))
+            .is_none());
+        for bit in 0..7 {
+            let mut altered = encoding.clone();
+            altered[56] |= 1 << bit;
+            assert!(curve.decode_point(&altered).is_none(), "bit {bit}");
+        }
+    }
+
+    /// `from_explicit` takes the named Ed25519 parameters by comparison, and
+    /// Ed448's by validation: both are real curves and pass every check.
+    #[test]
+    fn from_explicit_accepts_ed25519_and_ed448() {
+        let named = ed25519();
+        let explicit = TwistedEdwardsCurve::from_explicit(
+            named.p.clone(),
+            named.a.clone(),
+            named.d.clone(),
+            named.n.clone(),
+            named.gx.clone(),
+            named.gy.clone(),
+        )
+        .expect("Ed25519");
+        assert!(explicit.same_curve(&named));
+
+        let (p, a, d, n, gx, gy) = ed448_parameters();
+        let explicit = TwistedEdwardsCurve::from_explicit(p, a, d, n, gx, gy).expect("Ed448");
+        assert!(explicit.same_curve(&ed448()));
+    }
+
+    /// Ed25519's parameters with `n` replaced by `3n`: odd, within the size
+    /// bound, `[3n]G` is neutral, `G` is on the curve, and the Hasse
+    /// quotient is `⌊8n/3n⌋ = 2`, so primality of `n` is the one check that
+    /// fails.
+    #[test]
+    fn from_explicit_refuses_a_composite_order() {
+        let named = ed25519();
+        let three_n = named.n.mul(&BigUint::from_u64(3));
+        assert!(named.scalar_mul_base(&three_n).is_neutral());
+        assert!(cofactor_is_hasse_quotient(2, &three_n, &named.p));
+        assert!(TwistedEdwardsCurve::from_explicit(
+            named.p.clone(),
+            named.a.clone(),
+            named.d.clone(),
+            three_n,
+            named.gx.clone(),
+            named.gy.clone(),
+        )
+        .is_none());
+    }
+
+    /// The other parameter faults each fail their own step: an oversized
+    /// `p`, an `n` above `p.bits() + 1`, `a = d`, a square `d`, a base point
+    /// off the curve, and an order that is prime but not `G`'s (Ed25519's
+    /// `n` with Ed448's other parameters fails at the cofactor, since
+    /// `(√p + 1)²/n` is far above 8).
+    #[test]
+    fn from_explicit_refuses_each_parameter_fault() {
+        let named = ed25519();
+        let explicit = |p: &BigUint, a: &BigUint, d: &BigUint, n: &BigUint, gx: &BigUint, gy| {
+            TwistedEdwardsCurve::from_explicit(
+                p.clone(),
+                a.clone(),
+                d.clone(),
+                n.clone(),
+                gx.clone(),
+                gy,
+            )
+        };
+        let (p, a, d, n, gx, gy) = (&named.p, &named.a, &named.d, &named.n, &named.gx, &named.gy);
+
+        let mut huge_n = BigUint::one();
+        huge_n.shl_bits(400_000);
+        huge_n = huge_n.add(&BigUint::one());
+        assert!(explicit(p, a, d, &huge_n, gx, gy.clone()).is_none());
+
+        let mut huge_p = BigUint::one();
+        huge_p.shl_bits(MAX_EXPLICIT_FIELD_BITS);
+        huge_p = huge_p.add(&BigUint::one());
+        assert!(explicit(&huge_p, a, d, n, gx, gy.clone()).is_none());
+
+        assert!(explicit(p, d, d, n, gx, gy.clone()).is_none());
+        // 4 is a square; the d check comes before the base-point check.
+        assert!(explicit(p, a, &BigUint::from_u64(4), n, gx, gy.clone()).is_none());
+        assert!(explicit(p, a, d, n, gx, gy.add(&BigUint::one())).is_none());
+
+        let (p448, a448, d448, _, gx448, gy448) = ed448_parameters();
+        assert!(explicit(&p448, &a448, &d448, n, &gx448, gy448).is_none());
+    }
+
+    /// `new` refuses `n = 1`, for which there is no scalar in `[1, n)` to
+    /// draw, and `p = 1`, which is no field.
+    #[test]
+    fn new_refuses_unit_moduli() {
+        let named = ed25519();
+        assert!(TwistedEdwardsCurve::new(
+            named.p.clone(),
+            named.a.clone(),
+            named.d.clone(),
+            BigUint::one(),
+            named.gx.clone(),
+            named.gy.clone(),
+        )
+        .is_none());
+        assert!(TwistedEdwardsCurve::new(
+            BigUint::one(),
+            named.a.clone(),
+            named.d.clone(),
+            named.n.clone(),
+            named.gx.clone(),
+            named.gy.clone(),
+        )
+        .is_none());
     }
 
     #[test]
@@ -1125,8 +1523,13 @@ mod tests {
         assert_eq!(decoded, two_g);
     }
 
+    /// Regression values for small base-point multiples. `1·G` is the encoding
+    /// of RFC 8032 §5.1's base point (`y = 4/5`, `x` even). The other
+    /// encodings have no external source: this implementation produced them,
+    /// and they guard against unintended change rather than standing as
+    /// independent known answers.
     #[test]
-    fn ed25519_known_basepoint_multiples_match_fixture_encodings() {
+    fn ed25519_basepoint_multiples_match_regression_encodings() {
         let curve = ed25519();
         let g = curve.base_point();
         let fixtures = [
@@ -1237,8 +1640,7 @@ mod tests {
     #[test]
     fn ed25519_decode_rejects_non_canonical_y() {
         let curve = ed25519();
-        let y_be = pad_to(curve.p.to_be_bytes(), curve.coord_len);
-        let enc: Vec<u8> = y_be.into_iter().rev().collect();
+        let enc = curve.p.to_le_bytes_padded(curve.coord_len);
         assert!(
             curve.decode_point(&enc).is_none(),
             "compressed encodings must reject y >= p"

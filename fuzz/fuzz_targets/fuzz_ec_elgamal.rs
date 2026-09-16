@@ -29,6 +29,11 @@ fuzz_target!(|data: &[u8]| {
         None => return,
     };
 
-    let recovered = sk.decrypt(&ct);
-    assert_eq!(recovered, message, "EC-ElGamal P-256: decrypt(encrypt(msg)) != msg");
+    let recovered = sk
+        .decrypt(&ct)
+        .expect("freshly encrypted ciphertext is valid");
+    assert_eq!(
+        recovered, message,
+        "EC-ElGamal P-256: decrypt(encrypt(msg)) != msg"
+    );
 });

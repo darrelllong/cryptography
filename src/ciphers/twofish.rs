@@ -1,10 +1,16 @@
 //! Twofish block cipher — AES submission (1998).
 //!
-//! 128-bit block cipher with the three standard key sizes:
+//! 128-bit block cipher with the three key sizes the submission defines
+//! (paper §4.3: "Twofish is defined for keys of length N = 128, N = 192, and
+//! N = 256"):
 //!
 //! - `Twofish128` / `Twofish128Ct`
 //! - `Twofish192` / `Twofish192Ct`
 //! - `Twofish256` / `Twofish256Ct`
+//!
+//! Paper §4.3.1 admits shorter keys by padding them with zero bytes up to the
+//! next defined length; this crate exposes only the three defined lengths, so
+//! a caller with a shorter key performs that zero padding itself.
 //!
 //! The fast path keeps direct lookup tables for the 8-bit `q0` / `q1`
 //! permutations used inside the keyed `h` function. `Ct` variants evaluate the
@@ -156,7 +162,7 @@ fn gf_mul(mut a: u8, mut b: u8, poly: u16) -> u8 {
     out
 }
 
-fn rs_mds_encode(bytes: [u8; 8]) -> u32 {
+fn rs_encode(bytes: [u8; 8]) -> u32 {
     // The RS matrix compresses each 64-bit key chunk into one S-box key word.
     let mut out = [0u8; 4];
     let mut row = 0usize;
@@ -256,42 +262,62 @@ fn keyed_h_byte(v: u8, j: usize, s: &[u32; 4], words: usize, use_ct: bool) -> u8
     }
 }
 
-// Precompute the four keyed 256-entry tables (S-box composed with one MDS
-// column) for the FAST path.  Built once per key, this turns each `h()` on the
-// hot round path into four table lookups and three XORs, replacing two keyed
-// `h()` evaluations — each with sixteen loop-based GF multiplies — per round.
-//
-// The tables are secret key material (they depend on `s`); the fast path is
-// already documented as using secret-indexed lookups, so this changes nothing
-// about its side-channel posture.  Callers zeroize them on `Drop`.
-fn build_keyed_tables(s: &[u32; 4], words: usize) -> [[u32; 256]; 4] {
-    let mut tables = [[0u32; 256]; 4];
-    let mut j = 0usize;
-    while j < 4 {
-        let mut v = 0usize;
-        while v < 256 {
-            let hb = keyed_h_byte(v as u8, j, s, words, false);
-            tables[j][v] = mds_column(j, hb);
-            v += 1;
-        }
-        j += 1;
+/// The fast path's four keyed 256-entry tables: the S-box cascade composed
+/// with one MDS column. Built once per key, they turn each `h()` on the hot
+/// round path into four table lookups and three XORs, replacing two keyed
+/// `h()` evaluations (each with sixteen loop-based GF multiplies) per round.
+///
+/// The tables are secret key material (they depend on `S`); the fast path is
+/// already documented as using secret-indexed lookups, so they change nothing
+/// about its side-channel posture. They sit behind a `Box` so moving a cipher
+/// copies one pointer instead of 4 KB of key-derived data that could never be
+/// wiped, and the one heap copy wipes itself on drop.
+struct KeyedTables(Box<[[u32; 256]; 4]>);
+
+impl KeyedTables {
+    /// All-zero tables on the heap, to be filled in place by [`Self::fill`].
+    fn empty() -> Self {
+        Self(Box::new([[0u32; 256]; 4]))
     }
-    tables
+
+    /// Fill the tables from an expanded schedule's S-box key words.
+    fn fill(&mut self, key: &TwofishKey) {
+        let tables = &mut self.0;
+        let mut j = 0usize;
+        while j < 4 {
+            let mut v = 0usize;
+            while v < 256 {
+                let hb = keyed_h_byte(v as u8, j, &key.s, key.words, false);
+                tables[j][v] = mds_column(j, hb);
+                v += 1;
+            }
+            j += 1;
+        }
+    }
+
+    /// FAST-path evaluation of the keyed `h()` via the precomputed tables.
+    #[inline]
+    fn h(&self, x: u32) -> u32 {
+        let tables = &self.0;
+        tables[0][(x & 0xff) as usize]
+            ^ tables[1][((x >> 8) & 0xff) as usize]
+            ^ tables[2][((x >> 16) & 0xff) as usize]
+            ^ tables[3][((x >> 24) & 0xff) as usize]
+    }
 }
 
-// FAST-path evaluation of the keyed `h()` via the precomputed tables.
-#[inline]
-fn h_fast(x: u32, tables: &[[u32; 256]; 4]) -> u32 {
-    tables[0][(x & 0xff) as usize]
-        ^ tables[1][((x >> 8) & 0xff) as usize]
-        ^ tables[2][((x >> 16) & 0xff) as usize]
-        ^ tables[3][((x >> 24) & 0xff) as usize]
+impl Drop for KeyedTables {
+    fn drop(&mut self) {
+        for table in self.0.iter_mut() {
+            zeroize_slice(table);
+        }
+    }
 }
 
 // The keyed function `h`: apply the per-byte cascade to each of the four input
 // bytes, then mix the results through the MDS matrix. The Ct path computes this
 // directly (with `use_ct`); the fast path precomputes it as tables via
-// `build_keyed_tables`, which maps the same `keyed_h_byte` over every input.
+// `KeyedTables::build`, which maps the same `keyed_h_byte` over every input.
 fn h(x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
     let xb = x.to_le_bytes();
     let y = [
@@ -303,92 +329,78 @@ fn h(x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
     mds_multiply(y)
 }
 
-fn expand_key<const N: usize>(key: &[u8; N], use_ct: bool) -> ([u32; 40], [u32; 4], usize) {
-    let words = N / 8;
-
-    let mut me = [0u32; 4];
-    let mut mo = [0u32; 4];
-    let mut s_words = [0u32; 4];
-
-    let mut word_idx = 0usize;
-    while word_idx < words {
-        // Even and odd 32-bit words feed separate `h()` calls in the subkey
-        // schedule, while the RS matrix derives the S-box key words in reverse
-        // chunk order.
-        me[word_idx] = u32::from_le_bytes(key[word_idx * 8..word_idx * 8 + 4].try_into().unwrap());
-        mo[word_idx] =
-            u32::from_le_bytes(key[word_idx * 8 + 4..word_idx * 8 + 8].try_into().unwrap());
-        let chunk: &[u8; 8] = key[word_idx * 8..word_idx * 8 + 8].try_into().unwrap();
-        s_words[words - 1 - word_idx] = rs_mds_encode(*chunk);
-        word_idx += 1;
-    }
-
-    let mut sub = [0u32; 40];
-    let mut subkey_idx = 0usize;
-    while subkey_idx < 20 {
-        // K[0..3] are input whitening, K[4..7] output whitening, and the
-        // remaining 32 words supply the 16 rounds.
-        let even_input = u32::try_from(2 * subkey_idx).expect("subkey index fits in u32");
-        let odd_input = even_input + 1;
-        let even_g = h(even_input.wrapping_mul(RHO), &me, words, use_ct);
-        let odd_g = h(odd_input.wrapping_mul(RHO), &mo, words, use_ct).rotate_left(8);
-        sub[2 * subkey_idx] = even_g.wrapping_add(odd_g);
-        sub[2 * subkey_idx + 1] = even_g
-            .wrapping_add(odd_g.wrapping_add(odd_g))
-            .rotate_left(9);
-        subkey_idx += 1;
-    }
-
-    (sub, s_words, words)
-}
-
-#[derive(Clone, Copy)]
-struct TwofishCore {
+/// One Twofish key schedule: the 40 whitening and round subkeys, the S-box
+/// key words `S`, and the key length in 64-bit words.
+///
+/// Deliberately not `Copy`, so it is never silently duplicated by value, and
+/// it wipes itself on drop. The fast types pair it with [`KeyedTables`]; the
+/// constant-time types carry it alone.
+struct TwofishKey {
     subkeys: [u32; 40],
     s: [u32; 4],
-    // FAST-path keyed S-box/MDS tables. Populated only when `!use_ct`; the
-    // constant-time path leaves them zeroed and never reads them.
-    keyed_tables: [[u32; 256]; 4],
     words: usize,
-    use_ct: bool,
 }
 
-impl TwofishCore {
-    fn new<const N: usize>(key: &[u8; N], use_ct: bool) -> Self {
-        let (subkeys, s, words) = expand_key(key, use_ct);
-        // Only the fast path uses the secret-indexed tables; the constant-time
-        // path must keep evaluating `h()` without them.
-        let keyed_tables = if use_ct {
-            [[0u32; 256]; 4]
-        } else {
-            build_keyed_tables(&s, words)
-        };
+impl TwofishKey {
+    /// An all-zero schedule for a key of `words` 64-bit words (2, 3 or 4),
+    /// to be filled in place by [`Self::expand`].
+    fn empty(words: usize) -> Self {
         Self {
-            subkeys,
-            s,
-            keyed_tables,
+            subkeys: [0u32; 40],
+            s: [0u32; 4],
             words,
-            use_ct,
         }
     }
 
-    // Evaluate the keyed `h()` for the round function: table lookups on the
-    // fast path, direct (non-secret-indexed) computation on the `Ct` path.
-    #[inline]
-    fn h_round(&self, x: u32) -> u32 {
-        if self.use_ct {
-            h(x, &self.s, self.words, true)
-        } else {
-            h_fast(x, &self.keyed_tables)
+    /// Expand a 16-, 24-, or 32-byte key into this schedule, evaluating `h()`
+    /// through the constant-time q-permutations when `use_ct` is set. Subkeys
+    /// and `S` are written straight into `self`; the key's even and odd words
+    /// `Me`/`Mo` are wiped before returning.
+    fn expand<const N: usize>(&mut self, key: &[u8; N], use_ct: bool) {
+        let words = N / 8;
+        debug_assert_eq!(words, self.words);
+        let mut me = [0u32; 4];
+        let mut mo = [0u32; 4];
+
+        let mut word_idx = 0usize;
+        while word_idx < words {
+            // Even and odd 32-bit words feed separate `h()` calls in the subkey
+            // schedule, while the RS matrix derives the S-box key words in reverse
+            // chunk order.
+            me[word_idx] =
+                u32::from_le_bytes(key[word_idx * 8..word_idx * 8 + 4].try_into().unwrap());
+            mo[word_idx] =
+                u32::from_le_bytes(key[word_idx * 8 + 4..word_idx * 8 + 8].try_into().unwrap());
+            let chunk: &[u8; 8] = key[word_idx * 8..word_idx * 8 + 8].try_into().unwrap();
+            self.s[words - 1 - word_idx] = rs_encode(*chunk);
+            word_idx += 1;
         }
+
+        let mut subkey_idx = 0usize;
+        while subkey_idx < 20 {
+            // K[0..3] are input whitening, K[4..7] output whitening, and the
+            // remaining 32 words supply the 16 rounds.
+            let even_input = u32::try_from(2 * subkey_idx).expect("subkey index fits in u32");
+            let odd_input = even_input + 1;
+            let even_g = h(even_input.wrapping_mul(RHO), &me, words, use_ct);
+            let odd_g = h(odd_input.wrapping_mul(RHO), &mo, words, use_ct).rotate_left(8);
+            self.subkeys[2 * subkey_idx] = even_g.wrapping_add(odd_g);
+            self.subkeys[2 * subkey_idx + 1] = even_g
+                .wrapping_add(odd_g.wrapping_add(odd_g))
+                .rotate_left(9);
+            subkey_idx += 1;
+        }
+
+        zeroize_slice(&mut me);
+        zeroize_slice(&mut mo);
     }
 
     #[inline]
-    fn round_f(&self, x0: u32, x1: u32, round: usize) -> (u32, u32) {
+    fn round_f(&self, h_round: &impl Fn(u32) -> u32, x0: u32, x1: u32, round: usize) -> (u32, u32) {
         // Twofish's round function is the pair of keyed `g()` calls followed by
         // the pseudo-Hadamard transform and round subkey injection.
-        let t0 = self.h_round(x0);
-        let t1 = self.h_round(x1.rotate_left(8));
+        let t0 = h_round(x0);
+        let t1 = h_round(x1.rotate_left(8));
         let f0 = t0
             .wrapping_add(t1)
             .wrapping_add(self.subkeys[8 + 2 * round]);
@@ -398,7 +410,10 @@ impl TwofishCore {
         (f0, f1)
     }
 
-    fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    /// Encrypt one block with `h_round` as the keyed `h()`: table lookups on
+    /// the fast path, direct constant-time evaluation on the `Ct` path. Each
+    /// path is monomorphized, so no per-round branch selects between them.
+    fn encrypt_block(&self, h_round: impl Fn(u32) -> u32, block: &[u8; 16]) -> [u8; 16] {
         let mut x0 = u32::from_le_bytes(block[0..4].try_into().unwrap()) ^ self.subkeys[0];
         let mut x1 = u32::from_le_bytes(block[4..8].try_into().unwrap()) ^ self.subkeys[1];
         let mut x2 = u32::from_le_bytes(block[8..12].try_into().unwrap()) ^ self.subkeys[2];
@@ -408,11 +423,11 @@ impl TwofishCore {
         while round < 8 {
             // Two rounds are grouped per loop so the Feistel word swap stays
             // explicit without introducing a separate temporary block shuffle.
-            let (f0, f1) = self.round_f(x0, x1, 2 * round);
+            let (f0, f1) = self.round_f(&h_round, x0, x1, 2 * round);
             x2 = (x2 ^ f0).rotate_right(1);
             x3 = x3.rotate_left(1) ^ f1;
 
-            let (f0, f1) = self.round_f(x2, x3, 2 * round + 1);
+            let (f0, f1) = self.round_f(&h_round, x2, x3, 2 * round + 1);
             x0 = (x0 ^ f0).rotate_right(1);
             x1 = x1.rotate_left(1) ^ f1;
 
@@ -432,7 +447,8 @@ impl TwofishCore {
         out
     }
 
-    fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    /// Decrypt one block with `h_round` as the keyed `h()`.
+    fn decrypt_block(&self, h_round: impl Fn(u32) -> u32, block: &[u8; 16]) -> [u8; 16] {
         let mut x2 = u32::from_le_bytes(block[0..4].try_into().unwrap()) ^ self.subkeys[4];
         let mut x3 = u32::from_le_bytes(block[4..8].try_into().unwrap()) ^ self.subkeys[5];
         let mut x0 = u32::from_le_bytes(block[8..12].try_into().unwrap()) ^ self.subkeys[6];
@@ -444,11 +460,11 @@ impl TwofishCore {
 
             // Decryption walks the same structure backward with the round
             // subkeys consumed in reverse order.
-            let (f0, f1) = self.round_f(x2, x3, 2 * round + 1);
+            let (f0, f1) = self.round_f(&h_round, x2, x3, 2 * round + 1);
             x1 = (x1 ^ f1).rotate_right(1);
             x0 = x0.rotate_left(1) ^ f0;
 
-            let (f0, f1) = self.round_f(x0, x1, 2 * round);
+            let (f0, f1) = self.round_f(&h_round, x0, x1, 2 * round);
             x3 = (x3 ^ f1).rotate_right(1);
             x2 = x2.rotate_left(1) ^ f0;
         }
@@ -467,6 +483,13 @@ impl TwofishCore {
     }
 }
 
+impl Drop for TwofishKey {
+    fn drop(&mut self) {
+        zeroize_slice(&mut self.subkeys);
+        zeroize_slice(&mut self.s);
+    }
+}
+
 macro_rules! define_twofish_type {
     ($name:ident, $name_ct:ident, $key_len:expr) => {
         /// Twofish (AES submission, 1998) fast software path for the key
@@ -475,15 +498,23 @@ macro_rules! define_twofish_type {
         /// round's `h()` becomes four secret-indexed lookups and three
         /// xors; all key-derived material is zeroized on drop.
         pub struct $name {
-            core: TwofishCore,
+            key: TwofishKey,
+            tables: KeyedTables,
         }
 
         impl $name {
-            /// Expand the user key into the whitening and round subkeys.
+            /// Expand the user key into the whitening and round subkeys and
+            /// build the keyed tables, both written directly into the new
+            /// instance.
+            #[must_use]
             pub fn new(key: &[u8; $key_len]) -> Self {
-                Self {
-                    core: TwofishCore::new(key, false),
-                }
+                let mut cipher = Self {
+                    key: TwofishKey::empty($key_len / 8),
+                    tables: KeyedTables::empty(),
+                };
+                cipher.key.expand(key, false);
+                cipher.tables.fill(&cipher.key);
+                cipher
             }
 
             /// Expand the key and then wipe the caller-owned key buffer.
@@ -493,14 +524,18 @@ macro_rules! define_twofish_type {
                 out
             }
 
-            /// Encrypt one 128-bit block.
+            /// Encrypt one 128-bit block through the keyed tables
+            /// (secret-indexed lookups; not constant-time).
+            #[must_use]
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                self.core.encrypt_block(block)
+                self.key.encrypt_block(|x| self.tables.h(x), block)
             }
 
-            /// Decrypt one 128-bit block.
+            /// Decrypt one 128-bit block through the keyed tables
+            /// (secret-indexed lookups; not constant-time).
+            #[must_use]
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                self.core.decrypt_block(block)
+                self.key.decrypt_block(|x| self.tables.h(x), block)
             }
         }
 
@@ -520,32 +555,26 @@ macro_rules! define_twofish_type {
             }
         }
 
-        impl Drop for $name {
-            fn drop(&mut self) {
-                zeroize_slice(&mut self.core.subkeys);
-                zeroize_slice(&mut self.core.s);
-                // The keyed S-box/MDS tables are key-derived secret material.
-                for table in self.core.keyed_tables.iter_mut() {
-                    zeroize_slice(table);
-                }
-            }
-        }
-
         /// Constant-time Twofish for the same key size: it skips the keyed
         /// table precomputation and instead evaluates every `h()` — in the
         /// key schedule and per round — from the published 4-bit `q0`/`q1`
         /// building blocks with fixed-scan nibble selection, so no table
-        /// read is indexed by secret data.
+        /// read is indexed by secret data. It carries only the key schedule,
+        /// which is zeroized on drop.
         pub struct $name_ct {
-            core: TwofishCore,
+            key: TwofishKey,
         }
 
         impl $name_ct {
-            /// Expand the user key into the whitening and round subkeys.
+            /// Expand the user key into the whitening and round subkeys,
+            /// written directly into the new instance.
+            #[must_use]
             pub fn new(key: &[u8; $key_len]) -> Self {
-                Self {
-                    core: TwofishCore::new(key, true),
-                }
+                let mut cipher = Self {
+                    key: TwofishKey::empty($key_len / 8),
+                };
+                cipher.key.expand(key, true);
+                cipher
             }
 
             /// Expand the key and then wipe the caller-owned key buffer.
@@ -556,13 +585,17 @@ macro_rules! define_twofish_type {
             }
 
             /// Encrypt one 128-bit block with the software constant-time path.
+            #[must_use]
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                self.core.encrypt_block(block)
+                let key = &self.key;
+                key.encrypt_block(|x| h(x, &key.s, key.words, true), block)
             }
 
             /// Decrypt one 128-bit block with the software constant-time path.
+            #[must_use]
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                self.core.decrypt_block(block)
+                let key = &self.key;
+                key.decrypt_block(|x| h(x, &key.s, key.words, true), block)
             }
         }
 
@@ -581,17 +614,6 @@ macro_rules! define_twofish_type {
                 block.copy_from_slice(&out);
             }
         }
-
-        impl Drop for $name_ct {
-            fn drop(&mut self) {
-                zeroize_slice(&mut self.core.subkeys);
-                zeroize_slice(&mut self.core.s);
-                // The keyed S-box/MDS tables are key-derived secret material.
-                for table in self.core.keyed_tables.iter_mut() {
-                    zeroize_slice(table);
-                }
-            }
-        }
     };
 }
 
@@ -606,104 +628,202 @@ pub type TwofishCt = Twofish128Ct;
 
 #[cfg(test)]
 mod tests {
+    // Known answers come from the Twofish AES-submission package
+    // (Counterpane Systems, 1998): `ECB_TBL.TXT` ("Full Encryptions" tables,
+    // entries I=1..5 for each key size, whose keys and plaintexts chain from
+    // the previous ciphertexts) and `ECB_E_M.TXT` (ECB encryption Monte Carlo
+    // test, KEYSIZE=128, I=0..2). The random sweep checks the fast path
+    // against the constant-time path.
     use super::*;
+    use crate::test_utils::decode_hex_array;
 
-    fn decode_hex<const N: usize>(s: &str) -> [u8; N] {
-        assert_eq!(s.len(), N * 2);
-        let mut out = [0u8; N];
-        let bytes = s.as_bytes();
-        let mut i = 0usize;
-        while i < N {
-            let hi = u8::try_from((bytes[2 * i] as char).to_digit(16).unwrap())
-                .expect("decoded hex nibble fits in u8");
-            let lo = u8::try_from((bytes[2 * i + 1] as char).to_digit(16).unwrap())
-                .expect("decoded hex nibble fits in u8");
-            out[i] = (hi << 4) | lo;
-            i += 1;
+    /// Run one `ECB_TBL.TXT` entry through both paths of the given types.
+    macro_rules! check_tbl_entry {
+        ($fast:ident, $slow:ident, $klen:literal, $key:expr, $pt:expr, $ct:expr) => {{
+            let key = decode_hex_array::<$klen>($key);
+            let pt = decode_hex_array::<16>($pt);
+            let ct = decode_hex_array::<16>($ct);
+            let fast = $fast::new(&key);
+            let slow = $slow::new(&key);
+            assert_eq!(fast.encrypt_block(&pt), ct, "fast encrypt {}", $key);
+            assert_eq!(slow.encrypt_block(&pt), ct, "ct encrypt {}", $key);
+            assert_eq!(fast.decrypt_block(&ct), pt, "fast decrypt {}", $key);
+            assert_eq!(slow.decrypt_block(&ct), pt, "ct decrypt {}", $key);
+        }};
+    }
+
+    /// `ECB_TBL.TXT`, KEYSIZE=128, I=1..5.
+    #[test]
+    fn ecb_tbl_128() {
+        let entries = [
+            (
+                "00000000000000000000000000000000",
+                "00000000000000000000000000000000",
+                "9F589F5CF6122C32B6BFEC2F2AE8C35A",
+            ),
+            (
+                "00000000000000000000000000000000",
+                "9F589F5CF6122C32B6BFEC2F2AE8C35A",
+                "D491DB16E7B1C39E86CB086B789F5419",
+            ),
+            (
+                "9F589F5CF6122C32B6BFEC2F2AE8C35A",
+                "D491DB16E7B1C39E86CB086B789F5419",
+                "019F9809DE1711858FAAC3A3BA20FBC3",
+            ),
+            (
+                "D491DB16E7B1C39E86CB086B789F5419",
+                "019F9809DE1711858FAAC3A3BA20FBC3",
+                "6363977DE839486297E661C6C9D668EB",
+            ),
+            (
+                "019F9809DE1711858FAAC3A3BA20FBC3",
+                "6363977DE839486297E661C6C9D668EB",
+                "816D5BD0FAE35342BF2A7412C246F752",
+            ),
+        ];
+        for (key, pt, ct) in entries {
+            check_tbl_entry!(Twofish128, Twofish128Ct, 16, key, pt, ct);
         }
-        out
     }
 
+    /// `ECB_TBL.TXT`, KEYSIZE=192, I=1..5.
     #[test]
-    fn twofish128_zero_kat() {
-        let key = [0u8; 16];
-        let pt = [0u8; 16];
-        let ct = decode_hex::<16>("9F589F5CF6122C32B6BFEC2F2AE8C35A");
-        let fast = Twofish128::new(&key);
-        let slow = Twofish128Ct::new(&key);
-        assert_eq!(fast.encrypt_block(&pt), ct);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(fast.decrypt_block(&ct), pt);
-        assert_eq!(slow.decrypt_block(&ct), pt);
+    fn ecb_tbl_192() {
+        let entries = [
+            (
+                "000000000000000000000000000000000000000000000000",
+                "00000000000000000000000000000000",
+                "EFA71F788965BD4453F860178FC19101",
+            ),
+            (
+                "000000000000000000000000000000000000000000000000",
+                "EFA71F788965BD4453F860178FC19101",
+                "88B2B2706B105E36B446BB6D731A1E88",
+            ),
+            (
+                "EFA71F788965BD4453F860178FC191010000000000000000",
+                "88B2B2706B105E36B446BB6D731A1E88",
+                "39DA69D6BA4997D585B6DC073CA341B2",
+            ),
+            (
+                "88B2B2706B105E36B446BB6D731A1E88EFA71F788965BD44",
+                "39DA69D6BA4997D585B6DC073CA341B2",
+                "182B02D81497EA45F9DAACDC29193A65",
+            ),
+            (
+                "39DA69D6BA4997D585B6DC073CA341B288B2B2706B105E36",
+                "182B02D81497EA45F9DAACDC29193A65",
+                "7AFF7A70CA2FF28AC31DD8AE5DAAAB63",
+            ),
+        ];
+        for (key, pt, ct) in entries {
+            check_tbl_entry!(Twofish192, Twofish192Ct, 24, key, pt, ct);
+        }
     }
 
+    /// `ECB_TBL.TXT`, KEYSIZE=256, I=1..5.
     #[test]
-    fn twofish128_nonzero_kat() {
-        // Twofish paper ("ecb_tbl.txt", Full Encryptions, KEYSIZE=128, I=4).
-        let key = decode_hex::<16>("D491DB16E7B1C39E86CB086B789F5419");
-        let pt = decode_hex::<16>("019F9809DE1711858FAAC3A3BA20FBC3");
-        let ct = decode_hex::<16>("6363977DE839486297E661C6C9D668EB");
-        let fast = Twofish128::new(&key);
-        let slow = Twofish128Ct::new(&key);
-        assert_eq!(fast.encrypt_block(&pt), ct);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(fast.decrypt_block(&ct), pt);
-        assert_eq!(slow.decrypt_block(&ct), pt);
+    fn ecb_tbl_256() {
+        let entries = [
+            (
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "00000000000000000000000000000000",
+                "57FF739D4DC92C1BD7FC01700CC8216F",
+            ),
+            (
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "57FF739D4DC92C1BD7FC01700CC8216F",
+                "D43BB7556EA32E46F2A282B7D45B4E0D",
+            ),
+            (
+                "57FF739D4DC92C1BD7FC01700CC8216F00000000000000000000000000000000",
+                "D43BB7556EA32E46F2A282B7D45B4E0D",
+                "90AFE91BB288544F2C32DC239B2635E6",
+            ),
+            (
+                "D43BB7556EA32E46F2A282B7D45B4E0D57FF739D4DC92C1BD7FC01700CC8216F",
+                "90AFE91BB288544F2C32DC239B2635E6",
+                "6CB4561C40BF0A9705931CB6D408E7FA",
+            ),
+            (
+                "90AFE91BB288544F2C32DC239B2635E6D43BB7556EA32E46F2A282B7D45B4E0D",
+                "6CB4561C40BF0A9705931CB6D408E7FA",
+                "3059D6D61753B958D92F4781C8640E58",
+            ),
+        ];
+        for (key, pt, ct) in entries {
+            check_tbl_entry!(Twofish256, Twofish256Ct, 32, key, pt, ct);
+        }
     }
 
+    /// `ECB_E_M.TXT`, KEYSIZE=128, I=0..2: each entry encrypts its plaintext
+    /// 10,000 times in ECB, feeding every ciphertext back as the next
+    /// plaintext; the next entry's key is the previous key XOR the final
+    /// ciphertext and its plaintext is that ciphertext.
     #[test]
-    fn twofish192_zero_kat() {
-        let key = [0u8; 24];
-        let pt = [0u8; 16];
-        let ct = decode_hex::<16>("EFA71F788965BD4453F860178FC19101");
-        let fast = Twofish192::new(&key);
-        let slow = Twofish192Ct::new(&key);
-        assert_eq!(fast.encrypt_block(&pt), ct);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(fast.decrypt_block(&ct), pt);
-        assert_eq!(slow.decrypt_block(&ct), pt);
+    fn ecb_encrypt_monte_carlo_128() {
+        let entries = [
+            (
+                "00000000000000000000000000000000",
+                "00000000000000000000000000000000",
+                "282BE7E4FA1FBDC29661286F1F310B7E",
+            ),
+            (
+                "282BE7E4FA1FBDC29661286F1F310B7E",
+                "282BE7E4FA1FBDC29661286F1F310B7E",
+                "C8E1D477621ACC37742BD16032075654",
+            ),
+            (
+                "E0CA3393980571F5E24AF90F2D365D2A",
+                "C8E1D477621ACC37742BD16032075654",
+                "D5187E7D6B8BE9517DAC4A8AF4A552EA",
+            ),
+        ];
+        let mut key = [0u8; 16];
+        let mut pt = [0u8; 16];
+        for (i, (file_key, file_pt, file_ct)) in entries.into_iter().enumerate() {
+            assert_eq!(key, decode_hex_array::<16>(file_key), "I={i} key");
+            assert_eq!(pt, decode_hex_array::<16>(file_pt), "I={i} plaintext");
+            let cipher = Twofish128::new(&key);
+            let mut block = pt;
+            for _ in 0..10_000 {
+                block = cipher.encrypt_block(&block);
+            }
+            assert_eq!(block, decode_hex_array::<16>(file_ct), "I={i} ciphertext");
+            for (k, c) in key.iter_mut().zip(block) {
+                *k ^= c;
+            }
+            pt = block;
+        }
     }
 
+    /// The `BlockCipher` entry points reject a wrong-length block.
     #[test]
-    fn twofish192_nonzero_kat() {
-        // Twofish paper ("ecb_tbl.txt", Full Encryptions, KEYSIZE=192, I=4).
-        let key = decode_hex::<24>("88B2B2706B105E36B446BB6D731A1E88EFA71F788965BD44");
-        let pt = decode_hex::<16>("39DA69D6BA4997D585B6DC073CA341B2");
-        let ct = decode_hex::<16>("182B02D81497EA45F9DAACDC29193A65");
-        let fast = Twofish192::new(&key);
-        let slow = Twofish192Ct::new(&key);
-        assert_eq!(fast.encrypt_block(&pt), ct);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(fast.decrypt_block(&ct), pt);
-        assert_eq!(slow.decrypt_block(&ct), pt);
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        let cipher = Twofish128::new(&[0u8; 16]);
+        let mut long = [0u8; 17];
+        cipher.encrypt(&mut long);
     }
 
+    /// The constant-time types carry only the key schedule, not the fast
+    /// path's 4 KB of keyed tables; the fast types hold those tables behind a
+    /// pointer; and every Twofish type wipes itself on drop.
     #[test]
-    fn twofish256_zero_kat() {
-        let key = [0u8; 32];
-        let pt = [0u8; 16];
-        let ct = decode_hex::<16>("57FF739D4DC92C1BD7FC01700CC8216F");
-        let fast = Twofish256::new(&key);
-        let slow = Twofish256Ct::new(&key);
-        assert_eq!(fast.encrypt_block(&pt), ct);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(fast.decrypt_block(&ct), pt);
-        assert_eq!(slow.decrypt_block(&ct), pt);
-    }
-
-    #[test]
-    fn twofish256_nonzero_kat() {
-        // Twofish paper ("ecb_tbl.txt", Full Encryptions, KEYSIZE=256, I=4).
-        let key =
-            decode_hex::<32>("D43BB7556EA32E46F2A282B7D45B4E0D57FF739D4DC92C1BD7FC01700CC8216F");
-        let pt = decode_hex::<16>("90AFE91BB288544F2C32DC239B2635E6");
-        let ct = decode_hex::<16>("6CB4561C40BF0A9705931CB6D408E7FA");
-        let fast = Twofish256::new(&key);
-        let slow = Twofish256Ct::new(&key);
-        assert_eq!(fast.encrypt_block(&pt), ct);
-        assert_eq!(slow.encrypt_block(&pt), ct);
-        assert_eq!(fast.decrypt_block(&ct), pt);
-        assert_eq!(slow.decrypt_block(&ct), pt);
+    fn ct_types_carry_no_keyed_tables_and_all_types_wipe() {
+        assert!(core::mem::size_of::<Twofish256Ct>() < 256);
+        assert!(core::mem::size_of::<Twofish256>() < 256 + 16);
+        for needs_drop in [
+            core::mem::needs_drop::<Twofish128>(),
+            core::mem::needs_drop::<Twofish128Ct>(),
+            core::mem::needs_drop::<Twofish192>(),
+            core::mem::needs_drop::<Twofish192Ct>(),
+            core::mem::needs_drop::<Twofish256>(),
+            core::mem::needs_drop::<Twofish256Ct>(),
+        ] {
+            assert!(needs_drop);
+        }
     }
 
     // Deterministic xorshift64* PRNG so the differential test needs no

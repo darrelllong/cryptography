@@ -2,7 +2,7 @@
 
 - [SYMMETRIC.md](SYMMETRIC.md) covers block ciphers, stream ciphers, modes,
   hashes, MACs, CSPRNGs, and the symmetric benchmark story.
-- [ASYMMETRIC.md](ASYMMETRIC.md) covers bigint arithmetic, public-key
+- [ASYMMETRIC.md](ASYMMETRIC.md) covers the arithmetic layer, public-key
   primitives, standards-based and crate-defined wrappers, serialization, and
   public-key latency.
 
@@ -13,7 +13,8 @@ The crate has four major implementation areas:
 - `src/ciphers/`: symmetric block and stream ciphers
 - `src/modes/`: reusable block-cipher modes and AEAD-adjacent wrappers
 - `src/hash/`: fixed-output hashes, XOFs, and HMAC support
-- `src/public_key/`: bigint arithmetic, number theory, and public-key schemes
+- `src/public_key/`: public-key schemes and the cryptographic policy over
+  the sibling `rump` multiprecision layer
 
 The public API uses the same layering:
 

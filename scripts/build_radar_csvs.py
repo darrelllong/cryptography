@@ -84,6 +84,12 @@ def write_csv(
         w = csv.writer(fh)
         # Column order matches the radar generator's curve order.
         w.writerow(["label"] + columns)
+        for platform in platforms:
+            if not any(platform in vals for _, vals in rows):
+                raise SystemExit(
+                    f"platform {platform!r} appears in no merged-table column; "
+                    "pass --platforms with the labels the sweep's headers use"
+                )
         for label, vals in rows:
             v_w = vals.get(platforms[0], float("nan"))
             v_m = vals.get(platforms[1], float("nan"))

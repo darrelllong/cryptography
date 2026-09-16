@@ -1,60 +1,86 @@
-//! Fuzz CtrDrbgAes256: determinism and no-panic guarantees.
+//! `CtrDrbgAes256` against the shape SP 800-90A Rev. 1 gives it, from
+//! fuzzer-chosen seeds, strings and request lengths.
 //!
-//! Invariants:
-//! 1. Two instances seeded identically produce identical output.
-//! 2. After identical reseeds, output is still identical.
-//! 3. reseed_counter increments on each generate call.
+//! Layout: `[48-byte seed][u16 request length][48-byte reseed][string of up
+//! to 48 bytes]`. Properties, each derived here independently of the DRBG:
+//! `instantiate(e, s)` is `new(e XOR (s ‖ 0…))` (§10.2.1.3.1 steps 2-3);
+//! `reseed_with_additional_input(e, s)` is `reseed(e XOR (s ‖ 0…))`
+//! (§10.2.1.4.1 steps 2-3); a request of `k` bytes returns the first `k`
+//! bytes of a longer request from the same state (§10.2.1.5.1 step 4 takes
+//! the leftmost bits of the block stream), for every `k` up to the 64 KiB
+//! maximum; and the reseed counter is 1 after a reseed and grows by one per
+//! request.
 #![no_main]
 
 use cryptography::CtrDrbgAes256;
 use libfuzzer_sys::fuzz_target;
 
 const SEED: usize = 48;
+const MAX_REQUEST: usize = 1 << 16;
+
+fn xor_padded(entropy: &[u8; SEED], string: &[u8]) -> [u8; SEED] {
+    let mut out = *entropy;
+    for (byte, extra) in out.iter_mut().zip(string) {
+        *byte ^= extra;
+    }
+    out
+}
 
 fuzz_target!(|data: &[u8]| {
-    if data.len() < SEED {
+    if data.len() < SEED + 2 {
         return;
     }
-    let seed: [u8; SEED] = data[..SEED].try_into().unwrap();
+    let seed: [u8; SEED] = data[..SEED].try_into().expect("48 bytes");
+    let request = usize::from(u16::from_be_bytes([data[SEED], data[SEED + 1]])) + 1;
+    let rest = &data[SEED + 2..];
+    let (fresh, string) = if rest.len() >= SEED {
+        let fresh: [u8; SEED] = rest[..SEED].try_into().expect("48 bytes");
+        (fresh, &rest[SEED..rest.len().min(2 * SEED)])
+    } else {
+        ([0x5Au8; SEED], &rest[..rest.len().min(SEED)])
+    };
 
-    let mut rng1 = CtrDrbgAes256::new(&seed);
-    let mut rng2 = CtrDrbgAes256::new(&seed);
-
-    let out_len = (data.get(SEED).copied().unwrap_or(64) as usize % 512) + 1;
-    let mut out1 = vec![0u8; out_len];
-    let mut out2 = vec![0u8; out_len];
-
-    // Invariant 1: identical seeds produce identical output.
-    rng1.generate(&mut out1, None);
-    rng2.generate(&mut out2, None);
-    assert_eq!(out1, out2, "CtrDrbgAes256: determinism violated");
-
-    // Invariant 3: reseed_counter increments after generate.
-    let count_before = rng1.reseed_counter();
-    rng1.generate(&mut out1, None);
-    assert!(
-        rng1.reseed_counter() > count_before,
-        "CtrDrbgAes256: reseed_counter did not increment after generate",
+    // Instantiate with a personalization string is `new` on the XORed seed.
+    let mut a = CtrDrbgAes256::instantiate(&seed, string);
+    let mut b = CtrDrbgAes256::new(&xor_padded(&seed, string));
+    let (mut out_a, mut out_b) = (vec![0u8; request], vec![0u8; request]);
+    a.generate(&mut out_a, None);
+    b.generate(&mut out_b, None);
+    assert_eq!(
+        out_a, out_b,
+        "CTR_DRBG: instantiate is not new on the padded XOR"
+    );
+    assert_eq!(
+        a.reseed_counter(),
+        2,
+        "CTR_DRBG: one request after instantiation"
     );
 
-    // Invariant 2: starting from the *same* initial state + same reseed →
-    // identical subsequent output.  We must start fresh RNGs here because rng1
-    // and rng2 have diverged (rng1 had an extra generate call for invariant 3).
-    if data.len() >= SEED * 2 {
-        let reseed: [u8; SEED] = data[SEED..SEED * 2].try_into().unwrap();
-        let mut rng3 = CtrDrbgAes256::new(&seed);
-        let mut rng4 = CtrDrbgAes256::new(&seed);
-        rng3.reseed(&reseed);
-        rng4.reseed(&reseed);
-        rng3.generate(&mut out1, None);
-        rng4.generate(&mut out2, None);
-        assert_eq!(out1, out2, "CtrDrbgAes256: determinism violated after reseed");
-    }
+    // A shorter request is a prefix of a longer one from the same state.
+    let mut short = CtrDrbgAes256::new(&seed);
+    let mut long = CtrDrbgAes256::new(&seed);
+    let (mut out_short, mut out_long) = (vec![0u8; request], vec![0u8; MAX_REQUEST]);
+    short.generate(&mut out_short, Some(string));
+    long.generate(&mut out_long, Some(string));
+    assert_eq!(
+        out_short[..],
+        out_long[..request],
+        "CTR_DRBG: a request is not a prefix of a longer one"
+    );
 
-    // generate with additional input must not panic.
-    if data.len() >= SEED * 3 {
-        let add: [u8; SEED] = data[SEED * 2..SEED * 3].try_into().unwrap();
-        let mut out3 = vec![0u8; out_len];
-        rng1.generate(&mut out3, Some(&add));
-    }
+    // Reseed with additional input is `reseed` on the XORed seed.
+    a.reseed_with_additional_input(&fresh, string);
+    b.reseed(&xor_padded(&fresh, string));
+    assert_eq!(
+        a.reseed_counter(),
+        1,
+        "CTR_DRBG: reseed does not reset the counter"
+    );
+    a.generate(&mut out_a, None);
+    b.generate(&mut out_b, None);
+    assert_eq!(
+        out_a, out_b,
+        "CTR_DRBG: reseed_with_additional_input is not reseed on the padded XOR"
+    );
+    assert_eq!(a.reseed_counter(), 2);
 });

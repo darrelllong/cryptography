@@ -12,7 +12,9 @@
 //!
 //! `Shake128` and `Shake256` are built on the same permutation, but use the
 //! SHAKE domain suffix (`0x1f`) and expose the sponge's natural
-//! absorb-then-squeeze interface through the `Xof` trait.
+//! absorb-then-squeeze interface through the `Xof` trait. One `Keccak`
+//! state serves both phases and is padded and permuted in place, so the
+//! absorbing state is never copied when output begins.
 
 use super::{Digest, Xof};
 
@@ -75,15 +77,19 @@ fn keccak_f1600(state: &mut [u64; 25]) {
 
 // Pure-Rust fallback — 24 rounds of theta → rho → pi → chi → iota.
 fn keccak_f1600_soft(state: &mut [u64; 25]) {
+    // Round scratch lives outside the loop so one wipe clears the last round:
+    // `b` is the state just before chi, which determines the output state,
+    // capacity included.
+    let mut c = [0u64; 5];
+    let mut d = [0u64; 5];
+    let mut b = [0u64; 25];
     for &rc in &RC {
         // theta: parity of each column.
-        let mut c = [0u64; 5];
         for x in 0..5 {
             c[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
         }
 
         // theta: mix neighboring column parities.
-        let mut d = [0u64; 5];
         for x in 0..5 {
             d[x] = c[(x + 4) % 5] ^ c[(x + 1) % 5].rotate_left(1);
         }
@@ -96,7 +102,6 @@ fn keccak_f1600_soft(state: &mut [u64; 25]) {
         }
 
         // rho + pi: per-lane rotate, then permute lane positions.
-        let mut b = [0u64; 25];
         for i in 0..25 {
             b[PI[i]] = state[i].rotate_left(RHO[i]);
         }
@@ -112,6 +117,9 @@ fn keccak_f1600_soft(state: &mut [u64; 25]) {
         // iota: inject round constant.
         state[0] ^= rc;
     }
+    crate::ct::zeroize_slice(c.as_mut_slice());
+    crate::ct::zeroize_slice(d.as_mut_slice());
+    crate::ct::zeroize_slice(b.as_mut_slice());
 }
 
 // FEAT_SHA3 hardware path: uses EOR3 (3-way XOR), RAX1 (rotate-and-XOR),
@@ -132,6 +140,15 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         vcombine_u64(vdup_n_u64(a), vdup_n_u64(b))
     }
 
+    // Round scratch outside the loop, wiped once after the last round, as in
+    // the soft path: `c` holds the column parities, `d` the theta offsets,
+    // and `b` the state just before chi. The packed `uint64x2_t` values
+    // below (`c01`, `c23`, `d01`, `d23`, `chi01`, `chi23`) carry the same
+    // words through the intrinsics; they live in vector registers, have no
+    // address to wipe, and are overwritten by the next round's values.
+    let mut c = [0u64; 5];
+    let mut d = [0u64; 5];
+    let mut b = [0u64; 25];
     for &rc in &RC {
         // === Theta ===
         // Column parities: c[x] = XOR of 5 lanes in column x.
@@ -158,20 +175,23 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         // c[4] is the odd column; compute it scalar.
         let c4 = state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24];
 
-        let c0 = vgetq_lane_u64::<0>(c01);
-        let c1 = vgetq_lane_u64::<1>(c01);
-        let c2 = vgetq_lane_u64::<0>(c23);
-        let c3 = vgetq_lane_u64::<1>(c23);
+        c = [
+            vgetq_lane_u64::<0>(c01),
+            vgetq_lane_u64::<1>(c01),
+            vgetq_lane_u64::<0>(c23),
+            vgetq_lane_u64::<1>(c23),
+            c4,
+        ];
 
         // D[x] = C[(x+4)%5] ^ rotate_left(C[(x+1)%5], 1).
         // vrax1q_u64(a, b) = a ^ rotate_left(b, 1), elementwise.
         //   D[0] = c4 ^ rotl(c1, 1)    D[1] = c0 ^ rotl(c2, 1)
         //   D[2] = c1 ^ rotl(c3, 1)    D[3] = c2 ^ rotl(c4, 1)
-        let d01 = vrax1q_u64(u64x2(c4, c0), u64x2(c1, c2));
-        let d23 = vrax1q_u64(u64x2(c1, c2), u64x2(c3, c4));
-        let d4 = c3 ^ c0.rotate_left(1); // scalar
+        let d01 = vrax1q_u64(u64x2(c[4], c[0]), u64x2(c[1], c[2]));
+        let d23 = vrax1q_u64(u64x2(c[1], c[2]), u64x2(c[3], c[4]));
+        let d4 = c[3] ^ c[0].rotate_left(1); // scalar
 
-        let d = [
+        d = [
             vgetq_lane_u64::<0>(d01),
             vgetq_lane_u64::<1>(d01),
             vgetq_lane_u64::<0>(d23),
@@ -190,7 +210,6 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         // Each of the 24 non-zero-rotation lanes has a unique RHO value, so
         // XAR (which applies the same rotation to both elements of a pair)
         // gives no advantage.  Keep the existing scalar loop.
-        let mut b = [0u64; 25];
         for i in 0..25 {
             b[PI[i]] = state[i].rotate_left(RHO[i]);
         }
@@ -225,6 +244,9 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         // === Iota ===
         state[0] ^= rc;
     }
+    crate::ct::zeroize_slice(c.as_mut_slice());
+    crate::ct::zeroize_slice(d.as_mut_slice());
+    crate::ct::zeroize_slice(b.as_mut_slice());
 }
 
 #[inline]
@@ -240,65 +262,71 @@ fn absorb_block<const RATE: usize>(state: &mut [u64; 25], block: &[u8; RATE]) {
     keccak_f1600(state);
 }
 
+/// Serialize the rate lanes of `state` into `out` (little-endian), writing in
+/// place so no temporary copy of the output block is left behind.
+#[inline]
+fn load_rate_bytes<const RATE: usize>(state: &[u64; 25], out: &mut [u8; RATE]) {
+    let lanes = RATE / 8;
+    let mut i = 0usize;
+    while i < lanes {
+        out[i * 8..i * 8 + 8].copy_from_slice(&state[i].to_le_bytes());
+        i += 1;
+    }
+}
+
+/// One Keccak sponge (FIPS 202 §4, Algorithm 8) over Keccak-f\[1600\] with a
+/// rate of `RATE` bytes, in either of its two phases, and finalized in place
+/// so the state is never copied between phases.
+///
+/// While absorbing, `block` buffers the not-yet-absorbed tail of the input
+/// and `pos` counts it. Once [`Keccak::pad_and_permute`] has applied the
+/// domain suffix and `pad10*1` (§5.1) the sponge is squeezing: `block` holds
+/// the rate bytes of the current state and `pos` counts how many of them
+/// have been emitted. Every value wipes itself on drop.
 #[derive(Clone)]
 struct Keccak<const RATE: usize> {
     state: [u64; 25],
     block: [u8; RATE],
     pos: usize,
+    squeezing: bool,
 }
 
-#[derive(Clone)]
-struct KeccakSponge<const RATE: usize> {
-    state: [u64; 25],
-    block: [u8; RATE],
-    offset: usize,
-}
-
-#[derive(Clone)]
-enum XofState<const RATE: usize> {
-    Absorbing(Keccak<RATE>),
-    Squeezing(KeccakSponge<RATE>),
-}
-
-impl<const RATE: usize> XofState<RATE> {
-    fn zeroize(&mut self) {
-        match self {
-            XofState::Absorbing(inner) => {
-                crate::ct::zeroize_slice(inner.state.as_mut_slice());
-                crate::ct::zeroize_slice(inner.block.as_mut_slice());
-                inner.pos = 0;
-            }
-            XofState::Squeezing(sponge) => {
-                crate::ct::zeroize_slice(sponge.state.as_mut_slice());
-                crate::ct::zeroize_slice(sponge.block.as_mut_slice());
-                sponge.offset = 0;
-            }
-        }
+impl<const RATE: usize> Drop for Keccak<RATE> {
+    fn drop(&mut self) {
+        self.wipe();
     }
-}
-
-#[inline]
-fn state_to_rate_bytes<const RATE: usize>(state: &[u64; 25]) -> [u8; RATE] {
-    let mut rate_bytes = [0u8; RATE];
-    let lanes = RATE / 8;
-    let mut i = 0usize;
-    while i < lanes {
-        rate_bytes[i * 8..i * 8 + 8].copy_from_slice(&state[i].to_le_bytes());
-        i += 1;
-    }
-    rate_bytes
 }
 
 impl<const RATE: usize> Keccak<RATE> {
+    /// A fresh absorbing sponge: Keccak starts from the all-zero state
+    /// (Algorithm 8, step 5).
     fn new() -> Self {
         Self {
             state: [0u64; 25],
             block: [0u8; RATE],
             pos: 0,
+            squeezing: false,
         }
     }
 
+    /// Wipe the state and block buffer. Because the initial state is zero,
+    /// a wiped sponge is also a fresh one.
+    fn wipe(&mut self) {
+        crate::ct::zeroize_slice(self.state.as_mut_slice());
+        crate::ct::zeroize_slice(self.block.as_mut_slice());
+        self.pos = 0;
+        self.squeezing = false;
+    }
+
+    /// Absorb `data`: XOR each completed rate block into the state and
+    /// permute (Algorithm 8, step 6); buffer any partial block.
+    ///
+    /// # Panics
+    ///
+    /// Panics once the sponge is squeezing: a sponge cannot absorb more
+    /// input after its output has begun.
     fn update(&mut self, mut data: &[u8]) {
+        assert!(!self.squeezing, "cannot absorb after squeezing");
         while !data.is_empty() {
             let take = (RATE - self.pos).min(data.len());
             self.block[self.pos..self.pos + take].copy_from_slice(&data[..take]);
@@ -313,61 +341,52 @@ impl<const RATE: usize> Keccak<RATE> {
         }
     }
 
-    fn finalize_sponge(mut self, suffix: u8) -> KeccakSponge<RATE> {
+    /// Finish absorbing in place and enter the squeezing phase.
+    ///
+    /// `suffix` is the domain-separation bits followed by the first `1` of
+    /// `pad10*1` (§5.1), as one byte in the little-endian bit order of
+    /// Appendix B.2: `0x06` for the SHA-3 hash functions (M || 01, §6.1) and
+    /// `0x1f` for SHAKE (M || 1111, §6.2). It is XORed into the byte after
+    /// the buffered input, the closing `1` bit into the last rate byte; when
+    /// the buffered input stops one byte short of the rate the two land in
+    /// the same byte (`0x86` or `0x9f`). The padded block is absorbed and
+    /// the rate bytes of the resulting state are exposed for squeezing.
+    fn pad_and_permute(&mut self, suffix: u8) {
+        debug_assert!(!self.squeezing, "the sponge is already squeezing");
         self.block[self.pos] ^= suffix;
         self.block[RATE - 1] ^= 0x80;
         absorb_block(&mut self.state, &self.block);
-        KeccakSponge {
-            block: state_to_rate_bytes(&self.state),
-            state: self.state,
-            offset: 0,
-        }
-    }
-
-    fn finalize<const OUT: usize>(self) -> [u8; OUT] {
-        let mut sponge = self.finalize_sponge(0x06);
-        let mut out = [0u8; OUT];
-        sponge.squeeze(&mut out);
-        out
-    }
-
-    fn finalize_into_reset<const OUT: usize>(&mut self, suffix: u8, out: &mut [u8; OUT]) {
-        self.block[self.pos] ^= suffix;
-        self.block[RATE - 1] ^= 0x80;
-        absorb_block(&mut self.state, &self.block);
-
-        let mut sponge: KeccakSponge<RATE> = KeccakSponge {
-            block: state_to_rate_bytes(&self.state),
-            state: self.state,
-            offset: 0,
-        };
-        sponge.squeeze(out);
-
-        crate::ct::zeroize_slice(sponge.state.as_mut_slice());
-        crate::ct::zeroize_slice(sponge.block.as_mut_slice());
-
-        crate::ct::zeroize_slice(self.state.as_mut_slice());
-        crate::ct::zeroize_slice(self.block.as_mut_slice());
+        load_rate_bytes(&self.state, &mut self.block);
         self.pos = 0;
+        self.squeezing = true;
     }
-}
 
-impl<const RATE: usize> KeccakSponge<RATE> {
+    /// Squeeze (Algorithm 8, steps 8 to 10): copy from the rate bytes,
+    /// permuting for a fresh block whenever they are exhausted.
     fn squeeze(&mut self, out: &mut [u8]) {
+        debug_assert!(self.squeezing, "pad_and_permute comes first");
         let mut produced = 0usize;
         while produced < out.len() {
-            if self.offset == RATE {
+            if self.pos == RATE {
                 keccak_f1600(&mut self.state);
-                self.block = state_to_rate_bytes(&self.state);
-                self.offset = 0;
+                load_rate_bytes(&self.state, &mut self.block);
+                self.pos = 0;
             }
 
-            let take = (out.len() - produced).min(RATE - self.offset);
-            out[produced..produced + take]
-                .copy_from_slice(&self.block[self.offset..self.offset + take]);
+            let take = (out.len() - produced).min(RATE - self.pos);
+            out[produced..produced + take].copy_from_slice(&self.block[self.pos..self.pos + take]);
             produced += take;
-            self.offset += take;
+            self.pos += take;
         }
+    }
+
+    /// Fixed-output finalization: pad with `suffix`, then fill `out` from
+    /// the leading rate bytes. The sponge is left in the squeezing phase;
+    /// the callers decide whether it is dropped (`finalize`) or replaced
+    /// (`finalize_reset`).
+    fn finalize_in_place(&mut self, suffix: u8, out: &mut [u8]) {
+        self.pad_and_permute(suffix);
+        self.squeeze(out);
     }
 }
 
@@ -423,8 +442,11 @@ macro_rules! define_sha3 {
             /// return the digest read from the leading state lanes in
             /// little-endian byte order.
             #[must_use]
-            pub fn finalize(self) -> [u8; $out_len] {
-                self.inner.finalize()
+            pub fn finalize(mut self) -> [u8; $out_len] {
+                let mut out = [0u8; $out_len];
+                self.inner.finalize_in_place(0x06, &mut out);
+                // `self` drops here, and `Drop` wipes the final state.
+                out
             }
 
             /// One-shot hash of `data`, equivalent to `new` + `update` +
@@ -452,21 +474,21 @@ macro_rules! define_sha3 {
                 self.inner.update(data);
             }
 
-            fn finalize_into(self, out: &mut [u8]) {
+            fn finalize_into(mut self, out: &mut [u8]) {
                 assert_eq!(out.len(), $out_len, "wrong digest length");
-                let digest = self.inner.finalize::<$out_len>();
-                out.copy_from_slice(&digest);
+                self.inner.finalize_in_place(0x06, out);
             }
 
             fn finalize_reset(&mut self, out: &mut [u8]) {
-                let out: &mut [u8; $out_len] = out.try_into().expect("wrong digest length");
-                self.inner.finalize_into_reset::<$out_len>(0x06, out);
+                assert_eq!(out.len(), $out_len, "wrong digest length");
+                self.inner.finalize_in_place(0x06, out);
+                // Assigning a fresh sponge drops the consumed one, and `Drop`
+                // wipes its state.
+                self.inner = Keccak::new();
             }
 
             fn zeroize(&mut self) {
-                crate::ct::zeroize_slice(self.inner.state.as_mut_slice());
-                crate::ct::zeroize_slice(self.inner.block.as_mut_slice());
-                self.inner.pos = 0;
+                self.inner.wipe();
             }
         }
     };
@@ -489,11 +511,12 @@ macro_rules! define_shake {
         /// strength the variant is named for.
         ///
         /// Absorb with [`Xof::update`], then draw any number of output bytes
-        /// with [`Xof::squeeze`]; the first squeeze finalizes the sponge, and
-        /// updating after that panics. The state is zeroized on drop.
+        /// with [`Xof::squeeze`]; the first squeeze finalizes the sponge in
+        /// place, and updating after that panics. The state is zeroized on
+        /// drop.
         #[derive(Clone)]
         pub struct $name {
-            inner: XofState<$rate>,
+            inner: Keccak<$rate>,
         }
 
         impl Default for $name {
@@ -513,7 +536,7 @@ macro_rules! define_shake {
             #[must_use]
             pub fn new() -> Self {
                 Self {
-                    inner: XofState::Absorbing(Keccak::new()),
+                    inner: Keccak::new(),
                 }
             }
 
@@ -529,33 +552,14 @@ macro_rules! define_shake {
 
         impl Xof for $name {
             fn update(&mut self, data: &[u8]) {
-                match &mut self.inner {
-                    XofState::Absorbing(inner) => inner.update(data),
-                    XofState::Squeezing(_) => panic!("cannot absorb after squeezing"),
-                }
+                self.inner.update(data);
             }
 
             fn squeeze(&mut self, out: &mut [u8]) {
-                if let XofState::Absorbing(_) = self.inner {
-                    let prev =
-                        core::mem::replace(&mut self.inner, XofState::Absorbing(Keccak::new()));
-                    let sponge = match prev {
-                        XofState::Absorbing(inner) => inner.finalize_sponge(0x1f),
-                        XofState::Squeezing(sponge) => sponge,
-                    };
-                    self.inner = XofState::Squeezing(sponge);
+                if !self.inner.squeezing {
+                    self.inner.pad_and_permute(0x1f);
                 }
-
-                match &mut self.inner {
-                    XofState::Absorbing(_) => unreachable!(),
-                    XofState::Squeezing(sponge) => sponge.squeeze(out),
-                }
-            }
-        }
-
-        impl Drop for $name {
-            fn drop(&mut self) {
-                self.inner.zeroize();
+                self.inner.squeeze(out);
             }
         }
     };
@@ -567,20 +571,46 @@ define_shake!(Shake256, 136);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::encode_hex;
 
-    fn hex(bytes: &[u8]) -> String {
-        let mut out = String::with_capacity(bytes.len() * 2);
-        for b in bytes {
-            use core::fmt::Write;
-            let _ = write!(&mut out, "{b:02x}");
-        }
-        out
+    /// `finalize_reset` leaves a fresh sponge (for Keccak the zero state),
+    /// `zeroize` scrubs it, and every SHA-3 and SHAKE type wipes itself on
+    /// drop.
+    #[test]
+    fn finalize_reset_and_zeroize_scrub_the_state() {
+        let msg = b"HMAC feeds key material through this state";
+        let mut h = Sha3_256::new();
+        h.update(msg);
+        let mut out = [0u8; 32];
+        crate::hash::Digest::finalize_reset(&mut h, &mut out);
+        assert_eq!(out, Sha3_256::digest(msg));
+        assert_eq!(h.inner.state, [0u64; 25]);
+        assert!(h.inner.block.iter().all(|&b| b == 0));
+        assert_eq!((h.inner.pos, h.inner.squeezing), (0, false));
+
+        let mut h = Sha3_512::new();
+        h.update(b"a partial block");
+        crate::hash::Digest::zeroize(&mut h);
+        assert_eq!((h.inner.state, h.inner.pos), ([0u64; 25], 0));
+
+        let mut xof = Shake128::new();
+        xof.update(msg);
+        xof.squeeze(&mut out);
+        assert!(xof.inner.squeezing);
+        drop(xof);
+
+        assert!(core::mem::needs_drop::<Sha3_224>());
+        assert!(core::mem::needs_drop::<Sha3_256>());
+        assert!(core::mem::needs_drop::<Sha3_384>());
+        assert!(core::mem::needs_drop::<Sha3_512>());
+        assert!(core::mem::needs_drop::<Shake128>());
+        assert!(core::mem::needs_drop::<Shake256>());
     }
 
     #[test]
     fn sha3_224_empty() {
         assert_eq!(
-            hex(&Sha3_224::digest(b"")),
+            encode_hex(&Sha3_224::digest(b"")),
             "6b4e03423667dbb73b6e15454f0eb1ab".to_owned() + "d4597f9a1b078e3f5b5a6bc7"
         );
     }
@@ -588,7 +618,7 @@ mod tests {
     #[test]
     fn sha3_256_empty() {
         assert_eq!(
-            hex(&Sha3_256::digest(b"")),
+            encode_hex(&Sha3_256::digest(b"")),
             "a7ffc6f8bf1ed76651c14756a061d662".to_owned() + "f580ff4de43b49fa82d80a4b80f8434a"
         );
     }
@@ -600,7 +630,7 @@ mod tests {
         h.update(b"b");
         h.update(b"c");
         assert_eq!(
-            hex(&h.finalize()),
+            encode_hex(&h.finalize()),
             "3a985da74fe225b2045c172d6bd390bd".to_owned() + "855f086e3e9d525b46bfe24511431532"
         );
     }
@@ -608,7 +638,7 @@ mod tests {
     #[test]
     fn sha3_384_empty() {
         assert_eq!(
-            hex(&Sha3_384::digest(b"")),
+            encode_hex(&Sha3_384::digest(b"")),
             "0c63a75b845e4f7d01107d852e4c2485".to_owned()
                 + "c51a50aaaa94fc61995e71bbee983a2a"
                 + "c3713831264adb47fb6bd1e058d5f004"
@@ -618,7 +648,7 @@ mod tests {
     #[test]
     fn sha3_512_empty() {
         assert_eq!(
-            hex(&Sha3_512::digest(b"")),
+            encode_hex(&Sha3_512::digest(b"")),
             "a69f73cca23a9ac5c8b567dc185a756e".to_owned()
                 + "97c982164fe25859e0d1dcc1475c80a6"
                 + "15b2123af1f5f94c11e3e9402c3ac558"
@@ -631,7 +661,7 @@ mod tests {
         let mut out = [0u8; 32];
         Shake128::digest(b"", &mut out);
         assert_eq!(
-            hex(&out),
+            encode_hex(&out),
             "7f9c2ba4e88f827d616045507605853e".to_owned() + "d73b8093f6efbc88eb1a6eacfa66ef26"
         );
     }
@@ -645,7 +675,7 @@ mod tests {
         let mut out = [0u8; 32];
         xof.squeeze(&mut out);
         assert_eq!(
-            hex(&out),
+            encode_hex(&out),
             "5881092dd818bf5cf8a3ddb793fbcba7".to_owned() + "4097d5c526a6d35f97b83351940f2cc8"
         );
     }
@@ -672,7 +702,7 @@ mod tests {
         let mut out = [0u8; 64];
         Shake256::digest(b"", &mut out);
         assert_eq!(
-            hex(&out),
+            encode_hex(&out),
             "46b9dd2b0ba88d13233b3feb743eeb24".to_owned()
                 + "3fcd52ea62b81b82b50c27646ed5762f"
                 + "d75dc4ddd8c0f200cb05019d67b592f6"
@@ -683,7 +713,8 @@ mod tests {
     #[test]
     fn sha3_224_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-224", "-binary"], msg)
+        let Some(expected) = crate::test_utils::openssl(&["dgst", "-sha3-224", "-binary"], msg)
+            .or_skip("sha3_224_matches_openssl")
         else {
             return;
         };
@@ -693,7 +724,8 @@ mod tests {
     #[test]
     fn sha3_256_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-256", "-binary"], msg)
+        let Some(expected) = crate::test_utils::openssl(&["dgst", "-sha3-256", "-binary"], msg)
+            .or_skip("sha3_256_matches_openssl")
         else {
             return;
         };
@@ -703,7 +735,8 @@ mod tests {
     #[test]
     fn sha3_384_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-384", "-binary"], msg)
+        let Some(expected) = crate::test_utils::openssl(&["dgst", "-sha3-384", "-binary"], msg)
+            .or_skip("sha3_384_matches_openssl")
         else {
             return;
         };
@@ -713,10 +746,229 @@ mod tests {
     #[test]
     fn sha3_512_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) = crate::test_utils::run_openssl(&["dgst", "-sha3-512", "-binary"], msg)
+        let Some(expected) = crate::test_utils::openssl(&["dgst", "-sha3-512", "-binary"], msg)
+            .or_skip("sha3_512_matches_openssl")
         else {
             return;
         };
         assert_eq!(Sha3_512::digest(msg).as_slice(), expected.as_slice());
+    }
+
+    /// `Xof::update` after the first squeeze panics: the sponge is in output
+    /// mode and cannot absorb.
+    #[test]
+    #[should_panic(expected = "cannot absorb after squeezing")]
+    fn shake128_update_after_squeeze_panics() {
+        let mut xof = Shake128::new();
+        xof.update(b"absorbed");
+        let mut out = [0u8; 16];
+        xof.squeeze(&mut out);
+        xof.update(b"too late");
+    }
+
+    /// The same for SHAKE256.
+    #[test]
+    #[should_panic(expected = "cannot absorb after squeezing")]
+    fn shake256_update_after_squeeze_panics() {
+        let mut xof = Shake256::new();
+        xof.update(b"absorbed");
+        let mut out = [0u8; 16];
+        xof.squeeze(&mut out);
+        xof.update(b"too late");
+    }
+
+    /// The message of `len` bytes the pad-edge cross-checks hash: a fixed
+    /// non-constant pattern.
+    fn message(len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|i| (i.wrapping_mul(13) ^ (i >> 2)) as u8)
+            .collect()
+    }
+
+    /// Message lengths at which `pad10*1` changes shape for a rate of `rate`
+    /// bytes (FIPS 202 §5.1 and Appendix B.2): at `rate - 2` the suffix and
+    /// the closing bit occupy separate bytes; at `rate - 1` they share the
+    /// last rate byte (`0x86` / `0x9f`); at `rate` the message fills a block
+    /// and the padding is a whole block of its own. The same three lengths
+    /// one block later, and `rate + 1`, cover the multi-block absorb.
+    fn pad_edge_lengths(rate: usize) -> [usize; 7] {
+        [
+            rate - 2,
+            rate - 1,
+            rate,
+            rate + 1,
+            2 * rate - 2,
+            2 * rate - 1,
+            2 * rate,
+        ]
+    }
+
+    /// Cross-check a SHA-3 hash against `openssl dgst <flag>` at the
+    /// pad-edge lengths, hashing in one call and byte by byte.
+    fn sha3_pad_edges_match_openssl<H: Digest>(flag: &str, test: &str) {
+        for len in pad_edge_lengths(H::BLOCK_LEN) {
+            let msg = message(len);
+            let Some(expected) =
+                crate::test_utils::openssl(&["dgst", flag, "-binary"], &msg).or_skip(test)
+            else {
+                return;
+            };
+            assert_eq!(H::digest(&msg), expected, "{test}: {len}-byte message");
+            let mut h = H::new();
+            for byte in &msg {
+                h.update(core::slice::from_ref(byte));
+            }
+            let mut out = vec![0u8; H::OUTPUT_LEN];
+            h.finalize_into(&mut out);
+            assert_eq!(out, expected, "{test}: {len}-byte message, byte by byte");
+        }
+    }
+
+    #[test]
+    fn sha3_224_pad_edges_match_openssl() {
+        sha3_pad_edges_match_openssl::<Sha3_224>("-sha3-224", "sha3_224_pad_edges_match_openssl");
+    }
+
+    #[test]
+    fn sha3_256_pad_edges_match_openssl() {
+        sha3_pad_edges_match_openssl::<Sha3_256>("-sha3-256", "sha3_256_pad_edges_match_openssl");
+    }
+
+    #[test]
+    fn sha3_384_pad_edges_match_openssl() {
+        sha3_pad_edges_match_openssl::<Sha3_384>("-sha3-384", "sha3_384_pad_edges_match_openssl");
+    }
+
+    #[test]
+    fn sha3_512_pad_edges_match_openssl() {
+        sha3_pad_edges_match_openssl::<Sha3_512>("-sha3-512", "sha3_512_pad_edges_match_openssl");
+    }
+
+    /// Cross-check a SHAKE XOF against `openssl dgst <flag> -xoflen N` at the
+    /// pad-edge lengths, with `N = rate + 9` so the output crosses one
+    /// squeeze boundary; the output is also drawn in two uneven pieces.
+    fn shake_pad_edges_match_openssl<X: Xof>(new: fn() -> X, rate: usize, flag: &str, test: &str) {
+        let xoflen = rate + 9;
+        let xoflen_arg = xoflen.to_string();
+        for len in pad_edge_lengths(rate) {
+            let msg = message(len);
+            let Some(expected) = crate::test_utils::openssl(
+                &["dgst", flag, "-xoflen", &xoflen_arg, "-binary"],
+                &msg,
+            )
+            .or_skip(test) else {
+                return;
+            };
+            assert_eq!(expected.len(), xoflen, "{test}: openssl output length");
+
+            let mut xof = new();
+            xof.update(&msg);
+            let mut out = vec![0u8; xoflen];
+            xof.squeeze(&mut out);
+            assert_eq!(out, expected, "{test}: {len}-byte message");
+
+            let mut xof = new();
+            for byte in &msg {
+                xof.update(core::slice::from_ref(byte));
+            }
+            let (head, tail) = out.split_at_mut(rate - 3);
+            xof.squeeze(head);
+            xof.squeeze(tail);
+            assert_eq!(out, expected, "{test}: {len}-byte message, piecewise");
+        }
+    }
+
+    #[test]
+    fn shake128_pad_edges_match_openssl() {
+        shake_pad_edges_match_openssl(
+            Shake128::new,
+            Shake128::BLOCK_LEN,
+            "-shake128",
+            "shake128_pad_edges_match_openssl",
+        );
+    }
+
+    #[test]
+    fn shake256_pad_edges_match_openssl() {
+        shake_pad_edges_match_openssl(
+            Shake256::new,
+            Shake256::BLOCK_LEN,
+            "-shake256",
+            "shake256_pad_edges_match_openssl",
+        );
+    }
+
+    /// FIPS 202 §3.2.5, Algorithm 5, rc(t): the output bit of a linear
+    /// feedback shift register over eight bits, written as the Standard does
+    /// with R\[0\] the leftmost bit of the bit string R.
+    fn rc(t: usize) -> u64 {
+        // 1. If t mod 255 = 0, return 1.
+        if t.is_multiple_of(255) {
+            return 1;
+        }
+        // 2. Let R = 10000000.
+        let mut r = [1u8, 0, 0, 0, 0, 0, 0, 0];
+        // 3. For i from 1 to t mod 255, let:
+        for _ in 1..=(t % 255) {
+            // a. R = 0 || R;
+            let mut r9 = [0u8; 9];
+            r9[1..].copy_from_slice(&r);
+            // b. R[0] = R[0] ⊕ R[8];  c. R[4] = R[4] ⊕ R[8];
+            // d. R[5] = R[5] ⊕ R[8];  e. R[6] = R[6] ⊕ R[8];
+            r9[0] ^= r9[8];
+            r9[4] ^= r9[8];
+            r9[5] ^= r9[8];
+            r9[6] ^= r9[8];
+            // f. R = Trunc8[R].
+            r.copy_from_slice(&r9[..8]);
+        }
+        // 4. Return R[0].
+        u64::from(r[0])
+    }
+
+    /// FIPS 202 §3.2.5, Algorithm 6, steps 2 and 3: for round index i_r the
+    /// lane constant RC has RC\[2^j − 1\] = rc(j + 7 i_r) for 0 ≤ j ≤ l, with
+    /// l = 6 for the 64-bit lanes of Keccak-f\[1600\] (§3.1, Table 1), every
+    /// other bit zero. Bit z of a lane is the 2^z place of the `u64`
+    /// (Appendix B.1). The 24 rounds of Keccak-f\[1600\] are i_r = 0 to 23
+    /// (§3.4, with n_r = 24 rounds indexed 12 + 2l − n_r to 12 + 2l − 1).
+    #[test]
+    fn round_constants_come_from_the_algorithm_5_lfsr() {
+        for (i_r, &constant) in RC.iter().enumerate() {
+            let mut expected = 0u64;
+            for j in 0..=6 {
+                expected |= rc(j + 7 * i_r) << ((1usize << j) - 1);
+            }
+            assert_eq!(constant, expected, "RC[{i_r}]");
+        }
+    }
+
+    /// FIPS 202 §3.2.2, Algorithm 2 (ρ): starting from (x, y) = (1, 0), the
+    /// lane visited at step t (0 ≤ t ≤ 23) is rotated by (t + 1)(t + 2)/2
+    /// mod w, and the walk continues to (y, (2x + 3y) mod 5); lane (0, 0) is
+    /// not rotated. `RHO` is indexed x + 5y.
+    #[test]
+    fn rho_offsets_come_from_the_algorithm_2_walk() {
+        let mut expected = [0u32; 25];
+        let (mut x, mut y) = (1usize, 0usize);
+        for t in 0..24u32 {
+            expected[x + 5 * y] = ((t + 1) * (t + 2) / 2) % 64;
+            (x, y) = (y, (2 * x + 3 * y) % 5);
+        }
+        assert_eq!(RHO, expected);
+    }
+
+    /// FIPS 202 §3.2.3, Algorithm 3 (π): A′\[x, y\] = A\[(x + 3y) mod 5, x\].
+    /// `PI` maps each source lane index x′ + 5y′ to the destination index it
+    /// lands at, so for every destination (x, y) the source must be
+    /// ((x + 3y) mod 5, x).
+    #[test]
+    fn pi_permutation_is_algorithm_3() {
+        for y in 0..5 {
+            for x in 0..5 {
+                let source = (x + 3 * y) % 5 + 5 * x;
+                assert_eq!(PI[source], x + 5 * y, "A'[{x}, {y}]");
+            }
+        }
     }
 }

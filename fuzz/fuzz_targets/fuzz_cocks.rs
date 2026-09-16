@@ -6,9 +6,7 @@
 //! Invariant: decrypt(encrypt(msg)) == msg
 #![no_main]
 
-use cryptography::public_key::{
-    cocks::{Cocks, CocksPrivateKey, CocksPublicKey},
-};
+use cryptography::public_key::cocks::{Cocks, CocksPrivateKey, CocksPublicKey};
 use cryptography::vt::BigUint;
 // Note: encrypt(msg) converts msg bytes to a BigUint (strips leading zeros).
 // decrypt returns the canonical big-endian bytes of that BigUint (also no
@@ -40,6 +38,9 @@ fuzz_target!(|data: &[u8]| {
         // roundtrip.
         let msg_int = BigUint::from_be_bytes(data);
         let rec_int = BigUint::from_be_bytes(&recovered);
-        assert_eq!(rec_int, msg_int, "Cocks: decrypt(encrypt(msg)) integer mismatch");
+        assert_eq!(
+            rec_int, msg_int,
+            "Cocks: decrypt(encrypt(msg)) integer mismatch"
+        );
     }
 });

@@ -1,17 +1,29 @@
-//! NTRUEncrypt-EES541EP1 (IEEE Std 1363.1-2008, dense trapdoor, SHA-1).
+//! NTRUEncrypt SVES-3 parameter set `ees541ep1` (IEEE Std 1363.1-2008 /
+//! ANSI X9.98; 112-bit security, dense private key, SHA-1).
 //!
-//! Parameters (IEEE 1363.1 Annex A): $N = 541$, $q = 2048$, $p = 3$,
-//! $df = 49$, $dg = 180$, $dm0 = 49$, $db = 112$ bits, SHA-1,
-//! OID `[0, 2, 5]`. Wire sizes pk/sk/ct = 744 / 880 / 744 bytes.
+//! $N = 541$, $q = 2048$, $p = 3$; private key $f = 1 + 3F$ with
+//! $F \in T(49, 49)$; $g \in T(181, 180)$; $d_{m_0} = 49$;
+//! $db = 112$ bits; $c = 12$; pkLen $= 112$ bits; OID `00 02 05`.
+//! Wire sizes: public-key blob 749, private-key blob 858 (trit-packed $F$),
+//! ciphertext 744 octets; messages of at most 86 octets.
 //!
-//! All algebra and SVES-3 padding live in
-//! [`crate::public_key::ntru_ees_core`]; this file is the parameter binding.
+//! The IEEE Std 1363.1-2008 parameter tables were not available. $N$, $df$,
+//! $db$, $c$, pkLen, the OID, the hash and maxMsgLenBytes are confirmed
+//! against the reference implementation by
+//! `tests/vectors/ntru_ees_sves3_reference.txt`, and $dg$ by key pair
+//! validation of its keys; $dm_0$ is only constrained where a recorded
+//! encryption had to redraw $b$. minCallsR and minCallsMask match the 2013
+//! reference release and libntru; the 2015 reference release uses other
+//! values. They set how many hash blocks are computed up front, not the
+//! output, so the vectors cannot tell them apart. The algorithm and
+//! encodings live in [`crate::public_key::ntru_ees_core`].
 
 crate::public_key::ntru_ees_core::define_ees_set! {
     namespace = NtruEes541Ep1,
     public_key = NtruEes541Ep1PublicKey,
     private_key = NtruEes541Ep1PrivateKey,
     ciphertext = NtruEes541Ep1Ciphertext,
+    name = "ees541ep1",
     n = 541,
     trapdoor = TrapdoorKind::Dense { df: 49 },
     dg = 180,
@@ -21,10 +33,10 @@ crate::public_key::ntru_ees_core::define_ees_set! {
     min_calls_r = 15,
     min_calls_mask = 11,
     pklen_bits = 112,
-    oid = [0, 2, 5],
+    oid = [0x00, 0x02, 0x05],
     hash = HashKind::Sha1,
-    pk_bytes = 744,
-    sk_packed_bytes = 136,
-    ct_bytes = 744,
-    regression_digest = "c744941287d719d1f092ba4057855529683c811dacfb43c5ea1597c0f866ac80",
+    public_key_bytes = 749,
+    private_key_bytes = 858,
+    ciphertext_bytes = 744,
+    max_message_bytes = 86,
 }

@@ -3,6 +3,8 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cryptography::public_key::ec_edwards::ed25519;
+use cryptography::public_key::ecies::EciesSetup;
+use cryptography::public_key::primes::{FfcHash, FfcParameterSize};
 use cryptography::vt::{
     p256, BigUint, Dh, Dsa, Ecdh, Ecdsa, Ecies, Ed25519, EdDsa, EdwardsDh, ElGamal, MlDsa,
     MlDsaParameterSet, MlDsaSignature, MlKem, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey,
@@ -113,6 +115,14 @@ fn manual_symmetric_examples() {
     ctr.apply_keystream(&[0u8; 16], &mut ctr_buf);
     assert_eq!(ctr_buf, original);
 
+    // MANUAL "Modes": OCB with a 96-bit tag (AEAD_AES_128_OCB_TAGLEN96).
+    let ocb = cryptography::Ocb::<_, 12>::new(Aes128::new(&[0u8; 16]));
+    let ocb_nonce = [1u8; 12];
+    let mut ocb_data = b"ocb payload".to_vec();
+    let ocb_tag: [u8; 12] = ocb.encrypt(&ocb_nonce, b"header", &mut ocb_data);
+    assert!(ocb.decrypt(&ocb_nonce, b"header", &mut ocb_data, &ocb_tag));
+    assert_eq!(ocb_data, b"ocb payload");
+
     let plaintext_path = temp_path("plain.bin");
     let ciphertext_path = temp_path("cipher.bin");
     let roundtrip_path = temp_path("roundtrip.bin");
@@ -198,11 +208,17 @@ fn manual_rsa_examples() {
 
     let ciphertext =
         RsaOaep::<Sha256>::encrypt_rng(&public, b"label", b"hello rsa", &mut rng).expect("oaep");
-    let plaintext = RsaOaep::<Sha256>::decrypt(&private, b"label", &ciphertext).expect("decrypt");
+    let plaintext =
+        RsaOaep::<Sha256>::decrypt_rng(&private, b"label", &ciphertext, &mut rng).expect("decrypt");
     assert_eq!(plaintext, b"hello rsa");
 
-    let signature = RsaPss::<Sha256>::sign_rng(&private, b"hello rsa", &mut rng).expect("pss");
-    assert!(RsaPss::<Sha256>::verify(&public, b"hello rsa", &signature));
+    let signature = RsaPss::<Sha256>::sign_rng(&private, b"hello rsa", 32, &mut rng).expect("pss");
+    assert!(RsaPss::<Sha256>::verify(
+        &public,
+        b"hello rsa",
+        &signature,
+        32
+    ));
 
     let public_spki = public.to_spki_der();
     let private_pkcs8 = private.to_pkcs8_der();
@@ -217,14 +233,17 @@ fn manual_rsa_examples() {
 fn manual_finite_field_examples() {
     let mut rng = CtrDrbgAes256::new(&[8u8; 48]);
 
-    let params = Dh::generate_params(&mut rng, 256).expect("dh params");
+    let params = Dh::generate_params(&mut rng, FfcParameterSize::L2048N224, FfcHash::Sha224)
+        .expect("dh params");
     let (dh_pub_a, dh_priv_a) = Dh::generate(&params, &mut rng);
     let (dh_pub_b, dh_priv_b) = Dh::generate(&params, &mut rng);
     let dh_shared_a = dh_priv_a.agree_element(&dh_pub_b).expect("dh a");
     let dh_shared_b = dh_priv_b.agree_element(&dh_pub_a).expect("dh b");
     assert_eq!(dh_shared_a, dh_shared_b);
 
-    let (dsa_public, dsa_private) = Dsa::generate(&mut rng, 512).expect("dsa");
+    let dsa_params = Dsa::generate_params(&mut rng, FfcParameterSize::L2048N256, FfcHash::Sha256)
+        .expect("dsa params");
+    let (dsa_public, dsa_private) = Dsa::generate(&dsa_params, &mut rng);
     let dsa_sig = dsa_private
         .sign_message::<Sha256>(b"dsa message")
         .expect("dsa sign");
@@ -232,11 +251,12 @@ fn manual_finite_field_examples() {
     let dsa_blob = dsa_sig.to_key_blob();
     assert!(dsa_public.verify_message_bytes::<Sha256>(b"dsa message", &dsa_blob));
 
-    let (elg_public, elg_private) = ElGamal::generate(&mut rng, 256).expect("elgamal");
+    let (elg_public, elg_private) =
+        ElGamal::generate(&mut rng, FfcParameterSize::L1024N160, FfcHash::Sha256).expect("elgamal");
     let elg_cipher = elg_public
         .encrypt(b"elgamal", &mut rng)
         .expect("elgamal encrypt");
-    let elg_plain = elg_private.decrypt(&elg_cipher);
+    let elg_plain = elg_private.decrypt(&elg_cipher).expect("elgamal decrypt");
     assert_eq!(elg_plain, b"elgamal");
     let elg_ct_blob = elg_cipher.to_key_blob();
     assert_eq!(
@@ -254,7 +274,10 @@ fn manual_finite_field_examples() {
         .encrypt_with_nonce(&BigUint::from_u64(20), &BigUint::from_u64(5))
         .expect("right");
     let sum_ct = paillier_public.add_ciphertexts(&left, &right).expect("sum");
-    assert_eq!(paillier_private.decrypt_raw(&sum_ct), BigUint::from_u64(30));
+    assert_eq!(
+        paillier_private.decrypt_raw(&sum_ct),
+        Some(BigUint::from_u64(30))
+    );
 }
 
 #[test]
@@ -272,6 +295,27 @@ fn manual_ec_examples() {
         cryptography::vt::EcdhPublicKey::from_wire_bytes(p256(), &ecdh_wire).expect("ecdh wire");
     assert_eq!(ecdh_round.public_point(), ecdh_pub_a.public_point());
 
+    // MANUAL "ECDH": importing a raw private scalar.
+    let curve = p256();
+    let d = BigUint::from_u64(7);
+    let (imported_public, imported_private) =
+        Ecdh::from_secret_scalar(curve.clone(), &d).expect("1 <= d < n");
+    assert_eq!(imported_private.private_scalar(), &d);
+    assert_eq!(
+        imported_public.public_point(),
+        &curve.scalar_mul(&curve.base_point(), &d)
+    );
+    assert!(Ecdh::from_secret_scalar(curve, &BigUint::zero()).is_none());
+
+    // MANUAL "EC-ElGamal": the decrypt_int bound is exclusive.
+    let (elgamal_public, elgamal_private) = cryptography::vt::EcElGamal::generate(p256(), &mut rng);
+    let elgamal_sum = elgamal_public.add_ciphertexts(
+        &elgamal_public.encrypt_int(9, &mut rng),
+        &elgamal_public.encrypt_int(6, &mut rng),
+    );
+    assert_eq!(elgamal_private.decrypt_int(&elgamal_sum, 16), Some(15));
+    assert_eq!(elgamal_private.decrypt_int(&elgamal_sum, 15), None);
+
     let (ecdsa_public, ecdsa_private) = Ecdsa::generate(p256(), &mut rng);
     let ecdsa_sig = ecdsa_private
         .sign_message::<Sha256>(b"ecdsa message")
@@ -279,8 +323,18 @@ fn manual_ec_examples() {
     assert!(ecdsa_public.verify_message::<Sha256>(b"ecdsa message", &ecdsa_sig));
 
     let (ecies_public, ecies_private) = Ecies::generate(p256(), &mut rng);
-    let ecies_ct = ecies_public.encrypt(b"ecies payload", &mut rng);
-    let ecies_pt = ecies_private.decrypt(&ecies_ct).expect("ecies decrypt");
+    let ecies_ct = ecies_public
+        .encrypt(
+            EciesSetup::RECOMMENDED,
+            b"ecies payload",
+            &[],
+            &[],
+            &mut rng,
+        )
+        .expect("ecies encrypt");
+    let ecies_pt = ecies_private
+        .decrypt(EciesSetup::RECOMMENDED, &ecies_ct, &[], &[])
+        .expect("ecies decrypt");
     assert_eq!(ecies_pt, b"ecies payload");
 }
 
@@ -322,7 +376,7 @@ fn manual_postquantum_examples() {
     let mut rng = CtrDrbgAes256::new(&[11u8; 48]);
 
     let (kem_pk, kem_sk) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).expect("ml-kem");
-    let (kem_ct, kem_ss_sender) = MlKem::encaps(&kem_pk, &mut rng).expect("encaps");
+    let (kem_ct, kem_ss_sender) = MlKem::encaps(&kem_pk, &mut rng);
     let kem_ss_receiver = MlKem::decaps(&kem_sk, &kem_ct).expect("decaps");
     assert_eq!(
         kem_ss_sender.to_wire_bytes(),
@@ -335,15 +389,15 @@ fn manual_postquantum_examples() {
     assert_eq!(kem_pk_round, kem_pk);
 
     let kem_sk_blob = kem_sk.to_key_blob();
-    let kem_sk_round = MlKemPrivateKey::from_key_blob(&kem_sk_blob).expect("sk");
+    let kem_sk_round = MlKemPrivateKey::from_key_blob(&kem_sk_blob, &mut rng).expect("sk");
     assert_eq!(kem_sk_round, kem_sk);
 
     let fixed_randomness = [0xA5u8; 32];
-    let (_, ss1) = MlKem::encaps_with_randomness(&kem_pk_round, &fixed_randomness).expect("ss1");
-    let (_, ss2) = MlKem::encaps_with_randomness(&kem_pk_round, &fixed_randomness).expect("ss2");
+    let (_, ss1) = MlKem::encaps_with_randomness(&kem_pk_round, &fixed_randomness);
+    let (_, ss2) = MlKem::encaps_with_randomness(&kem_pk_round, &fixed_randomness);
     assert_eq!(ss1.to_wire_bytes(), ss2.to_wire_bytes());
 
-    let (dsa_pk, dsa_sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).expect("ml-dsa");
+    let (dsa_pk, dsa_sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng);
     let sig = MlDsa::sign(&dsa_sk, b"release manifest", &mut rng).expect("sign");
     assert!(MlDsa::verify(&dsa_pk, b"release manifest", &sig));
     assert!(!MlDsa::verify(&dsa_pk, b"tampered", &sig));
@@ -352,15 +406,14 @@ fn manual_postquantum_examples() {
     let fixed_rnd = [0x5Cu8; 32];
     let sig_ctx = MlDsa::sign_with_randomness_and_context(&dsa_sk, b"payload", &fixed_rnd, ctx)
         .expect("sign with context");
-    assert!(MlDsa::verify_with_context(
-        &dsa_pk, b"payload", &sig_ctx, ctx
-    ));
-    assert!(!MlDsa::verify_with_context(
-        &dsa_pk,
-        b"payload",
-        &sig_ctx,
-        b"bundle:v2"
-    ));
+    assert_eq!(
+        MlDsa::verify_with_context(&dsa_pk, b"payload", &sig_ctx, ctx),
+        Some(true)
+    );
+    assert_eq!(
+        MlDsa::verify_with_context(&dsa_pk, b"payload", &sig_ctx, b"bundle:v2"),
+        Some(false)
+    );
 
     let sig_wire = sig.to_wire_bytes();
     let sig_round =
@@ -405,4 +458,49 @@ fn manual_postquantum_examples() {
     let too_big = vec![0u8; NtruEes443Ep1::MAX_MESSAGE_BYTES + 1];
     let err = NtruEes443Ep1::encrypt(&ees_pk, &too_big, &mut rng).unwrap_err();
     assert_eq!(err, NtruEesError::MessageTooLong);
+}
+
+#[test]
+fn manual_standard_key_encoding_examples() {
+    use cryptography::vt::{
+        DhParams, DhPrivateKey, DhPublicKey, DsaParams, DsaPrivateKey, DsaPublicKey,
+        EcdsaPrivateKey, EcdsaPublicKey,
+    };
+
+    // Fixed seed for a deterministic example only.
+    let mut rng = CtrDrbgAes256::new(&[0x31; 48]);
+    let (public, private) = Ecdsa::generate(p256(), &mut rng);
+    // `None` only for a curve without an object identifier.
+    let spki_pem = public.to_spki_pem().expect("P-256 is a named curve");
+    let pkcs8_pem = private.to_pkcs8_pem().expect("P-256 is a named curve");
+    let sec1_pem = private.to_sec1_pem().expect("P-256 is a named curve");
+    let public_again = EcdsaPublicKey::from_spki_pem(&spki_pem).expect("SPKI");
+    let private_again = EcdsaPrivateKey::from_pkcs8_pem(&pkcs8_pem).expect("PKCS #8");
+    assert_eq!(public_again.public_point(), public.public_point());
+    assert_eq!(private_again.private_scalar(), private.private_scalar());
+    assert!(EcdsaPrivateKey::from_sec1_pem(&sec1_pem).is_some());
+
+    let dsa_params = Dsa::generate_toy_params(&mut rng, 256).expect("toy group");
+    let (dsa_public, dsa_private) = Dsa::generate(&dsa_params, &mut rng);
+    assert_eq!(
+        DsaPublicKey::from_spki_der(&dsa_public.to_spki_der()),
+        Some(dsa_public)
+    );
+    assert_eq!(
+        DsaPrivateKey::from_pkcs8_pem(&dsa_private.to_pkcs8_pem()),
+        Some(dsa_private)
+    );
+    assert_eq!(DsaParams::from_der(&dsa_params.to_der()), Some(dsa_params));
+
+    let dh_params = Dh::generate_toy_params(&mut rng, 256).expect("toy group");
+    let (dh_public, dh_private) = Dh::generate(&dh_params, &mut rng);
+    assert_eq!(
+        DhPublicKey::from_spki_pem(&dh_public.to_spki_pem()),
+        Some(dh_public)
+    );
+    assert_eq!(
+        DhPrivateKey::from_pkcs8_der(&dh_private.to_pkcs8_der()),
+        Some(dh_private)
+    );
+    assert_eq!(DhParams::from_der(&dh_params.to_der()), Some(dh_params));
 }

@@ -1,6 +1,8 @@
 /target
 /benchmarks/target
 /fuzz/target
+/fuzz/artifacts/
+/fuzz/corpus/
 Cargo.lock
 /pilot_result_*/
 /scripts/cipher_outputs/
@@ -12,3 +14,4 @@ Cargo.lock
 /.claude/
 /.ntru-upstream/
 __pycache__/
+/scripts/null_calibration/pvalues.csv

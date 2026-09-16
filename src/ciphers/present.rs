@@ -187,14 +187,18 @@ fn sbox_fast_nibble(input: u8) -> u8 {
     SBOX[(input & 0x0f) as usize]
 }
 
-fn expand_round_keys_80(key: &[u8; 10], sbox: fn(u8) -> u8) -> [u64; 32] {
+/// PRESENT-80 key schedule (CHES 2007 paper, "The key schedule"): the 80-bit
+/// register `k79..k0` is held in a `u128`, round key `i` is `k79..k16`, and
+/// between rounds the register is rotated left by 61, its top nibble is
+/// S-boxed and the round counter is XORed into `k19..k15`. The 32 round keys
+/// are written directly into `out`.
+fn expand_round_keys_80(key: &[u8; 10], sbox: fn(u8) -> u8, out: &mut [u64; 32]) {
     let mut reg = 0u128;
     for &b in key {
         reg = (reg << 8) | u128::from(b);
     }
 
     let mask80 = (1u128 << 80) - 1;
-    let mut out = [0u64; 32];
 
     for round in 1..=32u8 {
         out[(round - 1) as usize] = ((reg >> 16) & 0xffff_ffff_ffff_ffff) as u64;
@@ -209,12 +213,17 @@ fn expand_round_keys_80(key: &[u8; 10], sbox: fn(u8) -> u8) -> [u64; 32] {
         reg ^= u128::from(round) << 15;
     }
 
-    out
+    // The 80-bit key register: after the last round it still determines the
+    // whole schedule.
+    crate::ct::zeroize_slice(core::slice::from_mut(&mut reg));
 }
 
-fn expand_round_keys_128(key: &[u8; 16], sbox: fn(u8) -> u8) -> [u64; 32] {
+/// PRESENT-128 key schedule (CHES 2007 paper, Appendix II): round key `i` is
+/// `k127..k64`; between rounds the register is rotated left by 61, its top two
+/// nibbles are S-boxed and the round counter is XORed into `k66..k62`. The 32
+/// round keys are written directly into `out`.
+fn expand_round_keys_128(key: &[u8; 16], sbox: fn(u8) -> u8, out: &mut [u64; 32]) {
     let mut reg = u128::from_be_bytes(*key);
-    let mut out = [0u64; 32];
 
     for round in 1..=32u8 {
         out[(round - 1) as usize] = (reg >> 64) as u64;
@@ -235,7 +244,9 @@ fn expand_round_keys_128(key: &[u8; 16], sbox: fn(u8) -> u8) -> [u64; 32] {
         reg ^= u128::from(round) << 62;
     }
 
-    out
+    // The 128-bit key register: after the last round it still determines the
+    // whole schedule.
+    crate::ct::zeroize_slice(core::slice::from_mut(&mut reg));
 }
 
 /// PRESENT-80 fast software path.
@@ -246,12 +257,15 @@ pub struct Present80 {
 impl Present80 {
     /// Expand the 80-bit key (big-endian) into the 32 round keys of the
     /// CHES 2007 schedule, S-boxing the register's top nibble each step
-    /// with a direct (secret-indexed) table lookup.
+    /// with a direct (secret-indexed) table lookup. The schedule is written
+    /// directly into the new instance.
     #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
-        Self {
-            round_keys: expand_round_keys_80(key, sbox_fast_nibble),
-        }
+        let mut cipher = Self {
+            round_keys: [0u64; 32],
+        };
+        expand_round_keys_80(key, sbox_fast_nibble, &mut cipher.round_keys);
+        cipher
     }
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
@@ -285,12 +299,15 @@ pub struct Present80Ct {
 impl Present80Ct {
     /// Expand the 80-bit key (big-endian) into the 32 round keys, with the
     /// schedule's per-step S-box evaluated in packed ANF form so key
-    /// expansion itself performs no secret-indexed table reads.
+    /// expansion itself performs no secret-indexed table reads. The schedule
+    /// is written directly into the new instance.
     #[must_use]
     pub fn new(key: &[u8; 10]) -> Self {
-        Self {
-            round_keys: expand_round_keys_80(key, sbox_ct_nibble),
-        }
+        let mut cipher = Self {
+            round_keys: [0u64; 32],
+        };
+        expand_round_keys_80(key, sbox_ct_nibble, &mut cipher.round_keys);
+        cipher
     }
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
@@ -326,12 +343,15 @@ pub struct Present128 {
 impl Present128 {
     /// Expand the 128-bit key (big-endian) into the 32 round keys; the
     /// 128-bit schedule S-boxes the register's top two nibbles each step,
-    /// here via direct (secret-indexed) table lookups.
+    /// here via direct (secret-indexed) table lookups. The schedule is
+    /// written directly into the new instance.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
-        Self {
-            round_keys: expand_round_keys_128(key, sbox_fast_nibble),
-        }
+        let mut cipher = Self {
+            round_keys: [0u64; 32],
+        };
+        expand_round_keys_128(key, sbox_fast_nibble, &mut cipher.round_keys);
+        cipher
     }
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
@@ -365,12 +385,15 @@ pub struct Present128Ct {
 impl Present128Ct {
     /// Expand the 128-bit key (big-endian) into the 32 round keys; the
     /// schedule's two per-step S-box applications are evaluated in packed
-    /// ANF form so key expansion performs no secret-indexed table reads.
+    /// ANF form so key expansion performs no secret-indexed table reads. The
+    /// schedule is written directly into the new instance.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
-        Self {
-            round_keys: expand_round_keys_128(key, sbox_ct_nibble),
-        }
+        let mut cipher = Self {
+            round_keys: [0u64; 32],
+        };
+        expand_round_keys_128(key, sbox_ct_nibble, &mut cipher.round_keys);
+        cipher
     }
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
@@ -442,30 +465,7 @@ impl_drop_zeroize!(Present128Ct);
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn h8(s: &str) -> [u8; 8] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
-    }
-
-    fn h10(s: &str) -> [u8; 10] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
-    }
-
-    fn h16(s: &str) -> [u8; 16] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
-    }
+    use crate::test_utils::decode_hex_array;
 
     #[test]
     fn ct_sbox_matches_tables() {
@@ -480,24 +480,24 @@ mod tests {
         // CHES 2007 Appendix I.
         let cases = [
             (
-                h10("00000000000000000000"),
-                h8("0000000000000000"),
-                h8("5579c1387b228445"),
+                decode_hex_array::<10>("00000000000000000000"),
+                decode_hex_array::<8>("0000000000000000"),
+                decode_hex_array::<8>("5579c1387b228445"),
             ),
             (
-                h10("ffffffffffffffffffff"),
-                h8("0000000000000000"),
-                h8("e72c46c0f5945049"),
+                decode_hex_array::<10>("ffffffffffffffffffff"),
+                decode_hex_array::<8>("0000000000000000"),
+                decode_hex_array::<8>("e72c46c0f5945049"),
             ),
             (
-                h10("00000000000000000000"),
-                h8("ffffffffffffffff"),
-                h8("a112ffc72f68417b"),
+                decode_hex_array::<10>("00000000000000000000"),
+                decode_hex_array::<8>("ffffffffffffffff"),
+                decode_hex_array::<8>("a112ffc72f68417b"),
             ),
             (
-                h10("ffffffffffffffffffff"),
-                h8("ffffffffffffffff"),
-                h8("3333dcd3213210d2"),
+                decode_hex_array::<10>("ffffffffffffffffffff"),
+                decode_hex_array::<8>("ffffffffffffffff"),
+                decode_hex_array::<8>("3333dcd3213210d2"),
             ),
         ];
 
@@ -512,24 +512,24 @@ mod tests {
     fn present80_ct_kats() {
         let cases = [
             (
-                h10("00000000000000000000"),
-                h8("0000000000000000"),
-                h8("5579c1387b228445"),
+                decode_hex_array::<10>("00000000000000000000"),
+                decode_hex_array::<8>("0000000000000000"),
+                decode_hex_array::<8>("5579c1387b228445"),
             ),
             (
-                h10("ffffffffffffffffffff"),
-                h8("0000000000000000"),
-                h8("e72c46c0f5945049"),
+                decode_hex_array::<10>("ffffffffffffffffffff"),
+                decode_hex_array::<8>("0000000000000000"),
+                decode_hex_array::<8>("e72c46c0f5945049"),
             ),
             (
-                h10("00000000000000000000"),
-                h8("ffffffffffffffff"),
-                h8("a112ffc72f68417b"),
+                decode_hex_array::<10>("00000000000000000000"),
+                decode_hex_array::<8>("ffffffffffffffff"),
+                decode_hex_array::<8>("a112ffc72f68417b"),
             ),
             (
-                h10("ffffffffffffffffffff"),
-                h8("ffffffffffffffff"),
-                h8("3333dcd3213210d2"),
+                decode_hex_array::<10>("ffffffffffffffffffff"),
+                decode_hex_array::<8>("ffffffffffffffff"),
+                decode_hex_array::<8>("3333dcd3213210d2"),
             ),
         ];
 
@@ -540,68 +540,270 @@ mod tests {
         }
     }
 
+    /// PRESENT-128 values for the all-zero and all-one keys and plaintexts.
+    /// The CHES 2007 paper publishes known answers only for PRESENT-80
+    /// (Appendix I) and gives the 128-bit key schedule in Appendix II without
+    /// vectors. These four values are pinned by two implementations that share
+    /// no code: the production path and the bit-level transcription of the
+    /// paper in [`bitwise`], which `present128_matches_bitwise_transcription`
+    /// also compares on random keys.
+    fn present128_reference_cases() -> [([u8; 16], [u8; 8], [u8; 8]); 4] {
+        [
+            (
+                decode_hex_array::<16>("00000000000000000000000000000000"),
+                decode_hex_array::<8>("0000000000000000"),
+                decode_hex_array::<8>("96db702a2e6900af"),
+            ),
+            (
+                decode_hex_array::<16>("ffffffffffffffffffffffffffffffff"),
+                decode_hex_array::<8>("0000000000000000"),
+                decode_hex_array::<8>("13238c710272a5d8"),
+            ),
+            (
+                decode_hex_array::<16>("00000000000000000000000000000000"),
+                decode_hex_array::<8>("ffffffffffffffff"),
+                decode_hex_array::<8>("3c6019e5e5edd563"),
+            ),
+            (
+                decode_hex_array::<16>("ffffffffffffffffffffffffffffffff"),
+                decode_hex_array::<8>("ffffffffffffffff"),
+                decode_hex_array::<8>("628d9fbd4218e5b4"),
+            ),
+        ]
+    }
+
     #[test]
     fn present128_kats() {
-        // Commonly cited four-corner vectors for the 128-bit schedule.
-        let cases = [
-            (
-                h16("00000000000000000000000000000000"),
-                h8("0000000000000000"),
-                h8("96db702a2e6900af"),
-            ),
-            (
-                h16("ffffffffffffffffffffffffffffffff"),
-                h8("0000000000000000"),
-                h8("13238c710272a5d8"),
-            ),
-            (
-                h16("00000000000000000000000000000000"),
-                h8("ffffffffffffffff"),
-                h8("3c6019e5e5edd563"),
-            ),
-            (
-                h16("ffffffffffffffffffffffffffffffff"),
-                h8("ffffffffffffffff"),
-                h8("628d9fbd4218e5b4"),
-            ),
-        ];
-
-        for (key, pt, ct) in cases {
+        for (key, pt, ct) in present128_reference_cases() {
             let cipher = Present128::new(&key);
             assert_eq!(cipher.encrypt_block(&pt), ct);
             assert_eq!(cipher.decrypt_block(&ct), pt);
+            assert_eq!(bitwise::encrypt(&pt, &bitwise::round_keys_128(&key)), ct);
         }
     }
 
     #[test]
     fn present128_ct_kats() {
-        let cases = [
-            (
-                h16("00000000000000000000000000000000"),
-                h8("0000000000000000"),
-                h8("96db702a2e6900af"),
-            ),
-            (
-                h16("ffffffffffffffffffffffffffffffff"),
-                h8("0000000000000000"),
-                h8("13238c710272a5d8"),
-            ),
-            (
-                h16("00000000000000000000000000000000"),
-                h8("ffffffffffffffff"),
-                h8("3c6019e5e5edd563"),
-            ),
-            (
-                h16("ffffffffffffffffffffffffffffffff"),
-                h8("ffffffffffffffff"),
-                h8("628d9fbd4218e5b4"),
-            ),
-        ];
-
-        for (key, pt, ct) in cases {
+        for (key, pt, ct) in present128_reference_cases() {
             let cipher = Present128Ct::new(&key);
             assert_eq!(cipher.encrypt_block(&pt), ct);
             assert_eq!(cipher.decrypt_block(&ct), pt);
         }
+    }
+
+    /// PRESENT transcribed from the CHES 2007 paper bit by bit, as an
+    /// independent oracle for the packed production code.
+    ///
+    /// State bits `b63..b0`, key register bits `k79..k0` / `k127..k0` and
+    /// round-key bits `κ63..κ0` are individual `bool`s indexed by the paper's
+    /// bit numbers, so every step below is the paper's sentence rather than a
+    /// shift-and-mask reformulation of it:
+    ///
+    /// - sBoxLayer: `w_i = b_{4i+3} ‖ b_{4i+2} ‖ b_{4i+1} ‖ b_{4i}` through S;
+    /// - pLayer: "bit i of state is moved to bit position P(i)", with `P`
+    ///   the paper's table;
+    /// - 80-bit key schedule: `K_i = k79..k16`; then `[k79..k0] =
+    ///   [k18..k19]` (rotate left 61), `[k79..k76] = S[k79..k76]`,
+    ///   `[k19..k15] ^= round_counter`;
+    /// - 128-bit key schedule (Appendix II): `K_i = k127..k64`; then rotate
+    ///   left 61, `[k127..k124] = S[..]`, `[k123..k120] = S[..]`,
+    ///   `[k66..k62] ^= round_counter`.
+    ///
+    /// Hex strings in the paper's vectors are read most significant digit
+    /// first, so byte 0 of a key or block carries its highest-numbered bits.
+    mod bitwise {
+        use super::SBOX;
+
+        /// The paper's pLayer table: entry `i` is `P(i)`.
+        #[rustfmt::skip]
+        const P: [usize; 64] = [
+             0, 16, 32, 48,  1, 17, 33, 49,  2, 18, 34, 50,  3, 19, 35, 51,
+             4, 20, 36, 52,  5, 21, 37, 53,  6, 22, 38, 54,  7, 23, 39, 55,
+             8, 24, 40, 56,  9, 25, 41, 57, 10, 26, 42, 58, 11, 27, 43, 59,
+            12, 28, 44, 60, 13, 29, 45, 61, 14, 30, 46, 62, 15, 31, 47, 63,
+        ];
+
+        /// Bits of `bytes` indexed by bit number: bit `8n - 1` is the most
+        /// significant bit of `bytes[0]`, bit 0 the least significant bit of
+        /// the last byte.
+        fn to_bits(bytes: &[u8]) -> Vec<bool> {
+            let n = bytes.len() * 8;
+            (0..n)
+                .map(|bit| (bytes[bytes.len() - 1 - bit / 8] >> (bit % 8)) & 1 == 1)
+                .collect()
+        }
+
+        fn from_bits(bits: &[bool]) -> Vec<u8> {
+            let mut out = vec![0u8; bits.len() / 8];
+            for (bit, &set) in bits.iter().enumerate() {
+                if set {
+                    let idx = out.len() - 1 - bit / 8;
+                    out[idx] |= 1 << (bit % 8);
+                }
+            }
+            out
+        }
+
+        /// Replace bits `lo+3 .. lo` (most significant first) by their S-box image.
+        fn sbox_nibble(bits: &mut [bool], lo: usize) {
+            let input = (0..4).fold(0u8, |acc, j| acc | (u8::from(bits[lo + j]) << j));
+            let output = SBOX[input as usize];
+            for j in 0..4 {
+                bits[lo + j] = (output >> j) & 1 == 1;
+            }
+        }
+
+        /// Rotate the register left by 61 positions: new `k_j` is old
+        /// `k_{(j + n - 61) mod n}`, so new `k_{n-1}` is old `k_{n-62}`.
+        fn rotate_left_61(reg: &[bool]) -> Vec<bool> {
+            let n = reg.len();
+            (0..n).map(|j| reg[(j + n - 61) % n]).collect()
+        }
+
+        fn xor_round_counter(reg: &mut [bool], lo: usize, round: usize) {
+            for j in 0..5 {
+                reg[lo + j] ^= (round >> j) & 1 == 1;
+            }
+        }
+
+        pub(super) fn round_keys_80(key: &[u8; 10]) -> Vec<[bool; 64]> {
+            let mut reg = to_bits(key);
+            let mut keys = Vec::with_capacity(32);
+            for round in 1..=32 {
+                keys.push(reg[16..80].try_into().unwrap());
+                reg = rotate_left_61(&reg);
+                sbox_nibble(&mut reg, 76);
+                xor_round_counter(&mut reg, 15, round);
+            }
+            keys
+        }
+
+        pub(super) fn round_keys_128(key: &[u8; 16]) -> Vec<[bool; 64]> {
+            let mut reg = to_bits(key);
+            let mut keys = Vec::with_capacity(32);
+            for round in 1..=32 {
+                keys.push(reg[64..128].try_into().unwrap());
+                reg = rotate_left_61(&reg);
+                sbox_nibble(&mut reg, 124);
+                sbox_nibble(&mut reg, 120);
+                xor_round_counter(&mut reg, 62, round);
+            }
+            keys
+        }
+
+        pub(super) fn encrypt(pt: &[u8; 8], round_keys: &[[bool; 64]]) -> [u8; 8] {
+            let mut state: [bool; 64] = to_bits(pt).try_into().unwrap();
+            for round_key in &round_keys[..31] {
+                for (s, k) in state.iter_mut().zip(round_key) {
+                    *s ^= k;
+                }
+                for i in 0..16 {
+                    sbox_nibble(&mut state, 4 * i);
+                }
+                let mut permuted = [false; 64];
+                for (i, &bit) in state.iter().enumerate() {
+                    permuted[P[i]] = bit;
+                }
+                state = permuted;
+            }
+            for (s, k) in state.iter_mut().zip(&round_keys[31]) {
+                *s ^= k;
+            }
+            from_bits(&state).try_into().unwrap()
+        }
+    }
+
+    fn xorshift64(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn fill_bytes(state: &mut u64, out: &mut [u8]) {
+        for chunk in out.chunks_mut(8) {
+            let bytes = xorshift64(state).to_le_bytes();
+            let n = chunk.len();
+            chunk.copy_from_slice(&bytes[..n]);
+        }
+    }
+
+    /// The bit-level transcription reproduces the paper's Appendix I
+    /// PRESENT-80 known answers, which qualifies it as an oracle.
+    #[test]
+    fn bitwise_transcription_matches_appendix_i() {
+        let cases = [
+            (
+                "00000000000000000000",
+                "0000000000000000",
+                "5579c1387b228445",
+            ),
+            (
+                "ffffffffffffffffffff",
+                "0000000000000000",
+                "e72c46c0f5945049",
+            ),
+            (
+                "00000000000000000000",
+                "ffffffffffffffff",
+                "a112ffc72f68417b",
+            ),
+            (
+                "ffffffffffffffffffff",
+                "ffffffffffffffff",
+                "3333dcd3213210d2",
+            ),
+        ];
+        for (key, pt, ct) in cases {
+            let rks = bitwise::round_keys_80(&decode_hex_array::<10>(key));
+            assert_eq!(
+                bitwise::encrypt(&decode_hex_array::<8>(pt), &rks),
+                decode_hex_array::<8>(ct)
+            );
+        }
+    }
+
+    /// Random keys and plaintexts through the packed PRESENT-80 and PRESENT-128
+    /// paths and the bit-level transcription: the two agree, which pins the
+    /// key byte order that the all-zero/all-one vectors cannot distinguish.
+    #[test]
+    fn present_matches_bitwise_transcription() {
+        let mut rng = 0x9e37_79b9_7f4a_7c15u64;
+        for _ in 0..200 {
+            let mut key80 = [0u8; 10];
+            let mut key128 = [0u8; 16];
+            let mut pt = [0u8; 8];
+            fill_bytes(&mut rng, &mut key80);
+            fill_bytes(&mut rng, &mut key128);
+            fill_bytes(&mut rng, &mut pt);
+
+            let expected80 = bitwise::encrypt(&pt, &bitwise::round_keys_80(&key80));
+            let fast = Present80::new(&key80);
+            let ct = Present80Ct::new(&key80);
+            assert_eq!(fast.encrypt_block(&pt), expected80, "Present80");
+            assert_eq!(ct.encrypt_block(&pt), expected80, "Present80Ct");
+            assert_eq!(fast.decrypt_block(&expected80), pt, "Present80 decrypt");
+            assert_eq!(ct.decrypt_block(&expected80), pt, "Present80Ct decrypt");
+
+            let expected128 = bitwise::encrypt(&pt, &bitwise::round_keys_128(&key128));
+            let fast = Present128::new(&key128);
+            let ct = Present128Ct::new(&key128);
+            assert_eq!(fast.encrypt_block(&pt), expected128, "Present128");
+            assert_eq!(ct.encrypt_block(&pt), expected128, "Present128Ct");
+            assert_eq!(fast.decrypt_block(&expected128), pt, "Present128 decrypt");
+            assert_eq!(ct.decrypt_block(&expected128), pt, "Present128Ct decrypt");
+        }
+    }
+
+    /// The `BlockCipher` entry points reject a wrong-length block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        use crate::BlockCipher;
+        let cipher = Present80::new(&[0u8; 10]);
+        let mut long = [0u8; 9];
+        cipher.encrypt(&mut long);
     }
 }

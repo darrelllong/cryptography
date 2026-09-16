@@ -24,7 +24,7 @@ const PI: [[u8; 16]; 8] = [
     [1, 7, 14, 13, 0, 5, 8, 3, 4, 15, 10, 6, 9, 12, 11, 2], // Pi'_7
 ];
 
-// ── Core transforms ────────────────────────────────────────────────────────
+// ── Core transforms (RFC 8891 §4.2) ────────────────────────────────────────
 
 /// t(v): apply 8 independent 4-bit S-boxes to a 32-bit word.
 /// Nibble i (bits [4i+3 : 4i]) is passed through Pi'_i.
@@ -317,7 +317,8 @@ fn t_ct(v: u32) -> u32 {
         | (u32::from(pi7_ct(n7)) << 28)
 }
 
-/// g[k](a): wrapping-add key, substitute, rotate left 11 bits.
+/// g[k](a) = (t(Vec_32(Int_32(a) ⊞ Int_32(k)))) <<< 11 (RFC 8891 §4.2):
+/// add the key modulo 2^32, substitute, rotate left 11 bits.
 #[inline]
 fn g(k: u32, a: u32) -> u32 {
     t(a.wrapping_add(k)).rotate_left(11)
@@ -341,13 +342,15 @@ fn g_ct(k: u32, a: u32) -> u32 {
 // Decryption round key sequence = encryption sequence reversed:
 //   k[0..8]  (×1)  then  k[7..0]  (×3)
 
-fn build_round_keys(key: &[u8; 32]) -> ([u32; 32], [u32; 32]) {
+/// Fill `enc` with the 32 encryption round keys and `dec` with the same keys
+/// reversed. The caller's schedule fields are written in place, and the eight
+/// key words `k`, which are the user key itself, are wiped before returning.
+fn build_round_keys(key: &[u8; 32], enc: &mut [u32; 32], dec: &mut [u32; 32]) {
     let mut k = [0u32; 8];
     for i in 0..8 {
         k[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
     }
 
-    let mut enc = [0u32; 32];
     for i in 0..24 {
         enc[i] = k[i % 8];
     } // rounds 1–24: forward three times
@@ -355,13 +358,13 @@ fn build_round_keys(key: &[u8; 32]) -> ([u32; 32], [u32; 32]) {
         enc[24 + i] = k[7 - i];
     } // rounds 25–32: reversed once
 
-    let mut dec = enc;
+    *dec = *enc;
     dec.reverse();
 
-    (enc, dec)
+    crate::ct::zeroize_slice(k.as_mut_slice());
 }
 
-// ── Feistel core ───────────────────────────────────────────────────────────
+// ── Feistel core (RFC 8891 §4.2 G, G*; §5.1 encryption, §5.2 decryption) ───
 //
 // Block is split as a₁ || a₀  (a₁ = upper 32 bits, a₀ = lower 32 bits).
 //
@@ -421,8 +424,12 @@ impl Magma {
     /// Construct from a 32-byte (256-bit) key.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
-        let (enc_rk, dec_rk) = build_round_keys(key);
-        Magma { enc_rk, dec_rk }
+        let mut cipher = Magma {
+            enc_rk: [0u32; 32],
+            dec_rk: [0u32; 32],
+        };
+        build_round_keys(key, &mut cipher.enc_rk, &mut cipher.dec_rk);
+        cipher
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
@@ -459,8 +466,12 @@ impl MagmaCt {
     /// Construct from a 32-byte (256-bit) key.
     #[must_use]
     pub fn new(key: &[u8; 32]) -> Self {
-        let (enc_rk, dec_rk) = build_round_keys(key);
-        MagmaCt { enc_rk, dec_rk }
+        let mut cipher = MagmaCt {
+            enc_rk: [0u32; 32],
+            dec_rk: [0u32; 32],
+        };
+        build_round_keys(key, &mut cipher.enc_rk, &mut cipher.dec_rk);
+        cipher
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
@@ -522,35 +533,88 @@ impl Drop for MagmaCt {
     }
 }
 
-// ── Tests (vectors from RFC 8891) ─────────────────────────────────────────
+// ── Tests (vectors from RFC 8891 Appendix A) ──────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex_array;
 
-    fn h8(s: &str) -> [u8; 8] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
+    // ── Transformation t (RFC 8891 Appendix A.1) ─────────────────────────
+
+    #[test]
+    fn t_vectors() {
+        let cases = [
+            (0xfdb9_7531, 0x2a19_6f34),
+            (0x2a19_6f34, 0xebd9_f03a),
+            (0xebd9_f03a, 0xb039_bb3d),
+            (0xb039_bb3d, 0x6869_5433),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(t(input), expected, "t({input:08x})");
+            assert_eq!(t_ct(input), expected, "t_ct({input:08x})");
+        }
     }
 
-    fn h32(s: &str) -> [u8; 32] {
-        let b: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        b.try_into().unwrap()
+    // ── Transformation g (RFC 8891 Appendix A.2) ─────────────────────────
+
+    #[test]
+    fn g_vectors() {
+        let cases = [
+            (0x8765_4321, 0xfedc_ba98, 0xfdcb_c20c),
+            (0xfdcb_c20c, 0x8765_4321, 0x7e79_1a4b),
+            (0x7e79_1a4b, 0xfdcb_c20c, 0xc765_49ec),
+            (0xc765_49ec, 0x7e79_1a4b, 0x9791_c849),
+        ];
+        for (k, a, expected) in cases {
+            assert_eq!(g(k, a), expected, "g[{k:08x}]({a:08x})");
+            assert_eq!(g_ct(k, a), expected, "g_ct[{k:08x}]({a:08x})");
+        }
     }
 
-    // ── Encrypt / Decrypt (RFC 8891 §A.3) ────────────────────────────────
+    // ── Key schedule (RFC 8891 Appendix A.3) ─────────────────────────────
+
+    #[test]
+    fn key_schedule_vectors() {
+        let key = decode_hex_array::<32>(
+            "ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+        );
+        let forward = [
+            0xffee_ddcc,
+            0xbbaa_9988,
+            0x7766_5544,
+            0x3322_1100,
+            0xf0f1_f2f3,
+            0xf4f5_f6f7,
+            0xf8f9_fafb,
+            0xfcfd_feff,
+        ];
+        // K_1..K_24 are the eight words three times over; K_25..K_32 are the
+        // eight words reversed.
+        let mut expected = [0u32; 32];
+        for (i, slot) in expected.iter_mut().enumerate() {
+            *slot = if i < 24 {
+                forward[i % 8]
+            } else {
+                forward[7 - (i - 24)]
+            };
+        }
+        let m = Magma::new(&key);
+        assert_eq!(m.enc_rk, expected, "K_1..K_32");
+        let mut reversed = expected;
+        reversed.reverse();
+        assert_eq!(m.dec_rk, reversed, "decryption order");
+    }
+
+    // ── Encrypt / Decrypt (RFC 8891 Appendix A.4 / A.5) ──────────────────
 
     #[test]
     fn encrypt_decrypt_rfc() {
-        let key = h32("ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
-        let pt = h8("fedcba9876543210");
-        let ct = h8("4ee901e5c2d8ca3d");
+        let key = decode_hex_array::<32>(
+            "ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+        );
+        let pt = decode_hex_array::<8>("fedcba9876543210");
+        let ct = decode_hex_array::<8>("4ee901e5c2d8ca3d");
         let m = Magma::new(&key);
         assert_eq!(m.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(m.decrypt_block(&ct), pt, "decrypt");
@@ -566,6 +630,16 @@ mod tests {
         assert_eq!(m.decrypt_block(&m.encrypt_block(&pt)), pt);
     }
 
+    /// The `BlockCipher` entry points reject a wrong-length block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        use crate::BlockCipher;
+        let cipher = Magma::new(&[0u8; 32]);
+        let mut long = [0u8; 16];
+        cipher.encrypt(&mut long);
+    }
+
     #[test]
     fn ct_sboxes_match_tables() {
         for (box_idx, table) in PI.iter().enumerate() {
@@ -577,9 +651,11 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_rfc_ct() {
-        let key = h32("ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
-        let pt = h8("fedcba9876543210");
-        let ct = h8("4ee901e5c2d8ca3d");
+        let key = decode_hex_array::<32>(
+            "ffeeddccbbaa99887766554433221100f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+        );
+        let pt = decode_hex_array::<8>("fedcba9876543210");
+        let ct = decode_hex_array::<8>("4ee901e5c2d8ca3d");
         let fast = Magma::new(&key);
         let slow = MagmaCt::new(&key);
         assert_eq!(slow.encrypt_block(&pt), ct, "encrypt");

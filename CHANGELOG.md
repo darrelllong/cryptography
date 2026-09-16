@@ -9,121 +9,633 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
-### Changed
-- **Prime-curve scalar multiplication stays in the Montgomery domain.** The
-  Jacobian point arithmetic used `MontgomeryCtx::mul`/`square` (encode →
-  multiply → decode, plus two allocations) for every field multiply in the
-  hot loop, so each logical multiply cost three Montgomery reductions. It now
-  encodes the coordinates once in `from_affine`, runs `mul_mont`/`square_mont`
-  throughout, and decodes once in `to_affine` — the curve coefficient `a` is
-  precomputed in Montgomery form. Measured on Apple M1: `ecdsa_sign`
-  1.47 → 0.72 ms, `ecdh_agree` 1.38 → 0.69 ms (2×), now faster than the
-  v0.7.0 baseline. This recovers a ~1.9× regression that `perf(ec)` commit
-  `a63c781` introduced by adding a windowed ladder over the still
-  encode/decode-bound field arithmetic; ECDSA/ECDH/ECIES/EC-ElGamal all
-  benefit. Result values are unchanged (verified by the RFC known-answer
-  vectors and the differential ladder tests).
-
 ### Added
-- **P-224 compressed-point decoding.** Decompression now takes
-  `rump::sqrt_mod` (general Tonelli–Shanks with the `(p+1)/4` shortcut), so
-  every odd prime field decompresses; the long-standing `p ≡ 1 (mod 4)`
-  refusal on P-224 is gone, and the test that pinned the refusal now pins
-  the round trip.
-- `RsaPrivateKey::decrypt_raw_blinded` — the raw private operation with
-  multiplicative (base) blinding, the classic Brumley–Boneh countermeasure.
-  `decrypt_raw` documents that it is deliberately unblinded.
-- `Hmac::finalize_into` — finalize into a caller-provided buffer without the
-  return-value allocation.
-- `MontgomeryCtx::{mul_mont, square_mont, one_mont}` — arithmetic on
-  residues kept in the Montgomery domain, used by the EC stack.
-- `arm-sha3` cargo feature — the aarch64 FEAT_SHA3 hardware Keccak path is
-  now **opt-in**. A default build is pure safe Rust except for the single
-  audited volatile-zeroization helper.
-- `#![deny(unsafe_code)]` at the crate root, with a scrub policy test
-  (`unsafe_code_stays_confined_to_audited_sites`) pinning the two allowed
-  sites.
+- NIST ACVP known answers from the official `usnistgov/ACVP-Server`
+  repository, with provenance headers: ML-KEM keyGen, encapsulation,
+  decapsulation (valid and modified ciphertext) and the key checks for all
+  three parameter sets (`tests/vectors/ml_kem_acvp_fips203.txt`); ML-DSA
+  keyGen, deterministic and hedged sigGen, and sigVer with NIST's verdict for
+  all three parameter sets (`tests/vectors/ml_dsa_fips204_subset.txt`,
+  replacing an undocumented two-vector subset).
+- Tests that are experiments rather than self-comparisons: HMAC `verify`
+  refusals (every flipped tag bit, every prefix, wrong key or message); SHA-3
+  and SHAKE at the padding edge and every Merkle–Damgård hash at its padding
+  boundaries against OpenSSL; Keccak round constants, ρ and π derived from
+  FIPS 202's algorithms and SHA-224's IV from its definition; all six RFC 4503
+  Rabbit vectors and the later blocks of the eSTREAM Salsa20 vector; the
+  chunked-fill continuation of SNOW 3G and ZUC; every `new_wiping`
+  constructor; ML-DSA-87 on a 256 KiB stack; NTRU key generation under a
+  source that samples a zero polynomial.
+- `Zuc128::new_wiping`, so both ZUC paths have the key-erasure constructor.
+- `CurveParams::from_explicit` and `ExplicitField`, the constructor for curve
+  parameters received from outside the process, and
+  `CurveParams::validate_domain_parameters`, the SEC 1 v2.0 domain-parameter
+  validation primitive it applies; `primes::MAX_NONCE_DRAWS`, the draw bound
+  of randomized DSA and ECDSA signing.
+- `TripleDesCt`, Triple-DES over the constant-time DES core. `TripleDes` and
+  `TripleDesCt` report their keying option through `mode()` (`TDesMode` gains
+  `SingleKey`), and both reject repeated key components
+  (`DesKeyError::RepeatedKeyComponent`), as SP 800-67 requires.
+- Standard signature encodings: `EcdsaSignature::{to_der, from_der}`
+  (X9.62 / RFC 3279 §2.2.3 `ECDSA-Sig-Value`) and `DsaSignature::{to_der, from_der}`
+  (RFC 3279 `Dss-Sig-Value`).
+- FIPS 186-4 domain parameters: `FfcParameterSize`, `FfcHash`, `FfcSeed`,
+  `DsaParams`, `Dsa::generate_params`, `DhParams::{new, with_seed, seed}` and
+  the parameter accessors, third-party validation per Appendix A.1.1.3 and
+  A.2.4, and separately named generators for toy sizes no standard covers.
+- SEC 1 ECIES setup types: `EciesSetup` (with `EciesSetup::RECOMMENDED`),
+  `EciesKdf`, `EciesHash`, `EciesEncryption`, `EciesMac`, `EciesDhPrimitive`,
+  `EciesPointFormat`, and `EciesError`.
+- `MlDsa::sign_deterministic`, the FIPS 204 deterministic variant.
+- Public-point validation: `CurveParams::{is_valid_public_point, same_curve}`
+  and `TwistedEdwardsCurve::{is_valid_public_point, is_in_prime_subgroup}`.
+- OCB tag lengths per RFC 7253 §3.1: `Ocb<C, const TAG_LEN: usize = 16>` with
+  16-, 12-, and 8-byte tags (other lengths fail to compile), and
+  `Ocb::tag_len`; the RFC's 96-bit sample and iterative outputs for all nine
+  AES-OCB variants are pinned.
+- `Ecdh::from_secret_scalar`, mirroring `Ecdsa::from_secret_scalar`.
+- Known answers from published standards in `tests/kat_*.rs`: RFC 6979
+  Appendix A.2 (DSA and all fifteen curves), RFC 5903, RFC 7748 §6, the GCM
+  specification's test cases 3–18, RFC 7253, the XChaCha20 draft, FIPS 180 and
+  FIPS 202 examples, RFC 1321, the RIPEMD-160 paper, RFC 4231, the NIST CMAC
+  examples, CAVP CTR_DRBG, RFC 8439 Appendix A, and RFC 8452 Appendix C.
+- Oracle-generated known answers for every ML-KEM and ML-DSA parameter set
+  (`tests/vectors/ml_{kem,dsa}_ref_kat.txt`, regenerated by
+  `scripts/gen_pq_ref_vectors.sh`), NTRUEncrypt interoperability vectors
+  (`tests/vectors/ntru_ees_sves3_reference.txt`, `scripts/ees_ref_vectors/`),
+  NIST CAVP FIPS 186-4 domain-parameter records, SEC 1 GEC 2 vectors, CAVP
+  ANS X9.63 KDF and ECC CDH vectors, RFC 8452 Appendix C.2, SP 800-67
+  Appendix B, and IEEE P1619/D16 Annex B. OpenSSL interoperability tests cover
+  P-256 ECDSA both ways and RSA keys from `openssl genrsa`.
+- `kat/README.md` records that the NTRU KAT files are unmodified copies from
+  NIST's round-3 package, with their SHA-256 digests. The specifications the
+  code follows are kept in `pubs/`.
+- `src/bin/cipher_encrypt`, the driver `scripts/cipher_randomness.R` needs;
+  `R-REPORT.md` and `scripts/cipher_plots/` are regenerated.
+- Standard key encodings beside the crate's own formats, which stay the
+  default. Public keys gain `to_spki_der`, `to_spki_pem` and their decoders
+  (RFC 5280 SubjectPublicKeyInfo); private keys gain `to_pkcs8_der`,
+  `to_pkcs8_pem` and their decoders (RFC 5958); EC private keys also gain
+  `to_sec1_der` and `to_sec1_pem` (RFC 5915); and `DsaParams` and `DhParams`
+  gain `to_der` and `from_der`. EC keys follow RFC 5480 with named curves
+  only; DSA and DH follow RFC 3279; X25519, X448 and Ed25519 follow RFC 8410;
+  ML-KEM follows RFC 9935 and ML-DSA RFC 9881. No standard defines a DH
+  private key in PKCS #8, so the crate follows OpenSSL's convention and says
+  so. Every family is cross-checked against OpenSSL 3.
+- BER receivers where the RFCs require them: `from_pkcs8_ber` on private
+  keys (RFC 5958 §2, "receivers MUST support BER") and `from_sec1_ber` on EC
+  private keys (RFC 5915 §4). The `PRIVATE KEY` and `PUBLIC KEY` PEM decoders
+  accept BER contents too (RFC 7468 §10 and §13). Every `_der` method stays
+  strict DER, and contents an algorithm's RFC requires in DER stay DER inside
+  a BER container.
+- Policy tests: wiping is always on and never feature-gated, and no source
+  file outside the audited sites contains unsafe code. CI lints the
+  `ct_profile` feature.
+- `pilot_cipher 3desct` and `scripts/bench_ees_only.sh <set>`.
+- **P-224 compressed-point decoding** through `rump::modular::mod_sqrt`.
+- `RsaPrivateKey::decrypt_raw_blinded`, the raw private operation with base
+  blinding.
+- `Hmac::finalize_into`.
+- `arm-sha3` cargo feature for the aarch64 FEAT_SHA3 Keccak path, now opt-in.
+- `#![deny(unsafe_code)]` at the crate root; the only exceptions are the
+  audited volatile-write helper and the opt-in `arm-sha3` path.
+- **Every Rust code block in `MANUAL.md` and `README.md` is a doctest**
+  (`#[cfg(doctest)]` includes at the crate root): 32 from the manual and 20
+  from the README, which with the five source doctests makes the 57 that
+  `cargo test --doc` compiles; all but the manual's file-encryption example
+  (`rust,no_run`, it reads a file that need not exist) also run.
+- `CtrDrbg::instantiate(entropy_input, personalization_string)` and
+  `reseed_with_additional_input(entropy_input, additional_input)`, the
+  SP 800-90A §10.2.1.3.1 and §10.2.1.4.1 no-df forms (zero-pad and XOR into
+  the entropy input, at most `seedlen` bytes); the CAVP harness calls them
+  with the vector fields as NIST names them.
+- Fuzz targets for what had none: `fuzz_pkix_parse` (every PKCS #8,
+  SubjectPublicKeyInfo, SEC 1, RFC 3279 parameter and signature parser in
+  DER, BER and PEM, with the encoding required to be idempotent when a parse
+  succeeds), `fuzz_aead_decrypt` (GCM on both GHASH back ends, AES-GCM-SIV,
+  CCM, OCB, SIV, EAX and ChaCha20-Poly1305: honest ciphertexts open, one
+  flipped bit in ciphertext, tag, AAD or nonce is refused, a payload under a
+  payload tag is refused), `fuzz_mac` (HMAC, CMAC, GMAC on both back ends,
+  Poly1305), `fuzz_ntru` (all nine NTRUEncrypt sets and the four round-3
+  KEMs, with flipped ciphertexts refused or implicitly rejected),
+  `fuzz_x25519` (X25519 and X448 clamping, symmetry and the all-zero refusal)
+  and `fuzz_edwards_dh`.
+- `fuzz/seeds/` seeds for the targets whose inputs mutation does not find
+  (key blobs, DER containers), written by `cargo run --manifest-path
+  fuzz/Cargo.toml --bin seed_corpus` from fixed-seed keys.
+- `scripts/cipher_randomness.R --calibrate N` runs the battery on `N`
+  streams of OS randomness across forked workers and appends one row per
+  stream to `scripts/null_calibration/pvalues.csv` (kept gzipped in the
+  repository, 400,000 streams from dennard and twilight); the report's
+  calibration section gives each test's rejection rate at α and at α/m with
+  a Clopper-Pearson interval, the Kolmogorov-Smirnov uniformity of its
+  p-values, the battery's own false-failure rate (1.05 × 10⁻³ against the
+  bound 10⁻³), and the Spearman correlations between tests.
 
 ### Changed
+- **Finite-field groups have a size policy**: `q ≥ 2^15`
+  (`primes::MIN_SUBGROUP_ORDER_BITS`), `p ≤ 16 384` bits
+  (`primes::MAX_MODULUS_BITS`) and `q ≤ 512` bits
+  (`primes::MAX_SUBGROUP_ORDER_BITS`), checked before any primality test on
+  every DSA, DH and ElGamal constructor and parser, so a parameter blob cannot
+  buy seconds of hardened primality testing and no one-element keyspace
+  passes. `DsaPrivateKey::sign_digest` (RFC 6979) is bounded by
+  `MAX_NONCE_DRAWS` like the randomized signer. `ElGamalPrivateKey::decrypt_raw`
+  and `decrypt` return `Option` and refuse a ciphertext with `γ` or `δ` out of
+  range or `γ` outside the order-`q` subgroup; `m = 0` is refused at
+  encryption. DH keys cache a Montgomery context; `DsaParams` and `DhParams`
+  come from one macro. New: `Dsa::with_secret_exponent`,
+  `DsaPublicKey::from_public_component`, `Dh::from_secret_exponent`,
+  `Dh::with_secret_exponent`, `DhPublicKey::from_public_component`, and the
+  NIST CAVP DSA KeyPair/SigGen/SigVer and KAS FFC ephemeral suites
+  (`tests/kat_fips186_dsa.rs`, `tests/kat_kas_ffc.rs`) with fixed answers for
+  signing, verification verdicts and the DH shared secret.
+- **Breaking — Serpent byte order.** `Serpent128/192/256` take keys and
+  blocks in the little-endian word order of the Serpent paper (§2), the
+  order the NESSIE test vectors and deployed Serpent libraries use:
+  `Serpent128::new(&[0x80, 0, …, 0]).encrypt_block(&[0; 16])` is
+  `264E5481EFF42A4606ABDA06C0BFDA3D`. Earlier versions reversed the 16 key
+  and block bytes around that core and documented the opposite; their
+  ciphertexts decrypt with the new API only after reversing key, plaintext
+  and ciphertext bytes. The tests pin the submission's `ecb_vk.txt` and
+  `ecb_vt.txt` entries (I = 1 and 121, all key sizes) and the standard-order
+  vector directly. `Serpent*Ct` remain as aliases of the fast types, whose
+  bitsliced round function is constant-time by construction; the duplicate
+  benchmark rows are gone.
+- **Simon's `z` sequences are derived at compile time** from the paper's
+  §3.2 recurrences and checked bit for bit against every sequence it prints;
+  PRESENT is compared on random keys against a bit-level transcription of the
+  paper; SEED's schedule against a transcription of RFC 4269 §2.3 and all of
+  Appendix B.1; Twofish against `ECB_TBL.TXT` I = 1–5 per key size and the
+  chained `ECB_E_M.TXT`; CAST-128 against RFC 2144 B.2's full maintenance
+  test (ignored, 0.4 s in release); Magma against RFC 8891 Appendix A's
+  intermediate values; the Kuznyechik fused-table posture is stated
+  (six index bits per lookup, 128 KiB working set). Every block cipher
+  expands its key schedule into the new instance, and CAST-128's wiping
+  constructor wipes before refusing a bad key length.
+- **`AesGcmSiv<C>` is generic over the AES implementation** (sealed
+  `GcmSivBlockCipher`), with `Aes128GcmSivCt` and `Aes256GcmSivCt` beside the
+  T-table aliases; all RFC 8452 Appendix C records pass on both. SIV enforces
+  RFC 5297's limits (`siv::MAX_PLAINTEXT_BYTES`, 2^39 − 128 bits under 32-bit
+  counter addition, §2.5; `siv::MAX_AD_COMPONENTS`, 126, §7) and XTS refuses
+  data units above `XTS_MAX_DATA_UNIT_BLOCKS` (2^20, SP 800-38E §4); decrypt
+  paths return `false` rather than panic, and GCM decrypt returns `false` for
+  over-long ciphertext, AAD or IV. `GcmVt` and `GmacVt` say on the type that
+  their GHASH is variable-time in both operands; `Gcm`, `Gmac` and `Cmac`
+  document that only a full-length tag verifies; the GHASH multiply and
+  Poly1305 finish masks pass through `black_box`. New known answers: SP
+  800-38C Appendix C.1–C.4 and RFC 3610 packet vectors 1–24
+  (`tests/kat_ccm.rs`), SP 800-38A's AES-192 and CFB8 AES-192/256 cases, and
+  tampering refusals for GCM, GCM-SIV and ChaCha20-Poly1305 on every vector;
+  `tests/wipe_modes.rs` observes every mode's Drop wipe. The GCM test cases
+  3–18 are checked digit by digit against the McGrew–Viega 2005 specification
+  now kept in `pubs/`.
+- **`CurveParams::from_explicit` checks admissibility before arithmetic**:
+  field size at a SEC 1 security level, coefficient sizes, the reduction
+  polynomial's degree and `n ≤ 2·bits(q) + 2` bits are checked before any
+  context or irreducibility test (a 16 KB polynomial or a 1 MiB modulus
+  previously cost 40–68 s of CPU). Binary compressed points with `x = 0`
+  decode to `(0, √b)` per SEC 1 §2.3.4 step 2.4.2; a prime-field compressed
+  2-torsion point under tag `03` is refused (step 2.4.1 gives no field
+  element); `encode_point` and `encode_point_compressed` reduce their
+  coordinates instead of panicking on a non-canonical point; the differential
+  scalar-multiplication test has an independent affine reference on prime
+  curves; the embedding-degree helper is named for what it computes.
+- **`zeroize_slice` is bounded by the sealed `Zeroable` trait** (primitive
+  integers, `bool`, arrays of them) and writes zeros, not `Default`. Policy
+  tests say what they check: the manifest gate parses the rump dependency
+  table, the constant-time gate is a spelling gate beside an ignored
+  release-only timing experiment (equal-length compares differing at byte 0
+  and at byte 4095 run within 0.2% of each other), and the root-export gate
+  no longer claims `vt` is a gate. The unsafe-code gate scans `tests/`,
+  `fuzz/` and `benchmarks/` too and recognises `expect(unsafe_code)`,
+  `unsafe trait` and `unsafe extern`; the audited sites are the volatile
+  writer, the NEON Keccak path, the gate itself and the drop-observation
+  tests.
+- **OpenSSL cross-check helpers distinguish a missing algorithm from a broken
+  invocation**: usage errors, unknown options and invalid commands panic;
+  only an algorithm the installed tool lacks skips. `CRYPTOGRAPHY_OPENSSL_REQUIRED=1`
+  turns every skip into a failure (except `enc`'s refusal of XTS, which no
+  installation changes), and CI sets it. LibreSSL-only hosts need OpenSSL 3
+  for the affected cross-checks.
+- **CI** pins the rump checkout to a commit, installs OpenSSL 3, runs the
+  `ct_profile` suite and the full suite plus clippy under `arm-sha3`, checks
+  the fuzz, benchmark and fast crates, asserts entropy's manifest points at
+  this checkout, and runs the release-only ignored tests weekly and on
+  dispatch.
+- **PKIX receivers**: `OneAsymmetricKey` requires version 2 exactly when a
+  public key is present (RFC 5958 §2); the BER receivers accept primitive
+  values under unassigned universal tags as the DER decoders do, so every
+  DER the strict decoders accept converts to itself; `read_explicit` requires
+  exactly one DER value; integer-sequence blobs decode at most their
+  schema's field count (16 by default), BER constructed values and string
+  segments at most 4096 per value, PEM encapsulated text at most 1 MiB;
+  `WipedBytes` asserts against the size it was asked for.
+- **Twisted Edwards point encodings are `⌈(bits(p)+1)/8⌉` octets**, the
+  RFC 8032 `b`-bit form: 32 for Ed25519 (unchanged) and 57 for Ed448, whose
+  sign bit is bit 455. Explicit Edwards parameters in EdDsa, Edwards-DH and
+  Edwards-ElGamal blobs, PEM and XML go through
+  `TwistedEdwardsCurve::from_explicit` (Ed25519 by comparison, otherwise `p`
+  and `n` prime by the hardened test with `p` capped at 1024 bits, `a` a
+  square and `d` a non-square, `G` on the curve, the Hasse cofactor even and
+  at most 8, no small embedding degree, `[n]G` neutral). EdDsa verification
+  requires `R` canonical and non-neutral and lets the equation fix its order.
+  X25519 and X448 public keys store the canonical `u`; `X25519PrivateKey`
+  compares in constant time; the X25519 ladder and key generation wipe every
+  intermediate as X448 does; the Ed25519 verification table is built on first
+  use; `TwistedEdwardsCurve::new` refuses `p ≤ 1` and `n ≤ 1`; `decrypt_int`
+  on both ElGamal variants refuses bounds above `2^40`.
+- **RSA key generation follows FIPS 186-4 B.3.3 under B.3.1**: `p, q ≥
+  √2·2^(nlen/2−1)`, `|p − q| > 2^(nlen/2−100)`, `d > 2^(nlen/2)`, `e` odd in
+  `(2^16, 2^256)` and coprime to `p − 1` and `q − 1`, `nlen` even; the modulus
+  is exactly `nlen` bits, and `Rsa::generate` fixes `e = 65537` before drawing
+  the primes.
+- **`RsaPss::verify` takes the salt length** (RFC 8017 §9.1.2 step 10's
+  `sLen`) and `RsaPss::sign_rng` takes it too; a signature made with another
+  salt length does not verify. `PaillierPrivateKey::decrypt_raw` and `decrypt`
+  return `Option` and refuse `c ≥ n²`. Rabin's redundancy tag is 128 bits
+  (former ciphertexts do not decrypt) and `Rabin::generate` requires at least
+  `Rabin::MIN_GENERATED_BITS` (140). Private-key parsers cap `n`, `p` and `q`
+  at 16 384 bits before the hardened primality test; `Rsa::from_primes` tests
+  each prime once; MGF1 refuses a mask longer than RFC 8017 B.2.1 allows.
+- **ECDSA signing emits the FIPS 186-5 §6.4.1 value of `s`.** The low-`s`
+  form moved to `EcdsaSignature::to_low_s`, and the RFC 6979 known-answer
+  test pins every `s` exactly. Signing and verification refuse an empty
+  digest, and `verify` documents the `z ≡ 0` structure the equation has; the
+  RFC 6979 signing loop is bounded by `MAX_NONCE_DRAWS` like the randomized
+  one. `CurveParams::scalar_invert` is what signing and verification use.
+- **One `ec_io` layer encodes and decodes the crate-defined EC key formats**
+  for ECDSA, ECDH, EC-ElGamal and ECIES: the blob's field-type octet must be
+  `00` or `01`, every path validates through `CurveParams::from_explicit`,
+  `is_valid_public_point` and `public_point_for_scalar`, and every temporary
+  holding `d` is wiped. `EcElGamal::encrypt_point` and
+  `encrypt_point_with_nonce` return `Option` and refuse a plaintext outside
+  the subgroup of order `n`; the Koblitz embedding retries until its point
+  lies in that subgroup. The EC-ElGamal ciphertext blob, PEM and XML carry a
+  form octet per point (`0` for the identity, `4` for a finite point) and
+  round-trip `C₂ = ∞`; the former four-field encoding no longer parses.
+- **`CtrDrbgAes256` is now `CtrDrbg<Aes256>`**, with `CtrDrbgAes256Ct =
+  CtrDrbg<Aes256Ct>` beside it and the sealed `CtrDrbgCipher` trait naming
+  the two approved instantiations; the DRBG keys an encrypt-only schedule
+  once per update instead of three full schedules per request, and
+  `generate` takes additional input as `Option<&[u8]>` of up to 48 bytes,
+  zero-padded per SP 800-90A §10.2.1.5.1 (an existing `Some(&[u8; 48])` still
+  compiles). Both aliases pass every DRBGVS group.
+- **Withdrawn and bypass constructors leave the public API**:
+  `Des::new_unchecked`, `DesCt::new_unchecked`, `TripleDes::new_single_key`,
+  `new_single_key_unchecked`, `new_single_key_wiping` and their `TripleDesCt`
+  twins are crate-private test helpers (FIPS 46-3 withdrawn 2005; SP 800-67
+  Rev. 2 withdrew keying option 3). AES and Camellia expand their key
+  schedules directly into the new instance.
+- **Infallible functions no longer return `Option`**: `MlKem::keygen_from_seed`,
+  `MlKem::encaps_with_randomness`, `MlKem::encaps`, `MlDsa::keygen` and
+  `MlDsa::keygen_from_seed` return their pair directly. `MlKem::keygen` keeps
+  `Option` for the pair-wise test; `MlKem::decaps` for a parameter-set
+  mismatch.
+- **`MlDsa::verify_with_context` returns `Option<bool>`**: `None` is FIPS 204
+  Algorithm 3's error indication for a context longer than 255 bytes, which a
+  `bool` could not tell from an invalid signature.
+- **`Digest::finalize_reset` resets to a fresh hasher** after scrubbing the
+  consumed state, for every hash; `finalize_into` and `finalize_reset`
+  document their length panics, and `Xof::update` documents the panic on
+  absorbing after a squeeze.
+- **`MlKem::keygen` runs the pair-wise consistency test** FIPS 140-3 IG
+  10.3.A asks of a new key pair, in the form of FIPS 203 §7.1 step 4, on the
+  public key it returns (encapsulating under that key's own cached matrix)
+  and the private key, before returning them; the random source now supplies
+  96 bytes per call. `keygen_from_seed` takes no random source and runs no
+  test.
+- ML-KEM's cached matrix Â and ML-DSA's polynomial vectors and matrix are
+  sized to the parameter set and live on the heap; an ML-DSA public key is
+  pointer-sized instead of 64 KiB by value, and ML-DSA-87 signs and verifies
+  on a 256 KiB thread stack.
+- NTRU round-3 key generation applies the zero-polynomial rule that
+  encapsulation follows: it redraws its sampling bits once when `f` (or `g`
+  for HRSS) samples to zero and panics on a second refusal. Release builds
+  replay all 100 entries of each NIST KAT file by default; debug builds sample
+  eight; the ignored `nist_kat_full` replays all 100 in any build.
+- `Snow3g`, `Zuc128` and their `next_word` discard path, `Salsa20`'s
+  wiping constructor and the SNOW 3G / ZUC initialisation are documented and
+  structured as the standards describe: the table-driven types carry a
+  variable-time warning, `next_word` wipes the partial word it discards,
+  `Salsa20::with_key_bytes_wiping` wipes its buffers before refusing a bad
+  key length, and the Document 3 traces start from the production key loading.
+- **Randomized DSA and ECDSA signing draw at most 64 nonces.**
+  `sign_digest_with_rng` returns `None` after `MAX_NONCE_DRAWS` consecutive
+  draws with `r = 0` or `s = 0`, the mark of a random source stuck on one
+  `k`; a working source signs on the first draw.
+- **NTRUEncrypt key generation and encryption bound their retries.** Eight
+  non-invertible candidates for `F` or `g` in a row, 64 attempts in a row
+  refused by the `dm0` weight check, or 256 rejected index draws in a row are
+  reported as a broken random source by a panic, as the NTRU round-3 KEMs
+  already report a refused coin draw.
+- **Clean-room rewrites of code copied from other implementations.** A
+  provenance audit found that ML-KEM's arithmetic core and ML-DSA came from the
+  pq-crystals reference code, the NTRU round-3 KEMs from the round-3 reference
+  C, NTRUEncrypt's encodings and drivers from libntru, Poly1305 from
+  poly1305-donna, the GHASH multiply from BearSSL, SNOW 3G and ZUC arithmetic
+  from the C listings in their specifications, and X25519's inversion naming
+  from libsodium. Each is rewritten from its specification (FIPS 203, FIPS 204,
+  the NTRU round-3 specification, EESS #1 v3.1, RFC 8439, SP 800-38D, the
+  ETSI/SAGE specifications, RFC 7748) without consulting any implementation,
+  and each reproduces the same published or oracle-generated known answers.
+  Measured costs: ML-KEM-768 1.38–1.73× slower, ML-DSA-65 signing 1.30×
+  slower, NTRU round-3 key generation about 2× slower, GCM tag computation at
+  0.31× throughput. `AUDIT.md` records the findings.
+- MD5, SHA-1, and SHA-2 compression functions are written in RFC 1321 §3.4
+  and FIPS 180-4 §6 notation instead of following secondary pseudocode, with
+  tests that recompute MD5's T table from sines and the SHA-2 constants and
+  initial values from prime roots. MD5 is about 2.3× faster.
+- **NTRUEncrypt follows EESS #1 v3.1** (the public text of IEEE 1363.1) and
+  interoperates in both directions with the standard authors' reference
+  implementation: 4-octet hash counters, hashed IGF seed, most-significant-bit
+  first packing, the specified trit and index orders, `g` with dg + 1 ones, and
+  corrected ees401ep1 and ees443ep1 parameters. Key blobs follow the reference
+  layout, `PUBLIC_KEY_BYTES` and `PRIVATE_KEY_BYTES` are full wire lengths, and
+  private-key import runs the standard's key-pair validation. **Breaking:** keys
+  and ciphertexts from earlier versions do not interoperate.
+- **ECIES implements SEC 1 v2.0 §5.1** with an explicit setup: ANSI-X9.63-KDF,
+  the §3.8 encryption schemes, the §3.7 MACs, standard or cofactor
+  Diffie–Hellman, and SharedInfo₁/₂. **Breaking:** `encrypt` and `decrypt` take
+  the setup and SharedInfo, and the old AES-256-GCM ciphertext format is gone.
+- **Domain parameters follow FIPS 186-4.** **Breaking:**
+  `Dsa::generate(rng, bits)` becomes `Dsa::generate(&DsaParams, rng)`, and
+  `Dh::generate_params` and `ElGamal::generate` take a size and a hash instead
+  of a bit count. `DhPrivateKey::agree_element` refuses results 1 and p − 1.
+- **One parse-time validation policy.** Private keys are fully validated with
+  the hash-hardened primality test and recomputed relations. Public keys are
+  validated structurally, with subgroup membership where a prime-order subgroup
+  exists; domain parameters a key pair will be generated over take the
+  hardened test.
+- **Breaking:** `DhParams` fields are private; `DhPublicKey::params()` returns
+  `Option<DhParams>`; `EcElGamalPrivateKey::{decrypt_point, decrypt}` return
+  `Option`; `key_schedule` and `KeySchedule` are reachable only as
+  `cryptography::des::…`, and `DesKeyError` is exported at the root.
+- **RSA keys follow RFC 8017 §3.1–3.2.** Constructors reject `e < 3` or
+  `e ≥ n`, the default exponent search stays below `n`, and parsers require
+  `n` and `e` odd, `3 ≤ e < n`, and `d < n`.
+- **Memory wiping is always on.** This crate scrubs its own secrets in every
+  build, including temporaries in modes, ciphers, hashes, and key
+  serialization, and it enables rump's `BigUint` limb wiping, which rump keeps
+  opt-in because it is general-purpose. The owner decided this on 2026-09-11.
+- **ChaCha20 enforces RFC 8439's counter limit**: exhausting the 32-bit block
+  counter panics, ChaCha20-Poly1305 encryption asserts the 2^38 − 64 byte
+  limit, and decryption returns `false` beyond it.
+- DSA and ECDSA share one RFC 6979 generator, which retries on `r = 0` or
+  `s = 0`; one strict X.690 DER reader and writer serves every format; CMAC
+  subkeys are derived once and shared by EAX and SIV (`Eax::new` and
+  `Siv::new` now require `C: BlockCipher`).
+- **Breaking:** `decrypt_int` in EC-ElGamal and Edwards ElGamal takes an
+  exclusive `bound` (was `max_m` and an inclusive `max_message`), and
+  `Ocb::new(cipher)` needs the tag length spelled out where inference cannot
+  fix it (`Ocb::<_, 16>::new`).
+- OpenSSL cross-checks distinguish a missing tool, an algorithm the installed
+  tool rejects (reported and skipped), and a mismatch (a failure). OpenSSL 3
+  gets the legacy provider for DES, CAST5, and SEED.
+- Public-key modules take modular arithmetic, encoding, narrowing, hex parsing,
+  shifts, and the twisted-Edwards square root from rump instead of hand-rolled
+  helpers.
 - **Multiprecision layer extracted to the sibling
-  [rump](https://github.com/darrelllong/rump) crate** — `BigUint`, `BigInt`,
-  `MontgomeryCtx`, and the deterministic number theory (`gcd`, `lcm`,
-  `jacobi`, `mod_pow`, `mod_inverse`, fixed-base Miller-Rabin) now live in
-  `rump` and are re-exported at their old paths
-  (`public_key::bigint`, `public_key::primes`, `vt::`), so no caller
-  changes. Randomized generation and the hash-hardened untrusted primality
-  test remain here, composed over `rump::miller_rabin_witness`. The bigint
-  bench and GMP comparison harness moved with the code. rump is the crate's
-  only dependency (crates.io package name `rust-mp`, lib name `rump`): same
-  author, extracted from this tree, same safety and scrubbing policies.
-- GF(2^m) arithmetic moved to rump as the public `Gf2m` context; the
-  binary-curve code in `ec` now threads one field context instead of a
-  loose (polynomial, degree) pair, and `CurveParams::new_binary` validates
-  the pair against the derived degree.
-- The `random_below` / `random_nonzero_below` / `random_coprime_below` /
-  `random_probable_prime` samplers now live in rump, driven by its `Rng`
-  trait; `public_key::primes` re-exports them behind the same
-  `Csprng`-based signatures, so callers are unchanged. The full
-  number-theory surface (`legendre`, `kronecker`, `sqrt_mod`,
-  `gcd_extended`, `crt_combine`) is re-exported there as well. RSA and
-  Rabin deliberately keep their precomputed CRT coefficients (RFC 8017
-  serializes `qInv`) rather than adopting the generic `crt_combine` — the
-  generic path would recompute an inverse per decrypt.
-- **Zero dependencies**: `quick-xml` is gone. The flat XML key format is
-  read and written by a small strict scanner in `public_key::io`
-  (byte-identical output, same strictness on input).
-- The ~70 hand-written `to_xml`/`from_xml`/`to_key_blob`/`from_key_blob`/
-  `to_pem`/`from_pem` methods across the public-key modules are now
-  generated by `impl_xml_serialization!` / `impl_blob_pem_serialization!`
-  from a per-type `serial_fields`/`from_serial_fields` pair, eliminating the
-  duplicated validation between the DER and XML decode paths (~850 lines
-  removed).
-- Poly1305 rewritten from `BigUint` arithmetic to 5×26-bit limbs
-  (poly1305-donna form): branch-free, allocation-free, and ~50× faster —
-  ChaCha20-Poly1305 seal goes from ~5 MB/s to ~265 MB/s on Apple Silicon.
-- `MontgomeryCtx::pow` uses fixed 4-bit-window exponentiation for exponents
-  over 64 bits: RSA-2048 decrypt/sign/keygen ~17% faster.
-- Weierstrass and twisted-Edwards point arithmetic now stays in the
-  Montgomery domain across the whole scalar multiplication (plus the
-  factored `B = 3(X−Z²)(X+Z²)` doubling for `a = −3` curves): P-256 ECDSA
-  and Ed25519 sign/verify ~2.5× faster.
-- CMAC derives its SP 800-38B subkeys once at construction instead of per
-  tag; the unsupported-block-size panic moved from `compute` to `new`.
-- HKDF-expand streams each round through the keyed HMAC state into one
-  reused buffer instead of concatenating per-round input vectors.
-- ML-DSA verification compares the recomputed challenge in constant time;
-  NTRUEncrypt (EES) decryption accumulates its re-encryption check over all
-  coefficients instead of breaking at the first mismatch; both as
-  side-channel hygiene.
-- Clippy is clean at default lint levels (was: one denied `never_loop`
-  error and 34 warnings).
-- AEAD modes document nonce-reuse consequences; mode methods that assert
-  document `# Panics`; `CtrDrbgAes256` documents fork safety.
+  [rump](https://github.com/darrelllong/rump) crate** (package `rust-mp`, lib
+  `rump`), which is now the only dependency; `quick-xml` is gone. **Breaking:**
+  the `public_key::bigint` shim and the `public_key::primes` re-exports of rump
+  are removed; the bigint types remain available through `vt::`. GF(2^m)
+  arithmetic is rump's `Gf2m` context, which the binary curves thread as one
+  field context, and the random samplers are rump's, reached through the
+  `Csprng` bridge in `primes`. RSA-2048 decryption, signing, and key generation
+  are about 17% faster through rump's fixed-window exponentiation.
+- Prime-curve and twisted-Edwards scalar multiplication stay in the Montgomery
+  domain across the whole ladder: `ecdsa_sign` 1.47 → 0.72 ms and `ecdh_agree`
+  1.38 → 0.69 ms on Apple M1.
+- The hand-written key serialization methods are generated by
+  `impl_xml_serialization!` and `impl_blob_pem_serialization!`.
+- HKDF-expand streams rounds through one keyed HMAC state, and CMAC's
+  unsupported-block-size panic moved from `compute` to `new`.
+- AEAD modes document nonce-reuse consequences, asserting mode methods document
+  `# Panics`, and `CtrDrbgAes256` documents fork safety.
+- Clippy is clean with `-D warnings` under the default and `ct_profile`
+  feature sets.
+- The `vt` documentation names the modules that document their own
+  constant-time scope instead of implying only X25519 and X448 avoid
+  secret-dependent timing.
+- `POSTQUANTUM.md` math notation uses KaTeX-rendered LaTeX.
+- RSA's standard encodings run on the same shared PKIX layer. Their PEM
+  decoders follow RFC 7468's grammar and reject non-canonical base64, PKCS #8
+  decoding accepts RFC 5958 version 2 keys, and intermediate DER is wiped.
+- ML-KEM and ML-DSA private keys keep their seed when generated from or
+  imported with one, `MlKem::keygen` wipes its seed, and `MlKemPrivateKey`
+  equality is constant-time.
+- Ed25519 decodes public keys and signature R values exactly as RFC 8032
+  §5.1.3 specifies and verifies with §5.1.7's cofactored equation, as the owner
+  decided on 2026-09-11. Small-order and mixed-order keys the crate used to
+  refuse are accepted; they bind no secret, so a caller that needs a key tied to
+  one should check `is_valid_public_point`.
+- ML-KEM private-key importers that take a decapsulation key without its seed
+  (`from_wire_bytes`, `from_key_blob`, and the PKCS #8 `expandedKey` form)
+  run FIPS 203 §7.1's pair-wise consistency test, which needs fresh random
+  bytes, so all four importers now take a random source. RFC 9935's
+  inconsistent example C.4.1 #2 is rejected.
+- OpenSSL cross-check tests prefer OpenSSL 3 over LibreSSL when both are
+  installed, and `CRYPTOGRAPHY_OPENSSL` overrides the choice.
+- Every PEM decoder, including the crate's own formats, follows RFC 7468 §2:
+  text before the boundary is ignored, CRLF, CR and LF all end lines,
+  whitespace between the boundaries is ignored, and the base64 must be
+  canonical, so non-canonical base64 the crate used to accept is now refused.
+- Point negation on Weierstrass and Edwards curves and in Rabin uses rump's
+  `BigUint::mod_neg`, and Edwards point encoding and decoding use rump's
+  little-endian conversions instead of reversing big-endian copies. These and
+  the C.3.3 Lucas test need rump's additions of 2026-09-11.
+- Test code decodes hex and reads vector files through one shared set of
+  helpers in `src/test_utils/vectors.rs`, which the integration tests compile
+  too. 84 hand-rolled copies are gone, and malformed hex now fails the test
+  instead of being silently truncated or padded.
+- **The randomness battery is seven distinct tests, not twenty**: byte
+  frequency χ² (256 cells), KS against Uniform(0,1), Knuth's serial test on
+  pairs, gap test, permutation test on 4-tuples, Bartlett's cumulative
+  periodogram and the Wald-Wolfowitz runs test on the whole bit stream, all
+  on one chunk width (the 16- and 32-byte chunks were decimations of the
+  8-byte one). A cipher fails when any p-value falls below α/m (Bonferroni,
+  α = 0.001); entropy, moments and Fisher's g are reported, not counted,
+  since the plug-in entropy deficit is the byte χ² statistic over 2L ln 2.
+  The gap test pools its tail at an expected count of 50 (measured on
+  60,000 null streams: 5 gave a rejection rate of 1.42 × 10⁻³ at α = 10⁻³,
+  50 gave 9.2 × 10⁻⁴). The script needs only base R, runs the spectral
+  test on the largest 5-smooth prefix so the FFT is O(n log n), and takes
+  half a second per stream instead of forty.
+- Fuzz targets with structured inputs (`fuzz_dsa`, `fuzz_dh`, `fuzz_ecies`)
+  take a length-prefixed key blob instead of splitting the input in half;
+  `fuzz_ecdsa` and `fuzz_ecdh` cover all sixteen named curves; `fuzz_hash`
+  covers all thirteen digests and both SHAKEs; `fuzz_rabin` uses a generated
+  512-bit key; `fuzz_ml_kem` and `fuzz_ml_dsa` flip the bit the fuzzer
+  chooses in ciphertexts, signatures and public keys; `fuzz_des` compares
+  the T-table and constant-time DES and TDEA through the checked
+  constructors; `fuzz_dsa` and `fuzz_ecdsa` reduce the digest as FIPS 186-4
+  does before verifying and draw scalars at the order's bit width;
+  `fuzz_cprng` checks the DRBG against properties derived in the target
+  (instantiate and reseed as the padded XOR, a request as the prefix of a
+  longer one up to the 64 KiB maximum, the reseed counter).
+
+### Removed
+- Sixteen dated `benchmarks/pilot_*.md` dumps, eight orphaned single-platform
+  radar generators and their charts, five unreferenced sweep radars,
+  `scripts/merge_pilot_tables.py`, and five copy-pasted
+  `scripts/bench_ees*_only.sh` scripts.
+- `src/bin/ees_regression_gen.rs` and the self-generated NTRUEncrypt digests,
+  replaced by interoperability vectors.
+- `tests/vectors/ml_kem_ref_zetas.txt` and `tests/vectors/ml_dsa_ref_zetas.txt`,
+  reference-derived tables no longer used.
+- The non-FIPS `generate_prime_order_group`, the old ECIES construction, and
+  the transitional `test_utils::run_openssl`.
 
 ### Fixed
-- `POSTQUANTUM.md` correctness sweep. NTRUEncrypt now appears in Scope, What
-  Is Implemented, Theory of Operation, Working Examples, and Validation
-  alongside ML-KEM, ML-DSA, and NTRU; the cross-scheme comparison covers all
-  four schemes. Other corrections: EES449EP1 max-message (was 69, actual
-  67); the NTRU Kiviat radar (was 8 axes, now 12); the HRSS-701-vs-ML-KEM
-  encaps comparison numbers; the NTRU keygen/encaps-decaps ratio range; the
-  `(f, h)` trapdoor mis-description and `h = 3·f^{-1}` (missing `g`) in the
-  NTRUEncrypt theory; the legacy `(Kyber)` / `(Dilithium)` section
-  parentheticals; the "vendored reference code" / "trees not vendored"
-  contradiction.
-- `scripts/build_radar_csvs.py::PK_NTRU` was missing keygen and decaps for
-  HPS-677 and HPS-821. The 2026-05-08 NTRU Kiviat
-  (`assets/sweep-2026-05-08-ntru-radar.svg`) is regenerated with all twelve
-  axes.
-- `scripts/bench_all_pk_full.sh` now measures EES1171EP1 (previously the
-  only exported NTRUEncrypt parameter set with no benchmark line).
-- `tests/manual_examples.rs::manual_postquantum_examples` now also
-  exercises NTRUEncrypt EES443EP1, restoring the doc's claim that every
-  working example is mirrored by a test.
+- **ECDSA rejected valid signatures** with `s > n/2`, about half of what
+  OpenSSL produces. The verifier accepts any `1 ≤ s < n`; signing still emits
+  the low-s form.
+- **The B-409 curve had the wrong subgroup order.** It now matches FIPS 186-4
+  D.1.3.4.2, and every named curve is tested for `n·G = ∞`.
+- **Standard RSA key parsers rejected keys** whose `d` is reduced modulo φ(n).
+- **ZUC-128 and SNOW 3G `fill`** discarded the tail of a partial keystream word.
+- **`CtrDrbgAes256::fill_bytes` panicked above 64 KiB.**
+- **Twisted-Edwards addition was hard-coded for `a = −1`.**
+- **The `ct_profile` feature did not compile.**
+- **FIPS 186-4 prime testing used rump's strong Lucas test**, which accepts
+  only a subset of what Appendix C.3.3 accepts. It now runs C.3.3's own Lucas
+  test through rump's `is_lucas_probable_prime`.
+- **NTRU round-3 encapsulation could produce ciphertexts its own
+  decapsulation rejects.** The specification's Ternary sampler can yield
+  r = 0, or m = 0 for HRSS, which its sample spaces exclude and decapsulation
+  refuses. Encapsulation now redraws its coins once in that case and panics if
+  the second draw is refused too, which a working random source reaches with
+  probability below 2^−1598. Decapsulation keeps rejecting zero polynomials,
+  as the owner decided on 2026-09-11.
+- **OpenSSL cross-check tests passed without comparing anything** when the
+  installed tool lacked an algorithm.
+- **`scripts/cipher_randomness.R` could not run**: its driver was never
+  committed.
+- **The randomness battery's gap and spectrum tests were miscalibrated.**
+  randtoolbox's `gap.test` never pools rare long gaps, so a single one decided
+  the result: on OS-random bytes it rejected 16 times in 300 at α = 0.001,
+  where about 0.3 rejections are expected. The battery now runs Knuth's gap
+  test from *TAOCP* Vol. 2 §3.3.2. The spectrum test estimated its scale from
+  the data and almost never rejected; Bartlett's cumulative periodogram test
+  replaces it. The bit-stream runs test no longer counts three times.
+- ElGamal's byte wrapper round-trips a zero message; Paillier `rerandomize`
+  range-checks before drawing randomness; DSA verification is tested against
+  out-of-range `r` and `s`.
+- A GCM unit test used a vector that appears in no published source; it now
+  uses the specification's Test Case 4, and every GCM value in the crate was
+  checked against NIST's copy of the specification. Serpent vectors are cited
+  to the authors' submission files.
+- Documentation drift: Speck's vectors are from Appendix C; SEED cites RFC
+  4269; DSA cites FIPS 186-4; ML-DSA private keys are 2560, 4032, and 4896
+  bytes; the NTRU HPS public-key formula includes its factor of 3; stale
+  references to an in-tree bigint layer, a "Python reference", and the old
+  wiping policy are gone; benchmark tables for rewritten code are marked stale.
+- `POSTQUANTUM.md` correctness sweep, `scripts/build_radar_csvs.py` gained the
+  HPS-677/821 axes, `scripts/bench_all_pk_full.sh` measures EES1171EP1, and
+  `tests/manual_examples.rs` exercises NTRUEncrypt.
+- **EC-ElGamal byte encryption returned `None` for every message**: the
+  Koblitz x-coordinate buffer was two bytes short of the curve's coordinate
+  width once the capacity became `⌊(bits − 1)/8⌋ − 1`. The buffer is sized
+  from the coordinate width; the round-trip tests on nine curves run again.
+- The manual's RSA-PSS example asked for a 64-byte salt with SHA-512 under a
+  1024-bit key, which RFC 8017 §9.1.1 step 3 forbids (emLen ≥ hLen + sLen +
+  2); it uses a 32-byte salt and says why. The README's RSA and Paillier
+  examples each stand alone (the OAEP example needs a 1024-bit key: a
+  512-bit modulus cannot hold a SHA-256 OAEP block).
+- The NTRUEncrypt refusal-rate test runs enough trials to expect at least 25
+  refusals per set that refuses at all and bounds the count at four standard
+  deviations; its first form allowed one refusal too few for `ees443ep1`. A
+  release-only test (`--ignored`) with 100,000, 1,000,000 and 30,000 trials
+  decides `dm0` against `dm0 ± 1` by binomial likelihood; the table's value
+  won by 57 to 171 nats on every set.
+- The IKEv2 KE payloads in the RFC 5903 test are length-checked before their
+  header is read.
 
-### Changed
-- `POSTQUANTUM.md` math notation now uses KaTeX-rendered LaTeX rather than
-  backtick ASCII, matching the module-docstring convention adopted in 0.6.0.
+### Security
+- **`DsaPrivateKey::sign_digest` looped forever on a group where every
+  nonce is rejected**, and **ElGamal decryption validated nothing**, so a
+  small-order `γ` leaked bits of the private exponent; both are bounded and
+  validated as above.
+- **Blob and BER parsers had no element-count bound**, a twenty-fold memory
+  amplification from hostile input; bounded as above.
+- **Ed448-sized Edwards curves encoded points into 56 octets**, overwriting
+  bit 447 of `y` with the sign, so about half of all points round-tripped to
+  a different point with no error. Encodings now carry the sign in a bit of
+  their own.
+- **RSAES-OAEP accepted a nonzero leading octet.** RFC 8017 §7.1.2 step 3g
+  was checked on a buffer that had already been wiped, so it could never
+  fire; the check now reads the octet first, inside the same full-scan mask.
+- **EC-ElGamal's byte-message encryption produced undecryptable
+  ciphertexts on the cofactor curves**: the Koblitz embedding landed outside
+  the subgroup of order `n` about two thirds of the time on B-163 and K-163,
+  and decryption rightly refused the result. Every plaintext point is now in
+  the subgroup.
+- **`EcdsaPrivateKey` and `EciesPrivateKey` left the private scalar's DER in
+  freed memory** on every PEM encode and decode and, for ECDSA, on every
+  blob encode; the shared `ec_io` layer wipes those temporaries.
+- **NTRU round-3 key generation could emit an all-zero key pair.** The
+  specification's samplers can yield `f = 0` (or `g = 0` for HRSS); with
+  `h = 0` every ciphertext is `Lift(m)`. Key generation now refuses such
+  draws (see Changed).
+- **ML-KEM and NTRU shared secrets and NTRU private keys compared with an
+  early-exit equality**; they now compare in constant time, as the other
+  secret-bearing types do.
+- **ML-DSA signing left μ in memory and verification destroyed none of its
+  intermediates** (FIPS 204 §3.6.3); both now wipe every intermediate. The
+  NTRU polynomial multiplier wipes its scratch (the convolution buffer and
+  every Karatsuba level), which also serves NTRUEncrypt; the NEON Keccak path
+  wipes its column parities; SHAKE finalizes its sponge in place instead of
+  copying it.
+- **Explicit curve parameters in EC key blobs and XML were taken on trust.**
+  The ECDSA, ECDH, ECIES and EC-ElGamal decoders now build them through
+  `CurveParams::from_explicit`, which accepts a named curve of this crate or
+  parameters that pass the SEC 1 v2.0 validation primitive in full
+  (§3.1.1.2.1 over `F_p`, §3.1.2.2.1 over `F_2^m`): field size at a standard
+  security level, `p` and `n` prime, reduced coefficients and base point, a
+  non-singular curve with `G` on it, the cofactor the Hasse bound fixes,
+  `n·G = ∞`, and neither an anomalous curve nor a small embedding degree.
+  Parameters outside the primitive's sizes (a 160-bit prime field, say) are
+  refused.
+- **ML-DSA private keys were imported on their length alone.**
+  `MlDsaPrivateKey::from_wire_bytes` and `from_key_blob` now regenerate the
+  public key as the PKCS #8 `expandedKey` path does: `s1` and `s2` in
+  `[−η, η]`, and `t0` and `tr` the ones ρ, `s1` and `s2` produce.
+- **ECDH accepted a peer key on a different curve**, enabling an invalid-curve
+  attack on the static scalar; agreement now requires the same curve.
+- **EC-ElGamal decrypted unvalidated ciphertext points.**
+- **Weierstrass and Edwards decoders accepted non-canonical coordinates**, and
+  the Weierstrass decoders skipped subgroup checks on cofactor curves.
+- **Binary-curve key blobs could panic the parser** through a reducible modulus
+  polynomial.
+- **ML-KEM divided by q on secret operands** (the KyberSlash pattern,
+  CVE-2024-37880).
+- **RSA OAEP decryption and PSS verification skipped RFC 8017's range check.**
+- **DSA public keys were not checked for subgroup membership.**
+- **Paillier had a `debug_assert!` reachable from crafted ciphertext**, and CCM
+  decryption panicked on an attacker-chosen length.
+- **Secret temporaries were freed unwiped** in AEAD modes, key schedules,
+  hashes, Ed25519 signing, and key serialization.
+- **Key encoders left unwiped copies of secrets.** PEM, XML and DER encoders
+  grew their output buffers as they wrote, so reallocation could leave copies
+  of private-key material in freed memory. They now allocate the exact final
+  size up front, and PEM decoding and BER conversion use wiped buffers that
+  never grow.
+- **An EC public key could be the point at infinity.** ECDSA, ECDH and
+  EC-ElGamal wire-byte imports accepted the identity encoding. Under an ECDSA
+  identity key, a signature built entirely from public data verified, and under
+  EC-ElGamal the ciphertext carried the plaintext. ECDSA's blob, PEM and XML
+  imports also skipped SEC 1 §3.2.2.1's coordinate range check, and a crafted
+  private key could derive the identity as its public key. Every EC public-key
+  import now performs SEC 1 §3.2.2.1 validation, private-key imports require a
+  valid public point, and ECDSA verification refuses the identity.
+- **NTRUEncrypt ees443ep1 and ees1499ep1 were malleable.** Their last trit
+  pair decodes two bits past the zero padding, and EESS #1 v3.1 §10.2.3 never
+  checks them, so adding 1 to the final ciphertext coefficient left the
+  plaintext unchanged about two times in three. Decryption now also requires
+  those bits to be the zeros an honest encryptor writes, in constant time. The
+  check goes beyond the letter of the specification, honest ciphertexts still
+  decrypt, and the reference interoperability vectors pass both ways.
 
 ## [0.6.2] — 2026-05-08
 

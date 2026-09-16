@@ -29,7 +29,8 @@ Security note:
   effort and out of scope for this crate. Two equivalent paths reach the
   same types: `cryptography::vt::Ecdsa` (flat re-export, kept as a hint
   that the surface is variable-time) and `cryptography::public_key::ecdsa`
-  (the natural module tree). Pick whichever reads better in your code.
+  (the natural module tree). Pick whichever reads better in your code; the
+  `vt` name labels the surface, it does not gate it.
   X25519 / X448 are exceptions and use the constant-time RFC 7748 ladder.
 - Constant-time symmetric implementations are explicitly suffixed `Ct`
   (e.g. `Aes128Ct`, `Sm4Ct`, `Zuc128Ct`); the bare-named types
@@ -37,7 +38,8 @@ Security note:
   and are **not** constant-time. AEAD wrappers `Gcm`, `Gmac`, `GcmVt`, and
   `GmacVt` make the choice explicit per construction.
 - This crate intentionally does **not** provide an OS entropy source.
-  `CtrDrbgAes256` is deterministic once seeded. All key generation, randomized
+  `CtrDrbgAes256` (T-table AES) and `CtrDrbgAes256Ct` (constant-time AES)
+  are deterministic once seeded. All key generation, randomized
   padding, and nonce-dependent operations inherit seed quality from caller-
   supplied external entropy. Obtain entropy from OS APIs (`getentropy`,
   `SecRandomCopyBytes`, `getrandom`, or platform equivalent), and do not invent
@@ -60,7 +62,8 @@ Implemented families:
 - AES (`Aes128/192/256`) plus software constant-time variants (`Aes*Ct`)
 - CAST-128 / CAST5 plus `Cast128Ct`
 - Camellia (`Camellia128/192/256`) plus software constant-time variants
-- Serpent (`Serpent128/192/256`) plus software constant-time variants
+- Serpent (`Serpent128/192/256`); the `Ct` names are aliases of the same
+  types (the bitsliced round function is constant-time by construction)
 - Twofish (`Twofish128/192/256`) plus software constant-time variants
 - SEED plus `SeedCt`
 - SIMON (all 10 published variants)
@@ -88,7 +91,7 @@ Supporting primitives:
 - Generic block-cipher modes: `Ecb`, `Cbc`, `Cfb`, `Cfb8`, `Ofb`, `Ctr`,
   `Cmac`, `Ccm`, `Gcm`, `GcmVt`, `Gmac`, `GmacVt`, `Xts`, `AesKeyWrap`,
   `Eax`, `Ocb`, `Siv`, `Aes128GcmSiv`, `Aes256GcmSiv`
-- SP 800-90A Rev. 1: `CtrDrbgAes256`
+- SP 800-90A Rev. 1: `CtrDrbg<C>` as `CtrDrbgAes256` and `CtrDrbgAes256Ct`
 
 RFC 7748 constant-time ECDH (under `cryptography::vt`):
 
@@ -112,6 +115,7 @@ Asymmetric post-quantum work:
 Documentation:
 
 - [ANALYSIS.md](ANALYSIS.md): top-level overview, coverage, and experiment notes
+- [R-REPORT.md](R-REPORT.md): the symmetric-cipher randomness battery and its calibration on OS-random streams
 - [SYMMETRIC.md](SYMMETRIC.md): symmetric ciphers, modes, hashes, and throughput
 - [ASYMMETRIC.md](ASYMMETRIC.md): public-key primitives, wrappers, serialization, and latency
 - [POSTQUANTUM.md](POSTQUANTUM.md): ML-KEM/ML-DSA APIs, design rationale, and PQ benchmarks
@@ -128,7 +132,7 @@ expected size is visible in the API:
 - `Aes192`, `Camellia192`, `Serpent192`, `Twofish192` take `&[u8; 24]`
 - `Aes256`, `Camellia256`, `Serpent256`, `Twofish256` take `&[u8; 32]`
 - `Present80` takes `&[u8; 10]`; `Present128` takes `&[u8; 16]`
-- `Des` uses an 8-byte DES key; `TripleDes::new_2key` uses 16 bytes; `TripleDes::new_3key` uses 24 bytes
+- `Des` uses an 8-byte DES key; `TripleDes::new_2key` uses 16 bytes; `TripleDes::new_3key` uses 24 bytes; `TripleDesCt` takes the same keys over the constant-time DES core
 
 The main variable-length exceptions are:
 
@@ -248,7 +252,8 @@ The mode layer implements:
 - SP 800-38E: XTS (for 128-bit block ciphers)
 - SP 800-38F / RFC 3394: AES Key Wrap (`AesKeyWrap`, no padding)
 - RFC 5297: SIV
-- RFC 7253: OCB3
+- RFC 7253: OCB3, with the three tag lengths of its section 3.1 (`Ocb<C, 16>`,
+  `Ocb<C, 12>`, `Ocb<C, 8>`; `Ocb<C>` is the 16-byte default)
 - RFC 8452: AES-GCM-SIV (`Aes128GcmSiv`, `Aes256GcmSiv`)
 - RFC 8439: Poly1305, ChaCha20-Poly1305
 - Bellare-Rogaway-Wagner EAX
@@ -292,9 +297,11 @@ The crate root exports:
 SHA-1 / SHA-2 / SHA-3 expose fixed-output hashes, and SHAKE exposes
 extendable-output functions:
 
-For keyed integrity, do not treat raw SHA-1 / SHA-2 digests as MACs. Those
-Merkle-Damgard hashes have the usual length-extension caveat; use `Hmac<H>`
-instead, or prefer SHA-3 / SHAKE when sponge-based hashing is a better fit.
+For keyed integrity, do not treat raw MD5, RIPEMD-160, SHA-1 or SHA-2 digests
+as MACs. Those Merkle-Damgard hashes have the usual length-extension caveat
+(a digest of a secret-prefixed message extends to a digest of a longer one
+without the secret); use `Hmac<H>` instead, or prefer SHA-3 / SHAKE when
+sponge-based hashing is a better fit.
 
 ```rust
 use cryptography::{Digest, Hmac, Sha256, Sha3_256, Shake128};
@@ -341,11 +348,15 @@ Use the `Ct` path when:
 
 The `Ct` types are distinct on purpose; the API makes the tradeoff explicit.
 
-### Wiping caller-owned keys
+### Memory wiping
 
-Cipher types that retain expanded round keys also expose `new_wiping(...)`
-constructors. These build the cipher, then erase the caller-provided key
-buffer:
+This crate scrubs its own secrets in every build: expanded key schedules and
+DRBG state are wiped on drop, and secret temporaries (speculative AEAD
+plaintext, KDF inputs, nonce material) are wiped before they are freed, all
+through the volatile-write helper `zeroize_slice`.
+
+Cipher types also expose `new_wiping(...)` constructors, which build the cipher
+and erase the caller-provided key buffer:
 
 ```rust
 use cryptography::Aes256Ct;
@@ -355,6 +366,11 @@ let _cipher = Aes256Ct::new_wiping(&mut key);
 
 assert_eq!(key, [0u8; 32]);
 ```
+
+Big integers come from the sibling `rump` crate, which is general-purpose and
+keeps its limb wiping off by default because wiping costs speed. This crate
+turns it on, so every `BigUint` wipes its limbs on drop. Cargo unifies
+features, so any build that includes this crate wipes every rump value.
 
 ## How To Verify Correctness
 
@@ -444,8 +460,8 @@ The variable-time public-key module is intentionally explicit under
 - shared arithmetic support (re-exported from [rump](https://github.com/darrelllong/rump)): `BigUint`, `BigInt`, `MontgomeryContext`
 - usable wrappers:
   - `RsaOaep<H>` and `RsaPss<H>` for standards-based RSA encryption/signatures
-  - standard RSA key externalization via PKCS #1 / PKCS #8 / SPKI in DER or PEM
-  - crate-defined DER/PEM/XML key externalization for the non-RSA schemes, including `Dsa`
+  - standard key externalization via SPKI and PKCS #8 in DER or PEM for RSA, EC (ECDSA, ECDH, ECIES), DSA, DH, X25519, X448, Ed25519, ML-KEM and ML-DSA, plus PKCS #1 for RSA and SEC 1 for EC
+  - crate-defined DER/PEM/XML key externalization for the non-RSA schemes, including `Dsa`, which stays their default
   - byte-to-byte encrypt/decrypt helpers for all implemented encryption-capable schemes
   - byte-to-byte sign/verify helpers for signature-capable schemes (`Dsa`, `RsaPss<H>`)
   - built-in key generation for all implemented public-key schemes
@@ -459,12 +475,18 @@ use cryptography::CtrDrbgAes256;
 
 let seed = [0x55u8; 48];
 let mut drbg = CtrDrbgAes256::new(&seed);
-let (public, private) = Rsa::generate(&mut drbg, 512).expect("RSA key");
+let (public, private) = Rsa::generate(&mut drbg, 1024).expect("RSA key");
 ```
 
 Persist the RSA key pair in modern standard containers:
 
 ```rust
+use cryptography::vt::Rsa;
+use cryptography::CtrDrbgAes256;
+
+let mut drbg = CtrDrbgAes256::new(&[0x55u8; 48]);
+let (public, private) = Rsa::generate(&mut drbg, 1024).expect("RSA key");
+
 let private_pem = private.to_pkcs8_pem();
 let public_pem = public.to_spki_pem();
 
@@ -481,6 +503,12 @@ If you want a simple human-readable export for debugging, RSA also has the same
 flat XML convenience format as the non-RSA schemes:
 
 ```rust
+use cryptography::vt::Rsa;
+use cryptography::CtrDrbgAes256;
+
+let mut drbg = CtrDrbgAes256::new(&[0x55u8; 48]);
+let (public, private) = Rsa::generate(&mut drbg, 1024).expect("RSA key");
+
 let private_xml = private.to_xml();
 let public_xml = public.to_xml();
 
@@ -490,6 +518,44 @@ let public_again = cryptography::vt::RsaPublicKey::from_xml(&public_xml).expect(
 assert_eq!(private_again, private);
 assert_eq!(public_again, public);
 ```
+
+Elliptic-curve, DSA and Diffie-Hellman keys have the standard containers too,
+under explicitly named methods; the crate-defined formats shown next remain
+their defaults and are unchanged. An EC key has a standard encoding only on a
+named curve (P-192 to P-521, secp256k1, the NIST binary curves), so its `to_*`
+methods return `Option`:
+
+```rust
+use cryptography::vt::{p256, Ecdsa, EcdsaPrivateKey, EcdsaPublicKey};
+use cryptography::CtrDrbgAes256;
+
+let mut drbg = CtrDrbgAes256::new(&[0x31; 48]);
+let (public, private) = Ecdsa::generate(p256(), &mut drbg);
+
+let public_pem = public.to_spki_pem().expect("named curve"); // RFC 5480
+let private_pem = private.to_pkcs8_pem().expect("named curve"); // RFC 5958 holding RFC 5915
+let sec1_pem = private.to_sec1_pem().expect("named curve"); // "EC PRIVATE KEY"
+
+let public_again = EcdsaPublicKey::from_spki_pem(&public_pem).expect("SPKI");
+let private_again = EcdsaPrivateKey::from_pkcs8_pem(&private_pem).expect("PKCS #8");
+assert_eq!(public_again.public_point(), public.public_point());
+assert_eq!(private_again.private_scalar(), private.private_scalar());
+assert!(EcdsaPrivateKey::from_sec1_pem(&sec1_pem).is_some());
+```
+
+DSA and DH keys add `to_spki_der` / `to_spki_pem` (RFC 3279) and
+`to_pkcs8_der` / `to_pkcs8_pem`, and `DsaParams` / `DhParams` add `to_der`
+(`Dss-Parms` and X9.42 `DomainParameters`). No standard defines a
+Diffie-Hellman private key in PKCS #8, so `DhPrivateKey::to_pkcs8_der` follows
+OpenSSL's convention. The `_der` decoders accept strict DER; `from_pkcs8_ber`,
+`from_sec1_ber` and the `PRIVATE KEY` and `PUBLIC KEY` PEM decoders accept any
+BER encoding, as RFC 5958 §2, RFC 5915 §4 and RFC 7468 §10 and §13 ask of
+receivers. Every decoder validates the key it returns, and all are
+cross-checked against OpenSSL 3.
+
+X25519, X448 and Ed25519 keys follow RFC 8410, ML-KEM keys RFC 9935 and ML-DSA
+keys RFC 9881, under the same method names. An ML private key is written as its
+seed when it has one, and as the expanded key otherwise.
 
 Persist a non-RSA key pair in the crate-defined portable format:
 
@@ -513,6 +579,12 @@ assert_eq!(private_again, private);
 The same non-RSA keys can also be exported as flat XML:
 
 ```rust
+use cryptography::vt::Paillier;
+use cryptography::CtrDrbgAes256;
+
+let mut drbg = CtrDrbgAes256::new(&[0x23; 48]);
+let (public, private) = Paillier::generate(&mut drbg, 512).expect("Paillier key");
+
 let public_xml = public.to_xml();
 let private_xml = private.to_xml();
 
@@ -526,15 +598,16 @@ assert_eq!(private_again, private);
 Encrypt and decrypt with `RSAES-OAEP`:
 
 ```rust
-use cryptography::vt::RsaOaep;
+use cryptography::vt::{Rsa, RsaOaep};
 use cryptography::{CtrDrbgAes256, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x11; 48]);
+let (public, private) = Rsa::generate(&mut drbg, 1024).expect("RSA key");
 // The OAEP label is an optional context string. The empty label is the
 // standard default when you do not need domain separation.
 let ciphertext =
     RsaOaep::<Sha256>::encrypt_rng(&public, b"", b"hello", &mut drbg).expect("OAEP");
-let plaintext = RsaOaep::<Sha256>::decrypt(&private, b"", &ciphertext).expect("OAEP");
+let plaintext = RsaOaep::<Sha256>::decrypt_rng(&private, b"", &ciphertext, &mut drbg).expect("OAEP");
 
 assert_eq!(plaintext, b"hello");
 ```
@@ -542,22 +615,27 @@ assert_eq!(plaintext, b"hello");
 Sign and verify with `RSASSA-PSS`:
 
 ```rust
-use cryptography::vt::RsaPss;
+use cryptography::vt::{Rsa, RsaPss};
 use cryptography::{CtrDrbgAes256, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x22; 48]);
-let signature = RsaPss::<Sha256>::sign_rng(&private, b"message", &mut drbg).expect("PSS");
-assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature));
+let (public, private) = Rsa::generate(&mut drbg, 1024).expect("RSA key");
+let signature = RsaPss::<Sha256>::sign_rng(&private, b"message", 32, &mut drbg).expect("PSS");
+assert!(RsaPss::<Sha256>::verify(&public, b"message", &signature, 32));
 ```
 
 Generate and use a `DSA` key pair:
 
 ```rust
-use cryptography::vt::Dsa;
+use cryptography::vt::{Dsa, FfcHash, FfcParameterSize};
 use cryptography::{CtrDrbgAes256, Sha256};
 
 let mut drbg = CtrDrbgAes256::new(&[0x24; 48]);
-let (public, private) = Dsa::generate(&mut drbg, 256).expect("DSA key");
+// Domain parameters per FIPS 186-4 A.1.1.2 and A.2.3; they carry the seed a
+// third party needs to validate them.
+let params = Dsa::generate_params(&mut drbg, FfcParameterSize::L2048N256, FfcHash::Sha256)
+    .expect("SHA-256 is long enough for N = 256");
+let (public, private) = Dsa::generate(&params, &mut drbg);
 let signature = private
     .sign_message_bytes::<Sha256>(b"message")
     .expect("DSA sign");
@@ -567,11 +645,13 @@ assert!(public.verify_message_bytes::<Sha256>(b"message", &signature));
 Generate and use an `ElGamal` key pair:
 
 ```rust
-use cryptography::vt::ElGamal;
+use cryptography::vt::{ElGamal, FfcHash, FfcParameterSize};
 use cryptography::CtrDrbgAes256;
 
 let mut drbg = CtrDrbgAes256::new(&[0x33u8; 48]);
-let (public, private) = ElGamal::generate(&mut drbg, 256).expect("ElGamal key");
+let (public, private) =
+    ElGamal::generate(&mut drbg, FfcParameterSize::L2048N256, FfcHash::Sha256)
+        .expect("ElGamal key");
 let ciphertext = public.encrypt_bytes(b"hi", &mut drbg).expect("message fits in F_p");
 let plaintext = private.decrypt_bytes(&ciphertext).expect("valid ciphertext");
 
@@ -597,13 +677,20 @@ let combined = public
     .add_ciphertexts(&left, &right)
     .expect("ciphertexts are in range");
 
-assert_eq!(private.decrypt(&combined), b"\x46");
+assert_eq!(private.decrypt(&combined).as_deref(), Some(&b"\x46"[..]));
 ```
 
 If you want the ciphertext as bytes instead of a scheme-native integer or
 pair, use the dedicated byte-to-byte helpers:
 
 ```rust
+use cryptography::vt::{BigUint, Paillier};
+use cryptography::CtrDrbgAes256;
+
+let (public, private) =
+    Paillier::from_primes(&BigUint::from_u64(257), &BigUint::from_u64(263)).expect("Paillier key");
+let mut drbg = CtrDrbgAes256::new(&[0x52u8; 48]);
+
 let ciphertext = public
     .encrypt_bytes(b"\x2A", &mut drbg)
     .expect("message fits");
@@ -643,7 +730,7 @@ Production note:
   - `crate::ct::zeroize_slice` uses `ptr::write_volatile` so the compiler
     cannot elide key-clearing writes.
   - `src/hash/sha3.rs` includes an aarch64 FEAT_SHA3 fast path
-    (`keccak_f1600_sha3`) gated on runtime feature detection, with the
+    (`keccak_f1600_sha3`) gated on `arm-sha3` and runtime feature detection, with the
     portable scalar Keccak-f[1600] kept as the always-correct fallback. This
     is the only architecture-specific path in the in-tree library; AES does
     not use AES-NI / AESE intrinsics in `src/`.

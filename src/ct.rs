@@ -10,9 +10,11 @@
 //!   table by scanning every entry and masking, so the memory-access pattern
 //!   never reveals the index.
 //! - **Slice comparison** (`constant_time_eq_mask`) — accumulate differences
-//!   without short-circuiting, guarded with `black_box` and a compiler fence.
-//! - **Zeroization** (`zeroize_slice`) — volatile writes that the compiler
-//!   cannot elide, used to wipe key material from memory.
+//!   without short-circuiting; `black_box` and a compiler fence discourage the
+//!   optimizer from reintroducing an early exit, and the emitted code is what
+//!   settles the question (see the function's documentation).
+//! - **Zeroization** (`zeroize_slice`) — volatile zero writes over primitive
+//!   integers, active in every build of this crate.
 //! - **ANF S-box evaluation** — converts an S-box to Algebraic Normal Form at
 //!   compile time, then evaluates it via subset-sum inner products so that every
 //!   input produces exactly the same sequence of operations (no branches, no
@@ -75,54 +77,77 @@ mod profile {
     pub(super) fn bump_eval_byte_sbox() {}
 }
 
+/// Call counts for the constant-time ANF helpers since the last
+/// [`ct_profile_reset`]. Only available with the `ct_profile` feature.
 #[cfg(feature = "ct_profile")]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CtAnfProfile {
+    /// Calls to the 8-bit monomial-mask expander.
     pub subset_mask8_calls: u64,
+    /// Calls to the 128-bit parity fold.
     pub parity128_calls: u64,
+    /// Calls to the byte S-box ANF evaluator.
     pub eval_byte_sbox_calls: u64,
 }
 
+/// Measured per-call cost of each constant-time ANF helper, in nanoseconds.
+/// Only available with the `ct_profile` feature.
 #[cfg(feature = "ct_profile")]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CtAnfHelperCostsNs {
+    /// Nanoseconds per `subset_mask8` call.
     pub subset_mask8_ns: f64,
+    /// Nanoseconds per `parity128` call.
     pub parity128_ns: f64,
+    /// Nanoseconds per `eval_byte_sbox` call.
     pub eval_byte_sbox_ns: f64,
 }
 
+/// Zero the ANF helper call counters.
 #[cfg(feature = "ct_profile")]
 pub fn ct_profile_reset() {
     profile::reset();
 }
 
+/// Read the ANF helper call counters accumulated since the last reset.
 #[cfg(feature = "ct_profile")]
 #[must_use]
 pub fn ct_profile_snapshot() -> CtAnfProfile {
     profile::snapshot()
 }
 
+/// Time each ANF helper over `iterations` calls and report the mean cost.
+///
+/// Each loop feeds its result through [`black_box`] so the call cannot be
+/// hoisted or folded away. The measured cost includes the helper's own
+/// `ct_profile` call counter (one relaxed atomic increment per call), which
+/// this feature compiles in; the counters are part of what is being timed.
+/// With `iterations == 0` there is nothing to average and every cost is
+/// reported as zero.
 #[cfg(feature = "ct_profile")]
 #[must_use]
 pub fn ct_profile_measure_helper_costs(iterations: u64) -> CtAnfHelperCostsNs {
-    let mut input = 0u8;
-    let mut acc = 0u64;
+    if iterations == 0 {
+        return CtAnfHelperCostsNs::default();
+    }
+    let per_call = |elapsed: std::time::Duration| elapsed.as_secs_f64() * 1e9 / iterations as f64;
 
+    let mut input = 0u8;
     let t_subset = Instant::now();
     for _ in 0..iterations {
-        let (lo, hi) = subset_mask8(input);
-        acc ^= (lo as u64) ^ ((hi >> 64) as u64);
+        let (lo, hi) = subset_mask8(black_box(input));
+        black_box((lo, hi));
         input = input.wrapping_add(1);
     }
-    let subset_ns = t_subset.elapsed().as_secs_f64() * 1e9 / iterations as f64;
+    let subset_ns = per_call(t_subset.elapsed());
 
-    let t_parity = Instant::now();
     let mut x = 0x0123_4567_89ab_cdef_0011_2233_4455_6677u128;
+    let t_parity = Instant::now();
     for _ in 0..iterations {
-        acc ^= u64::from(parity128(x));
+        black_box(parity128(black_box(x)));
         x = x.rotate_left(13) ^ 0x9e37_79b9_7f4a_7c15_6a09_e667_f3bc_c909u128;
     }
-    let parity_ns = t_parity.elapsed().as_secs_f64() * 1e9 / iterations as f64;
+    let parity_ns = per_call(t_parity.elapsed());
 
     let mut table = [0u8; 256];
     let mut i = 0usize;
@@ -131,15 +156,14 @@ pub fn ct_profile_measure_helper_costs(iterations: u64) -> CtAnfHelperCostsNs {
         i += 1;
     }
     let coeffs = build_byte_sbox_anf(&table);
-    let t_eval = Instant::now();
     let mut y = 0u8;
+    let t_eval = Instant::now();
     for _ in 0..iterations {
         y = y.wrapping_add(17);
-        acc ^= u64::from(eval_byte_sbox(&coeffs, y));
+        black_box(eval_byte_sbox(black_box(&coeffs), black_box(y)));
     }
-    let eval_ns = t_eval.elapsed().as_secs_f64() * 1e9 / iterations as f64;
+    let eval_ns = per_call(t_eval.elapsed());
 
-    black_box(acc);
     CtAnfHelperCostsNs {
         subset_mask8_ns: subset_ns,
         parity128_ns: parity_ns,
@@ -183,20 +207,75 @@ fn eq_mask_u8(a: u8, b: u8) -> u8 {
 // Zeroization
 // ---------------------------------------------------------------------------
 
-/// Overwrites every element of `slice` with its `Default` value.
+/// Types [`zeroize_slice`] can scrub: the primitive integers, `bool`, and
+/// arrays of those, for which the all-zero bit pattern is the value zero.
 ///
-/// Uses `ptr::write_volatile` so the compiler cannot prove the writes are dead
-/// and elide them (which it would be allowed to do for ordinary assignments to
-/// memory that is about to go out of scope).  The `compiler_fence` prevents
-/// reordering the volatile stores with subsequent deallocation or reuse of the
-/// backing memory.
+/// The trait is sealed. Scrubbing writes `ZERO` through a volatile pointer,
+/// so it must be a plain value with no destructor and no invariant; keeping
+/// the set closed keeps that true by construction.
+pub trait Zeroable: sealed::Sealed + Copy {
+    /// The value every element is overwritten with.
+    const ZERO: Self;
+}
+
+mod sealed {
+    /// Supertrait no code outside this module can name, so the set of
+    /// [`super::Zeroable`] types is fixed here.
+    pub trait Sealed {}
+}
+
+macro_rules! zeroable_integers {
+    ($($int:ty),* $(,)?) => {
+        $(
+            impl sealed::Sealed for $int {}
+            impl Zeroable for $int {
+                const ZERO: Self = 0;
+            }
+        )*
+    };
+}
+
+zeroable_integers!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+
+impl sealed::Sealed for bool {}
+impl Zeroable for bool {
+    const ZERO: Self = false;
+}
+
+impl<T: Zeroable, const N: usize> sealed::Sealed for [T; N] {}
+impl<T: Zeroable, const N: usize> Zeroable for [T; N] {
+    const ZERO: Self = [T::ZERO; N];
+}
+
+/// Overwrite every element with zero.
+///
+/// Active in every build: this crate always scrubs its own key schedules,
+/// DRBG state, and secret temporaries. rump's `BigUint` limb wiping is a
+/// separate switch that this crate turns on in its manifest, because rump is
+/// general-purpose and keeps it off by default.
+///
+/// What the language guarantees, and what it does not. Each element is
+/// written with [`ptr::write_volatile`], which the compiler must perform and
+/// must not merge with or reorder against other volatile operations, even
+/// though the memory is never read again; an ordinary assignment to memory
+/// that is about to go out of scope may be removed under the as-if rule. The
+/// trailing [`compiler_fence`] keeps the compiler from moving later
+/// non-volatile memory operations, such as the deallocation or reuse of the
+/// backing store, ahead of the volatile stores; it emits no CPU instruction
+/// and orders nothing across threads. Neither construct reaches copies the
+/// value made before this call: register spills, moved temporaries, and
+/// values the caller cloned are the caller's to scrub.
 ///
 /// Called by `Drop` implementations and `new_wiping` constructors to ensure
 /// expanded round keys do not linger in memory.
 #[allow(unsafe_code)] // sole audited exception to the crate-wide deny: volatile scrub
-pub fn zeroize_slice<T: Copy + Default>(slice: &mut [T]) {
+pub fn zeroize_slice<T: Zeroable>(slice: &mut [T]) {
     for item in slice.iter_mut() {
-        unsafe { ptr::write_volatile(std::ptr::from_mut::<T>(item), T::default()) };
+        // SAFETY: `item` is a valid, aligned, exclusively borrowed `T`, and
+        // `T::ZERO` is a value of `T` (the sealed trait admits only integers,
+        // `bool`, and arrays of them), so a volatile store of it is a
+        // well-formed write to initialised memory we own.
+        unsafe { ptr::write_volatile(ptr::from_mut::<T>(item), T::ZERO) };
     }
     compiler_fence(Ordering::SeqCst);
 }
@@ -223,9 +302,15 @@ pub(crate) fn ct_lookup_u32(table: &[u32; 256], idx: u8) -> u32 {
 
 /// Reads `table[idx]` by scanning all 16 entries — constant-time for nibble tables.
 ///
-/// Same principle as [`ct_lookup_u32`] but for the 16-entry S-boxes used by
-/// ciphers such as Magma, Simon, and Speck.  `idx` must be in `0..16`.
+/// Same principle as [`ct_lookup_u32`] but for 16-entry nibble tables; the
+/// Twofish constant-time q-box evaluation is its caller.
+///
+/// `idx` must be in `0..16`: a debug build asserts it, and a release build
+/// returns 0 for any larger index because no entry's mask matches. Callers
+/// split bytes into nibbles before calling, so the range holds by
+/// construction.
 pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
+    debug_assert!(idx < 16, "ct_lookup_u8_16 index {idx} is not a nibble");
     let mut out = 0u8;
     let mut i = 0usize;
     while i < 16 {
@@ -243,10 +328,20 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
 /// Returns `0xFF` if `a == b` (byte-by-byte), `0x00` otherwise.
 ///
 /// Standard `==` can short-circuit on the first differing byte, leaking the
-/// mismatch position through timing — critical in MAC verification.
-/// `black_box` stops the compiler replacing the XOR-accumulate with an early
-/// exit (permitted under as-if); `compiler_fence` prevents reordering the
-/// reads past the reduction.
+/// mismatch position through timing — critical in MAC verification. Here
+/// every byte pair is OR-accumulated and the single reduction happens after
+/// the loop, so the only data-dependent control flow is on the lengths, which
+/// are public.
+///
+/// What holds this in place. `black_box` is documented by std as a hint the
+/// optimizer is asked to treat as opaque, with no guarantee attached, and
+/// `compiler_fence` only orders memory operations as seen by the compiler;
+/// neither is a promise that no early exit can be synthesised. The guarantee
+/// rests on the emitted code, which is inspected: the aarch64 release build
+/// carries length-driven branches only, with the loop vectorised into
+/// `eor`/`orr` accumulation. `constant_time_eq_mask_timing_is_length_only`
+/// (an ignored, release-only experiment in this module's tests) measures the
+/// same property on the running machine.
 #[inline]
 pub(crate) fn constant_time_eq_mask(a: &[u8], b: &[u8]) -> u8 {
     if a.len() != b.len() {
@@ -455,14 +550,9 @@ pub(crate) fn subset_mask8(x: u8) -> (u128, u128) {
 
 /// XOR-parity of all 128 bits of `x` (i.e., `popcount(x) mod 2`).
 ///
-/// Uses a binary folding: XOR the top 64 bits into the bottom 64, then top 32
-/// into bottom 32, etc., until 4 bits remain.  The final nibble is looked up in
-/// `0x6996`, a 16-entry packed truth table for 4-bit parity:
-///
-/// ```text
-/// 0x6996 = 0110_1001_1001_0110
-/// bit i  =  popcount(i) mod 2  for i in 0..16
-/// ```
+/// Takes `count_ones` of each 64-bit half and XORs the two parities.
+/// `count_ones` lowers to a hardware popcount or to a fixed, branch-free
+/// bit-twiddling sequence, so no data-dependent branch or table is involved.
 ///
 /// Used by [`eval_byte_sbox`] to compute the inner product over GF(2).
 #[inline]
@@ -546,8 +636,13 @@ pub(crate) fn parity16(mut x: u16) -> u8 {
 ///
 /// Each output bit is `parity(subset_indicator(input) & coeffs[bit])` over
 /// GF(2).  Same principle as [`eval_byte_sbox`] but with 16-bit words.
+///
+/// `input` must be in `0..16`: a debug build asserts it, and a release build
+/// reads only the low nibble because [`subset_mask4`] tests bits 0 to 3 and
+/// no other. Callers split bytes into nibbles before calling.
 #[inline]
 pub(crate) fn eval_nibble_sbox(coeffs: [u16; 4], input: u8) -> u8 {
+    debug_assert!(input < 16, "eval_nibble_sbox input {input} is not a nibble");
     let active = subset_mask4(input);
     let mut out = 0u8;
     let mut bit = 0usize;
@@ -647,6 +742,89 @@ mod tests {
                 "ANF mismatch at input {x:#04x}"
             );
         }
+    }
+
+    /// Timing experiment: comparing equal-length slices that differ only at
+    /// byte 0 must cost the same as ones that differ only at the last byte.
+    /// An early-exit compare would finish the first case in one step and the
+    /// second in `n`; this loop measures many repetitions of each and requires
+    /// the ratio of the two means to stay within `TOLERANCE`.
+    ///
+    /// The tolerance covers scheduler and cache noise on a shared machine,
+    /// not a real early exit: with `LEN = 4096` an early exit at byte 0
+    /// would be hundreds of times faster, far outside a 25 % band. Run in
+    /// release only (`cargo test --release --lib -- --ignored
+    /// constant_time_eq_mask_timing`); a debug build's overflow checks and
+    /// unoptimised loop measure the compiler, not the algorithm.
+    #[test]
+    #[ignore = "release-only timing experiment"]
+    fn constant_time_eq_mask_timing_is_length_only() {
+        use std::time::Instant;
+        const LEN: usize = 4096;
+        const ROUNDS: usize = 20_000;
+        const TOLERANCE: f64 = 0.25;
+
+        let reference = vec![0x5au8; LEN];
+        let mut differs_first = reference.clone();
+        differs_first[0] ^= 1;
+        let mut differs_last = reference.clone();
+        differs_last[LEN - 1] ^= 1;
+
+        let time = |other: &[u8]| {
+            let mut acc = 0u32;
+            let start = Instant::now();
+            for _ in 0..ROUNDS {
+                acc = acc.wrapping_add(u32::from(constant_time_eq_mask(
+                    black_box(&reference),
+                    black_box(other),
+                )));
+            }
+            let elapsed = start.elapsed().as_secs_f64();
+            assert_eq!(
+                acc, 0,
+                "the operands differ, so every compare is a mismatch"
+            );
+            elapsed / ROUNDS as f64
+        };
+
+        // Warm both paths, then interleave the measurements so a frequency
+        // change during the run lands on both sides.
+        time(&differs_first);
+        time(&differs_last);
+        let mut first_total = 0.0;
+        let mut last_total = 0.0;
+        for _ in 0..5 {
+            first_total += time(&differs_first);
+            last_total += time(&differs_last);
+        }
+        let ratio = first_total / last_total;
+        eprintln!(
+            "constant_time_eq_mask over {LEN} bytes: differs at byte 0 {:.1} ns, \
+             differs at byte {} {:.1} ns, ratio {ratio:.3}",
+            first_total / 5.0 * 1e9,
+            LEN - 1,
+            last_total / 5.0 * 1e9
+        );
+        assert!(
+            (ratio - 1.0).abs() <= TOLERANCE,
+            "mismatch position changed the compare time: ratio {ratio:.3}"
+        );
+    }
+
+    #[test]
+    fn zeroize_slice_zeros_integers_and_arrays() {
+        let mut bytes = [0xffu8; 7];
+        let mut words = [u128::MAX; 3];
+        let mut signed = [-1i32; 4];
+        let mut blocks = [[0xa5u8; 16]; 3];
+        zeroize_slice(&mut bytes);
+        zeroize_slice(&mut words);
+        zeroize_slice(&mut signed);
+        zeroize_slice(&mut blocks);
+        assert_eq!(bytes, [0; 7]);
+        assert_eq!(words, [0; 3]);
+        assert_eq!(signed, [0; 4]);
+        assert_eq!(blocks, [[0; 16]; 3]);
     }
 
     /// Same exhaustive check for the 4-bit ANF path using a known non-trivial

@@ -3,90 +3,42 @@
 //! EAX combines CMAC and CTR for nonce-based authenticated encryption over
 //! 128-bit block ciphers.
 
-use super::dbl;
+use super::{increment_be, xor_in_place, Cmac};
 use crate::BlockCipher;
 
-#[inline]
-fn increment_be(counter: &mut [u8; 16]) {
-    for b in counter.iter_mut().rev() {
-        let (next, carry) = b.overflowing_add(1);
-        *b = next;
-        if !carry {
-            break;
-        }
-    }
-}
-
-#[inline]
-fn xor_in_place(dst: &mut [u8], src: &[u8]) {
-    for (d, s) in dst.iter_mut().zip(src.iter()) {
-        *d ^= *s;
-    }
-}
-
-fn cmac_compute<C: BlockCipher>(cipher: &C, data: &[u8]) -> [u8; 16] {
-    assert_eq!(C::BLOCK_LEN, 16, "EAX requires a 128-bit block cipher");
-    let blk = C::BLOCK_LEN;
-    let mut l = vec![0u8; blk];
-    cipher.encrypt(&mut l);
-    let k1 = dbl(&l);
-    let k2 = dbl(&k1);
-
-    let n = if data.is_empty() {
-        1
-    } else {
-        data.len().div_ceil(blk)
-    };
-    let last_complete = !data.is_empty() && data.len().is_multiple_of(blk);
-
-    let mut x = vec![0u8; blk];
-    let mut y = vec![0u8; blk];
-
-    for block in data.chunks(blk).take(n.saturating_sub(1)) {
-        y.copy_from_slice(&x);
-        xor_in_place(&mut y, block);
-        cipher.encrypt(&mut y);
-        x.copy_from_slice(&y);
-    }
-
-    let mut m_last = vec![0u8; blk];
-    if last_complete {
-        let start = (n - 1) * blk;
-        m_last.copy_from_slice(&data[start..start + blk]);
-        xor_in_place(&mut m_last, &k1);
-    } else {
-        let start = (n - 1) * blk;
-        let rem = data.len().saturating_sub(start);
-        if rem != 0 {
-            m_last[..rem].copy_from_slice(&data[start..]);
-        }
-        m_last[rem] = 0x80;
-        xor_in_place(&mut m_last, &k2);
-    }
-
-    xor_in_place(&mut m_last, &x);
-    cipher.encrypt(&mut m_last);
-    m_last.try_into().expect("CMAC output is one block")
-}
-
-fn eax_omac<C: BlockCipher>(cipher: &C, domain: u8, data: &[u8]) -> [u8; 16] {
+/// `OMAC^t_K(data)`: CMAC over the one-block domain prefix `[t]_16 || data`.
+fn eax_omac<C: BlockCipher>(cmac: &Cmac<C>, domain: u8, data: &[u8]) -> [u8; 16] {
     let mut prefixed = Vec::with_capacity(16 + data.len());
     prefixed.extend_from_slice(&[0u8; 15]);
     prefixed.push(domain);
     prefixed.extend_from_slice(data);
-    cmac_compute(cipher, &prefixed)
+    let mut omac = [0u8; 16];
+    cmac.compute_into(&prefixed, &mut omac);
+    omac
 }
 
+/// CTR over `data` from `initial_counter` (the OMAC of the nonce), counting
+/// over the whole block. The keystream and counter blocks are wiped after.
 fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; 16], data: &mut [u8]) {
     let mut counter = *initial_counter;
+    let mut stream = [0u8; 16];
     for chunk in data.chunks_mut(16) {
-        let mut stream = counter;
+        stream = counter;
         cipher.encrypt(&mut stream);
-        for i in 0..chunk.len() {
-            chunk[i] ^= stream[i];
-        }
+        xor_in_place(chunk, &stream[..chunk.len()]);
         increment_be(&mut counter);
     }
+    crate::ct::zeroize_slice(stream.as_mut_slice());
+    crate::ct::zeroize_slice(counter.as_mut_slice());
+}
+
+#[inline]
+fn xor3(a: &[u8; 16], b: &[u8; 16], c: &[u8; 16]) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    for i in 0..16 {
+        out[i] = a[i] ^ b[i] ^ c[i];
+    }
+    out
 }
 
 /// EAX AEAD with a full 16-byte detached tag.
@@ -97,36 +49,44 @@ fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; 16], data: &mut 
 /// authenticity: the CTR keystream repeats and the OMAC tags become related.
 /// Never reuse a `(key, nonce)` pair.
 pub struct Eax<C> {
-    cipher: C,
+    // EAX's OMAC is CMAC under the same key: holding the `Cmac` derives the
+    // subkeys once per key rather than once per OMAC call.
+    cmac: Cmac<C>,
 }
 
 impl<C> Eax<C> {
-    /// Wrap a 128-bit block cipher in EAX mode.
-    pub fn new(cipher: C) -> Self {
-        Self { cipher }
-    }
-
     /// Borrow the wrapped cipher.
     pub fn cipher(&self) -> &C {
-        &self.cipher
+        self.cmac.cipher()
     }
 }
 
 impl<C: BlockCipher> Eax<C> {
+    /// Wrap a 128-bit block cipher in EAX mode.
+    ///
+    /// The CMAC subkeys shared by EAX's three OMAC computations are derived
+    /// here, once, and wiped when the `Eax` is dropped.
+    pub fn new(cipher: C) -> Self {
+        Self {
+            cmac: Cmac::new(cipher),
+        }
+    }
+
     /// Encrypt `data` in place and return a detached 16-byte tag.
     #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         assert_eq!(C::BLOCK_LEN, 16, "EAX requires a 128-bit block cipher");
 
-        let n_tag = eax_omac(&self.cipher, 0, nonce);
-        let h_tag = eax_omac(&self.cipher, 1, aad);
+        let mut n_tag = eax_omac(&self.cmac, 0, nonce);
+        let mut h_tag = eax_omac(&self.cmac, 1, aad);
+        ctr_apply(self.cmac.cipher(), &n_tag, data);
+        let mut c_tag = eax_omac(&self.cmac, 2, data);
 
-        ctr_apply(&self.cipher, &n_tag, data);
-        let c_tag = eax_omac(&self.cipher, 2, data);
-
-        let mut tag = [0u8; 16];
-        for i in 0..16 {
-            tag[i] = n_tag[i] ^ h_tag[i] ^ c_tag[i];
+        let tag = xor3(&n_tag, &h_tag, &c_tag);
+        // `N` is the CTR start block, and the three OMACs separately would let
+        // an attacker assemble tags for other headers and ciphertexts.
+        for omac in [&mut n_tag, &mut h_tag, &mut c_tag] {
+            crate::ct::zeroize_slice(omac.as_mut_slice());
         }
         tag
     }
@@ -137,41 +97,28 @@ impl<C: BlockCipher> Eax<C> {
     pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8; 16]) -> bool {
         assert_eq!(C::BLOCK_LEN, 16, "EAX requires a 128-bit block cipher");
 
-        let n_tag = eax_omac(&self.cipher, 0, nonce);
-        let h_tag = eax_omac(&self.cipher, 1, aad);
-        let c_tag = eax_omac(&self.cipher, 2, data);
-        let mut expected = [0u8; 16];
-        for i in 0..16 {
-            expected[i] = n_tag[i] ^ h_tag[i] ^ c_tag[i];
-        }
+        let mut n_tag = eax_omac(&self.cmac, 0, nonce);
+        let mut h_tag = eax_omac(&self.cmac, 1, aad);
+        let mut c_tag = eax_omac(&self.cmac, 2, data);
+        let mut expected = xor3(&n_tag, &h_tag, &c_tag);
 
-        if crate::ct::constant_time_eq_mask(&expected, tag) != u8::MAX {
-            return false;
+        let authentic = crate::ct::constant_time_eq_mask(&expected, tag) == u8::MAX;
+        if authentic {
+            ctr_apply(self.cmac.cipher(), &n_tag, data);
         }
-
-        ctr_apply(&self.cipher, &n_tag, data);
-        true
+        // On failure `expected` is a valid tag for attacker-chosen input.
+        for block in [&mut n_tag, &mut h_tag, &mut c_tag, &mut expected] {
+            crate::ct::zeroize_slice(block.as_mut_slice());
+        }
+        authentic
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Eax;
+    use crate::test_utils::decode_hex;
     use crate::Aes128;
-
-    fn unhex_ws(input: &str) -> Vec<u8> {
-        let compact: String = input.chars().filter(|c| !c.is_whitespace()).collect();
-        let mut out = Vec::with_capacity(compact.len() / 2);
-        let bytes = compact.as_bytes();
-        let mut i = 0usize;
-        while i + 1 < bytes.len() {
-            let hi = (bytes[i] as char).to_digit(16).expect("hex") as u8;
-            let lo = (bytes[i + 1] as char).to_digit(16).expect("hex") as u8;
-            out.push((hi << 4) | lo);
-            i += 2;
-        }
-        out
-    }
 
     #[test]
     fn eax_aes128_eprint_2003_069_known_vectors() {
@@ -266,12 +213,12 @@ mod tests {
         for (idx, (key_hex, nonce_hex, aad_hex, pt_hex, ct_hex, tag_hex)) in
             vectors.iter().enumerate()
         {
-            let key = <[u8; 16]>::try_from(unhex_ws(key_hex)).expect("16-byte key");
-            let nonce = unhex_ws(nonce_hex);
-            let aad = unhex_ws(aad_hex);
-            let mut plaintext = unhex_ws(pt_hex);
-            let expected_ciphertext = unhex_ws(ct_hex);
-            let expected_tag = <[u8; 16]>::try_from(unhex_ws(tag_hex)).expect("16-byte tag");
+            let key = <[u8; 16]>::try_from(decode_hex(key_hex)).expect("16-byte key");
+            let nonce = decode_hex(nonce_hex);
+            let aad = decode_hex(aad_hex);
+            let mut plaintext = decode_hex(pt_hex);
+            let expected_ciphertext = decode_hex(ct_hex);
+            let expected_tag = <[u8; 16]>::try_from(decode_hex(tag_hex)).expect("16-byte tag");
 
             let eax = Eax::new(Aes128::new(&key));
             let tag = eax.encrypt(&nonce, &aad, &mut plaintext);
@@ -287,7 +234,7 @@ mod tests {
             );
             assert_eq!(
                 plaintext,
-                unhex_ws(pt_hex),
+                decode_hex(pt_hex),
                 "plaintext mismatch after decrypt for EAX KAT #{idx}"
             );
         }

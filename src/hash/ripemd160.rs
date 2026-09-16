@@ -134,6 +134,9 @@ fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
     state[3] = state[4].wrapping_add(al).wrapping_add(br);
     state[4] = state[0].wrapping_add(bl).wrapping_add(cr);
     state[0] = t;
+
+    // The block's message words; under HMAC the first block is key xor ipad.
+    crate::ct::zeroize_slice(words.as_mut_slice());
 }
 
 /// Streaming RIPEMD-160 state (Dobbertin/Bosselaers/Preneel).
@@ -170,6 +173,75 @@ impl Ripemd160 {
     /// an empty (zero-length) message.
     #[must_use]
     pub fn new() -> Self {
+        <Self as Digest>::new()
+    }
+
+    /// Absorb more message bytes. May be called any number of times with
+    /// arbitrary chunk sizes; the digest depends only on the concatenation
+    /// of all chunks. The message length is tracked modulo 2^64 bits for
+    /// the Merkle-Damgaard length padding.
+    pub fn update(&mut self, data: &[u8]) {
+        Digest::update(self, data);
+    }
+
+    /// Apply the `0x80` / little-endian length padding, consume the hasher,
+    /// and return the 20-byte digest (state words serialized little-endian,
+    /// unlike the SHA family). Keep a [`Clone`] beforehand if the stream
+    /// must continue past this point.
+    #[must_use]
+    pub fn finalize(mut self) -> [u8; 20] {
+        let mut out = [0u8; 20];
+        self.finalize_in_place(&mut out);
+        // `self` drops here, and `Drop` wipes the final chaining state.
+        out
+    }
+
+    /// One-shot convenience: hash `data` in a single call. Equivalent to
+    /// `new` + `update` + `finalize`, returning the 20-byte digest.
+    #[must_use]
+    pub fn digest(data: &[u8]) -> [u8; 20] {
+        let mut h = Self::new();
+        h.update(data);
+        h.finalize()
+    }
+
+    /// The specification's MD4-style padding (a `0x80` byte, zeros, and the
+    /// 64-bit little-endian bit length) and the final compression(s), then
+    /// the little-endian chaining value into `out`. The
+    /// state is left holding the final chaining value; the callers decide
+    /// whether it is dropped (`finalize`) or replaced (`finalize_reset`).
+    fn finalize_in_place(&mut self, out: &mut [u8; 20]) {
+        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
+
+        self.block[self.pos] = 0x80;
+        self.pos += 1;
+
+        if self.pos > 56 {
+            self.block[self.pos..].fill(0);
+            compress(&mut self.state, &self.block);
+            self.block = [0u8; 64];
+            self.pos = 0;
+        }
+
+        self.block[self.pos..56].fill(0);
+        self.block[56..].copy_from_slice(&self.bit_len.to_le_bytes());
+        compress(&mut self.state, &self.block);
+
+        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
+            chunk.copy_from_slice(&word.to_le_bytes());
+        }
+    }
+}
+
+// The bodies of `new` and `update` live here; the same-named inherent
+// methods delegate through the trait path, so neither pair can turn into
+// silent recursion if one half is removed.
+impl Digest for Ripemd160 {
+    const BLOCK_LEN: usize = 64;
+    const OUTPUT_LEN: usize = 20;
+
+    /// The specification's initial chaining value and an empty message.
+    fn new() -> Self {
         Self {
             state: IV,
             block: [0u8; 64],
@@ -178,11 +250,7 @@ impl Ripemd160 {
         }
     }
 
-    /// Absorb more message bytes. May be called any number of times with
-    /// arbitrary chunk sizes; the digest depends only on the concatenation
-    /// of all chunks. The message length is tracked modulo 2^64 bits for
-    /// the Merkle-Damgaard length padding.
-    pub fn update(&mut self, mut data: &[u8]) {
+    fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
             let take = (64 - self.pos).min(data.len());
             self.block[self.pos..self.pos + take].copy_from_slice(&data[..take]);
@@ -198,89 +266,17 @@ impl Ripemd160 {
         }
     }
 
-    /// Apply the `0x80` / little-endian length padding, consume the hasher,
-    /// and return the 20-byte digest (state words serialized little-endian,
-    /// unlike the SHA family). Keep a [`Clone`] beforehand if the stream
-    /// must continue past this point.
-    #[must_use]
-    pub fn finalize(mut self) -> [u8; 20] {
-        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
-
-        self.block[self.pos] = 0x80;
-        self.pos += 1;
-
-        if self.pos > 56 {
-            self.block[self.pos..].fill(0);
-            compress(&mut self.state, &self.block);
-            self.block = [0u8; 64];
-            self.pos = 0;
-        }
-
-        self.block[self.pos..56].fill(0);
-        self.block[56..].copy_from_slice(&self.bit_len.to_le_bytes());
-        compress(&mut self.state, &self.block);
-
-        let mut out = [0u8; 20];
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
-            chunk.copy_from_slice(&word.to_le_bytes());
-        }
-        out
-    }
-
-    /// One-shot convenience: hash `data` in a single call. Equivalent to
-    /// `new` + `update` + `finalize`, returning the 20-byte digest.
-    #[must_use]
-    pub fn digest(data: &[u8]) -> [u8; 20] {
-        let mut h = Self::new();
-        h.update(data);
-        h.finalize()
-    }
-
-    fn finalize_into_reset(&mut self, out: &mut [u8; 20]) {
-        self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
-
-        self.block[self.pos] = 0x80;
-        self.pos += 1;
-
-        if self.pos > 56 {
-            self.block[self.pos..].fill(0);
-            compress(&mut self.state, &self.block);
-            self.block = [0u8; 64];
-            self.pos = 0;
-        }
-
-        self.block[self.pos..56].fill(0);
-        self.block[56..].copy_from_slice(&self.bit_len.to_le_bytes());
-        compress(&mut self.state, &self.block);
-
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
-            chunk.copy_from_slice(&word.to_le_bytes());
-        }
-
-        self.zeroize();
-    }
-}
-
-impl Digest for Ripemd160 {
-    const BLOCK_LEN: usize = 64;
-    const OUTPUT_LEN: usize = 20;
-
-    fn new() -> Self {
-        Self::new()
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        self.update(data);
-    }
-
-    fn finalize_into(self, out: &mut [u8]) {
-        assert_eq!(out.len(), 20, "wrong digest length");
-        out.copy_from_slice(&self.finalize());
+    fn finalize_into(mut self, out: &mut [u8]) {
+        let out: &mut [u8; 20] = out.try_into().expect("wrong digest length");
+        self.finalize_in_place(out);
     }
 
     fn finalize_reset(&mut self, out: &mut [u8]) {
         let out: &mut [u8; 20] = out.try_into().expect("wrong digest length");
-        self.finalize_into_reset(out);
+        self.finalize_in_place(out);
+        // Assigning a fresh value drops the consumed one, and `Drop` wipes
+        // its chaining state and block buffer.
+        *self = <Self as Digest>::new();
     }
 
     fn zeroize(&mut self) {
@@ -291,23 +287,48 @@ impl Digest for Ripemd160 {
     }
 }
 
+impl Drop for Ripemd160 {
+    fn drop(&mut self) {
+        // Under HMAC the chaining state and buffered block are key material.
+        Digest::zeroize(self);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::encode_hex;
 
-    fn hex(bytes: &[u8]) -> String {
-        let mut out = String::with_capacity(bytes.len() * 2);
-        for b in bytes {
-            use core::fmt::Write;
-            let _ = write!(&mut out, "{b:02x}");
-        }
-        out
+    /// `finalize_reset` leaves a fresh instance, `zeroize` scrubs the whole
+    /// state, and the type wipes itself on drop.
+    #[test]
+    fn finalize_reset_and_zeroize_scrub_the_state() {
+        let msg = b"HMAC feeds key material through this state";
+        let mut h = Ripemd160::new();
+        h.update(msg);
+        let mut out = [0u8; 20];
+        crate::hash::Digest::finalize_reset(&mut h, &mut out);
+        assert_eq!(out, Ripemd160::digest(msg));
+        assert_eq!(
+            (h.state, h.block, h.pos, h.bit_len),
+            (IV, [0u8; 64], 0, 0),
+            "finalize_reset leaves a fresh instance"
+        );
+
+        let mut h = Ripemd160::new();
+        h.update(b"a partial block");
+        crate::hash::Digest::zeroize(&mut h);
+        assert_eq!(
+            (h.state, h.block, h.pos, h.bit_len),
+            ([0u32; 5], [0u8; 64], 0, 0)
+        );
+        assert!(core::mem::needs_drop::<Ripemd160>());
     }
 
     #[test]
     fn ripemd160_empty() {
         assert_eq!(
-            hex(&Ripemd160::digest(b"")),
+            encode_hex(&Ripemd160::digest(b"")),
             "9c1185a5c5e9fc54612808977ee8f548b2258d31"
         );
     }
@@ -315,7 +336,7 @@ mod tests {
     #[test]
     fn ripemd160_abc() {
         assert_eq!(
-            hex(&Ripemd160::digest(b"abc")),
+            encode_hex(&Ripemd160::digest(b"abc")),
             "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc"
         );
     }
@@ -323,7 +344,7 @@ mod tests {
     #[test]
     fn ripemd160_message_digest() {
         assert_eq!(
-            hex(&Ripemd160::digest(b"message digest")),
+            encode_hex(&Ripemd160::digest(b"message digest")),
             "5d0689ef49d2fae572b881b123a85ffa21595f36"
         );
     }
@@ -331,8 +352,8 @@ mod tests {
     #[test]
     fn ripemd160_matches_openssl() {
         let msg = b"The quick brown fox jumps over the lazy dog";
-        let Some(expected) =
-            crate::test_utils::run_openssl(&["dgst", "-ripemd160", "-binary"], msg)
+        let Some(expected) = crate::test_utils::openssl(&["dgst", "-ripemd160", "-binary"], msg)
+            .or_skip("ripemd160_matches_openssl")
         else {
             return;
         };

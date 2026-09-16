@@ -1,21 +1,28 @@
-//! Fuzz all public-key deserialization entry points: `from_wire_bytes`,
-//! `from_key_blob`, `from_pem`, and `from_xml` must never panic on arbitrary
-//! input — they must return `None` / `Err` / empty string gracefully.
+//! The crate-defined key encodings under hostile input: ML-KEM, ML-DSA and
+//! ECDSA wire bytes (every parameter set and named curve), and the
+//! `from_key_blob` readers of ML-KEM, ML-DSA, ECDSA, ECDH, DSA, DH and
+//! Ed25519 keys. The first two bytes select the parser; the rest is the
+//! payload. A parser may refuse anything and may not panic; a key blob it
+//! accepts must re-encode to bytes that parse again to the same encoding.
 //!
-//! If a parse succeeds, we also check the re-serialization roundtrip:
-//! encoding the parsed value must produce identical bytes.
+//! The standard containers (PKCS #8, SubjectPublicKeyInfo, SEC 1, the RFC
+//! 3279 parameter and signature structures) are `fuzz_pkix_parse`.
 #![no_main]
 
 use cryptography::public_key::{
     dh::{DhPrivateKey, DhPublicKey},
     dsa::{DsaPrivateKey, DsaPublicKey},
-    ec::{b163, b233, b283, b409, b571, k163, k233, k283, k409, k571, p192, p224, p256, p384, p521, secp256k1},
-    ed25519::{Ed25519PrivateKey as EdwardsDsaPrivateKey, Ed25519PublicKey},
+    ec::{
+        b163, b233, b283, b409, b571, k163, k233, k283, k409, k571, p192, p224, p256, p384, p521,
+        secp256k1,
+    },
     ecdh::{EcdhPrivateKey, EcdhPublicKey},
     ecdsa::{EcdsaPrivateKey, EcdsaPublicKey},
+    ed25519::{Ed25519PrivateKey as EdwardsDsaPrivateKey, Ed25519PublicKey},
     ml_dsa::{MlDsaParameterSet, MlDsaPrivateKey, MlDsaPublicKey, MlDsaSignature},
     ml_kem::{MlKemCiphertext, MlKemParameterSet, MlKemPrivateKey, MlKemPublicKey},
 };
+use cryptography::CtrDrbgAes256;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -29,19 +36,49 @@ fuzz_target!(|data: &[u8]| {
 
     match parser % 48 {
         // ML-KEM public key wire bytes (all three param sets).
-        0 => { let _ = MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem512, payload); }
-        1 => { let _ = MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem768, payload); }
-        2 => { let _ = MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem1024, payload); }
+        0 => {
+            let _ = MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem512, payload);
+        }
+        1 => {
+            let _ = MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem768, payload);
+        }
+        2 => {
+            let _ = MlKemPublicKey::from_wire_bytes(MlKemParameterSet::MlKem1024, payload);
+        }
 
         // ML-KEM private key wire bytes.
-        3 => { let _ = MlKemPrivateKey::from_wire_bytes(MlKemParameterSet::MlKem512, payload); }
-        4 => { let _ = MlKemPrivateKey::from_wire_bytes(MlKemParameterSet::MlKem768, payload); }
-        5 => { let _ = MlKemPrivateKey::from_wire_bytes(MlKemParameterSet::MlKem1024, payload); }
+        3 => {
+            let _ = MlKemPrivateKey::from_wire_bytes(
+                MlKemParameterSet::MlKem512,
+                payload,
+                &mut CtrDrbgAes256::new(&[0u8; 48]),
+            );
+        }
+        4 => {
+            let _ = MlKemPrivateKey::from_wire_bytes(
+                MlKemParameterSet::MlKem768,
+                payload,
+                &mut CtrDrbgAes256::new(&[0u8; 48]),
+            );
+        }
+        5 => {
+            let _ = MlKemPrivateKey::from_wire_bytes(
+                MlKemParameterSet::MlKem1024,
+                payload,
+                &mut CtrDrbgAes256::new(&[0u8; 48]),
+            );
+        }
 
         // ML-KEM ciphertext wire bytes.
-        6 => { let _ = MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem512, payload); }
-        7 => { let _ = MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem768, payload); }
-        8 => { let _ = MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem1024, payload); }
+        6 => {
+            let _ = MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem512, payload);
+        }
+        7 => {
+            let _ = MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem768, payload);
+        }
+        8 => {
+            let _ = MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem1024, payload);
+        }
 
         // ML-KEM key_blob roundtrip: if parse succeeds, re-encode must be stable.
         9 => {
@@ -53,28 +90,48 @@ fuzz_target!(|data: &[u8]| {
             }
         }
         10 => {
-            if let Some(sk) = MlKemPrivateKey::from_key_blob(payload) {
+            // Fixed-seed randomness for the import's pair-wise consistency test only.
+            let mut rng = CtrDrbgAes256::new(&[0u8; 48]);
+            if let Some(sk) = MlKemPrivateKey::from_key_blob(payload, &mut rng) {
                 let reencoded = sk.to_key_blob();
-                let sk2 = MlKemPrivateKey::from_key_blob(&reencoded)
+                let sk2 = MlKemPrivateKey::from_key_blob(&reencoded, &mut rng)
                     .expect("re-parse of encoded ML-KEM private key blob failed");
                 assert_eq!(reencoded, sk2.to_key_blob());
             }
         }
 
         // ML-DSA public key wire bytes.
-        11 => { let _ = MlDsaPublicKey::from_wire_bytes(MlDsaParameterSet::MlDsa44, payload); }
-        12 => { let _ = MlDsaPublicKey::from_wire_bytes(MlDsaParameterSet::MlDsa65, payload); }
-        13 => { let _ = MlDsaPublicKey::from_wire_bytes(MlDsaParameterSet::MlDsa87, payload); }
+        11 => {
+            let _ = MlDsaPublicKey::from_wire_bytes(MlDsaParameterSet::MlDsa44, payload);
+        }
+        12 => {
+            let _ = MlDsaPublicKey::from_wire_bytes(MlDsaParameterSet::MlDsa65, payload);
+        }
+        13 => {
+            let _ = MlDsaPublicKey::from_wire_bytes(MlDsaParameterSet::MlDsa87, payload);
+        }
 
         // ML-DSA private key wire bytes.
-        14 => { let _ = MlDsaPrivateKey::from_wire_bytes(MlDsaParameterSet::MlDsa44, payload); }
-        15 => { let _ = MlDsaPrivateKey::from_wire_bytes(MlDsaParameterSet::MlDsa65, payload); }
-        16 => { let _ = MlDsaPrivateKey::from_wire_bytes(MlDsaParameterSet::MlDsa87, payload); }
+        14 => {
+            let _ = MlDsaPrivateKey::from_wire_bytes(MlDsaParameterSet::MlDsa44, payload);
+        }
+        15 => {
+            let _ = MlDsaPrivateKey::from_wire_bytes(MlDsaParameterSet::MlDsa65, payload);
+        }
+        16 => {
+            let _ = MlDsaPrivateKey::from_wire_bytes(MlDsaParameterSet::MlDsa87, payload);
+        }
 
         // ML-DSA signature wire bytes.
-        17 => { let _ = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa44, payload); }
-        18 => { let _ = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa65, payload); }
-        19 => { let _ = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa87, payload); }
+        17 => {
+            let _ = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa44, payload);
+        }
+        18 => {
+            let _ = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa65, payload);
+        }
+        19 => {
+            let _ = MlDsaSignature::from_wire_bytes(MlDsaParameterSet::MlDsa87, payload);
+        }
 
         // ML-DSA key_blob roundtrip.
         20 => {
@@ -95,24 +152,56 @@ fuzz_target!(|data: &[u8]| {
         }
 
         // ECDSA public key wire bytes (prime curves).
-        22 => { let _ = EcdsaPublicKey::from_wire_bytes(p256(), payload); }
-        23 => { let _ = EcdsaPublicKey::from_wire_bytes(p384(), payload); }
-        24 => { let _ = EcdsaPublicKey::from_wire_bytes(p521(), payload); }
-        25 => { let _ = EcdsaPublicKey::from_wire_bytes(p192(), payload); }
-        26 => { let _ = EcdsaPublicKey::from_wire_bytes(p224(), payload); }
-        27 => { let _ = EcdsaPublicKey::from_wire_bytes(secp256k1(), payload); }
+        22 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(p256(), payload);
+        }
+        23 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(p384(), payload);
+        }
+        24 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(p521(), payload);
+        }
+        25 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(p192(), payload);
+        }
+        26 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(p224(), payload);
+        }
+        27 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(secp256k1(), payload);
+        }
 
         // ECDSA binary curves.
-        28 => { let _ = EcdsaPublicKey::from_wire_bytes(b163(), payload); }
-        29 => { let _ = EcdsaPublicKey::from_wire_bytes(k163(), payload); }
-        30 => { let _ = EcdsaPublicKey::from_wire_bytes(b233(), payload); }
-        31 => { let _ = EcdsaPublicKey::from_wire_bytes(k233(), payload); }
-        32 => { let _ = EcdsaPublicKey::from_wire_bytes(b283(), payload); }
-        33 => { let _ = EcdsaPublicKey::from_wire_bytes(k283(), payload); }
-        34 => { let _ = EcdsaPublicKey::from_wire_bytes(b409(), payload); }
-        35 => { let _ = EcdsaPublicKey::from_wire_bytes(k409(), payload); }
-        36 => { let _ = EcdsaPublicKey::from_wire_bytes(b571(), payload); }
-        37 => { let _ = EcdsaPublicKey::from_wire_bytes(k571(), payload); }
+        28 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(b163(), payload);
+        }
+        29 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(k163(), payload);
+        }
+        30 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(b233(), payload);
+        }
+        31 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(k233(), payload);
+        }
+        32 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(b283(), payload);
+        }
+        33 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(k283(), payload);
+        }
+        34 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(b409(), payload);
+        }
+        35 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(k409(), payload);
+        }
+        36 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(b571(), payload);
+        }
+        37 => {
+            let _ = EcdsaPublicKey::from_wire_bytes(k571(), payload);
+        }
 
         // ECDSA key blobs.
         38 => {

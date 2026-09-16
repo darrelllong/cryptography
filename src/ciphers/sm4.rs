@@ -179,40 +179,30 @@ fn t_prime_ct(x: u32) -> u32 {
     l_prime(tau_ct(x))
 }
 
-fn expand_round_keys(key: &[u8; 16]) -> ([u32; 32], [u32; 32]) {
+/// SM4 key expansion (GB/T 32907-2016) into `enc`, with `dec` the same round
+/// keys reversed. `t_prime` is the key-schedule transform T', built on either
+/// the table S-box or the packed-ANF one. The running words `K_i` start as the
+/// user key xor `FK`, so they are wiped before returning.
+fn expand_round_keys(
+    key: &[u8; 16],
+    t_prime: fn(u32) -> u32,
+    enc: &mut [u32; 32],
+    dec: &mut [u32; 32],
+) {
     let mut k = [0u32; 36];
     for i in 0..4 {
         let mk = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
         k[i] = mk ^ FK[i];
     }
 
-    let mut enc = [0u32; 32];
     for i in 0..32 {
         k[i + 4] = k[i] ^ t_prime(k[i + 1] ^ k[i + 2] ^ k[i + 3] ^ CK[i]);
         enc[i] = k[i + 4];
     }
 
-    let mut dec = enc;
+    *dec = *enc;
     dec.reverse();
-    (enc, dec)
-}
-
-fn expand_round_keys_ct(key: &[u8; 16]) -> ([u32; 32], [u32; 32]) {
-    let mut k = [0u32; 36];
-    for i in 0..4 {
-        let mk = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
-        k[i] = mk ^ FK[i];
-    }
-
-    let mut enc = [0u32; 32];
-    for i in 0..32 {
-        k[i + 4] = k[i] ^ t_prime_ct(k[i + 1] ^ k[i + 2] ^ k[i + 3] ^ CK[i]);
-        enc[i] = k[i + 4];
-    }
-
-    let mut dec = enc;
-    dec.reverse();
-    (enc, dec)
+    crate::ct::zeroize_slice(k.as_mut_slice());
 }
 
 #[inline]
@@ -279,11 +269,17 @@ pub type Sms4 = Sm4;
 pub type Sms4Ct = Sm4Ct;
 
 impl Sm4 {
-    /// Construct SM4 from a 128-bit key.
+    /// Construct SM4 from a 128-bit key. The key schedule (table S-box) is
+    /// expanded straight into the struct's fields; key expansion indexes the
+    /// S-box with key-derived bytes and is not constant-time.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
-        let (enc_rk, dec_rk) = expand_round_keys(key);
-        Self { enc_rk, dec_rk }
+        let mut cipher = Self {
+            enc_rk: [0u32; 32],
+            dec_rk: [0u32; 32],
+        };
+        expand_round_keys(key, t_prime, &mut cipher.enc_rk, &mut cipher.dec_rk);
+        cipher
     }
 
     /// Construct SM4 and wipe the caller-provided key buffer.
@@ -294,12 +290,19 @@ impl Sm4 {
     }
 
     /// Encrypt one 128-bit block.
+    ///
+    /// Not constant-time: each round indexes the four T-tables with bytes
+    /// derived from the data and the round key. [`Sm4Ct`] is the
+    /// constant-time path.
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         sm4_core(block, &self.enc_rk)
     }
 
     /// Decrypt one 128-bit block.
+    ///
+    /// Not constant-time, for the same reason as [`Self::encrypt_block`];
+    /// [`Sm4Ct`] is the constant-time path.
     #[must_use]
     pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
         sm4_core(block, &self.dec_rk)
@@ -310,8 +313,12 @@ impl Sm4Ct {
     /// Construct `SM4Ct` from a 128-bit key.
     #[must_use]
     pub fn new(key: &[u8; 16]) -> Self {
-        let (enc_rk, dec_rk) = expand_round_keys_ct(key);
-        Self { enc_rk, dec_rk }
+        let mut cipher = Self {
+            enc_rk: [0u32; 32],
+            dec_rk: [0u32; 32],
+        };
+        expand_round_keys(key, t_prime_ct, &mut cipher.enc_rk, &mut cipher.dec_rk);
+        cipher
     }
 
     /// Construct `SM4Ct` and wipe the caller-provided key buffer.
@@ -338,17 +345,13 @@ impl crate::BlockCipher for Sm4 {
     const BLOCK_LEN: usize = 16;
 
     fn encrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), Self::BLOCK_LEN);
-        let mut tmp = [0u8; 16];
-        tmp.copy_from_slice(block);
-        block.copy_from_slice(&self.encrypt_block(&tmp));
+        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.encrypt_block(arr));
     }
 
     fn decrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), Self::BLOCK_LEN);
-        let mut tmp = [0u8; 16];
-        tmp.copy_from_slice(block);
-        block.copy_from_slice(&self.decrypt_block(&tmp));
+        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.decrypt_block(arr));
     }
 }
 
@@ -356,17 +359,13 @@ impl crate::BlockCipher for Sm4Ct {
     const BLOCK_LEN: usize = 16;
 
     fn encrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), Self::BLOCK_LEN);
-        let mut tmp = [0u8; 16];
-        tmp.copy_from_slice(block);
-        block.copy_from_slice(&self.encrypt_block(&tmp));
+        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.encrypt_block(arr));
     }
 
     fn decrypt(&self, block: &mut [u8]) {
-        assert_eq!(block.len(), Self::BLOCK_LEN);
-        let mut tmp = [0u8; 16];
-        tmp.copy_from_slice(block);
-        block.copy_from_slice(&self.decrypt_block(&tmp));
+        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        block.copy_from_slice(&self.decrypt_block(arr));
     }
 }
 
@@ -387,6 +386,7 @@ impl Drop for Sm4Ct {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex_array;
 
     fn xorshift64(state: &mut u64) -> u64 {
         let mut x = *state;
@@ -405,19 +405,11 @@ mod tests {
         }
     }
 
-    fn parse<const N: usize>(s: &str) -> [u8; N] {
-        let v: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        v.try_into().unwrap()
-    }
-
     #[test]
     fn example_1_encrypt_decrypt() {
-        let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let pt: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let ct: [u8; 16] = parse("681edf34d206965e86b3e94f536e4246");
+        let key: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let pt: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let ct: [u8; 16] = decode_hex_array("681edf34d206965e86b3e94f536e4246");
 
         let sm4 = Sm4::new(&key);
         assert_eq!(sm4.encrypt_block(&pt), ct, "encrypt");
@@ -426,9 +418,9 @@ mod tests {
 
     #[test]
     fn example_1_encrypt_decrypt_ct() {
-        let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let pt: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let ct: [u8; 16] = parse("681edf34d206965e86b3e94f536e4246");
+        let key: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let pt: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let ct: [u8; 16] = decode_hex_array("681edf34d206965e86b3e94f536e4246");
 
         let sm4 = Sm4Ct::new(&key);
         assert_eq!(sm4.encrypt_block(&pt), ct, "encrypt");
@@ -437,9 +429,9 @@ mod tests {
 
     #[test]
     fn example_2_million_encryptions() {
-        let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let mut block: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let expected: [u8; 16] = parse("595298c7c6fd271f0402f804c33d3f66");
+        let key: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let mut block: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let expected: [u8; 16] = decode_hex_array("595298c7c6fd271f0402f804c33d3f66");
 
         let sm4 = Sm4::new(&key);
         for _ in 0..1_000_000 {
@@ -451,9 +443,9 @@ mod tests {
 
     #[test]
     fn example_2_million_encryptions_ct() {
-        let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let mut block: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let expected: [u8; 16] = parse("595298c7c6fd271f0402f804c33d3f66");
+        let key: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let mut block: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let expected: [u8; 16] = decode_hex_array("595298c7c6fd271f0402f804c33d3f66");
 
         let sm4 = Sm4Ct::new(&key);
         for _ in 0..1_000_000 {
@@ -463,22 +455,14 @@ mod tests {
         assert_eq!(block, expected);
     }
 
+    /// The `BlockCipher` entry points reject a wrong-length block.
     #[test]
-    fn sms4_alias_matches_sm4() {
-        let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let pt: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let a = Sm4::new(&key);
-        let b = Sms4::new(&key);
-        assert_eq!(a.encrypt_block(&pt), b.encrypt_block(&pt));
-    }
-
-    #[test]
-    fn sms4_ct_alias_matches_sm4_ct() {
-        let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let pt: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let a = Sm4Ct::new(&key);
-        let b = Sms4Ct::new(&key);
-        assert_eq!(a.encrypt_block(&pt), b.encrypt_block(&pt));
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        use crate::BlockCipher;
+        let cipher = Sm4::new(&[0u8; 16]);
+        let mut short = [0u8; 15];
+        cipher.decrypt(&mut short);
     }
 
     #[test]
@@ -491,8 +475,8 @@ mod tests {
 
     #[test]
     fn sm4_and_sm4ct_match() {
-        let key: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
-        let pt: [u8; 16] = parse("0123456789abcdeffedcba9876543210");
+        let key: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
+        let pt: [u8; 16] = decode_hex_array("0123456789abcdeffedcba9876543210");
         let fast = Sm4::new(&key);
         let slow = Sm4Ct::new(&key);
         assert_eq!(fast.encrypt_block(&pt), slow.encrypt_block(&pt));
@@ -521,15 +505,19 @@ mod tests {
     fn sm4_matches_openssl_ecb() {
         let key_hex = "0123456789abcdeffedcba9876543210";
         let pt_hex = "0123456789abcdeffedcba9876543210";
-        let Some(expected) =
-            crate::test_utils::run_openssl_enc("-sm4-ecb", key_hex, None, &parse::<16>(pt_hex))
-        else {
+        let Some(expected) = crate::test_utils::openssl_enc(
+            "-sm4-ecb",
+            key_hex,
+            None,
+            &decode_hex_array::<16>(pt_hex),
+        )
+        .or_skip("sm4_matches_openssl_ecb") else {
             return;
         };
 
-        let cipher = Sm4::new(&parse(key_hex));
+        let cipher = Sm4::new(&decode_hex_array(key_hex));
         assert_eq!(
-            cipher.encrypt_block(&parse(pt_hex)).as_slice(),
+            cipher.encrypt_block(&decode_hex_array(pt_hex)).as_slice(),
             expected.as_slice()
         );
     }

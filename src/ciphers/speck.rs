@@ -1,7 +1,7 @@
 //! Speck family of lightweight block ciphers.
 //!
 //! Implemented from "The SIMON and SPECK Families of Lightweight Block Ciphers"
-//! (Beaulieu et al., NSA, 2013), §4 and Appendix B.  All 10 variants.
+//! (Beaulieu et al., NSA, 2013), §4 and Appendix C.  All 10 variants.
 //!
 //! # Byte conventions
 //!
@@ -9,7 +9,8 @@
 //! first.  x is the word that is right-rotated in each ARX round.
 //!
 //! **Key** — m words *(k₀ ∥ ℓ₀ ∥ … ∥ ℓ_{m−2})* in little-endian word order,
-//! k₀ first.  This matches the C reference-implementation convention.
+//! k₀ first.  The paper states keys and blocks as words; the tests derive the
+//! byte strings from the Appendix C words under this convention.
 //!
 //! # Naming
 //!
@@ -17,7 +18,7 @@
 //!
 //! # Test vectors
 //!
-//! Known-answer tests use Appendix B of the 2013 paper.
+//! Known-answer tests use Appendix C of the 2013 paper.
 
 use super::simon_speck_util::{load_le, rotl, rotr, store_le};
 
@@ -62,6 +63,9 @@ fn speck_expand(key: &[u8], params: SpeckParams, rk: &mut [u64]) {
             ^ l[i + params.key_words - 1])
             & params.mask;
     }
+    // `l` starts as the key words after the first and carries the schedule's
+    // second register: key material that must not outlive the expansion.
+    crate::ct::zeroize_slice(l.as_mut_slice());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,9 +134,13 @@ macro_rules! speck_variant {
             round_keys: [u64; $T],
         }
         impl $Name {
-            /// Expand the paper-defined master key into this variant's round keys.
+            /// Expand the paper-defined master key into this variant's round
+            /// keys, written directly into the new instance.
+            #[must_use]
             pub fn new(key: &[u8; $key_len]) -> Self {
-                let mut rk = [0u64; $T];
+                let mut cipher = Self {
+                    round_keys: [0u64; $T],
+                };
                 speck_expand(
                     key,
                     SpeckParams {
@@ -143,9 +151,9 @@ macro_rules! speck_variant {
                         rounds: $T,
                         mask: $mask,
                     },
-                    &mut rk,
+                    &mut cipher.round_keys,
                 );
-                Self { round_keys: rk }
+                cipher
             }
             /// Expand the key and then wipe the caller-owned key buffer.
             pub fn new_wiping(key: &mut [u8; $key_len]) -> Self {
@@ -156,12 +164,14 @@ macro_rules! speck_variant {
                 out
             }
             /// Encrypt one block using the cached ARX round keys.
+            #[must_use]
             pub fn encrypt_block(&self, block: &[u8; $blk_len]) -> [u8; $blk_len] {
                 let mut out = *block;
                 speck_enc(&mut out, &self.round_keys, $alpha, $beta, $n, $mask);
                 out
             }
             /// Decrypt one block using the cached ARX round keys.
+            #[must_use]
             pub fn decrypt_block(&self, block: &[u8; $blk_len]) -> [u8; $blk_len] {
                 let mut out = *block;
                 speck_dec(&mut out, &self.round_keys, $alpha, $beta, $n, $mask);
@@ -202,13 +212,13 @@ speck_variant!(Speck128_192, 64, 3, 33, 8, 3, u64::MAX, 24, 16);
 speck_variant!(Speck128_256, 64, 4, 34, 8, 3, u64::MAX, 32, 16);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tests — known-answer vector from Appendix B of the 2013 paper;
-//         all other variants verified by encrypt→decrypt roundtrip.
+// Tests — known-answer vectors from Appendix C of the 2013 paper, one per
+//         variant (all ten), plus encrypt→decrypt round trips.
 //
 // Block bytes: (x ∥ y) little-endian, x first.
 // Key bytes:   (k₀ ∥ ℓ₀ ∥ … ∥ ℓ_{m-2}) little-endian, k₀ first.
 //
-// Speck 32/64 derivation (Appendix B):
+// Speck 32/64 derivation (Appendix C):
 //   Paper words: k₃k₂k₁k₀ = 0x1918 0x1110 0x0908 0x0100
 //   k₀ = 0x0100 → LE bytes 00 01; …; k₃ = 0x1918 → LE bytes 18 19
 //   Key bytes: 00 01 08 09 10 11 18 19
@@ -219,24 +229,27 @@ speck_variant!(Speck128_256, 64, 4, 34, 8, 3, u64::MAX, 32, 16);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::decode_hex_array;
 
-    fn parse<const N: usize>(s: &str) -> [u8; N] {
-        let v: Vec<u8> = (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect();
-        v.try_into().unwrap()
+    /// The `BlockCipher` entry points reject a wrong-length block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        use crate::BlockCipher;
+        let cipher = Speck32_64::new(&[0u8; 8]);
+        let mut long = [0u8; 5];
+        cipher.decrypt(&mut long);
     }
 
-    // ── Speck 32/64 — Appendix B ─────────────────────────────────────────────
+    // ── Speck 32/64 — Appendix C ─────────────────────────────────────────────
     // Key words (k₃,k₂,k₁,k₀) = (0x1918, 0x1110, 0x0908, 0x0100).
     // PT (x,y) = (0x6574, 0x694c).  CT (x,y) = (0xa868, 0x42f2).
 
     #[test]
     fn speck32_64_kat() {
-        let key: [u8; 8] = parse("0001080910111819");
-        let pt: [u8; 4] = parse("74654c69");
-        let ct: [u8; 4] = parse("68a8f242");
+        let key: [u8; 8] = decode_hex_array("0001080910111819");
+        let pt: [u8; 4] = decode_hex_array("74654c69");
+        let ct: [u8; 4] = decode_hex_array("68a8f242");
         let c = Speck32_64::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -248,9 +261,9 @@ mod tests {
 
     #[test]
     fn speck48_72_kat() {
-        let key: [u8; 9] = parse("00010208090a101112");
-        let pt: [u8; 6] = parse("6c792072616c");
-        let ct: [u8; 6] = parse("a549c0dc5a38");
+        let key: [u8; 9] = decode_hex_array("00010208090a101112");
+        let pt: [u8; 6] = decode_hex_array("6c792072616c");
+        let ct: [u8; 6] = decode_hex_array("a549c0dc5a38");
         let c = Speck48_72::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -262,9 +275,9 @@ mod tests {
 
     #[test]
     fn speck48_96_kat() {
-        let key: [u8; 12] = parse("00010208090a10111218191a");
-        let pt: [u8; 6] = parse("73206d746869");
-        let ct: [u8; 6] = parse("105e735d44b6");
+        let key: [u8; 12] = decode_hex_array("00010208090a10111218191a");
+        let pt: [u8; 6] = decode_hex_array("73206d746869");
+        let ct: [u8; 6] = decode_hex_array("105e735d44b6");
         let c = Speck48_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -276,9 +289,9 @@ mod tests {
 
     #[test]
     fn speck64_96_kat() {
-        let key: [u8; 12] = parse("0001020308090a0b10111213");
-        let pt: [u8; 8] = parse("2046617465616e73");
-        let ct: [u8; 8] = parse("ec52799f6c947541");
+        let key: [u8; 12] = decode_hex_array("0001020308090a0b10111213");
+        let pt: [u8; 8] = decode_hex_array("2046617465616e73");
+        let ct: [u8; 8] = decode_hex_array("ec52799f6c947541");
         let c = Speck64_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -290,9 +303,9 @@ mod tests {
 
     #[test]
     fn speck64_128_kat() {
-        let key: [u8; 16] = parse("0001020308090a0b1011121318191a1b");
-        let pt: [u8; 8] = parse("7465723b2d437574");
-        let ct: [u8; 8] = parse("48a56f8c8b024e45");
+        let key: [u8; 16] = decode_hex_array("0001020308090a0b1011121318191a1b");
+        let pt: [u8; 8] = decode_hex_array("7465723b2d437574");
+        let ct: [u8; 8] = decode_hex_array("48a56f8c8b024e45");
         let c = Speck64_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -305,9 +318,9 @@ mod tests {
 
     #[test]
     fn speck96_96_kat() {
-        let key: [u8; 12] = parse("00010203040508090a0b0c0d");
-        let pt: [u8; 12] = parse("2c20686f7765207573616765");
-        let ct: [u8; 12] = parse("7871ab094d9eaa798fdebd62");
+        let key: [u8; 12] = decode_hex_array("00010203040508090a0b0c0d");
+        let pt: [u8; 12] = decode_hex_array("2c20686f7765207573616765");
+        let ct: [u8; 12] = decode_hex_array("7871ab094d9eaa798fdebd62");
         let c = Speck96_96::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -320,9 +333,9 @@ mod tests {
 
     #[test]
     fn speck96_144_kat() {
-        let key: [u8; 18] = parse("00010203040508090a0b0c0d101112131415");
-        let pt: [u8; 12] = parse("6e2074696d657665722c2069");
-        let ct: [u8; 12] = parse("8a227210f32be62e2540e47a");
+        let key: [u8; 18] = decode_hex_array("00010203040508090a0b0c0d101112131415");
+        let pt: [u8; 12] = decode_hex_array("6e2074696d657665722c2069");
+        let ct: [u8; 12] = decode_hex_array("8a227210f32be62e2540e47a");
         let c = Speck96_144::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -335,9 +348,9 @@ mod tests {
 
     #[test]
     fn speck128_128_kat() {
-        let key: [u8; 16] = parse("000102030405060708090a0b0c0d0e0f");
-        let pt: [u8; 16] = parse("206571756976616c206d616465206974");
-        let ct: [u8; 16] = parse("6532787951985da6180d575cdffe6078");
+        let key: [u8; 16] = decode_hex_array("000102030405060708090a0b0c0d0e0f");
+        let pt: [u8; 16] = decode_hex_array("206571756976616c206d616465206974");
+        let ct: [u8; 16] = decode_hex_array("6532787951985da6180d575cdffe6078");
         let c = Speck128_128::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -350,9 +363,9 @@ mod tests {
 
     #[test]
     fn speck128_192_kat() {
-        let key: [u8; 24] = parse("000102030405060708090a0b0c0d0e0f1011121314151617");
-        let pt: [u8; 16] = parse("6869656620486172656e7420746f2043");
-        let ct: [u8; 16] = parse("665513133acfe41b86183ce05d18bcf9");
+        let key: [u8; 24] = decode_hex_array("000102030405060708090a0b0c0d0e0f1011121314151617");
+        let pt: [u8; 16] = decode_hex_array("6869656620486172656e7420746f2043");
+        let ct: [u8; 16] = decode_hex_array("665513133acfe41b86183ce05d18bcf9");
         let c = Speck128_192::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");
@@ -367,9 +380,9 @@ mod tests {
     #[test]
     fn speck128_256_kat() {
         let key: [u8; 32] =
-            parse("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
-        let pt: [u8; 16] = parse("496e2074686f7365706f6f6e65722e20");
-        let ct: [u8; 16] = parse("3ef5c00504010941438f189c8db4ee4e");
+            decode_hex_array("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        let pt: [u8; 16] = decode_hex_array("496e2074686f7365706f6f6e65722e20");
+        let ct: [u8; 16] = decode_hex_array("3ef5c00504010941438f189c8db4ee4e");
         let c = Speck128_256::new(&key);
         assert_eq!(c.encrypt_block(&pt), ct, "encrypt");
         assert_eq!(c.decrypt_block(&ct), pt, "decrypt");

@@ -9,9 +9,7 @@
 //! 2. decrypt(add_ciphertexts(enc(1,r1), enc(2,r2))) == 3   (homomorphic add).
 #![no_main]
 
-use cryptography::public_key::{
-    paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey},
-};
+use cryptography::public_key::paillier::{Paillier, PaillierPrivateKey, PaillierPublicKey};
 use cryptography::vt::BigUint;
 use libfuzzer_sys::fuzz_target;
 use std::sync::OnceLock;
@@ -39,7 +37,7 @@ fuzz_target!(|data: &[u8]| {
     // Invariant 1: roundtrip.
     if let Some(ct) = pk.encrypt_with_nonce(&msg, &nonce) {
         let recovered = sk.decrypt_raw(&ct);
-        assert_eq!(recovered, msg, "Paillier: decrypt(encrypt(m)) != m");
+        assert_eq!(recovered, Some(msg), "Paillier: decrypt(encrypt(m)) != m");
     }
 
     // Invariant 2: homomorphic add  enc(1) + enc(2) = enc(3).
@@ -54,7 +52,7 @@ fuzz_target!(|data: &[u8]| {
             let sum = sk.decrypt_raw(&ct_sum);
             assert_eq!(
                 sum,
-                BigUint::from_u64(3),
+                Some(BigUint::from_u64(3)),
                 "Paillier: homomorphic add dec(enc(1)+enc(2)) != 3",
             );
         }

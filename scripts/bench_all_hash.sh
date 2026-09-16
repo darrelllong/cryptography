@@ -32,6 +32,11 @@ measure() {
     mean=$(echo  "$out" | awk '/Reading mean/{print $5}')
     ci=$(echo    "$out" | awk '/Reading CI/{print $5}')
     rounds=$(echo "$out" | awk '/^Rounds:/{print $2}')
+    if [[ -z "$mean" || -z "$ci" || -z "$rounds" ]]; then
+        echo "pilot-bench output for $name carried no mean, CI or round count:" >&2
+        echo "$out" >&2
+        exit 1
+    fi
     printf "| %-12s | %5s | %8s | %8s | %5s |\n" \
            "$name" "$outbits" "$mean" "±$ci" "$rounds"
 }

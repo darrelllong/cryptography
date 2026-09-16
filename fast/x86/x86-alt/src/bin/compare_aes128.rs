@@ -69,7 +69,12 @@ fn run_microbench() -> Result<(), String> {
     let x86 = Aes128X86::new(&key).map_err(|_| "failed to init x86 AES".to_string())?;
     let baseline = Aes128::new(&key);
 
+    // Both buffers are written before timing so neither side pays page faults
+    // inside its measured span.
     let mut x86_buf = vec![0u8; 1024 * 1024];
+    for (i, b) in x86_buf.iter_mut().enumerate() {
+        *b = i as u8;
+    }
     let mut base_buf = x86_buf.clone();
 
     let t0 = Instant::now();

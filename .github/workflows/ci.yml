@@ -4,13 +4,24 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release-only ignored tests run weekly and on request (see the
+  # release-ignored job); every other job runs on every push and PR.
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
+  # rust-mp is taken from ../rump by path (it is not on crates.io). The
+  # sibling is pinned to one commit so a push to rump cannot change what
+  # this CI tests. To bump: `git -C ../rump rev-parse HEAD` after the
+  # cryptography tree builds and tests against that rump, and paste it here.
+  RUMP_REF: 799dd42a256fa9db42485122a2565455575a6e21
 
 jobs:
   test:
     name: ${{ matrix.os }} / ${{ matrix.rust }}
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -27,8 +38,7 @@ jobs:
       run:
         working-directory: cryptography
     steps:
-      # rust-mp is taken from ../rump by path (it is not on crates.io), so
-      # the sibling is checked out next to this repository exactly as it
+      # The sibling is checked out next to this repository exactly as it
       # lives on a development machine — the same layout entropy's CI uses.
       - uses: actions/checkout@v4
         with:
@@ -36,7 +46,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: darrelllong/rump
+          ref: ${{ env.RUMP_REF }}
           path: rump
+      # The cross-check tests compare against the `openssl` tool, and with
+      # CRYPTOGRAPHY_OPENSSL_REQUIRED=1 a missing tool or an algorithm it
+      # lacks fails the test instead of skipping. Ubuntu's OpenSSL 3 ships
+      # the legacy provider (single DES, CAST5, SEED, Blowfish); macOS gets
+      # Homebrew's openssl@3 because the system binary is LibreSSL, which
+      # lacks SHA-3, SHA-512/256 and SEED and names no algorithm it rejects.
+      - name: Install OpenSSL 3 (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y openssl && openssl version
+      - name: Install OpenSSL 3 (macOS)
+        if: runner.os == 'macOS'
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3; /opt/homebrew/opt/openssl@3/bin/openssl version
       - name: Install Rust ${{ matrix.rust }}
         run: rustup toolchain install ${{ matrix.rust }} --profile minimal --component clippy,rustfmt && rustup default ${{ matrix.rust }}
       - uses: Swatinem/rust-cache@v2
@@ -49,12 +72,17 @@ jobs:
         run: cargo build --all-targets
       - name: Clippy (deny warnings)
         run: cargo clippy --all-targets -- -D warnings
+      # The profiling feature is opt-in and never built by the default job;
+      # this keeps it compiling under deny(missing_docs) and its tests green.
+      - name: Clippy (ct_profile feature)
+        run: cargo clippy --features ct_profile --all-targets -- -D warnings
       # Job logs need authentication to read, but annotations do not, so a
       # failure names its failing tests where anyone can see them.
       - name: Tests
         shell: bash
         env:
           CARGO_TERM_COLOR: never
+          CRYPTOGRAPHY_OPENSSL_REQUIRED: "1"
         run: |
           set +e
           cargo test 2>&1 | tee /tmp/test.log
@@ -63,20 +91,75 @@ jobs:
             grep -E "^test .* FAILED|panicked at" /tmp/test.log | head -20 | while read -r l; do echo "::error::$l"; done
           fi
           exit "$status"
+      - name: Tests (ct_profile feature)
+        env:
+          CRYPTOGRAPHY_OPENSSL_REQUIRED: "1"
+        run: cargo test --features ct_profile
       # The opt-in NEON Keccak path is aarch64-only and runtime-detected;
       # the macos-latest runner is Apple silicon, so the feature's unsafe
-      # path actually executes there.
+      # path actually executes there, under the whole suite and clippy.
+      - name: Clippy (arm-sha3, aarch64)
+        if: matrix.os == 'macos-latest'
+        run: cargo clippy --features arm-sha3 --all-targets -- -D warnings
       - name: Tests (arm-sha3, aarch64)
         if: matrix.os == 'macos-latest'
-        run: cargo test --features arm-sha3 hash::sha3
+        env:
+          CRYPTOGRAPHY_OPENSSL_REQUIRED: "1"
+        run: cargo test --features arm-sha3
       - name: Doc build (deny warnings)
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
+  # The crates that depend on this one by path but are excluded from the
+  # package: the fuzz targets, the criterion benchmarks, and the two
+  # platform-intrinsics crates. Each fast crate is checked on its own
+  # architecture; the intrinsics do not compile on the other.
+  companions:
+    name: companion crates (${{ matrix.os }})
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            fast: fast/x86/x86-alt
+          - os: macos-latest
+            fast: fast/Apple-Silicon/aarch64-alt
+    defaults:
+      run:
+        working-directory: cryptography
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cryptography
+      - uses: actions/checkout@v4
+        with:
+          repository: darrelllong/rump
+          ref: ${{ env.RUMP_REF }}
+          path: rump
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            cryptography/fuzz
+            cryptography/benchmarks
+            cryptography/${{ matrix.fast }}
+      - name: Check fuzz targets
+        run: cargo check --manifest-path fuzz/Cargo.toml
+      - name: Check benchmarks
+        run: cargo check --manifest-path benchmarks/Cargo.toml --all-targets
+      - name: Check ${{ matrix.fast }}
+        run: cargo check --manifest-path ${{ matrix.fast }}/Cargo.toml --all-targets
+
   # The same courtesy this crate expects of rump: a breaking push here turns
   # this CI red rather than entropy's next one. entropy builds and tests
-  # against the exact cryptography commit under test.
+  # against the exact cryptography commit under test, which its manifest
+  # must reach by the sibling path; a registry version there would test a
+  # published crate instead, so the step checks the manifest first.
   downstream:
     name: downstream (entropy)
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,11 +168,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: darrelllong/rump
+          ref: ${{ env.RUMP_REF }}
           path: rump
       - uses: actions/checkout@v4
         with:
           repository: darrelllong/entropy
           path: entropy
+      - name: entropy takes cryptography from the sibling path
+        working-directory: entropy
+        run: |
+          grep -E '^cryptography-rs *= *\{.*path *= *"\.\./cryptography"' Cargo.toml \
+            || { echo "::error::entropy/Cargo.toml does not take cryptography-rs from path = \"../cryptography\""; exit 1; }
       - name: Install Rust stable
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@v2
@@ -98,3 +187,34 @@ jobs:
       - name: entropy tests against this cryptography
         working-directory: entropy
         run: cargo test
+
+  # The twelve release-only tests (million-iteration RFC 7748 ladders, every
+  # CAVP prime-generation case, FIPS parameter generation at every approved
+  # size, the full NTRU KATs). They take about 8 minutes on a 128-core host,
+  # where each runs on its own core; a 4-core runner shares the cores among
+  # them, so expect roughly 30 to 45 minutes there, the compile included.
+  # Runs weekly and on request, never on a push.
+  release-ignored:
+    name: release-only ignored tests
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: cryptography
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cryptography
+      - uses: actions/checkout@v4
+        with:
+          repository: darrelllong/rump
+          ref: ${{ env.RUMP_REF }}
+          path: rump
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cryptography
+      - name: Ignored tests (release)
+        run: cargo test --release -- --ignored

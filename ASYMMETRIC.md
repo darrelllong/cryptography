@@ -7,11 +7,12 @@ The public-key layer is built on:
 - `BigUint`
 - `BigInt`
 - `MontgomeryCtx`
-- shared number-theory helpers in `src/public_key/primes.rs`
+- number theory from `rump`, plus the cryptographic policy layered on it in
+  `src/public_key/primes.rs`
 
-The in-tree bigint backend stores `u64` limbs in little-endian limb order and
-uses Montgomery multiplication for repeated modular arithmetic under odd
-moduli. That is the common case for every implemented public-key
+The bigint backend (the sibling `rump` crate) stores `u64` limbs in
+little-endian limb order and uses Montgomery multiplication for repeated
+modular arithmetic under odd moduli. That is the common case for every implemented public-key
 scheme here.
 
 Implementation references for multiplication-kernel upgrades are tracked in
@@ -33,8 +34,8 @@ The broader implementation policy matches the rest of the crate:
 - minimal dependencies unless they clearly improve interoperability or
   maintainability
 
-That is why the bigint and Montgomery code carry no external arithmetic
-backend: they live in the sibling [rump](https://github.com/darrelllong/rump)
+That is why the bigint and Montgomery code depend on no third-party
+arithmetic: they live in the sibling [rump](https://github.com/darrelllong/rump)
 crate — extracted from this tree, same author, same pure-Rust and
 scrub-on-drop policies — while RSA key persistence uses standard DER/PEM
 structures where that buys real compatibility.
@@ -95,7 +96,7 @@ behavior explicit at import sites.
 ### Integer and finite-field schemes
 
 - `Rsa` — encryption and signatures
-- `Dsa` — signatures (FIPS 186-5)
+- `Dsa` — signatures (FIPS 186-4; FIPS 186-5 keeps DSA for verification only)
 - `Cocks` — encryption (historical; 1973)
 - `ElGamal` — encryption
 - `Rabin` — encryption
@@ -115,7 +116,7 @@ behavior explicit at import sites.
 - `Ecdh` — EC Diffie-Hellman key exchange (ANSI X9.63 / SEC 1)
 - `Ecdsa` — EC Digital Signature Algorithm (FIPS 186-5)
 - `EcElGamal` — EC-ElGamal encryption with additive homomorphism
-- `Ecies` — Elliptic Curve Integrated Encryption Scheme (ephemeral ECDH + AES-256-GCM)
+- `Ecies` — Elliptic Curve Integrated Encryption Scheme (SEC 1 v2.0 §5.1)
 
 ### Twisted Edwards schemes
 
@@ -135,6 +136,25 @@ below](#curve25519--curve448-ecdh-rfc-7748) for details.
 
 The Edwards arithmetic is generic over `TwistedEdwardsCurve`, but the only
 built-in named Edwards domain currently shipped in-tree is `ed25519()`.
+
+Points encode in the RFC 8032 `b`-bit form, `⌈(bits(p) + 1)/8⌉` octets with
+the sign of `x` in the top bit of the last octet: 32 octets for Ed25519 and
+57 for an Ed448-sized field (RFC 8032 §5.1.2, §5.2.2). Decoding refuses a
+`y ≥ p` and any set bit between `bits(p)` and the sign bit, so every point has
+one encoding.
+
+Explicit Edwards parameters arriving in an EdDsa, Edwards-DH or
+Edwards-ElGamal blob, PEM or XML document go through
+`TwistedEdwardsCurve::from_explicit` before any expensive work: Ed25519's
+parameters are accepted by comparison; any others must have `p` of at most
+`MAX_EXPLICIT_FIELD_BITS` (1024) bits and `n` of at most `bits(p) + 1`, every
+coefficient and coordinate reduced, `p` and `n` prime by the hardened test,
+`a` a square and `d` a non-square (the completeness condition of the addition
+law), `G` on the curve, a Hasse cofactor `h = ⌊(√p + 1)²/n⌋` that is even and
+at most `MAX_EXPLICIT_COFACTOR` (8), no embedding degree below 100, and
+`[n]G` neutral. EdDsa verification requires `R` to be canonical, on the curve
+and non-neutral, and lets the equation `S·G = R + e·A` fix its order, since
+`A` is validated into the prime-order subgroup on import.
 
 ### Wrapper layers
 
@@ -195,6 +215,25 @@ RFC 8032.
 This deliberately copies the structural simplicity of the RSA key material
 without pretending that those schemes have standard OIDs or a real PKCS/X.509
 profile.
+
+Every DER reader — the integer-sequence blobs and the RSA PKCS #1 / PKCS #8 /
+SPKI containers alike — is one strict X.690 DER parser: definite lengths in
+the fewest octets, `INTEGER`s in the fewest octets, non-negative, no trailing
+bytes. BER-style encodings (a long-form length below 128, a redundant leading
+`00` on an integer, an indefinite length) are rejected, so every key and
+signature has exactly one accepted encoding.
+
+Parsing also validates, under one policy for every scheme (stated in full in
+the `public_key` module docs): a private key is validated completely —
+hardened primality on every prime it carries, the scheme's algebraic
+relations, derived values recomputed rather than trusted — while a public key
+is validated structurally — ranges, parity, subgroup membership
+(`y^q ≡ 1 (mod p)` for `DSA` and `DH`), and one fixed-base primality test per
+public prime, so loading someone else's key never costs the 76-round hardened
+test. `DhParams` and `DsaParams` are the exceptions in the public-looking
+direction: a group the crate will generate a secret over is validated as
+private material, and parameters that carry a FIPS 186-4 seed record are also
+validated against it (Appendix A.1.1.3 and A.2.4).
 
 The short-Weierstrass EC public key types (`EcdhPublicKey`, `EcdsaPublicKey`,
 `EciesPublicKey`, `EcElGamalPublicKey`) encode the curve domain parameters
@@ -269,12 +308,18 @@ Core arithmetic:
 \gamma = g^k \bmod p,\qquad \delta = m \cdot y^k \bmod p,\qquad y = g^a \bmod p
 ```
 
-The key-generation path uses a prime-order subgroup construction instead of the
-older safe-prime search. A safe prime is a modulus of the form $p = 2q + 1$
-with `q` prime; it gives simple subgroup structure, but searching for those
-moduli is much slower than generating $p = kq + 1$ directly. The
-implementation keeps the subgroup structure explicit while avoiding that
-pathological key-generation cost.
+The paper works with a large prime `p` and a primitive element of
+$\mathbb{Z}_p^*$; `ElGamal::from_secret_exponent` keeps that shape and checks
+exactly this much of it: `p` a hardened probable prime of at most 16 384 bits,
+`1 < g < p` and `1 ≤ a ≤ p − 2`. It does not check `g`'s order. Generated
+keys work in a prime-order subgroup instead, with $p = kq + 1$ for a large
+cofactor `k` (a safe prime $p = 2q + 1$ would be far slower to find).
+`ElGamal::generate(rng, size, hash)` takes that group from FIPS 186-4
+Appendix A — `p` and `q` by A.1.1.2 at one of the four §4.2 `(L, N)` pairs,
+`g` by A.2.3 — and `ElGamal::generate_toy(rng, bits)` makes groups below 1024
+bits for tests, following no standard. No NIST standard specifies ElGamal
+encryption itself, and the key formats have no place for the FIPS 186-4 seed
+record, so a key's group cannot be revalidated from the key.
 
 The public key stores the real ephemeral bound used for encryption, so the
 random ephemeral exponent is sampled from the right range instead of from the
@@ -298,9 +343,10 @@ helpers are only a serialization layer over that arithmetic.
 
 #### DSA
 
-Reference: FIPS 186-5, Digital Signature Standard (see
-`pubs/fips186-5.pdf` and the matching BibTeX entry in the top-level
-references).
+Reference: FIPS 186-4, Digital Signature Standard (`pubs/fips186-4.pdf`).
+FIPS 186-5 (`pubs/fips186-5.pdf`) no longer approves DSA for generating
+signatures, allows it only for verifying signatures made earlier, and no longer
+contains its specification.
 
 Core arithmetic:
 
@@ -323,23 +369,39 @@ and acceptance when:
 \bigl(g^{u_1} y^{u_2} \bmod p\bigr) \bmod q = r
 ```
 
-The implementation reuses the same prime-order subgroup generation shape as
-`ElGamal`: generated keys store `(p, q, g)` explicitly, and signatures sample
-their per-message nonce from `[1, q)`. The digest representative is reduced to
-the leftmost $N = \mathrm{bits}(q)$ bits before signing and verification,
-matching the Digital Signature Standard's treatment of hash outputs that are
-wider than the subgroup order.
+Domain parameters are generated apart from key pairs, as FIPS 186-4 §4.3
+describes. `Dsa::generate_params(rng, size, hash)` runs Appendix A.1.1.2 for
+`p` and `q` at one of the §4.2 pairs — `(1024, 160)`, `(2048, 224)`,
+`(2048, 256)`, `(3072, 256)` — with a SHA-2 hash at least `N` bits long, and
+A.2.3 for `g` with index 1. Its Miller-Rabin rounds are Table C.1's (bases from
+the caller's RNG), followed by a Lucas test. The resulting `DsaParams` keeps
+the seed record (`FfcSeed`: hash, `domain_parameter_seed`, `counter`, `index`)
+and serializes it, and `DsaParams::with_seed` validates third-party parameters
+by A.1.1.3 and A.2.4. Validation has no RNG to draw bases from, so its
+primality test is the crate's hardened one (64 SHAKE256-derived bases after
+twelve fixed ones) rather than C.3.1's random bases. Both routines are checked
+against NIST's CAVP `PQGGen.rsp` and `PQGVer.rsp` vectors
+(`tests/vectors/fips186_4_ffc_domain_parameters.txt`).
+`Dsa::generate(&params, rng)` then draws `x` uniformly from `[1, q)`, the
+distribution of Appendix B.1.2. `Dsa::generate_toy_params(rng, bits)` makes
+groups below 1024 bits for tests and follows no standard.
 
-For generated keys, the implementation uses:
-
-```math
-N = \mathrm{clamp}(\lfloor L / 4 \rfloor, 16, 256)
-```
-
-for a modulus size $L = \mathrm{bits}(p)$. That is not the exact FIPS menu of $(L, N)$
-pairs (`(1024, 160)`, `(2048, 224)`, `(2048, 256)`, `(3072, 256)`), but it
-keeps the subgroup order conservative for the representative benchmark sizes
-used here while staying within the same finite-field `DSA` structure.
+`sign_digest_with_rng` samples the per-message nonce uniformly from `[1, q)`,
+the distribution of Appendix B.2.2, drawing again when `r = 0` or `s = 0` as
+§4.6 directs and giving up with `None` after `MAX_NONCE_DRAWS = 64` such
+draws in a row (about `(2/q)^64` for a working source; a source stuck on the
+one `k` that zeroes `s` fails every draw, and a stalled source is reported by
+`rump`'s own 256-rejection panic before the bound matters); `sign_digest`
+derives `k` by RFC 6979, which FIPS 186-4 does not list among its approved
+methods, and stops at the same bound. Every DSA, DH and ElGamal group must
+have `q ≥ 2^15`, `p ≤ 16 384` bits and `q ≤ 512` bits, checked before any
+primality test. Signing leaks the bit length of `k` through the variable-time
+exponentiation; DH and ElGamal exponentiate a peer-chosen base with the static
+secret. ElGamal decryption refuses `γ` or `δ` outside `[1, p)` and, when the
+key carries `q`, a `γ` outside the order-`q` subgroup; the encryptor refuses
+`m = 0`. The digest
+representative is the leftmost $\min(N, \mathrm{outlen})$ bits of the hash,
+with $N = \mathrm{bits}(q)$ (§4.6).
 
 The public API is intentionally parallel to `ECDSA`:
 
@@ -354,7 +416,8 @@ the message-level wrapper.
 Like `ElGamal` and `Dh`, generated `DSA` keys carry the full subgroup domain
 parameters `(p, q, g)` in the key object and in the crate-defined key blob.
 That keeps key import self-contained instead of depending on an external
-parameter registry.
+parameter registry. The key blobs do not carry the seed record; `DsaParams`
+does, in an eight-field form beside the original three-field one.
 
 #### Cocks
 
@@ -374,11 +437,15 @@ with the private recovery map:
 m = c^\pi \bmod q
 ```
 
-Cocks is historically important: Clifford Cocks proposed it in 1973, five
-years before RSA. The scheme is unusual because the public exponent is the
-modulus itself. The crate keeps that arithmetic intact and adds the byte-level
-serialization layer on top instead of inventing a modernized padding story
-that the literature does not standardize.
+Cocks is historically important: Clifford Cocks described it in a CESG
+memorandum in November 1973, declassified by GCHQ in December 1997; RSA was
+published independently in 1977. The scheme is unusual because the public
+exponent is the modulus itself. The crate keeps that arithmetic intact and
+adds the byte-level serialization layer on top instead of inventing a
+modernized padding story that the literature does not standardize. The map is
+deterministic (equal messages give equal ciphertexts) and carries no
+OAEP-like layer, so it is not IND-CPA; and its private exponentiation runs in
+variable time on the secret exponent, as the module documentation states.
 
 The private exponent is:
 
@@ -386,9 +453,9 @@ The private exponent is:
 \pi \equiv p^{-1} \pmod{q - 1}
 ```
 
-and the key observation is the CRT reduction modulo $q$: when
-$c = m^{pq} \bmod n$, raising $c$ to $\pi$ modulo $q$ reduces the exponent
-from $pq\pi$ to $q$, so Fermat brings the result back to $m$.
+and the key observation is what happens modulo $q$: $c^\pi \equiv m^{pq\pi}
+\pmod q$, and since $p\pi \equiv 1 \pmod{q-1}$, $pq\pi \equiv q \equiv 1
+\pmod{q-1}$, so Fermat gives $m^{pq\pi} \equiv m \pmod q$.
 
 From an API perspective, `Cocks` stays intentionally narrow:
 
@@ -414,8 +481,13 @@ c = m^2 \bmod n,\qquad n = pq
 Decryption computes square roots modulo `p` and `q`, then recombines them with
 the Chinese remainder theorem to recover the four square roots modulo `n`.
 Because plain Rabin is ambiguous, the implementation uses a tagged-message
-variant: the tag is carried inside the encoded plaintext and is used to select
-the intended root deterministically at decrypt time.
+variant: a fixed 128-bit tag occupies the low bits of the encoded plaintext
+(`m·2^128 + tag`, then shifted into the upper half of the residues) and
+selects the intended root at decrypt time. The scheme is deterministic and
+not IND-CPA, and the tag is the only thing between a decryption oracle and
+the factorization: a chosen ciphertext whose root is accepted with the wrong
+sign yields a factor of `n` through a gcd, which the tag makes a `2^-126`
+event per query.
 
 The implementation requires Blum primes:
 
@@ -436,9 +508,10 @@ algorithm during decryption.
 Rabin is historically important because it is one of the earliest public-key
 trapdoor constructions with a tight reduction story: in the plain setting,
 inverting the squaring map modulo $n = pq$ is essentially equivalent to
-factoring $n$. The fixed disambiguation tag used here is what lets the code
-identify the intended root among the four CRT roots and turn the raw squaring
-trapdoor into a deterministic decryptor.
+factoring $n$. The fixed 128-bit disambiguation tag used here is what lets
+the code identify the intended root among the four CRT roots and turn the raw
+squaring trapdoor into a deterministic decryptor; decryption reports the first
+matching root in the order `x, −x, y, −y`.
 
 The API follows that same philosophy:
 
@@ -534,7 +607,9 @@ modulus.
 
 Like Cocks, Schmidt-Samoa uses the modulus itself as the public exponent. It
 is mathematically neat and implemented faithfully here, but it does not have
-the same standards ecosystem or deployment relevance as RSA.
+the same standards ecosystem or deployment relevance as RSA. Like Cocks it is
+a deterministic map with no padding layer (not IND-CPA), and its private
+exponentiation runs in variable time on the secret exponent.
 
 The wrapper therefore stays minimal:
 
@@ -547,9 +622,10 @@ belongs in the same operational category as the RSA layer.
 
 #### Diffie-Hellman
 
-Reference: the classic finite-field Diffie-Hellman model, with subgroup
-validation handled in the same prime-order subgroup framework used for `DSA`
-and `ElGamal`.
+Reference: NIST SP 800-56A Rev. 3 (`pubs/sp800-56a-r3.pdf`) — the FFC DH
+primitive (§5.7.1.1), FFC full public-key validation (§5.6.2.3.1), and FIPS
+186-type domain parameters (§5.5.1.1). The key-agreement schemes of its §6
+(key derivation, key confirmation) are not implemented.
 
 Core arithmetic:
 
@@ -563,9 +639,8 @@ with shared secret:
 s = y_{\mathrm{peer}}^x \bmod p
 ```
 
-`DH` uses a prime-order subgroup construction identical to `DSA` and
-`ElGamal`: a Sophie-Germain-style group with explicit subgroup order `q`. The
-public key stores `(p, q, g, y)` so the receiver can validate that the peer's
+`DH` works in a prime-order subgroup, as `DSA` and `ElGamal` do, with an
+explicit subgroup order `q`. The public key stores `(p, q, g, y)` so the receiver can validate that the peer's
 contribution actually lies in the correct subgroup before computing the shared
 secret. The validation check is:
 
@@ -573,10 +648,18 @@ secret. The validation check is:
 1 < y < p \qquad \text{and} \qquad y^q \equiv 1 \pmod{p}
 ```
 
-`DhPrivateKey::agree` returns `None` when the peer key belongs to a different
-group or fails the subgroup check. The raw shared secret is returned as a
+For odd `q` that is SP 800-56A §5.6.2.3.1, whose bound $y \le p - 2$ follows
+because $p - 1$ has order 2.
+
+`DhPrivateKey::agree_element` returns `None` when the peer key belongs to a
+different group or fails the subgroup check, and when the result is
+$z \le 1$ or $z = p - 1$ (§5.7.1.1 step 2); the public-key parsers apply the
+same membership check, so a blob whose `y` lies outside the subgroup never
+becomes a `DhPublicKey`. The raw shared secret is returned as a
 `BigUint`; callers are expected to apply their own KDF before using it as
-keying material.
+keying material. SP 800-56A's shared secret `Z` is that integer encoded at the
+byte length of `p` (its Appendix C.1), which `to_be_bytes` is not: it drops
+leading zero bytes.
 
 That return shape is intentionally lower-level than the EC variants. `DH`
 returns the shared group element itself, not a byte-oriented KDF input chosen
@@ -585,7 +668,25 @@ quietly committing to a KDF policy here.
 
 Like `DSA`, the key blobs carry `(p, q, g)` explicitly. That makes `DhParams`
 and the generated keys self-contained and avoids any hidden dependency on an
-external parameter database.
+external parameter database. `DhParams` has no public fields: it is built by
+`Dh::generate_params`, `Dh::generate_toy_params`, `DhParams::new(p, q, g)`,
+`DhParams::with_seed(p, q, g, seed)`, or the parsers, and each validates,
+because these are the groups the crate generates fresh secrets over (a
+composite `p` that survives fixed Miller-Rabin bases would split `Z_p^*` into
+components where a discrete logarithm is cheap). `DhPublicKey::params()`
+therefore returns `Option<DhParams>`, re-validating a peer's group under that
+rule before it can be reused for key generation.
+
+`Dh::generate_params(rng, size, hash)` generates FIPS 186-type parameters the
+way SP 800-56A §5.5.1.1 requires — FIPS 186-4 A.1.1.2 and A.2.3, with index 2,
+keeping the seed record — and only at that section's parameter-size sets FB
+`(2048, 224)` and FC `(2048, 256)`; it refuses the other two FIPS 186-4 pairs.
+The same section says FIPS 186-type parameters should be used only for backward
+compatibility and requires an approved safe-prime group (its Appendix D) above
+112 bits of security; those groups are not implemented.
+`DhParams::with_seed` validates third-party parameters by FIPS 186-4 A.1.1.3
+and A.2.4, and `Dh::generate_toy_params(rng, bits)` makes groups below 1024
+bits for tests, following no standard.
 
 ### Short-Weierstrass elliptic-curve schemes
 
@@ -621,59 +722,113 @@ on the wire when the curve is already known; the self-describing blob is what
 the repo uses when it wants a standalone serialized key without an external OID
 or curve registry.
 
+Because the blob and the XML form carry the curve itself, their decoders (in
+ECDSA, ECDH, ECIES and EC-ElGamal alike) build it through
+`CurveParams::from_explicit`, which accepts the parameters on one of the two
+grounds SEC 1 v2.0 §3.1.1.2 and §3.1.2.2 give a party that did not generate
+them: they equal a named curve of this crate, or they pass the validation
+primitive of §3.1.1.2.1 (prime fields) or §3.1.2.2.1 (binary fields) in full,
+available on its own as `CurveParams::validate_domain_parameters`. The
+primitive fixes the field sizes it admits, $\lceil \log_2 p \rceil \in \{192,
+224, 256, 384, 521\}$ and $m \in \{163, 233, 239, 283, 409, 571\}$ under a
+Table 1 reduction polynomial, and then requires $p$ and $n$ prime, reduced
+coefficients and base point, a non-singular curve with $G$ on it, the
+cofactor $h = \lfloor (\sqrt{q} + 1)^2 / n \rfloor$ with $h \le 2^{t/8}$,
+$n G = \mathcal{O}$, and neither an anomalous curve nor an embedding degree
+below 100 (over $\mathbb{F}_{2^m}$ the primitive bounds $\mathrm{ord}_n(2) \ge 100m$,
+which implies it). A sound curve no name
+covers, P-256 with $-G$ as base point say, decodes; a 160-bit curve does not,
+whatever its merits, because the primitive has no security level for it.
+`CurveParams::new` and `new_binary` remain the constructors for parameters the
+caller vouches for.
+
 As with `DH`, `EcdhPrivateKey::agree` returns raw shared-secret material, not a
 KDF output. The returned bytes are the padded x-coordinate and should be fed
 through a KDF before use as a symmetric key.
 
 #### ECIES
 
-Reference: SEC 1 v2.0 and NIST SP 800-56A Rev. 3 for the EC key-establishment
-model and point encodings (external standards; no local PDFs are checked into
-`pubs/`).
+Reference: SEC 1 v2.0, "SEC 1: Elliptic Curve Cryptography", §5.1
+(`pubs/sec1-v2-elliptic-curve-cryptography.pdf`), with its components in §2.3
+(octet conversions), §3.3 (Diffie–Hellman primitives), §3.6.1
+(ANSI-X9.63-KDF), §3.7 (MAC schemes) and §3.8 (symmetric encryption schemes).
+Known answers: GEC 2 v0.3 §3 (`pubs/gec2-v0.3-test-vectors-for-sec1.pdf`), and
+NIST CAVP's ANS X9.63 KDF and ECC CDH primitive vectors (`tests/vectors/`).
 
-`ECIES` is the standard way to encrypt arbitrary byte strings to a static EC
-public key. It combines ephemeral ECDH with a symmetric encryption step, so the
-per-message overhead is a single scalar multiplication by the sender and a
-single scalar multiplication by the receiver.
+`ECIES` encrypts arbitrary byte strings to a static EC public key. Ephemeral
+Diffie–Hellman yields a shared field element, a KDF expands it into an
+encryption key and a MAC key, and the message is encrypted and then tagged.
+Encryption costs two scalar multiplications (`k·G` and `k·Q`); decryption costs
+one, plus `n·R` under the standard primitive.
 
-**Encryption:**
+SEC 1 makes ECIES a family. The recipient chooses five options, and
+`EciesSetup` carries them explicitly:
 
-1. Generate an ephemeral key pair $(k, R)$ where $R = k \cdot G$.
-2. Compute the shared point $S = k \cdot Q$.
-3. Derive symmetric key and nonce from $S_x$:
+| SEC 1 §5.1.1 | Type | Options |
+|---|---|---|
+| KDF (§3.6) | `EciesKdf` | ANSI-X9.63-KDF with SHA-1, SHA-224, SHA-256, SHA-384 or SHA-512 |
+| MAC (§3.7) | `EciesMac` | HMAC-SHA-1-160/80, HMAC-SHA-224-112/224, HMAC-SHA-256-128/256, HMAC-SHA-384-192/384, HMAC-SHA-512-256/512, CMAC-AES-128/192/256 |
+| ENC (§3.8) | `EciesEncryption` | XOR (SEC 1 v2.0 key layout, or v1.0 backwards compatibility), 3-key TDES-CBC, AES-128/192/256-CBC, AES-128/192/256-CTR |
+| primitive (§3.3) | `EciesDhPrimitive` | standard, cofactor |
+| point compression (§2.3.3) | `EciesPointFormat` | uncompressed, compressed |
+
+`EciesSetup::RECOMMENDED` is ANSI-X9.63-KDF with SHA-256, AES-128-CTR,
+HMAC-SHA-256-256, cofactor Diffie–Hellman and uncompressed points, aimed at
+the 128-bit level of P-256.
+
+**Encryption (§5.1.3):**
+
+1. Generate an ephemeral key pair $(k, R)$ with $R = k \cdot G$, and encode $R$
+   (§2.3.3).
+2. Compute $z = x(k \cdot Q)$, or $z = x(h \cdot k \cdot Q)$ under the cofactor
+   primitive; the point at infinity is "invalid". Encode $z$ as the octet
+   string $Z$ (§2.3.5).
+3. Derive $\mathit{enckeylen} + \mathit{mackeylen}$ octets of keying data:
 
 ```math
-\text{key}   = \mathrm{SHA\text{-}256}(\mathtt{0x01} \mathbin\| S_x)
-\qquad
-\text{nonce} = \mathrm{SHA\text{-}256}(\mathtt{0x02} \mathbin\| S_x)_{[0..12]}
+K = \mathrm{Hash}(Z \mathbin\| \mathtt{00000001} \mathbin\| \mathit{SharedInfo}_1)
+    \mathbin\| \mathrm{Hash}(Z \mathbin\| \mathtt{00000002} \mathbin\| \mathit{SharedInfo}_1)
+    \mathbin\| \cdots
 ```
 
-4. Encrypt the message with AES-256-GCM, using $R_{\text{bytes}}$ as the
-   additional authenticated data (AAD). The AAD binding prevents `R` from being
-   silently swapped without triggering a tag failure.
+4. Split $K$: $EK$ is the leftmost $\mathit{enckeylen}$ octets and $MK$ the
+   rightmost $\mathit{mackeylen}$, except that XOR outside backwards
+   compatibility mode takes $MK$ from the left.
+5. Encrypt $EM = \mathrm{ENC}_{EK}(M)$. The CBC IV and the CTR initial counter
+   block are zero and are not transmitted.
+6. Tag $D = \mathrm{MAC}_{MK}(EM \mathbin\| \mathit{SharedInfo}_2)$.
 
-**Wire format:**
+**Ciphertext:**
 
 ```text
-R_bytes  (1 + 2·coord_len bytes, SEC 1 uncompressed)
-ciphertext  (same length as plaintext)
-tag  (16 bytes, GCM authentication tag)
+R   04 || X || Y   (1 + 2·coord_len octets)  or  02/03 || X   (1 + coord_len octets)
+EM  as long as the message
+D   maclen octets: x/8 for HMAC-Hash-x, 16 for CMAC-AES-x
 ```
 
-**Decryption:**
+**Decryption (§5.1.4):** parse `R` by its leading octet (either encoding is
+accepted), decode it, require full validation (including `n·R = O`) under the
+standard primitive or partial validation under the cofactor primitive,
+recompute $Z$, $K$, $EK$ and $MK$, check $D$ in constant time, and only then
+decrypt. Every failure returns `None`.
 
-1. Parse `R_bytes` from the front of the ciphertext.
-2. Compute $S = d \cdot R$.
-3. Re-derive key and nonce from $S_x$.
-4. AES-256-GCM decrypt; return `None` if the tag fails.
+Three consequences come from the standard, not from this crate:
 
-The GCM tag simultaneously authenticates the ciphertext and the ephemeral
-public key, so no separate MAC layer is needed.
+- `R` is not authenticated. `−R`, the other encoding of `R`, and under the
+  cofactor primitive `R` plus a point whose order divides `h` all decrypt to
+  the same plaintext; Appendix B.4.1 calls this benign malleability. Put `R`
+  into SharedInfo₁ if ciphertexts must be unique.
+- The MAC covers `EM ‖ SharedInfo₂` with no separator, so SharedInfo₂ needs a
+  suffix-free format (§5.1.1 step 8). Without one, moving octets between the
+  end of `EM` and SharedInfo₂ keeps the tag valid and truncates the plaintext.
+- The CBC schemes take whole blocks only: SEC 1 defines no padding, and SP
+  800-38A Appendix A (`pubs/sp800-38a.pdf`) leaves padding outside its scope.
 
 This makes `ECIES` the practical "encrypt arbitrary bytes to an EC key" path
 in the short-Weierstrass family. Unlike `EC-ElGamal`, it does not try to expose
 the group law of the plaintext space; it uses the EC operation only for key
-establishment, then hands the real data path to AES-256-GCM.
+establishment, then hands the data path to the symmetric scheme and MAC the
+setup names.
 
 The key objects follow the same representation pattern as `ECDH` and `ECDSA`:
 they can be serialized either as compact SEC 1 points when the curve is known
@@ -706,12 +861,15 @@ bytes are padded and placed into an x-coordinate candidate; `decode_point` is
 called with the `0x02` compressed prefix until a valid curve point is found.
 The last byte of the padded x-coordinate is an iteration counter
 $j \in [0, 255]$; the first byte of the decoded x-coordinate is stripped
-during recovery, leaving the original message bytes. This approach works on
-every named curve in this crate because all have $p \equiv 3 \pmod{4}$, which means the
-compressed-point square root exists and the iteration succeeds quickly in
-practice.
+during recovery, leaving the original message bytes. The square root is
+`rump`'s general Tonelli–Shanks, so every prime field (P-224 included) and, by
+the half-trace, every binary field decompresses; on the cofactor curves the
+index is retried until the point lies in the subgroup of order `n`, so every
+ciphertext decrypts.
 
-The message capacity per ciphertext is `coord_len - 1` bytes.
+The message capacity per ciphertext is `⌊(bits − 1)/8⌋ − 1` bytes, `bits`
+being `⌈log2 p⌉` on a prime field and `m` on `F_2^m` (30 bytes on P-256, 19
+on B-163), so that `message ‖ j` is always a field element.
 
 **Integer layer** — additively homomorphic encryption of a small integer `m`:
 
@@ -735,7 +893,7 @@ So `EC-ElGamal` is intentionally the arithmetic-rich counterpart to `ECIES`:
 - additive homomorphism on the integer layer
 
 The practical constraint is capacity. Because the byte layer embeds the payload
-into an x-coordinate candidate, each ciphertext can carry only `coord_len - 1`
+into an x-coordinate candidate, each ciphertext can carry only `⌊(bits − 1)/8⌋ − 1`
 bytes. That is why `ECIES` exists alongside it: `ECIES` is the general-purpose
 byte-encryption path, while `EC-ElGamal` is the path that preserves the group
 structure when that algebra matters.
@@ -771,9 +929,24 @@ and acceptance when:
 (u_1 \cdot G + u_2 \cdot Q)_x \bmod n = r
 ```
 
-The per-message nonce `k` is generated from the crate's `Csprng`. The digest
-representative `z` is the leftmost `bits(n)` bits of the hash output, matching
-the FIPS 186-5 truncation rule for hash functions wider than the group order.
+The per-message nonce `k` is derived deterministically (RFC 6979) or drawn
+from the crate's `Csprng`. The digest representative `z` is the leftmost
+`bits(n)` bits of the hash output, matching the FIPS 186-5 truncation rule for
+hash functions wider than the group order.
+
+Verification is exactly the FIPS 186-5 / SEC 1 predicate: any `1 ≤ s < n` is
+accepted. The signer emits `s = k⁻¹(z + r·d) mod n` exactly as FIPS 186-5
+§6.4.1 computes it, so deterministic signatures reproduce the RFC 6979 vectors
+digit for digit. Because `(r, n − s)` verifies whenever `(r, s)` does,
+protocols that forbid malleable signatures fix the representative with
+`EcdsaSignature::to_low_s(curve)` (`s ≤ n/2`); that is a protocol rule, not a
+verification requirement — a verifier that rejected high-`s` would refuse
+about half of the conforming signatures other implementations produce. Empty
+digests are refused by sign and verify. `EcdsaSignature::to_der` / `from_der`
+are the X9.62 / RFC 3279 §2.2.3
+`ECDSA-Sig-Value` (`SEQUENCE { r INTEGER, s INTEGER }`), and the test suite
+cross-checks both directions against the installed OpenSSL when one is
+present.
 
 The key types (`EcdsaPublicKey`, `EcdsaPrivateKey`) carry the full `CurveParams`
 and work with any named curve.
@@ -949,6 +1122,10 @@ The encoded `u`-coordinate inputs likewise follow the spec:
 - X25519: high bit of `u[31]` is masked off before decoding
 - X448: full 448-bit `u`-coordinate, no masking
 
+Public keys are stored in canonical form: an imported `u` at or above `p` is
+reduced on import, so `to_raw_bytes` and the SPKI encoding emit the reduced
+coordinate and equality compares coordinates, not octet strings.
+
 The shared-secret API (`agree`) returns `Option<[u8; N]>` and rejects the
 all-zero output, as RFC 7748 §6 recommends for low-order point detection.
 The raw `scalar_mult` function exposes the unconditional RFC 7748 mapping
@@ -991,7 +1168,7 @@ Examples:
 - `CocksPublicKey::encrypt_bytes` / `CocksPrivateKey::decrypt_bytes`
 - `DsaPrivateKey::sign_message_bytes::<H>` / `DsaPublicKey::verify_message_bytes::<H>`
 - `EcElGamalPublicKey::encrypt` / `EcElGamalPrivateKey::decrypt` (Koblitz byte layer)
-- `EciesPublicKey::encrypt` / `EciesPrivateKey::decrypt` (arbitrary-length bytes)
+- `EciesPublicKey::encrypt` / `EciesPrivateKey::decrypt` (arbitrary-length bytes under XOR or CTR setups)
 - `EcdsaPrivateKey::sign_message::<H>` / `EcdsaPublicKey::verify_message::<H>`
 - `ElGamalPublicKey::encrypt_bytes` / `ElGamalPrivateKey::decrypt_bytes`
 - `PaillierPublicKey::encrypt_bytes` / `PaillierPrivateKey::decrypt_bytes`
@@ -1003,6 +1180,15 @@ helpers serialize the ciphertext into the same crate-defined binary framing used
 throughout the non-RSA key formats.
 
 ## Public-Key Performance
+
+> **Stale figures (2026-09-10).** Several tables below predate changes made on
+> 2026-09-10 and have not been re-swept. The `dsa_keygen` and `elgamal_keygen`
+> workloads now include FIPS 186-4 domain-parameter generation. The `ecies_*`
+> rows measure the former construction, not SEC 1 §5.1. X25519 uses a rewritten
+> field inversion. The ML-KEM, ML-DSA, NTRU, and NTRUEncrypt rows predate the
+> clean-room rewrites; on the development machine those made ML-KEM-768
+> 1.38–1.73× slower, ML-DSA-65 signing 1.30× slower, and NTRU round-3 key
+> generation about 2× slower.
 
 Public-key timing is measured with [pilot-bench](https://github.com/darrelllong/pilot-bench)
 driving `pilot_pk` through:
@@ -1091,6 +1277,9 @@ $e = 65{,}537$.
 | ecdh_serialize | 0.0001048 | ±2.272e-06 | 117 | 0.0001103 | ±2.205e-06 | 100 | 0.0001734 | ±1.329e-05 | 202 |
 
 ### ECIES / EC ElGamal (P-256)
+
+The `ecies_*` rows predate the SEC 1 §5.1 rewrite and measure the former
+AES-256-GCM construction; the next sweep measures `EciesSetup::RECOMMENDED`.
 
 | Operation | Tolkien (M1) ms/op | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Twilight (EPYC 7452) ms/op | Twilight (EPYC 7452) ±CI (90%) | Twilight (EPYC 7452) Runs | Heinlein (Jetson) ms/op | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
 |---|---|---|---|---|---|---|---|---|---|
@@ -1232,9 +1421,9 @@ NTRU. Per-scheme breakdown radars live in
   and understand their wrapper model.
 - Use `CtrDrbgAes256` (or another strong `Csprng`) for all randomized public-key
   operations.
-- Keep an eye on 2048-bit and larger timings; the in-tree bigint backend is
-  respectable but not a tuned industrial multiprecision library. The crate-wide
-  policy is to keep the arithmetic kernels pure Rust and in-tree.
+- Keep an eye on 2048-bit and larger timings; the `rump` bigint backend is
+  respectable but not a tuned industrial multiprecision library. The policy
+  shared by both crates is to keep the arithmetic kernels pure Rust.
 
 ## References
 

@@ -17,6 +17,8 @@
 /// Integer-arithmetic (base N = 3–5000 before scaling):
 ///   dsa_keygen_1024, dsa_sign_1024, dsa_verify_1024
 ///   elgamal_keygen_1024, elgamal_encrypt_1024, elgamal_decrypt_1024
+///   (DSA and ElGamal work over FIPS 186-4 (L = 1024, N = 160) domain
+///   parameters; their keygen includes generating them)
 ///   paillier_keygen_1024, paillier_encrypt_1024, paillier_decrypt_1024
 ///   paillier_rerandomize_1024, paillier_add_1024
 ///   cocks_keygen_1024, cocks_encrypt_1024, cocks_decrypt_1024
@@ -53,6 +55,8 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use cryptography::public_key::ec_edwards::ed25519 as ed25519_curve;
+use cryptography::public_key::ecies::EciesSetup;
+use cryptography::public_key::primes::{FfcHash, FfcParameterSize};
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, Ecdsa, Ecies, Ed25519, EdwardsDh, EdwardsElGamal,
     ElGamal, MlDsa, MlDsaParameterSet, MlKem, MlKemParameterSet, NtruEes1087Ep1, NtruEes1087Ep2,
@@ -70,6 +74,30 @@ const PSS_SALT: [u8; 32] = [0x22; 32];
 
 fn ms_per_op(elapsed: std::time::Duration, n: usize) -> f64 {
     elapsed.as_secs_f64() * 1000.0 / n as f64
+}
+
+/// The DRBG seed for one run. Each process draws a different seed unless
+/// `PILOT_PK_SEED` pins one (any string; hashed into the seed), so repeated
+/// runs average over the randomized paths of the operations measured: the
+/// rejection loops of ML-DSA signing and the retry loops of key generation
+/// follow a different trajectory in every run instead of replaying one.
+fn bench_seed() -> [u8; 48] {
+    use cryptography::Sha384;
+    let material = match std::env::var("PILOT_PK_SEED") {
+        Ok(pinned) => pinned.into_bytes(),
+        Err(_) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let mut material = now.to_le_bytes().to_vec();
+            material.extend_from_slice(&std::process::id().to_le_bytes());
+            material
+        }
+    };
+    let mut seed = [0u8; 48];
+    seed.copy_from_slice(&Sha384::digest(&material));
+    seed
 }
 
 fn pk_iters(base: usize) -> usize {
@@ -90,7 +118,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let mut rng = CtrDrbgAes256::new(&[0x5a; 48]);
+    let mut rng = CtrDrbgAes256::new(&bench_seed());
 
     let ms: f64 = match op.to_ascii_lowercase().as_str() {
         // ── ECDSA (P-256) ─────────────────────────────────────────────────────
@@ -163,17 +191,27 @@ fn main() {
             let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(pub_key.encrypt(&MSG, &mut rng));
+                black_box(
+                    pub_key
+                        .encrypt(EciesSetup::RECOMMENDED, &MSG, &[], &[], &mut rng)
+                        .expect("ECIES encrypt"),
+                );
             }
             ms_per_op(t0.elapsed(), n)
         }
         "ecies_decrypt" => {
             let (pub_key, priv_key) = Ecies::generate(p256(), &mut rng);
-            let ct = pub_key.encrypt(&MSG, &mut rng);
+            let ct = pub_key
+                .encrypt(EciesSetup::RECOMMENDED, &MSG, &[], &[], &mut rng)
+                .expect("ECIES encrypt");
             let n = pk_iters(500);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(priv_key.decrypt(&ct).unwrap());
+                black_box(
+                    priv_key
+                        .decrypt(EciesSetup::RECOMMENDED, &ct, &[], &[])
+                        .unwrap(),
+                );
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -294,12 +332,18 @@ fn main() {
             let n = pk_iters(10);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(Dsa::generate(&mut rng, 1024).unwrap());
+                let params =
+                    Dsa::generate_params(&mut rng, FfcParameterSize::L1024N160, FfcHash::Sha256)
+                        .unwrap();
+                black_box(Dsa::generate(&params, &mut rng));
             }
             ms_per_op(t0.elapsed(), n)
         }
         "dsa_sign_1024" => {
-            let (_, priv_key) = Dsa::generate(&mut rng, 1024).unwrap();
+            let params =
+                Dsa::generate_params(&mut rng, FfcParameterSize::L1024N160, FfcHash::Sha256)
+                    .unwrap();
+            let (_, priv_key) = Dsa::generate(&params, &mut rng);
             let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
@@ -308,7 +352,10 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "dsa_verify_1024" => {
-            let (pub_key, priv_key) = Dsa::generate(&mut rng, 1024).unwrap();
+            let params =
+                Dsa::generate_params(&mut rng, FfcParameterSize::L1024N160, FfcHash::Sha256)
+                    .unwrap();
+            let (pub_key, priv_key) = Dsa::generate(&params, &mut rng);
             let sig = priv_key.sign_message_bytes::<Sha256>(&MSG).unwrap();
             let n = pk_iters(100);
             let t0 = Instant::now();
@@ -322,12 +369,16 @@ fn main() {
             let n = pk_iters(5);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(ElGamal::generate(&mut rng, 1024).unwrap());
+                black_box(
+                    ElGamal::generate(&mut rng, FfcParameterSize::L1024N160, FfcHash::Sha256)
+                        .unwrap(),
+                );
             }
             ms_per_op(t0.elapsed(), n)
         }
         "elgamal_encrypt_1024" => {
-            let (pub_key, _) = ElGamal::generate(&mut rng, 1024).unwrap();
+            let (pub_key, _) =
+                ElGamal::generate(&mut rng, FfcParameterSize::L1024N160, FfcHash::Sha256).unwrap();
             let n = pk_iters(100);
             let t0 = Instant::now();
             for _ in 0..n {
@@ -336,7 +387,8 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "elgamal_decrypt_1024" => {
-            let (pub_key, priv_key) = ElGamal::generate(&mut rng, 1024).unwrap();
+            let (pub_key, priv_key) =
+                ElGamal::generate(&mut rng, FfcParameterSize::L1024N160, FfcHash::Sha256).unwrap();
             let ct = pub_key.encrypt(&MSG, &mut rng).unwrap();
             let n = pk_iters(100);
             let t0 = Instant::now();
@@ -393,10 +445,11 @@ fn main() {
             for _ in 0..n {
                 combined = black_box(pub_key.add_ciphertexts(&ct_a, &ct_b).unwrap());
             }
+            let elapsed = t0.elapsed();
             let combined_plaintext = priv_key.decrypt(&combined);
             let expected = BigUint::from_be_bytes(&MSG).add(&BigUint::from_u64(1));
-            assert_eq!(combined_plaintext, expected.to_be_bytes());
-            ms_per_op(t0.elapsed(), n)
+            assert_eq!(combined_plaintext, Some(expected.to_be_bytes()));
+            ms_per_op(elapsed, n)
         }
         // ── Cocks (1024-bit) ──────────────────────────────────────────────────
         "cocks_keygen_1024" => {
@@ -527,7 +580,12 @@ fn main() {
             let n = pk_iters(1000);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(RsaPss::<Sha256>::verify(&pub_key, &MSG, &sig));
+                black_box(RsaPss::<Sha256>::verify(
+                    &pub_key,
+                    &MSG,
+                    &sig,
+                    PSS_SALT.len(),
+                ));
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -576,7 +634,12 @@ fn main() {
             let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(RsaPss::<Sha256>::verify(&pub_key, &MSG, &sig));
+                black_box(RsaPss::<Sha256>::verify(
+                    &pub_key,
+                    &MSG,
+                    &sig,
+                    PSS_SALT.len(),
+                ));
             }
             ms_per_op(t0.elapsed(), n)
         }
@@ -594,13 +657,13 @@ fn main() {
             let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(MlKem::encaps(&pk, &mut rng).unwrap());
+                black_box(MlKem::encaps(&pk, &mut rng));
             }
             ms_per_op(t0.elapsed(), n)
         }
         "mlkem512_decaps" => {
             let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem512, &mut rng).unwrap();
-            let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
+            let (ct, _) = MlKem::encaps(&pk, &mut rng);
             let n = pk_iters(200);
             let t0 = Instant::now();
             for _ in 0..n {
@@ -621,13 +684,13 @@ fn main() {
             let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(MlKem::encaps(&pk, &mut rng).unwrap());
+                black_box(MlKem::encaps(&pk, &mut rng));
             }
             ms_per_op(t0.elapsed(), n)
         }
         "mlkem768_decaps" => {
             let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem768, &mut rng).unwrap();
-            let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
+            let (ct, _) = MlKem::encaps(&pk, &mut rng);
             let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
@@ -648,13 +711,13 @@ fn main() {
             let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(MlKem::encaps(&pk, &mut rng).unwrap());
+                black_box(MlKem::encaps(&pk, &mut rng));
             }
             ms_per_op(t0.elapsed(), n)
         }
         "mlkem1024_decaps" => {
             let (pk, sk) = MlKem::keygen(MlKemParameterSet::MlKem1024, &mut rng).unwrap();
-            let (ct, _) = MlKem::encaps(&pk, &mut rng).unwrap();
+            let (ct, _) = MlKem::encaps(&pk, &mut rng);
             let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
@@ -667,13 +730,13 @@ fn main() {
             let n = pk_iters(120);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap());
+                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng));
             }
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa44_sign" => {
-            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap();
-            let n = pk_iters(120);
+            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng);
+            let n = pk_iters(480);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
@@ -681,7 +744,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa44_verify" => {
-            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng).unwrap();
+            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa44, &mut rng);
             let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
             let n = pk_iters(120);
             let t0 = Instant::now();
@@ -694,13 +757,13 @@ fn main() {
             let n = pk_iters(80);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap());
+                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng));
             }
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa65_sign" => {
-            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap();
-            let n = pk_iters(80);
+            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng);
+            let n = pk_iters(320);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
@@ -708,7 +771,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa65_verify" => {
-            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng).unwrap();
+            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa65, &mut rng);
             let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
             let n = pk_iters(80);
             let t0 = Instant::now();
@@ -721,13 +784,13 @@ fn main() {
             let n = pk_iters(60);
             let t0 = Instant::now();
             for _ in 0..n {
-                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap());
+                black_box(MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng));
             }
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa87_sign" => {
-            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap();
-            let n = pk_iters(60);
+            let (_, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng);
+            let n = pk_iters(240);
             let t0 = Instant::now();
             for _ in 0..n {
                 black_box(MlDsa::sign(&sk, &MSG, &mut rng).unwrap());
@@ -735,7 +798,7 @@ fn main() {
             ms_per_op(t0.elapsed(), n)
         }
         "mldsa87_verify" => {
-            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng).unwrap();
+            let (pk, sk) = MlDsa::keygen(MlDsaParameterSet::MlDsa87, &mut rng);
             let sig = MlDsa::sign(&sk, &MSG, &mut rng).unwrap();
             let n = pk_iters(60);
             let t0 = Instant::now();

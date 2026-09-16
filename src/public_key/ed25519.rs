@@ -6,6 +6,12 @@
 //! - public key: 32-byte encoded Edwards point
 //! - signature: 64 bytes, `R || S`
 //!
+//! The keys also have the standard encodings of RFC 8410: the public key as a
+//! `SubjectPublicKeyInfo` (§4) and the private key as a PKCS #8
+//! `OneAsymmetricKey` (§7), in DER or as RFC 7468 `PUBLIC KEY` and
+//! `PRIVATE KEY` text. The crate-defined `to_key_blob`, `to_pem` and `to_xml`
+//! forms are unchanged.
+//!
 //! Unlike the generic [`crate::public_key::eddsa`] layer, this module follows
 //! the RFC 8032 seed-hash-and-clamp flow exactly:
 //!
@@ -15,6 +21,20 @@
 //! 4. sign with `r = H(prefix || M) mod n`
 //! 5. challenge `k = H(R || A || M) mod n`
 //! 6. response `S = r + k·a mod n`
+//!
+//! # Decoding and verification
+//!
+//! Point decoding is RFC 8032 §5.1.3 and nothing more, on every import path
+//! (raw bytes, key blob, crate PEM and XML, RFC 8410 `SubjectPublicKeyInfo`)
+//! and for the `R` of a signature. Verification is §5.1.7 with its cofactored
+//! equation `[8][S]B = [8]R + [8][k]A'`. Points of small order, and points with
+//! a small-order component, therefore decode, and a signature verifies exactly
+//! when RFC 8032 says it is valid. Earlier versions refused the neutral point
+//! and every point outside the subgroup of order `L`, and checked the
+//! uncofactored `[S]B = R + [k]A'`, so they refused some valid signatures.
+//! Under a public key of small order any `(R, S)` with `[8][S]B = [8]R`
+//! verifies for every message, so a caller that needs a key to be bound to a
+//! secret must check the key's order itself.
 //!
 //! # Side channels
 //!
@@ -29,8 +49,10 @@
 use core::fmt;
 use std::sync::OnceLock;
 
+use crate::public_key::curve_pkix::{self, ID_ED25519};
 use crate::public_key::ec_edwards::{ed25519, EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{pem_unwrap, pem_wrap};
+use crate::public_key::pkix::{pem_decode, pem_encode, PRIVATE_KEY_LABEL, PUBLIC_KEY_LABEL};
 use crate::Csprng;
 use crate::Sha512;
 use rump::BigUint;
@@ -39,20 +61,34 @@ const ED25519_PUBLIC_LABEL: &str = "CRYPTOGRAPHY ED25519 PUBLIC KEY";
 const ED25519_PRIVATE_LABEL: &str = "CRYPTOGRAPHY ED25519 PRIVATE KEY";
 
 /// Standard 32-byte Ed25519 public key.
+///
+/// The window table for `[k]A` is built on the first verification, not on
+/// import: importing a key is then a §5.1.3 decode and nothing more, and a
+/// key that only gets re-encoded or compared never pays for the table.
 #[derive(Clone)]
 pub struct Ed25519PublicKey {
     point: EdwardsPoint,
-    point_table: EdwardsMulTable,
+    point_table: OnceLock<EdwardsMulTable>,
 }
 
 /// Standard 32-byte Ed25519 private seed plus derived signing state.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct Ed25519PrivateKey {
     seed: [u8; 32],
     scalar: BigUint,
     prefix: [u8; 32],
     public: Ed25519PublicKey,
 }
+
+impl PartialEq for Ed25519PrivateKey {
+    /// Compares the seeds in constant time. The scalar, prefix, and public key
+    /// are all derived from the seed, so equal seeds mean equal keys.
+    fn eq(&self, other: &Self) -> bool {
+        crate::ct::constant_time_eq_mask(&self.seed, &other.seed) == u8::MAX
+    }
+}
+
+impl Eq for Ed25519PrivateKey {}
 
 /// Standard 64-byte Ed25519 signature.
 #[derive(Clone, Eq, PartialEq)]
@@ -97,14 +133,28 @@ impl Ed25519PublicKey {
     }
 
     /// Parse the standard 32-byte compressed public key.
+    ///
+    /// Decoding is RFC 8032 §5.1.3 and nothing more. It fails when the input
+    /// is not 32 octets, when `y` (the low 255 bits) is at least `p`, when
+    /// `x² = (y² − 1)/(d·y² + 1)` has no square root mod `p`, or when `x = 0`
+    /// and the sign bit is set. Every other string is a key, whatever the
+    /// order of its point.
+    ///
+    /// This changed: the crate used to refuse the neutral point and every
+    /// point outside the subgroup of prime order `L`, which RFC 8032 does not.
+    /// Such keys are now accepted, and §5.1.7 decides what verifies under
+    /// them. Under a key `A'` of small order, `[8][k]A'` is the neutral point,
+    /// so any `(R, S)` with `[8][S]B = [8]R` verifies for every message
+    /// (`R` neutral, `S = 0`, for one): such a key binds no secret. A caller
+    /// that needs the key to belong to someone should check it with
+    /// [`TwistedEdwardsCurve::is_valid_public_point`] on [`Self::public_point`].
     #[must_use]
     pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
-        let point = decode_point_strict(bytes)?;
-        if !point_in_prime_subgroup(&point) {
-            return None;
-        }
-        let point_table = curve().precompute_mul_table(&point);
-        Some(Self { point, point_table })
+        let point = decode_point(bytes)?;
+        Some(Self {
+            point,
+            point_table: OnceLock::new(),
+        })
     }
 
     /// Preferred explicit name for the standard 32-byte compressed public key.
@@ -126,6 +176,34 @@ impl Ed25519PublicKey {
         Self::from_key_blob(&bytes)
     }
 
+    /// Encode as the RFC 8410 §4 `SubjectPublicKeyInfo` in DER: `id-Ed25519`
+    /// with the parameters absent (§3) and the 32-byte RFC 8032 encoding of
+    /// the public point as the `subjectPublicKey`.
+    #[must_use]
+    pub fn to_spki_der(&self) -> Vec<u8> {
+        curve_pkix::public_key_to_spki(&ID_ED25519, &self.to_key_blob())
+    }
+
+    /// Encode as RFC 7468 `PUBLIC KEY` text (§13) around [`Self::to_spki_der`].
+    #[must_use]
+    pub fn to_spki_pem(&self) -> String {
+        pem_encode(PUBLIC_KEY_LABEL, self.to_spki_der())
+    }
+
+    /// Decode an RFC 8410 §4 `SubjectPublicKeyInfo` from strict DER with no
+    /// trailing bytes: `id-Ed25519` with the parameters absent (§3) and a
+    /// 32-byte key that passes the same validation as [`Self::from_key_blob`].
+    #[must_use]
+    pub fn from_spki_der(der: &[u8]) -> Option<Self> {
+        Self::from_key_blob(curve_pkix::public_key_from_spki(der, &ID_ED25519, 32)?)
+    }
+
+    /// Decode RFC 7468 `PUBLIC KEY` text (§13) with [`Self::from_spki_der`].
+    #[must_use]
+    pub fn from_spki_pem(pem: &str) -> Option<Self> {
+        pem_decode(PUBLIC_KEY_LABEL, pem, Self::from_spki_der)
+    }
+
     /// Schema fields for the crate-defined serialization formats.
     fn serial_fields(&self) -> Vec<BigUint> {
         vec![BigUint::from_be_bytes(&self.to_key_blob())]
@@ -139,23 +217,43 @@ impl Ed25519PublicKey {
         Self::from_key_blob(&bytes)
     }
 
-    /// Verify a standard signature over the message.
+    /// Verify a standard signature over the message: RFC 8032 §5.1.7.
+    ///
+    /// `S` lies in `0 ≤ S < L` (step 1), `k` is SHA-512 of `R ‖ A ‖ M`
+    /// (step 2), and the signature is valid exactly when the cofactored group
+    /// equation `[8][S]B = [8]R + [8][k]A'` holds (step 3).
+    ///
+    /// This changed: the crate used to check `[S]B = R + [k]A'` and to refuse
+    /// an `R` that was neutral or outside the subgroup of order `L`. RFC 8032
+    /// calls that equation "sufficient, but not required": whatever satisfies
+    /// it satisfies the cofactored one (§8.8), but not conversely. When `R` or
+    /// `A'` has a small-order component that `[k]` does not cancel, the old
+    /// check refused signatures RFC 8032 defines as valid. It no longer does.
     #[must_use]
     pub fn verify_message(&self, message: &[u8], signature: &Ed25519Signature) -> bool {
+        // Step 1. Every `Ed25519Signature` already has S < L; the check keeps
+        // the step where the section puts it.
         if signature.s >= curve().n {
             return false;
         }
-        if !point_in_prime_subgroup(&signature.r_point) {
-            return false;
-        }
+        // Step 2. §5.1.3 decodes exactly one 32-octet string to each point
+        // (y < p, and no sign bit on x = 0), so encoding R and A' again gives
+        // back the octets R and A that the section hashes. `k` comes back
+        // reduced mod L, which step 3 cannot see: [8]A' lies in the subgroup
+        // of order L, so [8][k]A' = [8][k mod L]A'.
+        let k = challenge_scalar(&signature.r_point, &self.point, message);
+        // Step 3, with [8]R + [8][k]A' taken as [8](R + [k]A').
+        let s_b = curve().scalar_mul_base(&signature.s);
+        let r_plus_k_a = curve().add(&signature.r_point, &self.mul_public_point(&k));
+        curve().mul_by_pow2(&s_b, COFACTOR_LOG2) == curve().mul_by_pow2(&r_plus_k_a, COFACTOR_LOG2)
+    }
 
-        let challenge = challenge_scalar(&signature.r_point, &self.point, message);
-        let lhs = curve().scalar_mul_base(&signature.s);
-        let rhs = curve().add(
-            &signature.r_point,
-            &curve().scalar_mul_cached(&self.point_table, &challenge),
-        );
-        lhs == rhs
+    /// `[k]A` through the cached window table, built on first use.
+    fn mul_public_point(&self, k: &BigUint) -> EdwardsPoint {
+        let table = self
+            .point_table
+            .get_or_init(|| curve().precompute_mul_table(&self.point));
+        curve().scalar_mul_cached(table, k)
     }
 
     /// Verify a standard 64-byte signature.
@@ -220,8 +318,10 @@ impl Ed25519PrivateKey {
     /// Parse the standard 32-byte private-key encoding (the seed).
     #[must_use]
     pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
-        let seed: [u8; 32] = bytes.try_into().ok()?;
-        Some(expand_seed(seed))
+        let mut seed: [u8; 32] = bytes.try_into().ok()?;
+        let key = expand_seed(seed);
+        crate::ct::zeroize_slice(seed.as_mut_slice());
+        Some(key)
     }
 
     /// Preferred explicit name for the standard 32-byte private seed.
@@ -233,14 +333,64 @@ impl Ed25519PrivateKey {
     /// PEM-armored wrapper around the standard 32-byte seed.
     #[must_use]
     pub fn to_pem(&self) -> String {
-        pem_wrap(ED25519_PRIVATE_LABEL, &self.to_key_blob())
+        let mut seed = self.to_key_blob();
+        let pem = pem_wrap(ED25519_PRIVATE_LABEL, &seed);
+        crate::ct::zeroize_slice(seed.as_mut_slice());
+        pem
     }
 
     /// Parse the PEM-armored private key.
     #[must_use]
     pub fn from_pem(pem: &str) -> Option<Self> {
-        let bytes = pem_unwrap(ED25519_PRIVATE_LABEL, pem)?;
-        Self::from_key_blob(&bytes)
+        let mut seed = pem_unwrap(ED25519_PRIVATE_LABEL, pem)?;
+        let key = Self::from_key_blob(&seed);
+        crate::ct::zeroize_slice(seed.as_mut_slice());
+        key
+    }
+
+    /// Encode as the RFC 8410 §7 `OneAsymmetricKey` (PKCS #8) in DER: version
+    /// 1, `id-Ed25519` with the parameters absent (§3), and the 32-byte RFC
+    /// 8032 §5.1.5 private key (the seed) as `CurvePrivateKey`. The public key
+    /// is left out, since the seed derives it.
+    #[must_use]
+    pub fn to_pkcs8_der(&self) -> Vec<u8> {
+        curve_pkix::private_key_to_pkcs8(&ID_ED25519, &self.seed)
+    }
+
+    /// Encode as RFC 7468 `PRIVATE KEY` text (§10) around
+    /// [`Self::to_pkcs8_der`].
+    #[must_use]
+    pub fn to_pkcs8_pem(&self) -> String {
+        pem_encode(PRIVATE_KEY_LABEL, self.to_pkcs8_der())
+    }
+
+    /// Decode an RFC 8410 §7 `OneAsymmetricKey` in any X.690 BER encoding, DER
+    /// included: RFC 5958 §2 says "receivers MUST support BER". The key is then
+    /// checked as [`Self::from_pkcs8_der`] checks it.
+    #[must_use]
+    pub fn from_pkcs8_ber(ber: &[u8]) -> Option<Self> {
+        crate::public_key::pkix::pkcs8_ber(ber, Self::from_pkcs8_der)
+    }
+
+    /// Decode an RFC 8410 §7 `OneAsymmetricKey` from strict DER with no
+    /// trailing bytes: version 1 or 2, `id-Ed25519` with the parameters absent
+    /// (§3), and a 32-byte seed as `CurvePrivateKey`. A version 2 `publicKey`
+    /// must be the encoding of the public key the seed derives. Attributes are
+    /// ignored.
+    #[must_use]
+    pub fn from_pkcs8_der(der: &[u8]) -> Option<Self> {
+        let (seed, public_key) = curve_pkix::private_key_from_pkcs8(der, &ID_ED25519, 32)?;
+        let key = Self::from_key_blob(seed)?;
+        match public_key {
+            Some(public_key) if public_key != key.public.to_key_blob() => None,
+            _ => Some(key),
+        }
+    }
+
+    /// Decode RFC 7468 `PRIVATE KEY` text (§10) with [`Self::from_pkcs8_der`].
+    #[must_use]
+    pub fn from_pkcs8_pem(pem: &str) -> Option<Self> {
+        pem_decode(PRIVATE_KEY_LABEL, pem, Self::from_pkcs8_der)
     }
 
     /// Schema fields for the crate-defined serialization formats.
@@ -252,17 +402,24 @@ impl Ed25519PrivateKey {
     fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
         let mut fields = fields.into_iter();
         let seed = fields.next()?;
-        let bytes = biguint_to_fixed_be(&seed, 32)?;
-        Self::from_key_blob(&bytes)
+        let mut bytes = biguint_to_fixed_be(&seed, 32)?;
+        let key = Self::from_key_blob(&bytes);
+        crate::ct::zeroize_slice(bytes.as_mut_slice());
+        key
     }
 
     /// Sign one message using the deterministic RFC 8032 nonce derivation.
     #[must_use]
     pub fn sign_message(&self, message: &[u8]) -> Ed25519Signature {
+        // `prefix || M` starts with the secret nonce prefix, and its digest is
+        // the nonce `r` before reduction: both are wiped once `r` exists.
         let mut nonce_input = Vec::with_capacity(self.prefix.len() + message.len());
         nonce_input.extend_from_slice(&self.prefix);
         nonce_input.extend_from_slice(message);
-        let r = le_bytes_to_biguint(&Sha512::digest(&nonce_input)).rem(&curve().n);
+        let mut nonce_digest = Sha512::digest(&nonce_input);
+        crate::ct::zeroize_slice(nonce_input.as_mut_slice());
+        let r = BigUint::from_le_bytes(&nonce_digest).rem(&curve().n);
+        crate::ct::zeroize_slice(nonce_digest.as_mut_slice());
         let r_point = curve().scalar_mul_base(&r);
         let challenge = challenge_scalar(&r_point, &self.public.point, message);
         let ka = curve().scalar_ctx().mul(&challenge, &self.scalar);
@@ -317,18 +474,24 @@ impl Ed25519Signature {
     #[must_use]
     pub fn to_key_blob(&self) -> Vec<u8> {
         let mut out = curve().encode_point(&self.r_point);
-        out.extend_from_slice(&biguint_to_fixed_le(&self.s, 32));
+        out.extend_from_slice(&self.s.to_le_bytes_padded(32));
         out
     }
 
     /// Parse the standard 64-byte signature encoding `R || S`.
+    ///
+    /// This is the decoding of RFC 8032 §5.1.7 step 1: `R` is a point by
+    /// §5.1.3 (see [`Ed25519PublicKey::from_key_blob`] for what that refuses)
+    /// and `S` a little-endian integer in `0 ≤ S < L`. Any `R` that decodes is
+    /// accepted, the neutral point and small-order points included; the crate
+    /// used to refuse a neutral `R`, which RFC 8032 does not.
     #[must_use]
     pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 64 {
             return None;
         }
-        let r_point = decode_point_strict(&bytes[..32])?;
-        let s = le_bytes_to_biguint(&bytes[32..]);
+        let r_point = decode_point(&bytes[..32])?;
+        let s = BigUint::from_le_bytes(&bytes[32..]);
         if s >= curve().n {
             return None;
         }
@@ -351,14 +514,16 @@ impl Ed25519 {
         let mut seed = [0u8; 32];
         rng.fill_bytes(&mut seed);
         let private = expand_seed(seed);
+        crate::ct::zeroize_slice(seed.as_mut_slice());
         let public = private.to_public_key();
         (public, private)
     }
 
     /// Derive a key pair from an explicit 32-byte seed.
     #[must_use]
-    pub fn from_seed(seed: [u8; 32]) -> (Ed25519PublicKey, Ed25519PrivateKey) {
+    pub fn from_seed(mut seed: [u8; 32]) -> (Ed25519PublicKey, Ed25519PrivateKey) {
         let private = expand_seed(seed);
+        crate::ct::zeroize_slice(seed.as_mut_slice());
         let public = private.to_public_key();
         (public, private)
     }
@@ -371,28 +536,35 @@ fn curve() -> &'static TwistedEdwardsCurve {
 }
 
 /// Expand a 32-byte RFC 8032 secret seed into signing state.
-fn expand_seed(seed: [u8; 32]) -> Ed25519PrivateKey {
-    let digest = Sha512::digest(&seed);
+fn expand_seed(mut seed: [u8; 32]) -> Ed25519PrivateKey {
+    let mut digest = Sha512::digest(&seed);
     let mut scalar_bytes = [0u8; 32];
     scalar_bytes.copy_from_slice(&digest[..32]);
     clamp_scalar(&mut scalar_bytes);
-    let scalar = le_bytes_to_biguint(&scalar_bytes);
+    let scalar = BigUint::from_le_bytes(&scalar_bytes);
 
     let mut prefix = [0u8; 32];
     prefix.copy_from_slice(&digest[32..64]);
 
-    let a_point = curve().scalar_mul_base(&scalar);
+    let point = curve().scalar_mul_base(&scalar);
     let public = Ed25519PublicKey {
-        point: a_point.clone(),
-        point_table: curve().precompute_mul_table(&a_point),
+        point,
+        point_table: OnceLock::new(),
     };
 
-    Ed25519PrivateKey {
+    let key = Ed25519PrivateKey {
         seed,
         scalar,
         prefix,
         public,
-    }
+    };
+    // The digest holds both the scalar and the prefix; the stack copies of the
+    // seed, scalar bytes, and prefix were copied into `key` and are wiped here.
+    crate::ct::zeroize_slice(digest.as_mut_slice());
+    crate::ct::zeroize_slice(scalar_bytes.as_mut_slice());
+    crate::ct::zeroize_slice(prefix.as_mut_slice());
+    crate::ct::zeroize_slice(seed.as_mut_slice());
+    key
 }
 
 /// RFC 8032 Ed25519 scalar clamping.
@@ -407,61 +579,38 @@ fn challenge_scalar(r_point: &EdwardsPoint, a_point: &EdwardsPoint, message: &[u
     let mut transcript = curve().encode_point(r_point);
     transcript.extend_from_slice(&curve().encode_point(a_point));
     transcript.extend_from_slice(message);
-    le_bytes_to_biguint(&Sha512::digest(&transcript)).rem(&curve().n)
+    BigUint::from_le_bytes(&Sha512::digest(&transcript)).rem(&curve().n)
 }
 
-/// Strict point decode: standard length, canonical `y`, on-curve, and subgroup-safe.
-fn decode_point_strict(bytes: &[u8]) -> Option<EdwardsPoint> {
-    if bytes.len() != 32 {
-        return None;
-    }
-    let mut y_bytes = bytes.to_vec();
-    *y_bytes.last_mut()? &= 0x7f;
-    let y = le_bytes_to_biguint(&y_bytes);
-    if y >= curve().p {
-        return None;
-    }
-    let point = curve().decode_point(bytes)?;
-    if point.is_neutral() {
-        return None;
-    }
-    Some(point)
-}
+/// `c` for Ed25519 (RFC 8032 §5.1): the cofactor is `2^c = 8`.
+const COFACTOR_LOG2: u32 = 3;
 
-/// Prime-subgroup membership: `l·P = 0`.
-fn point_in_prime_subgroup(point: &EdwardsPoint) -> bool {
-    curve().scalar_mul(point, &curve().n).is_neutral()
-}
-
-/// Little-endian bytes to `BigUint`.
-fn le_bytes_to_biguint(bytes: &[u8]) -> BigUint {
-    let mut be = bytes.to_vec();
-    be.reverse();
-    BigUint::from_be_bytes(&be)
-}
-
-/// Fixed-width little-endian encoding.
-fn biguint_to_fixed_le(value: &BigUint, len: usize) -> Vec<u8> {
-    let mut be = value.to_be_bytes();
-    if be.len() < len {
-        let mut padded = vec![0u8; len - be.len()];
-        padded.extend_from_slice(&be);
-        be = padded;
-    }
-    be.reverse();
-    be
+/// RFC 8032 §5.1.3 decoding of a 32-octet point encoding, with no further
+/// checks.
+///
+/// [`TwistedEdwardsCurve::decode_point`] carries out that section for
+/// Ed25519: a length other than 32 fails, as do `y ≥ p` (step 1), no square
+/// root of `(y² − 1)/(d·y² + 1)` (steps 2 and 3), and `x = 0` with `x_0 = 1`
+/// (step 4). Every other string yields its point, of whatever order.
+fn decode_point(bytes: &[u8]) -> Option<EdwardsPoint> {
+    curve().decode_point(bytes)
 }
 
 fn biguint_to_fixed_be(value: &BigUint, len: usize) -> Option<Vec<u8>> {
-    let bytes = value.to_be_bytes();
+    let mut bytes = value.to_be_bytes();
     if bytes.len() > len {
+        crate::ct::zeroize_slice(bytes.as_mut_slice());
         return None;
     }
     if bytes.len() == len {
         return Some(bytes);
     }
-    let mut padded = vec![0u8; len - bytes.len()];
+    // The private-key XML path passes the seed through here: the unpadded
+    // copy is wiped once the padded one exists.
+    let mut padded = Vec::with_capacity(len);
+    padded.resize(len - bytes.len(), 0u8);
     padded.extend_from_slice(&bytes);
+    crate::ct::zeroize_slice(bytes.as_mut_slice());
     Some(padded)
 }
 
@@ -478,21 +627,23 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        biguint_to_fixed_le, curve, Ed25519, Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature,
+        challenge_scalar, curve, Ed25519, Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature,
     };
+    use crate::public_key::curve_pkix::{
+        private_key_to_pkcs8, public_key_to_spki, ID_ED25519, ID_X25519,
+    };
+    use crate::public_key::ec_edwards::EdwardsPoint;
+    use crate::public_key::io::der_octet_string;
+    use crate::public_key::pkix::{
+        pem_decode, AlgorithmIdentifier, OneAsymmetricKey, PRIVATE_KEY_LABEL,
+    };
+    use crate::test_utils::{decode_hex, decode_hex_array, openssl3, ScratchFile};
     use crate::CtrDrbgAes256;
+    use rump::BigUint;
 
-    fn decode_hex(hex: &str) -> Vec<u8> {
-        let bytes = hex.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len() / 2);
-        for chunk in bytes.chunks_exact(2) {
-            let hi = (chunk[0] as char).to_digit(16).expect("hex") as u8;
-            let lo = (chunk[1] as char).to_digit(16).expect("hex") as u8;
-            out.push((hi << 4) | lo);
-        }
-        out
-    }
-
+    /// One RFC 8032 §7.1 vector: the seed derives the public key, signing
+    /// reproduces the signature, and the public key, imported on every path,
+    /// verifies it and refuses it for another message.
     fn assert_rfc8032_vector(
         seed_hex: &str,
         public_hex: &str,
@@ -513,6 +664,14 @@ mod tests {
         assert_eq!(sig.to_key_blob(), signature);
         assert!(derived_public.verify_message(&message, &sig));
         assert!(derived_public.verify_message_bytes(&message, &signature));
+
+        let public: [u8; 32] = public.try_into().expect("public key length");
+        let imported = import_everywhere(&public).expect("§7.1 public key");
+        assert_eq!(imported, derived_public);
+        assert!(imported.verify_message_bytes(&message, &signature));
+        let mut other = message.clone();
+        other.push(0x00);
+        assert!(!imported.verify_message_bytes(&other, &signature));
     }
 
     #[test]
@@ -644,25 +803,261 @@ mod tests {
         );
     }
 
+    /// RFC 8032 §5.1.3 decodes the neutral point's encoding, `y = 1` with the
+    /// sign bit clear; the crate used to refuse it.
     #[test]
-    fn public_key_rejects_neutral_encoding() {
-        let mut neutral = vec![0u8; 32];
+    fn public_key_accepts_neutral_encoding() {
+        let mut neutral = [0u8; 32];
         neutral[0] = 0x01;
-        assert!(Ed25519PublicKey::from_key_blob(&neutral).is_none());
+        let key = import_everywhere(&neutral).expect("§5.1.3 decodes (0, 1)");
+        assert!(key.public_point().is_neutral());
+        assert_eq!(key.to_raw_bytes(), neutral);
     }
 
+    /// §5.1.7 step 1 decodes `R = (0, 1)`, `S = 0`; the crate used to refuse
+    /// the neutral `R`.
     #[test]
-    fn signature_rejects_neutral_r_encoding() {
-        let mut signature = vec![0u8; 64];
+    fn signature_accepts_neutral_r_encoding() {
+        let mut signature = [0u8; 64];
         signature[0] = 0x01;
-        assert!(Ed25519Signature::from_key_blob(&signature).is_none());
+        let decoded = Ed25519Signature::from_key_blob(&signature).expect("§5.1.7 step 1");
+        assert!(decoded.nonce_point().is_neutral());
+        assert_eq!(decoded.to_key_blob(), signature);
+    }
+
+    /// The key `bytes` decode to on each import path (raw bytes, key blob,
+    /// crate PEM, crate XML, RFC 8410 `SubjectPublicKeyInfo`), after checking
+    /// that all five agree.
+    fn import_everywhere(bytes: &[u8; 32]) -> Option<Ed25519PublicKey> {
+        let raw = Ed25519PublicKey::from_raw_bytes(bytes);
+        let paths = [
+            Ed25519PublicKey::from_key_blob(bytes),
+            Ed25519PublicKey::from_pem(&crate::public_key::io::pem_wrap(
+                super::ED25519_PUBLIC_LABEL,
+                bytes,
+            )),
+            Ed25519PublicKey::from_xml(&crate::public_key::io::xml_wrap(
+                "Ed25519PublicKey",
+                &[("public", &BigUint::from_be_bytes(bytes))],
+            )),
+            Ed25519PublicKey::from_spki_der(&public_key_to_spki(&ID_ED25519, bytes)),
+        ];
+        for decoded in paths {
+            assert_eq!(decoded, raw, "import paths disagree on {bytes:02x?}");
+        }
+        raw
+    }
+
+    /// The 64-octet signature `R ‖ S`.
+    fn signature_octets(r: &EdwardsPoint, s: &BigUint) -> Vec<u8> {
+        [curve().encode_point(r), s.to_le_bytes_padded(32)].concat()
+    }
+
+    /// A point of order 8. The only point of order 2 is `(0, −1)` (`P = −P`
+    /// forces `x = 0`), so the part of the group of order 8 is cyclic, and
+    /// `[L]P` has order 8 for half of all points `P`.
+    fn point_of_order_eight() -> EdwardsPoint {
+        let curve = curve();
+        let t = (0u64..64)
+            .filter_map(|y| curve.decode_point(&BigUint::from_u64(y).to_le_bytes_padded(32)))
+            .map(|point| curve.scalar_mul(&point, &curve.n))
+            .find(|t| !curve.mul_by_pow2(t, 2).is_neutral())
+            .expect("some [L]P has order 8");
+        assert!(curve.mul_by_pow2(&t, 3).is_neutral());
+        t
+    }
+
+    /// RFC 8032 §5.1.3 refuses `y ≥ p` (step 1), a `y` whose `x²` has no
+    /// square root (steps 2 and 3), and `x = 0` with the sign bit set
+    /// (step 4), and nothing else. Every import path and the `R` of a
+    /// signature agree, and each accepted string is the encoding of its
+    /// point, so §5.1.7 step 2 hashes the same octets it was given.
+    #[test]
+    fn decoding_refuses_exactly_what_section_5_1_3_refuses() {
+        use rump::modular::MontgomeryContext;
+
+        let curve = curve();
+        let p = &curve.p;
+        let octets = |value: &BigUint, sign: bool| -> [u8; 32] {
+            let mut bytes: [u8; 32] = value.to_le_bytes_padded(32).try_into().expect("32 octets");
+            assert_eq!(bytes[31] & 0x80, 0, "value below 2^255");
+            if sign {
+                bytes[31] |= 0x80;
+            }
+            bytes
+        };
+        let refused = |bytes: [u8; 32]| {
+            Ed25519PublicKey::from_raw_bytes(&bytes).is_none()
+                && import_everywhere(&bytes).is_none()
+                && Ed25519Signature::from_key_blob(&[bytes, [0u8; 32]].concat()).is_none()
+        };
+        let accepted = |bytes: [u8; 32]| {
+            let key = Ed25519PublicKey::from_raw_bytes(&bytes);
+            let signature = Ed25519Signature::from_key_blob(&[bytes, [0u8; 32]].concat());
+            key.is_some_and(|key| key.to_raw_bytes() == bytes)
+                && signature.is_some_and(|signature| signature.to_key_blob()[..32] == bytes)
+        };
+
+        // Step 1: the 19 values p ≤ y < 2^255, either sign bit. Their
+        // canonical twins y − p = 0 and 1 decode.
+        for offset in 0u64..19 {
+            let y = p.add(&BigUint::from_u64(offset));
+            assert!(refused(octets(&y, false)) && refused(octets(&y, true)));
+        }
+        assert!(accepted(octets(&BigUint::zero(), false)));
+        assert!(accepted(octets(&BigUint::one(), false)));
+
+        // Step 4: x = 0 for y = 1 (the neutral point) and y = p − 1 (order 2).
+        for y in [BigUint::one(), p.sub(&BigUint::one())] {
+            assert!(accepted(octets(&y, false)));
+            assert!(refused(octets(&y, true)));
+        }
+
+        // Steps 2 and 3: x² = (y² − 1)/(d·y² + 1) must be a square mod p,
+        // judged here by Euler's criterion, not by the decoder's square root.
+        // A nonzero square decodes under either sign.
+        let ctx = MontgomeryContext::new(p).expect("p is odd");
+        let mut half = p.sub(&BigUint::one());
+        half.shr1();
+        let p_minus_2 = p.sub(&BigUint::from_u64(2));
+        let (mut squares, mut non_squares) = (0, 0);
+        for y in (2u64..24).map(BigUint::from_u64) {
+            let y2 = ctx.square(&y);
+            let u = BigUint::mod_sub(&y2, &BigUint::one(), p);
+            let v = BigUint::mod_add(&ctx.mul(&curve.d, &y2), &BigUint::one(), p);
+            let x2 = ctx.mul(&u, &ctx.pow(&v, &p_minus_2));
+            if ctx.pow(&x2, &half) == BigUint::one() {
+                squares += 1;
+                assert!(accepted(octets(&y, false)) && accepted(octets(&y, true)));
+            } else {
+                non_squares += 1;
+                assert!(refused(octets(&y, false)) && refused(octets(&y, true)));
+            }
+        }
+        assert!(squares > 0 && non_squares > 0);
+
+        // A point encoding is 32 octets; a signature 64.
+        assert!(Ed25519PublicKey::from_raw_bytes(&[0x01; 31]).is_none());
+        assert!(Ed25519PublicKey::from_raw_bytes(&[0x01; 33]).is_none());
+        assert!(Ed25519Signature::from_key_blob(&[0x01; 63]).is_none());
+        assert!(Ed25519Signature::from_key_blob(&[0x01; 65]).is_none());
+    }
+
+    /// The eight points of order dividing 8 decode on every import path:
+    /// §5.1.3 has no order check. Under such a key `A'`, `[8][k]A'` is
+    /// neutral, so §5.1.7 accepts exactly the `(R, S)` with `[8][S]B = [8]R`,
+    /// for any message.
+    #[test]
+    fn small_order_keys_decode_and_verify_as_section_5_1_7_defines() {
+        let curve = curve();
+        let t = point_of_order_eight();
+        let torsion: Vec<EdwardsPoint> = (0u64..8)
+            .map(|j| curve.scalar_mul(&t, &BigUint::from_u64(j)))
+            .collect();
+        for (i, point) in torsion.iter().enumerate() {
+            assert!(torsion[..i].iter().all(|earlier| earlier != point));
+        }
+
+        let (zero, one) = (BigUint::zero(), BigUint::one());
+        for (i, point) in torsion.iter().enumerate() {
+            let bytes: [u8; 32] = curve.encode_point(point).try_into().expect("32 octets");
+            let key = import_everywhere(&bytes).expect("§5.1.3 decodes every small-order point");
+            assert_eq!(key.public_point(), point);
+            // [8][0]B = [8]R for every small-order R, and [8][1]B = [8]B.
+            let r = &torsion[(3 * i + 1) % 8];
+            assert!(key.verify_message_bytes(b"one message", &signature_octets(r, &zero)));
+            assert!(key.verify_message_bytes(b"another", &signature_octets(r, &zero)));
+            let base = curve.base_point();
+            assert!(key.verify_message_bytes(b"one message", &signature_octets(&base, &one)));
+            // [8][1]B is not [8]R for a small-order R.
+            assert!(!key.verify_message_bytes(b"one message", &signature_octets(r, &one)));
+        }
+    }
+
+    /// A key `A' = A + T` or a nonce point `R + T`, `T` of order 8, used with
+    /// the honest scalar of `A`: §5.1.7's cofactored equation accepts the
+    /// signature. The uncofactored `[S]B = R + [k]A'` that this crate used to
+    /// check refuses it whenever `[k]T` is not neutral, which is always so for
+    /// the nonce point.
+    #[test]
+    fn mixed_order_key_and_nonce_verify_by_the_cofactored_equation() {
+        let curve = curve();
+        let n = &curve.n;
+        let t = point_of_order_eight();
+        let (public, private) = Ed25519::from_seed([0x6d; 32]);
+        let a = public.public_point().clone();
+        let respond =
+            |r: &BigUint, k: &BigUint| r.add(&curve.scalar_ctx().mul(k, private.scalar())).rem(n);
+        let uncofactored = |r: &EdwardsPoint, s: &BigUint, key: &EdwardsPoint, k: &BigUint| {
+            curve.scalar_mul_base(s) == curve.add(r, &curve.scalar_mul(key, k))
+        };
+
+        let a_mixed = curve.add(&a, &t);
+        let mixed_bytes: [u8; 32] = curve.encode_point(&a_mixed).try_into().expect("32 octets");
+        let mixed_key = import_everywhere(&mixed_bytes).expect("§5.1.3 decodes A + T");
+        let mut uncancelled = 0;
+        for i in 0u64..4 {
+            let message = i.to_le_bytes();
+            let r = BigUint::from_u64(0x0123_4567_89ab_cdef ^ i);
+            let r_point = curve.scalar_mul_base(&r);
+
+            let k = challenge_scalar(&r_point, &a_mixed, &message);
+            let s = respond(&r, &k);
+            let signature = signature_octets(&r_point, &s);
+            assert!(mixed_key.verify_message_bytes(&message, &signature));
+            assert!(!mixed_key.verify_message_bytes(b"other", &signature));
+            let s_plus_one = s.add(&BigUint::one()).rem(n);
+            assert!(
+                !mixed_key.verify_message_bytes(&message, &signature_octets(&r_point, &s_plus_one))
+            );
+            if !curve.scalar_mul(&t, &k).is_neutral() {
+                uncancelled += 1;
+                assert!(!uncofactored(&r_point, &s, &a_mixed, &k));
+            }
+
+            let r_mixed = curve.add(&r_point, &t);
+            let k = challenge_scalar(&r_mixed, &a, &message);
+            let s = respond(&r, &k);
+            assert!(public.verify_message_bytes(&message, &signature_octets(&r_mixed, &s)));
+            assert!(!uncofactored(&r_mixed, &s, &a, &k));
+        }
+        assert!(uncancelled > 0, "every message cancelled [k]T");
+    }
+
+    /// RFC 8032 §5.1.5: a private key is any 32 octets. Every import path
+    /// takes the extreme seeds, and nothing of another length.
+    #[test]
+    fn private_key_import_takes_any_32_octets() {
+        for seed in [[0x00u8; 32], [0xff; 32]] {
+            let (public, private) = Ed25519::from_seed(seed);
+            assert_eq!(
+                Ed25519PrivateKey::from_raw_bytes(&seed).as_ref(),
+                Some(&private)
+            );
+            assert_eq!(
+                Ed25519PrivateKey::from_pem(&private.to_pem()).as_ref(),
+                Some(&private)
+            );
+            assert_eq!(
+                Ed25519PrivateKey::from_xml(&private.to_xml()).as_ref(),
+                Some(&private)
+            );
+            assert_eq!(
+                Ed25519PrivateKey::from_pkcs8_der(&private.to_pkcs8_der()).as_ref(),
+                Some(&private)
+            );
+            let signature = private.sign_message(b"extreme seed");
+            assert!(public.verify_message(b"extreme seed", &signature));
+        }
+        assert!(Ed25519PrivateKey::from_raw_bytes(&[0u8; 31]).is_none());
+        assert!(Ed25519PrivateKey::from_raw_bytes(&[0u8; 33]).is_none());
     }
 
     #[test]
     fn signature_rejects_non_canonical_s() {
         let (_, private) = Ed25519::generate(&mut CtrDrbgAes256::new(&[0x91; 48]));
         let mut signature = private.sign_message_bytes(b"non-canonical-s");
-        signature[32..].copy_from_slice(&biguint_to_fixed_le(&curve().n, 32));
+        signature[32..].copy_from_slice(&curve().n.to_le_bytes_padded(32));
         assert!(Ed25519Signature::from_key_blob(&signature).is_none());
     }
 
@@ -728,5 +1123,232 @@ mod tests {
         let mut sig = private.sign_message_bytes(b"tamper");
         sig[63] ^= 0x01;
         assert!(!public.verify_message_bytes(b"tamper", &sig));
+    }
+
+    #[test]
+    fn private_key_equality_follows_the_seed() {
+        let (_, key) = Ed25519::from_seed([0x42; 32]);
+        let (_, same) = Ed25519::from_seed([0x42; 32]);
+        let mut other_seed = [0x42; 32];
+        other_seed[31] ^= 0x01;
+        let (_, other) = Ed25519::from_seed(other_seed);
+        assert!(key == same);
+        assert!(key != other);
+    }
+
+    /// RFC 8410 §10.1: an Ed25519 public key.
+    const RFC8410_PUBLIC_PEM: &str = "-----BEGIN PUBLIC KEY-----\n\
+        MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=\n\
+        -----END PUBLIC KEY-----\n";
+
+    /// RFC 8410 §10.3, first example: a private key, version 1.
+    const RFC8410_PRIVATE_V1_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
+        MC4CAQAwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC\n\
+        -----END PRIVATE KEY-----\n";
+
+    /// RFC 8410 §10.3, second example: the same key as version 2, with an
+    /// attribute and the public key. Erratum 8297 notes that the attribute's
+    /// identifier is unassigned; attributes are ignored on input.
+    const RFC8410_PRIVATE_V2_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
+        MHICAQEwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC\n\
+        oB8wHQYKKoZIhvcNAQkJFDEPDA1DdXJkbGUgQ2hhaXJzgSEAGb9ECWmEzf6FQbrB\n\
+        Z9w7lshQhqowtrbLDFw4rXAxZuE=\n\
+        -----END PRIVATE KEY-----\n";
+
+    #[test]
+    fn rfc8410_section_10_examples_decode_and_reencode_exactly() {
+        let public = Ed25519PublicKey::from_spki_pem(RFC8410_PUBLIC_PEM).expect("§10.1 key");
+        assert_eq!(public.to_spki_pem(), RFC8410_PUBLIC_PEM);
+
+        let private = Ed25519PrivateKey::from_pkcs8_pem(RFC8410_PRIVATE_V1_PEM).expect("§10.3 key");
+        // §10.3: "the value of the private key is D4 EE 72 DB ...".
+        assert_eq!(
+            private.seed(),
+            &decode_hex_array::<32>(
+                "D4EE72DBF913584AD5B6D8F1F769F8AD3AFE7C28CBF1D4FBE097A88F44755842"
+            )
+        );
+        // The §10.3 seed derives the §10.1 public key.
+        assert_eq!(private.to_public_key(), public);
+        assert_eq!(private.to_pkcs8_pem(), RFC8410_PRIVATE_V1_PEM);
+
+        let v2 =
+            Ed25519PrivateKey::from_pkcs8_pem(RFC8410_PRIVATE_V2_PEM).expect("§10.3 version 2 key");
+        assert_eq!(v2, private);
+        // Output is version 1 without the public key.
+        assert_eq!(v2.to_pkcs8_pem(), RFC8410_PRIVATE_V1_PEM);
+
+        // The version 2 example with its public key altered no longer matches
+        // its private key.
+        let mut der = pem_decode(PRIVATE_KEY_LABEL, RFC8410_PRIVATE_V2_PEM, |der| {
+            Some(der.to_vec())
+        })
+        .expect("RFC 7468 text");
+        *der.last_mut().expect("non-empty") ^= 0x01;
+        assert!(Ed25519PrivateKey::from_pkcs8_der(&der).is_none());
+    }
+
+    #[test]
+    fn pkcs8_ber_accepts_an_indefinite_length_container() {
+        let (_, private) = Ed25519::generate(&mut CtrDrbgAes256::new(&[0x5e; 48]));
+        let der = private.to_pkcs8_der();
+        let ber = crate::test_utils::der_to_indefinite_length(&der);
+        assert!(Ed25519PrivateKey::from_pkcs8_der(&ber).is_none());
+        assert_eq!(
+            Ed25519PrivateKey::from_pkcs8_ber(&ber),
+            Some(private.clone())
+        );
+        assert_eq!(Ed25519PrivateKey::from_pkcs8_ber(&der), Some(private));
+    }
+
+    #[test]
+    fn standard_encodings_round_trip_and_apply_the_key_checks() {
+        let (public, private) = Ed25519::generate(&mut CtrDrbgAes256::new(&[0x5e; 48]));
+        assert_eq!(
+            Ed25519PublicKey::from_spki_der(&public.to_spki_der()),
+            Some(public.clone())
+        );
+        assert_eq!(
+            Ed25519PrivateKey::from_pkcs8_der(&private.to_pkcs8_der()),
+            Some(private.clone())
+        );
+        assert_eq!(
+            Ed25519PrivateKey::from_pkcs8_pem(&private.to_pkcs8_pem()),
+            Some(private.clone())
+        );
+
+        // Inside a SubjectPublicKeyInfo a key decodes as it does bare, by RFC
+        // 8032 §5.1.3: the neutral point is a key; y = p + 1, the non-canonical
+        // spelling of the same y = 1, is not.
+        let mut neutral = [0u8; 32];
+        neutral[0] = 0x01;
+        let decoded = Ed25519PublicKey::from_spki_der(&public_key_to_spki(&ID_ED25519, &neutral));
+        assert!(decoded.is_some());
+        assert_eq!(decoded, Ed25519PublicKey::from_raw_bytes(&neutral));
+        let mut non_canonical = [0xffu8; 32];
+        non_canonical[0] = 0xee;
+        non_canonical[31] = 0x7f;
+        assert!(
+            Ed25519PublicKey::from_spki_der(&public_key_to_spki(&ID_ED25519, &non_canonical))
+                .is_none()
+        );
+        // The same bytes under id-X25519 are another algorithm's key (§12).
+        assert!(Ed25519PublicKey::from_spki_der(&public_key_to_spki(
+            &ID_X25519,
+            &public.to_key_blob()
+        ))
+        .is_none());
+        assert!(Ed25519PrivateKey::from_pkcs8_der(&private_key_to_pkcs8(
+            &ID_X25519,
+            private.seed()
+        ))
+        .is_none());
+
+        // A version 2 public key: the matching one is accepted; another key's,
+        // or a truncated one, is not.
+        let with_public = |public_key: &[u8]| {
+            OneAsymmetricKey::new(
+                AlgorithmIdentifier::new(&ID_ED25519, None),
+                &der_octet_string(private.seed()),
+                Some(public_key),
+            )
+            .to_der()
+        };
+        assert_eq!(
+            Ed25519PrivateKey::from_pkcs8_der(&with_public(&public.to_key_blob())),
+            Some(private.clone())
+        );
+        let (other, _) = Ed25519::from_seed([0x5f; 32]);
+        assert!(Ed25519PrivateKey::from_pkcs8_der(&with_public(&other.to_key_blob())).is_none());
+        assert!(
+            Ed25519PrivateKey::from_pkcs8_der(&with_public(&public.to_key_blob()[..31])).is_none()
+        );
+    }
+
+    /// OpenSSL's keys parse and re-encode byte for byte; OpenSSL reads the
+    /// crate's keys, derives the same public key, signs with the crate's key
+    /// exactly as the crate does (Ed25519 is deterministic), and verifies the
+    /// crate's signature under the crate's `SubjectPublicKeyInfo`.
+    #[test]
+    fn openssl_ed25519_keys_and_signatures_interoperate() {
+        const TEST: &str = "openssl_ed25519_keys_and_signatures_interoperate";
+        let Some(theirs_pem) = openssl3(&["genpkey", "-algorithm", "ED25519"], b"").or_skip(TEST)
+        else {
+            return;
+        };
+        let theirs = Ed25519PrivateKey::from_pkcs8_pem(
+            std::str::from_utf8(&theirs_pem).expect("PEM is ASCII"),
+        )
+        .expect("OpenSSL's PKCS #8 Ed25519 key");
+        assert_eq!(theirs.to_pkcs8_pem().as_bytes(), theirs_pem);
+        let theirs_spki = openssl3(&["pkey", "-pubout", "-outform", "DER"], &theirs_pem)
+            .or_skip(TEST)
+            .expect("pkey works once genpkey did");
+        assert_eq!(
+            Ed25519PublicKey::from_spki_der(&theirs_spki),
+            Some(theirs.to_public_key())
+        );
+        assert_eq!(theirs.to_public_key().to_spki_der(), theirs_spki);
+
+        let (public, ours) = Ed25519::from_seed([0x3c; 32]);
+        let ours_pem = ours.to_pkcs8_pem();
+        let run = |args: &[&str], stdin: &[u8]| {
+            openssl3(args, stdin)
+                .or_skip(TEST)
+                .expect("openssl works once genpkey did")
+        };
+        assert_eq!(
+            run(&["pkey", "-pubout", "-outform", "DER"], ours_pem.as_bytes()),
+            public.to_spki_der()
+        );
+        assert_eq!(
+            run(&["pkey", "-outform", "DER"], ours_pem.as_bytes()),
+            ours.to_pkcs8_der()
+        );
+        assert_eq!(
+            run(
+                &["pkey", "-pubin", "-outform", "DER"],
+                public.to_spki_pem().as_bytes()
+            ),
+            public.to_spki_der()
+        );
+        let text = run(&["pkey", "-text", "-noout"], ours_pem.as_bytes());
+        assert!(String::from_utf8_lossy(&text).contains("ED25519 Private-Key"));
+
+        let message = b"RFC 8410 keys carrying RFC 8032 signatures";
+        let signature = ours.sign_message_bytes(message);
+        let key_file = ScratchFile::new(TEST, "key.pem", ours_pem.as_bytes());
+        let public_file = ScratchFile::new(TEST, "public.pem", public.to_spki_pem().as_bytes());
+        let message_file = ScratchFile::new(TEST, "message.bin", message);
+        let signature_file = ScratchFile::new(TEST, "signature.bin", &signature);
+        let openssl_signature = run(
+            &[
+                "pkeyutl",
+                "-sign",
+                "-rawin",
+                "-inkey",
+                key_file.arg(),
+                "-in",
+                message_file.arg(),
+            ],
+            b"",
+        );
+        assert_eq!(openssl_signature, signature);
+        let verdict = run(
+            &[
+                "pkeyutl",
+                "-verify",
+                "-pubin",
+                "-rawin",
+                "-inkey",
+                public_file.arg(),
+                "-in",
+                message_file.arg(),
+                "-sigfile",
+                signature_file.arg(),
+            ],
+            b"",
+        );
+        assert!(String::from_utf8_lossy(&verdict).contains("Signature Verified Successfully"));
     }
 }

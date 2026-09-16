@@ -7,7 +7,21 @@ generators (DRBGs).
 
 | File | Algorithm | Standard |
 |------|-----------|----------|
-| `ctr_drbg.rs` | CTR_DRBG with AES-256 | NIST SP 800-90A Rev. 1 |
+| `ctr_drbg.rs` | CTR_DRBG with AES-256, no derivation function | NIST SP 800-90A Rev. 1 §10.2.1 |
+
+`CtrDrbg<C>` is generic over the AES-256 implementation. `CtrDrbgAes256`
+(= `CtrDrbg<Aes256>`) runs on the T-table AES and is variable-time: the table
+indices are the DRBG's key and counter. `CtrDrbgAes256Ct` (= `CtrDrbg<Aes256Ct>`)
+runs on the Boyar–Peralta circuit AES and has no secret-dependent memory
+access. The two agree bit for bit; the NIST DRBGVS vectors in
+`tests/kat_ctr_drbg.rs` run through both. The DRBG keys an encrypt-only
+schedule, since `CTR_DRBG` never decrypts.
+
+What is implemented is the §10.2.1 mechanism only: instantiate, reseed,
+generate (additional input up to `seedlen`, zero-padded), and wipe on drop. No
+entropy source, no prediction resistance, no health tests, no derivation
+function: the caller supplies 48 bytes of conditioned seed material to `new`
+and `reseed`, formed as SP 800-90A §10.2.1.3.1 / §10.2.1.4.1 steps 1–3 form it.
 
 This module is intentionally narrow.  `cryptography` provides only the
 CSPRNG primitive here; the sibling [`entropy`](https://github.com/darrelllong/entropy)
@@ -18,7 +32,7 @@ DIEHARD, DIEHARDER) that evaluate them.
 
 ## Important: seeding
 
-`CtrDrbgAes256` is **deterministic** once seeded.  It is not an OS entropy
+`CtrDrbgAes256` and `CtrDrbgAes256Ct` are **deterministic** once seeded.  It is not an OS entropy
 source — it cannot generate its own seed.  Callers must supply
 cryptographically strong external seed material obtained from the operating
 system:

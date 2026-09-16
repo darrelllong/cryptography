@@ -29,7 +29,10 @@ impl GhashX86 {
     }
 
     pub fn mul(x: u128, y: u128) -> Result<u128, GhashX86Error> {
-        // Hot path avoids per-call CPUID checks; callers gate with is_supported().
+        if !Self::is_supported() {
+            return Err(GhashX86Error::MissingPclmulFeature);
+        }
+        // The feature check is the API boundary; the kernel below is branch-free.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         unsafe {
             return Ok(mul_hw(x, y));

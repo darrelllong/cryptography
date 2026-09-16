@@ -1,10 +1,11 @@
-//! Fuzz DH: parse a private-key blob and exercise agree_element.
+//! Finite-field Diffie-Hellman from fuzzer-supplied key blobs.
 //!
-//! The first half is tried as a DH private-key blob.  If valid, self-agreement
-//! (sk.agree(sk.public_key)) is checked for no-panic.  The second half is
-//! tried as a peer public-key blob; if that also parses, cross-agreement is
-//! exercised.  Both calls must not panic regardless of group-parameter
-//! compatibility.
+//! Layout: `[u16 length][private-key blob][second blob]`. `fuzz/seeds/fuzz_dh`
+//! seeds the blobs with toy keys. The first blob must parse as a private key
+//! or the input ends. Agreement with its own public key must not panic. The
+//! second blob is tried as a public key (agreement must not panic, whatever
+//! group it names) and as a private key: two private keys in the same group
+//! agree on the same element.
 #![no_main]
 
 use cryptography::public_key::dh::{DhPrivateKey, DhPublicKey};
@@ -14,20 +15,29 @@ fuzz_target!(|data: &[u8]| {
     if data.len() < 2 {
         return;
     }
-    let mid = data.len() / 2;
-    let (blob1, blob2) = data.split_at(mid);
-
-    let sk = match DhPrivateKey::from_key_blob(blob1) {
-        Some(k) => k,
-        None => return,
+    let len = usize::from(u16::from_be_bytes([data[0], data[1]]));
+    let rest = &data[2..];
+    if rest.len() < len {
+        return;
+    }
+    let (blob1, blob2) = rest.split_at(len);
+    let Some(sk1) = DhPrivateKey::from_key_blob(blob1) else {
+        return;
     };
+    let pk1 = sk1.to_public_key();
+    let _ = sk1.agree_element(&pk1);
 
-    // Self-agreement: must not panic.
-    let my_pk = sk.to_public_key();
-    let _ = sk.agree_element(&my_pk);
-
-    // Cross-agreement with arbitrary peer: must not panic.
-    if let Some(peer_pk) = DhPublicKey::from_key_blob(blob2) {
-        let _ = sk.agree_element(&peer_pk);
+    if let Some(peer) = DhPublicKey::from_key_blob(blob2) {
+        let _ = sk1.agree_element(&peer);
+    }
+    if let Some(sk2) = DhPrivateKey::from_key_blob(blob2) {
+        let pk2 = sk2.to_public_key();
+        if sk1.modulus() == sk2.modulus() && sk1.generator() == sk2.generator() {
+            assert_eq!(
+                sk1.agree_element(&pk2),
+                sk2.agree_element(&pk1),
+                "DH: agreement is symmetric within one group"
+            );
+        }
     }
 });

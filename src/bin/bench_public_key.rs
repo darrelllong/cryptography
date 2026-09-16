@@ -11,6 +11,10 @@
 //!
 //! Notes:
 //! - The positional integer argument is finite-field key size in bits.
+//! - ElGamal and DSA run over FIPS 186-4 domain parameters, which exist only
+//!   at L = 1024 (N = 160) and L = 2048 or 3072 (benchmarked with N = 256);
+//!   at any other size they are skipped. Their keygen row includes generating
+//!   the domain parameters.
 //! - EC/Edwards operations are benchmarked on fixed curves (`p256`, `ed25519`).
 //! - Output values are wall-clock durations per operation, not throughput.
 
@@ -18,6 +22,8 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use cryptography::public_key::ec_edwards::ed25519 as edwards25519_curve;
+use cryptography::public_key::ecies::EciesSetup;
+use cryptography::public_key::primes::{FfcHash, FfcParameterSize};
 use cryptography::vt::{
     p256, BigUint, Cocks, Dsa, EcElGamal, Ecdh, EcdhPublicKey, Ecdsa, Ecies, Ed25519, EdwardsDh,
     EdwardsDhPublicKey, EdwardsElGamal, ElGamal, Paillier, Rabin, Rsa, RsaOaep, RsaPrivateKey,
@@ -159,7 +165,8 @@ fn bench_rsa(rng: &mut CtrDrbgAes256, bits: usize) -> (RsaPublicKey, RsaPrivateK
     let rsa_sign = start.elapsed();
 
     let start = Instant::now();
-    let rsa_verify = RsaPss::<Sha256>::verify(&rsa_public, &MESSAGE, &rsa_signature);
+    let rsa_verify =
+        RsaPss::<Sha256>::verify(&rsa_public, &MESSAGE, &rsa_signature, PSS_SALT.len());
     let rsa_verify_time = start.elapsed();
     assert!(rsa_verify);
 
@@ -176,11 +183,22 @@ fn bench_rsa(rng: &mut CtrDrbgAes256, bits: usize) -> (RsaPublicKey, RsaPrivateK
     )
 }
 
-fn bench_elgamal(rng: &mut CtrDrbgAes256, bits: usize) -> ElGamalTimings {
-    announce("Generating ElGamal key");
+/// The FIPS 186-4 §4.2 pair benchmarked at a finite-field size: `N = 160` for
+/// `L = 1024`, `N = 256` for `L = 2048` and `L = 3072`, and none elsewhere.
+fn fips186_4_size(bits: usize) -> Option<FfcParameterSize> {
+    match bits {
+        1024 => Some(FfcParameterSize::L1024N160),
+        2048 => Some(FfcParameterSize::L2048N256),
+        3072 => Some(FfcParameterSize::L3072N256),
+        _ => None,
+    }
+}
+
+fn bench_elgamal(rng: &mut CtrDrbgAes256, size: FfcParameterSize) -> ElGamalTimings {
+    announce("Generating ElGamal group and key");
     let start = Instant::now();
     let (elgamal_public, elgamal_private) =
-        ElGamal::generate(rng, bits).expect("ElGamal key generation");
+        ElGamal::generate(rng, size, FfcHash::Sha256).expect("ElGamal key generation");
     let elgamal_keygen = start.elapsed();
 
     announce("Measuring ElGamal");
@@ -193,15 +211,16 @@ fn bench_elgamal(rng: &mut CtrDrbgAes256, bits: usize) -> ElGamalTimings {
     let start = Instant::now();
     let elgamal_plaintext = elgamal_private.decrypt(&elgamal_ciphertext);
     let elgamal_decrypt = start.elapsed();
-    assert_eq!(elgamal_plaintext, MESSAGE);
+    assert_eq!(elgamal_plaintext.as_deref(), Some(&MESSAGE[..]));
 
     (elgamal_keygen, elgamal_encrypt, elgamal_decrypt)
 }
 
-fn bench_dsa(rng: &mut CtrDrbgAes256, bits: usize) -> DsaTimings {
-    announce("Generating DSA key");
+fn bench_dsa(rng: &mut CtrDrbgAes256, size: FfcParameterSize) -> DsaTimings {
+    announce("Generating DSA domain parameters and key");
     let start = Instant::now();
-    let (public, private) = Dsa::generate(rng, bits).expect("DSA key generation");
+    let params = Dsa::generate_params(rng, size, FfcHash::Sha256).expect("DSA domain parameters");
+    let (public, private) = Dsa::generate(&params, rng);
     let keygen = start.elapsed();
 
     announce("Measuring DSA");
@@ -238,14 +257,17 @@ fn bench_paillier(rng: &mut CtrDrbgAes256, bits: usize) -> PaillierTimings {
     let start = Instant::now();
     let paillier_plaintext = paillier_private.decrypt(&paillier_ciphertext);
     let paillier_decrypt = start.elapsed();
-    assert_eq!(paillier_plaintext, MESSAGE);
+    assert_eq!(paillier_plaintext.as_deref(), Some(&MESSAGE[..]));
 
     let start = Instant::now();
     let rerandomized = paillier_public
         .rerandomize(&paillier_ciphertext, rng)
         .expect("Paillier rerandomize");
     let paillier_rerandomize = start.elapsed();
-    assert_eq!(paillier_private.decrypt(&rerandomized), MESSAGE);
+    assert_eq!(
+        paillier_private.decrypt(&rerandomized).as_deref(),
+        Some(&MESSAGE[..])
+    );
 
     let other_ciphertext = paillier_public
         .encrypt(&[0x01], rng)
@@ -258,7 +280,7 @@ fn bench_paillier(rng: &mut CtrDrbgAes256, bits: usize) -> PaillierTimings {
     let combined_plaintext = paillier_private.decrypt(&combined);
     let mut expected = BigUint::from_be_bytes(&MESSAGE);
     expected = expected.add(&BigUint::from_u64(1));
-    assert_eq!(combined_plaintext, expected.to_be_bytes());
+    assert_eq!(combined_plaintext, Some(expected.to_be_bytes()));
 
     (
         paillier_keygen,
@@ -339,10 +361,10 @@ fn bench_ecdh(rng: &mut CtrDrbgAes256) -> EcdhTimings {
     let shared_a = private_a
         .agree_x_coordinate(&public_b)
         .expect("ECDH agree A");
+    let agree = start.elapsed();
     let shared_b = private_b
         .agree_x_coordinate(&public_a)
         .expect("ECDH agree B");
-    let agree = start.elapsed();
     assert_eq!(shared_a, shared_b);
     assert_eq!(shared_a.len(), 32);
 
@@ -388,10 +410,10 @@ fn bench_edwards_dh(rng: &mut CtrDrbgAes256) -> EdwardsDhTimings {
     let shared_a = private_a
         .agree_compressed_point(&public_b)
         .expect("Edwards DH agree A");
+    let agree = start.elapsed();
     let shared_b = private_b
         .agree_compressed_point(&public_a)
         .expect("Edwards DH agree B");
-    let agree = start.elapsed();
     assert_eq!(shared_a, shared_b);
     assert_eq!(shared_a.len(), 32);
 
@@ -412,11 +434,15 @@ fn bench_ecies(rng: &mut CtrDrbgAes256) -> EciesTimings {
 
     announce("Measuring ECIES");
     let start = Instant::now();
-    let ciphertext = public.encrypt(&MESSAGE, rng);
+    let ciphertext = public
+        .encrypt(EciesSetup::RECOMMENDED, &MESSAGE, &[], &[], rng)
+        .expect("ECIES encrypt");
     let encrypt = start.elapsed();
 
     let start = Instant::now();
-    let plaintext = private.decrypt(&ciphertext).expect("ECIES decrypt");
+    let plaintext = private
+        .decrypt(EciesSetup::RECOMMENDED, &ciphertext, &[], &[])
+        .expect("ECIES decrypt");
     let decrypt = start.elapsed();
     assert_eq!(plaintext, MESSAGE);
 
@@ -477,7 +503,7 @@ fn bench_ec_elgamal(rng: &mut CtrDrbgAes256) -> EcElGamalTimings {
     let encrypt = start.elapsed();
 
     let start = Instant::now();
-    let plaintext = private.decrypt(&ciphertext);
+    let plaintext = private.decrypt(&ciphertext).expect("EC ElGamal decrypt");
     let decrypt = start.elapsed();
     assert_eq!(plaintext, EC_MESSAGE);
 
@@ -498,20 +524,27 @@ fn main() {
     let (_, _, (rsa_keygen, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify_time)) =
         bench_rsa(&mut rng, bits);
 
+    let ffc_size = fips186_4_size(bits);
     let mut elgamal_timings = None;
     if skip_elgamal {
         println!("Skipping ElGamal benchmark.");
         println!();
+    } else if let Some(size) = ffc_size {
+        elgamal_timings = Some(bench_elgamal(&mut rng, size));
     } else {
-        elgamal_timings = Some(bench_elgamal(&mut rng, bits));
+        println!("Skipping ElGamal benchmark: FIPS 186-4 has no (L, N) pair with L = {bits}.");
+        println!();
     }
 
     let mut dsa_timings = None;
     if skip_dsa {
         println!("Skipping DSA benchmark.");
         println!();
+    } else if let Some(size) = ffc_size {
+        dsa_timings = Some(bench_dsa(&mut rng, size));
     } else {
-        dsa_timings = Some(bench_dsa(&mut rng, bits));
+        println!("Skipping DSA benchmark: FIPS 186-4 has no (L, N) pair with L = {bits}.");
+        println!();
     }
 
     let paillier_timings = bench_paillier(&mut rng, bits);

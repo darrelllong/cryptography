@@ -6,18 +6,37 @@
 //! - `Serpent192` / `Serpent192Ct`
 //! - `Serpent256` / `Serpent256Ct`
 //!
-//! The public API follows the original Serpent submission / reference-implementation
-//! byte order. That matches many existing Serpent libraries, but it differs
-//! from the byte-reversed NESSIE presentation. Internally, the core still works
-//! on 32-bit little-endian words, so the wrappers reverse the incoming key and
-//! block bytes around that native representation.
+//! # Byte order
 //!
-//! Both the fast (`Serpent128/192/256`) and constant-time (`*Ct`) types share a
-//! single word-parallel bitsliced S-box: each 4->4 S-box is evaluated directly
-//! on the four 32-bit bitslice registers via its Algebraic Normal Form (word-wide
-//! `AND`/`XOR` only), substituting all 32 lanes at once. This is branch-free and
-//! lookup-free — far faster than a per-lane table loop and constant-time by
-//! construction — so no separate variable-time path is needed.
+//! The Serpent paper (§2, "The Cipher") represents every value in
+//! little-endian form: word 0 is the least significant 32-bit word, and bit 0
+//! is the least significant bit of word 0. This API takes that representation
+//! byte for byte: block byte 0 is the least significant byte of word 0, and
+//! key byte 0 is the least significant byte of the key. It is the byte order
+//! used by the NESSIE test vectors and by deployed Serpent libraries, so
+//! `Serpent128::new(&[0x80, 0, .., 0]).encrypt_block(&[0; 16])` yields
+//! `264E5481EFF42A4606ABDA06C0BFDA3D`.
+//!
+//! The known-answer files shipped with the AES submission (`ecb_vk.txt`,
+//! `ecb_vt.txt`, …) write each value "as a plain 128-bit hex number", most
+//! significant byte first. A submission vector `(K, P, C)` is therefore
+//! satisfied here as `encrypt(rev(K), rev(P)) == rev(C)`, where `rev`
+//! reverses the byte string; the tests pin both presentations.
+//!
+//! # Key padding
+//!
+//! Keys shorter than 256 bits are extended as the paper prescribes: a single
+//! `1` bit is appended at the most significant end, followed by zeros.
+//!
+//! # Round function
+//!
+//! All types share one word-parallel bitsliced S-box: each 4->4 S-box is
+//! evaluated directly on the four 32-bit bitslice registers via its algebraic
+//! normal form (word-wide `AND`/`XOR` only), substituting all 32 lanes at
+//! once. The instruction sequence and memory accesses are independent of the
+//! key and the data, so the round function is constant-time by construction;
+//! the `*Ct` names are aliases of the corresponding types, retained so that
+//! Serpent presents the same fast/`Ct` pair as the other block ciphers.
 
 use crate::ct::zeroize_slice;
 use crate::BlockCipher;
@@ -136,8 +155,8 @@ fn apply_inv_sbox_round(words: [u32; 4], round: usize) -> [u32; 4] {
     apply_sbox_words(words, INV_SBOXES_ANF[round & 7])
 }
 
-/// Reference lane-by-lane table lookup — the original S-box implementation,
-/// retained only as a differential oracle for the equivalence tests below.
+/// Lane-by-lane table lookup: the S-box definition applied directly, kept as
+/// the oracle the word-parallel evaluation is tested against.
 #[cfg(test)]
 fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
     let [x0, x1, x2, x3] = words;
@@ -156,14 +175,6 @@ fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
         bit += 1;
     }
     out
-}
-
-/// Per-nibble constant-time ANF evaluation, retained for the coefficient
-/// cross-check test (and as this module's ct S-box indicator for the scrub
-/// policy in `scrub.rs`, which looks for `eval_nibble_sbox`).
-#[cfg(test)]
-fn sbox_ct_nibble(input: u8, sbox_anf: [u16; 4]) -> u8 {
-    crate::ct::eval_nibble_sbox(sbox_anf, input)
 }
 
 #[inline]
@@ -198,19 +209,10 @@ fn inv_lt(words: [u32; 4]) -> [u32; 4] {
     [x0, x1, x2, x3]
 }
 
+/// Block bytes to the paper's little-endian words: word `j` is bytes
+/// `4j..4j+4`, least significant byte first.
 #[inline]
-fn reverse_bytes<const N: usize>(input: &[u8; N]) -> [u8; N] {
-    let mut out = [0u8; N];
-    let mut i = 0usize;
-    while i < N {
-        out[i] = input[N - 1 - i];
-        i += 1;
-    }
-    out
-}
-
-#[inline]
-fn words_from_block_internal(block: &[u8; 16]) -> [u32; 4] {
+fn words_from_block(block: &[u8; 16]) -> [u32; 4] {
     [
         u32::from_le_bytes(block[0..4].try_into().unwrap()),
         u32::from_le_bytes(block[4..8].try_into().unwrap()),
@@ -220,7 +222,7 @@ fn words_from_block_internal(block: &[u8; 16]) -> [u32; 4] {
 }
 
 #[inline]
-fn block_from_words_internal(words: [u32; 4]) -> [u8; 16] {
+fn block_from_words(words: [u32; 4]) -> [u8; 16] {
     let mut out = [0u8; 16];
     out[0..4].copy_from_slice(&words[0].to_le_bytes());
     out[4..8].copy_from_slice(&words[1].to_le_bytes());
@@ -229,10 +231,14 @@ fn block_from_words_internal(words: [u32; 4]) -> [u8; 16] {
     out
 }
 
-fn expand_round_keys<const N: usize>(user_key: &[u8; N]) -> [[u32; 4]; 33] {
-    let key = reverse_bytes(user_key);
+/// Expand a 16-, 24- or 32-byte key into the 33 round keys, written directly
+/// into `out` (the caller's struct field). Short keys are padded with a `1`
+/// bit at the most significant end followed by zeros (paper §2); the prekeys
+/// `w_{-8}..w_131` follow the paper's affine recurrence and the round keys are
+/// the S-boxed prekey groups, S-box `(3 - i) mod 8` for round key `i`.
+fn expand_round_keys<const N: usize>(user_key: &[u8; N], out: &mut [[u32; 4]; 33]) {
     let mut padded = [0u8; 32];
-    padded[..N].copy_from_slice(&key);
+    padded[..N].copy_from_slice(user_key);
     if N < 32 {
         padded[N] = 1;
     }
@@ -255,21 +261,20 @@ fn expand_round_keys<const N: usize>(user_key: &[u8; N]) -> [[u32; 4]; 33] {
         i += 1;
     }
 
-    let mut out = [[0u32; 4]; 33];
+    let mut input = [0u32; 4];
     let mut round = 0usize;
     while round < 33 {
         let sbox_idx = (3usize.wrapping_sub(round)) & 7;
-        let input = [
-            words[8 + 4 * round],
-            words[8 + 4 * round + 1],
-            words[8 + 4 * round + 2],
-            words[8 + 4 * round + 3],
-        ];
+        input.copy_from_slice(&words[8 + 4 * round..8 + 4 * round + 4]);
         out[round] = apply_sbox_words(input, SBOXES_ANF[sbox_idx]);
         round += 1;
     }
 
-    out
+    // The padded key and the 140-word prekey are the user key in other
+    // shapes: only the round keys may outlive this call.
+    zeroize_slice(padded.as_mut_slice());
+    zeroize_slice(words.as_mut_slice());
+    zeroize_slice(input.as_mut_slice());
 }
 
 fn serpent_encrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u32; 4] {
@@ -321,20 +326,6 @@ fn serpent_decrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u
     state
 }
 
-fn encrypt_block_words(round_keys: &[[u32; 4]; 33], block: &[u8; 16]) -> [u8; 16] {
-    let internal = reverse_bytes(block);
-    let state = words_from_block_internal(&internal);
-    let out = serpent_encrypt_words(state, round_keys);
-    reverse_bytes(&block_from_words_internal(out))
-}
-
-fn decrypt_block_words(round_keys: &[[u32; 4]; 33], block: &[u8; 16]) -> [u8; 16] {
-    let internal = reverse_bytes(block);
-    let state = words_from_block_internal(&internal);
-    let out = serpent_decrypt_words(state, round_keys);
-    reverse_bytes(&block_from_words_internal(out))
-}
-
 macro_rules! serpent_type {
     ($name:ident, $name_ct:ident, $key_len:literal, $doc:literal, $doc_ct:literal) => {
         #[doc = $doc]
@@ -343,11 +334,14 @@ macro_rules! serpent_type {
         }
 
         impl $name {
-            /// Expand the user key into the 33 Serpent round-key words.
+            /// Expand the user key into the 33 Serpent round keys.
+            #[must_use]
             pub fn new(key: &[u8; $key_len]) -> Self {
-                Self {
-                    round_keys: expand_round_keys(key),
-                }
+                let mut cipher = Self {
+                    round_keys: [[0u32; 4]; 33],
+                };
+                expand_round_keys(key, &mut cipher.round_keys);
+                cipher
             }
 
             /// Expand the key and then wipe the caller-owned key buffer.
@@ -357,14 +351,24 @@ macro_rules! serpent_type {
                 cipher
             }
 
-            /// Encrypt one 128-bit block.
+            /// Encrypt one 128-bit block (little-endian words, see the module
+            /// documentation).
+            #[must_use]
             pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                encrypt_block_words(&self.round_keys, block)
+                block_from_words(serpent_encrypt_words(
+                    words_from_block(block),
+                    &self.round_keys,
+                ))
             }
 
-            /// Decrypt one 128-bit block.
+            /// Decrypt one 128-bit block (little-endian words, see the module
+            /// documentation).
+            #[must_use]
             pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                decrypt_block_words(&self.round_keys, block)
+                block_from_words(serpent_decrypt_words(
+                    words_from_block(block),
+                    &self.round_keys,
+                ))
             }
         }
 
@@ -392,9 +396,6 @@ macro_rules! serpent_type {
             }
         }
 
-        // The word-parallel bitsliced S-box has no secret-dependent table
-        // lookups or branches, so the fast path is already constant-time and
-        // the `Ct` type is simply an alias — no separate implementation exists.
         #[doc = $doc_ct]
         pub type $name_ct = $name;
     };
@@ -404,66 +405,47 @@ serpent_type!(
     Serpent128,
     Serpent128Ct,
     16,
-    "Serpent with a 128-bit key (public byte order matches the original submission vectors).",
-    "Serpent-128 (`Ct` alias): the bitsliced S-box is constant-time by construction, so this is identical to [`Serpent128`]."
+    "Serpent with a 128-bit key: 32 rounds over four little-endian 32-bit words, with the word-parallel bitsliced S-box (constant-time by construction).",
+    "Alias of [`Serpent128`], retained for API symmetry with the other block ciphers: the shipped round function is already table-free, so there is no separate constant-time implementation."
 );
 serpent_type!(
     Serpent192,
     Serpent192Ct,
     24,
-    "Serpent with a 192-bit key (public byte order matches the original submission vectors).",
-    "Serpent-192 (`Ct` alias): identical to [`Serpent192`]; the bitsliced S-box is constant-time by construction."
+    "Serpent with a 192-bit key: 32 rounds over four little-endian 32-bit words, with the word-parallel bitsliced S-box (constant-time by construction).",
+    "Alias of [`Serpent192`], retained for API symmetry with the other block ciphers: the shipped round function is already table-free, so there is no separate constant-time implementation."
 );
 serpent_type!(
     Serpent256,
     Serpent256Ct,
     32,
-    "Serpent with a 256-bit key (public byte order matches the original submission vectors).",
-    "Serpent-256 (`Ct` alias): identical to [`Serpent256`]; the bitsliced S-box is constant-time by construction."
+    "Serpent with a 256-bit key: 32 rounds over four little-endian 32-bit words, with the word-parallel bitsliced S-box (constant-time by construction).",
+    "Alias of [`Serpent256`], retained for API symmetry with the other block ciphers: the shipped round function is already table-free, so there is no separate constant-time implementation."
 );
 
 /// Default Serpent instantiation: alias for [`Serpent128`] (128-bit key).
 pub type Serpent = Serpent128;
-/// Constant-time Serpent-128 alias. Because the shared bitsliced S-box is
-/// constant-time by construction, this is the same type as [`Serpent`].
+/// Alias of [`Serpent`] (that is, of [`Serpent128`]), retained for API
+/// symmetry: the shipped round function is already constant-time.
 pub type SerpentCt = Serpent128Ct;
 
 #[cfg(test)]
 mod tests {
+    // Known answers come from the Serpent AES submission package by Anderson,
+    // Biham and Knudsen, https://www.cl.cam.ac.uk/~rja14/Papers/serpent.tar.gz
+    // (SHA-256 7af7efb13c537d707db45dc727b2d998
+    // 7df8e7f137a04a056dbedf6995e9b748), directory `floppy4/`: `ecb_vk.txt`
+    // (variable key, plaintext zero) and `ecb_vt.txt` (variable text, key
+    // zero). Those files write values most significant byte first, so each
+    // entry is checked as `encrypt(rev(K), rev(P)) == rev(C)` in this API's
+    // little-endian byte order (module documentation). `ecb_vk.txt` I=121 for
+    // the 128-bit key is the byte-reversed form of the NESSIE-format vector
+    // (key 80 00..00, plaintext zero, ciphertext 264E5481…), which is also
+    // pinned directly.
     use super::*;
+    use crate::test_utils::decode_hex;
 
-    fn decode_hex(s: &str) -> Vec<u8> {
-        assert_eq!(s.len() % 2, 0);
-        let mut out = Vec::with_capacity(s.len() / 2);
-        let bytes = s.as_bytes();
-        let mut i = 0usize;
-        while i < bytes.len() {
-            let hi = (bytes[i] as char).to_digit(16).unwrap();
-            let lo = (bytes[i + 1] as char).to_digit(16).unwrap();
-            out.push(u8::try_from((hi << 4) | lo).expect("decoded hex byte fits in u8"));
-            i += 2;
-        }
-        out
-    }
-
-    #[test]
-    fn ct_sboxes_match_tables() {
-        for sbox in 0..8 {
-            for x in 0u8..16 {
-                assert_eq!(
-                    SBOXES[sbox][x as usize],
-                    sbox_ct_nibble(x, SBOXES_ANF[sbox])
-                );
-                assert_eq!(
-                    INV_SBOXES[sbox][x as usize],
-                    sbox_ct_nibble(x, INV_SBOXES_ANF[sbox])
-                );
-            }
-        }
-    }
-
-    /// Small deterministic xorshift64 PRNG for reproducible pseudorandom tests
-    /// (no external rng; `Date::now`/`Math.random` unavailable and undesirable).
+    /// Small deterministic xorshift64 PRNG for reproducible pseudorandom tests.
     struct XorShift64(u64);
     impl XorShift64 {
         fn next(&mut self) -> u64 {
@@ -477,7 +459,7 @@ mod tests {
     }
 
     /// Prove the word-parallel bitsliced S-box is bit-for-bit identical to the
-    /// original lane-by-lane table lookup, for every S-box (forward and inverse).
+    /// lane-by-lane table lookup, for every S-box (forward and inverse).
     ///
     /// Part (a) is exhaustive over the S-box *definition*: for each of the 8
     /// S-boxes and each of the 16 nibble inputs, drive all 32 lanes with that one
@@ -532,9 +514,18 @@ mod tests {
         }
     }
 
-    /// Encrypt/decrypt several thousand pseudorandom blocks under random keys for
-    /// all three key sizes, asserting round-trip identity and that the fast and
-    /// `Ct` types (now sharing the word-parallel S-box) agree bit-for-bit.
+    /// The inverse S-box tables invert the forward tables entry by entry.
+    #[test]
+    fn inverse_sboxes_invert_forward_sboxes() {
+        for i in 0..8 {
+            for x in 0u8..16 {
+                assert_eq!(INV_SBOXES[i][SBOXES[i][x as usize] as usize], x, "S{i}");
+            }
+        }
+    }
+
+    /// Encrypt/decrypt several thousand pseudorandom blocks under random keys
+    /// for all three key sizes, asserting round-trip identity.
     #[test]
     fn encrypt_decrypt_roundtrip_random() {
         let mut rng = XorShift64(0x9e37_79b9_7f4a_7c15);
@@ -550,138 +541,146 @@ mod tests {
             let k16: [u8; 16] = key[..16].try_into().unwrap();
             let k24: [u8; 24] = key[..24].try_into().unwrap();
 
-            let fast = Serpent128::new(&k16);
-            let ct = Serpent128Ct::new(&k16);
-            let enc = fast.encrypt_block(&pt);
-            assert_eq!(enc, ct.encrypt_block(&pt), "128 fast/ct mismatch");
-            assert_eq!(fast.decrypt_block(&enc), pt, "128 fast round-trip");
-            assert_eq!(ct.decrypt_block(&enc), pt, "128 ct round-trip");
-
-            let fast = Serpent192::new(&k24);
-            let ct = Serpent192Ct::new(&k24);
-            let enc = fast.encrypt_block(&pt);
-            assert_eq!(enc, ct.encrypt_block(&pt), "192 fast/ct mismatch");
-            assert_eq!(fast.decrypt_block(&enc), pt, "192 fast round-trip");
-            assert_eq!(ct.decrypt_block(&enc), pt, "192 ct round-trip");
-
-            let fast = Serpent256::new(&key);
-            let ct = Serpent256Ct::new(&key);
-            let enc = fast.encrypt_block(&pt);
-            assert_eq!(enc, ct.encrypt_block(&pt), "256 fast/ct mismatch");
-            assert_eq!(fast.decrypt_block(&enc), pt, "256 fast round-trip");
-            assert_eq!(ct.decrypt_block(&enc), pt, "256 ct round-trip");
+            let cipher = Serpent128::new(&k16);
+            assert_eq!(cipher.decrypt_block(&cipher.encrypt_block(&pt)), pt, "128");
+            let cipher = Serpent192::new(&k24);
+            assert_eq!(cipher.decrypt_block(&cipher.encrypt_block(&pt)), pt, "192");
+            let cipher = Serpent256::new(&key);
+            assert_eq!(cipher.decrypt_block(&cipher.encrypt_block(&pt)), pt, "256");
         }
     }
 
+    /// NESSIE-format vector (Serpent-128, key 80 00..00, plaintext zero) in
+    /// this API's byte order, with no reversal.
     #[test]
-    fn serpent128_kat() {
-        let key: [u8; 16] = decode_hex("80000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let pt: [u8; 16] = decode_hex("00000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let ct: [u8; 16] = decode_hex("49AFBFAD9D5A34052CD8FFA5986BD2DD")
+    fn serpent128_standard_byte_order_vector() {
+        let mut key = [0u8; 16];
+        key[0] = 0x80;
+        let pt = [0u8; 16];
+        let ct: [u8; 16] = decode_hex("264E5481EFF42A4606ABDA06C0BFDA3D")
             .try_into()
             .unwrap();
         let cipher = Serpent128::new(&key);
         assert_eq!(cipher.encrypt_block(&pt), ct);
         assert_eq!(cipher.decrypt_block(&ct), pt);
+        // `SerpentCt`/`Serpent128Ct` name the same type.
+        let cipher: SerpentCt = Serpent128Ct::new(&key);
+        assert_eq!(cipher.encrypt_block(&pt), ct);
     }
 
-    #[test]
-    fn serpent128_ct_kat() {
-        let key: [u8; 16] = decode_hex("80000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let pt: [u8; 16] = decode_hex("00000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let ct: [u8; 16] = decode_hex("49AFBFAD9D5A34052CD8FFA5986BD2DD")
-            .try_into()
-            .unwrap();
-        let cipher = Serpent128Ct::new(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct);
-        assert_eq!(cipher.decrypt_block(&ct), pt);
+    fn reversed<const N: usize>(hex: &str) -> [u8; N] {
+        let mut bytes: [u8; N] = decode_hex(hex).try_into().unwrap();
+        bytes.reverse();
+        bytes
     }
 
-    #[test]
-    fn serpent128_standard_plaintext_vector() {
-        let key = [0u8; 16];
-        let pt: [u8; 16] = decode_hex("80000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let ct: [u8; 16] = decode_hex("10B5FFB720B8CB9002A1142B0BA2E94A")
-            .try_into()
-            .unwrap();
-        let cipher = Serpent128::new(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct);
-        assert_eq!(cipher.decrypt_block(&ct), pt);
+    /// Check one submission-file entry: `encrypt(rev(K), rev(P)) == rev(C)`
+    /// for each key size, dispatching on the key length.
+    fn check_submission_entry(label: &str, key_hex: &str, pt_hex: &str, ct_hex: &str) {
+        let pt: [u8; 16] = reversed(pt_hex);
+        let ct: [u8; 16] = reversed(ct_hex);
+        let (enc, dec) = match key_hex.len() / 2 {
+            16 => {
+                let c = Serpent128::new(&reversed::<16>(key_hex));
+                (c.encrypt_block(&pt), c.decrypt_block(&ct))
+            }
+            24 => {
+                let c = Serpent192::new(&reversed::<24>(key_hex));
+                (c.encrypt_block(&pt), c.decrypt_block(&ct))
+            }
+            32 => {
+                let c = Serpent256::new(&reversed::<32>(key_hex));
+                (c.encrypt_block(&pt), c.decrypt_block(&ct))
+            }
+            other => panic!("unexpected key length {other}"),
+        };
+        assert_eq!(enc, ct, "{label}: encrypt");
+        assert_eq!(dec, pt, "{label}: decrypt");
     }
 
+    /// `floppy4/ecb_vk.txt` (plaintext zero): I=1 and I=121 for each key size.
     #[test]
-    fn serpent192_kat() {
-        let key: [u8; 24] = decode_hex("800000000000000000000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let pt: [u8; 16] = decode_hex("00000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let ct: [u8; 16] = decode_hex("E78E5402C7195568AC3678F7A3F60C66")
-            .try_into()
-            .unwrap();
-        let cipher = Serpent192::new(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct);
-        assert_eq!(cipher.decrypt_block(&ct), pt);
+    fn submission_variable_key_vectors() {
+        const ZERO: &str = "00000000000000000000000000000000";
+        let entries = [
+            (
+                "128 I=1",
+                "80000000000000000000000000000000",
+                "49afbfad9d5a34052cd8ffa5986bd2dd",
+            ),
+            (
+                "128 I=121",
+                "00000000000000000000000000000080",
+                "3ddabfc006daab06462af4ef81544e26",
+            ),
+            (
+                "192 I=1",
+                "800000000000000000000000000000000000000000000000",
+                "e78e5402c7195568ac3678f7a3f60c66",
+            ),
+            (
+                "192 I=121",
+                "000000000000000000000000000000800000000000000000",
+                "093c1029c5eb09844c39dcb42a6ac5eb",
+            ),
+            (
+                "256 I=1",
+                "8000000000000000000000000000000000000000000000000000000000000000",
+                "abed96e766bf28cbc0ebd21a82ef0819",
+            ),
+            (
+                "256 I=121",
+                "0000000000000000000000000000008000000000000000000000000000000000",
+                "eb5d9352b3615c55e895550b497191c1",
+            ),
+        ];
+        for (label, key, ct) in entries {
+            check_submission_entry(label, key, ZERO, ct);
+        }
     }
 
+    /// `floppy4/ecb_vt.txt` (key zero): I=1 and I=121 for each key size.
     #[test]
-    fn serpent192_ct_kat() {
-        let key: [u8; 24] = decode_hex("800000000000000000000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let pt: [u8; 16] = decode_hex("00000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let ct: [u8; 16] = decode_hex("E78E5402C7195568AC3678F7A3F60C66")
-            .try_into()
-            .unwrap();
-        let cipher = Serpent192Ct::new(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct);
-        assert_eq!(cipher.decrypt_block(&ct), pt);
+    fn submission_variable_text_vectors() {
+        const KEY128: &str = "00000000000000000000000000000000";
+        const KEY192: &str = "000000000000000000000000000000000000000000000000";
+        const KEY256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+        const PT1: &str = "80000000000000000000000000000000";
+        const PT121: &str = "00000000000000000000000000000080";
+        let entries = [
+            ("128 I=1", KEY128, PT1, "10b5ffb720b8cb9002a1142b0ba2e94a"),
+            (
+                "128 I=121",
+                KEY128,
+                PT121,
+                "bbbcb8648c674426d8dd58c3e75db3a3",
+            ),
+            ("192 I=1", KEY192, PT1, "b10b271ba25257e1294f2b51f076d0d9"),
+            (
+                "192 I=121",
+                KEY192,
+                PT121,
+                "bb8a615964c174450d7e68ad32f4f523",
+            ),
+            ("256 I=1", KEY256, PT1, "da5a7992b1b4ae6f8c004bc8a7de5520"),
+            (
+                "256 I=121",
+                KEY256,
+                PT121,
+                "6e567fcf2b853dd8ecc3d58a5e671483",
+            ),
+        ];
+        for (label, key, pt, ct) in entries {
+            check_submission_entry(label, key, pt, ct);
+        }
     }
 
+    /// The `BlockCipher` entry points reject a wrong-length block.
     #[test]
-    fn serpent256_kat() {
-        let key: [u8; 32] =
-            decode_hex("8000000000000000000000000000000000000000000000000000000000000000")
-                .try_into()
-                .unwrap();
-        let pt: [u8; 16] = decode_hex("00000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let ct: [u8; 16] = decode_hex("ABED96E766BF28CBC0EBD21A82EF0819")
-            .try_into()
-            .unwrap();
-        let cipher = Serpent256::new(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct);
-        assert_eq!(cipher.decrypt_block(&ct), pt);
-    }
-
-    #[test]
-    fn serpent256_ct_kat() {
-        let key: [u8; 32] =
-            decode_hex("8000000000000000000000000000000000000000000000000000000000000000")
-                .try_into()
-                .unwrap();
-        let pt: [u8; 16] = decode_hex("00000000000000000000000000000000")
-            .try_into()
-            .unwrap();
-        let ct: [u8; 16] = decode_hex("ABED96E766BF28CBC0EBD21A82EF0819")
-            .try_into()
-            .unwrap();
-        let cipher = Serpent256Ct::new(&key);
-        assert_eq!(cipher.encrypt_block(&pt), ct);
-        assert_eq!(cipher.decrypt_block(&ct), pt);
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_rejects_wrong_length() {
+        let cipher = Serpent128::new(&[0u8; 16]);
+        let mut short = [0u8; 15];
+        cipher.encrypt(&mut short);
     }
 }

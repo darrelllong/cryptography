@@ -23,7 +23,8 @@ use cryptography::{
     Sha512, Sha512_224, Sha512_256, Shake128, Shake256, Xof,
 };
 
-const MIB: usize = 1024 * 1024;
+/// Bytes per megabyte: the throughput columns are labelled MB/s and mean 10^6 bytes.
+const MB: usize = 1_000_000;
 const DEFAULT_WORKLOAD_BYTES: usize = 256 * 1024;
 const DEFAULT_XOF_OUT_BYTES: usize = 32;
 
@@ -43,8 +44,17 @@ fn xof_out_bytes() -> usize {
         .unwrap_or(DEFAULT_XOF_OUT_BYTES)
 }
 
+/// A workload whose pages are all written before timing starts.
+fn workload(bytes: usize) -> Vec<u8> {
+    let mut buf = vec![0u8; bytes];
+    for (i, b) in buf.iter_mut().enumerate() {
+        *b = i as u8;
+    }
+    buf
+}
+
 fn bench_digest<H: Digest>(bytes: usize) -> f64 {
-    let buf = vec![0u8; bytes];
+    let buf = workload(bytes);
     let mut h = H::new();
     let t0 = Instant::now();
     h.update(black_box(&buf));
@@ -52,11 +62,11 @@ fn bench_digest<H: Digest>(bytes: usize) -> f64 {
     h.finalize_into(&mut out);
     let elapsed = t0.elapsed();
     black_box(&out);
-    bytes as f64 / elapsed.as_secs_f64() / (MIB as f64)
+    bytes as f64 / elapsed.as_secs_f64() / (MB as f64)
 }
 
 fn bench_xof<X: Xof, F: FnOnce() -> X>(make: F, bytes: usize, out_len: usize) -> f64 {
-    let buf = vec![0u8; bytes];
+    let buf = workload(bytes);
     let mut x = make();
     let mut out = vec![0u8; out_len];
     let t0 = Instant::now();
@@ -64,7 +74,7 @@ fn bench_xof<X: Xof, F: FnOnce() -> X>(make: F, bytes: usize, out_len: usize) ->
     x.squeeze(&mut out);
     let elapsed = t0.elapsed();
     black_box(&out);
-    bytes as f64 / elapsed.as_secs_f64() / (MIB as f64)
+    bytes as f64 / elapsed.as_secs_f64() / (MB as f64)
 }
 
 fn main() {

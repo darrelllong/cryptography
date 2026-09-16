@@ -22,9 +22,7 @@ exclude = [
     "scripts/**",
     "target/**",
     ".claude/**",
-    ".codex/**",
     "pubs/**",
-    "cipher_plots/**",
     ".ntru-upstream/**",
 ]
 autobenches = false
@@ -37,8 +35,8 @@ path = "src/lib.rs"
 default = []
 ct_profile = []
 # Opt-in aarch64 FEAT_SHA3 hardware Keccak ("ARM go fast"). Uses `unsafe`
-# NEON intrinsics behind runtime feature detection. The default build is
-# pure safe Rust apart from the one audited volatile-zeroization helper.
+# NEON intrinsics behind runtime feature detection. Without it the build is
+# safe Rust apart from the one audited volatile-zeroization helper.
 arm-sha3 = []
 
 # Benchmark targets live in the separate `benchmarks/` crate so ordinary
@@ -48,7 +46,7 @@ arm-sha3 = []
 # The multiprecision layer, extracted from this crate (re-exported through
 # `crate::vt`). The package is rust-mp, the lib is rump, so code says
 # `use rump::...`; the path serves side-by-side checkouts and the version
-# takes over once rust-mp is published. The `wipe` feature restores rump's
-# drop-time limb zeroization — key material must not linger in freed heap
-# memory, so this crate always enables it.
+# takes over once rust-mp is published. rump keeps limb wiping opt-in because
+# it is general-purpose and wiping costs speed; cryptographic code turns it on,
+# so every `BigUint` here wipes its limbs on drop.
 rust-mp = { version = "0.3.0", path = "../rump", features = ["wipe"] }

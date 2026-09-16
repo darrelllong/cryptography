@@ -79,7 +79,7 @@ fn main() {
     for name in ["camellia128ct", "sm4ct", "seedct", "snow3gct", "zuc128ct"] {
         let (elapsed, profile) = run_case(name);
         let elapsed_ns = elapsed.as_secs_f64() * 1e9;
-        let mbs = MIB as f64 / elapsed.as_secs_f64() / MIB as f64;
+        let mbs = MIB as f64 / elapsed.as_secs_f64() / 1_000_000.0;
 
         let eval_share = 100.0
             * (profile.eval_byte_sbox_calls as f64 * helper_cost.eval_byte_sbox_ns)

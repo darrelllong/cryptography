@@ -1,15 +1,44 @@
-//! DES and Triple-DES (TDEA) implemented from FIPS PUB 46-3.
+//! DES and Triple-DES (TDEA) implemented from FIPS PUB 46-3 and NIST SP
+//! 800-67 Rev. 2.
 //!
 //! All tables are transcribed verbatim from the FIPS 46-3 document
 //! (<https://csrc.nist.gov/files/pubs/fips/46-3/final/docs/fips46-3.pdf>).
-//! Tests use the official NIST CAVP Known Answer Test vectors downloaded
-//! directly from csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-
-//! Validation-Program/documents/des/KAT_TDES.zip.
 //!
-//! `Des` keeps the original fast byte-table and fused `SP_TABLE` software
-//! path. `DesCt` is a separate software-only path that replaces the secret
-//! indexed round function with loop-based permutations and packed ANF bitset
-//! evaluation of the DES S-boxes.
+//! # Status of the algorithms
+//!
+//! Single DES is not an approved algorithm: FIPS 46-3 was withdrawn on 19 May
+//! 2005 (Federal Register 70 FR 28907), and SP 800-131A Rev. 2 § 2 lists no
+//! use of it. `Des` and `DesCt` exist as the primitive inside TDEA and for
+//! interoperating with legacy data; they refuse the weak and semi-weak keys
+//! (see [`is_weak_or_semi_weak_key`] for exactly which) and nothing else.
+//!
+//! TDEA is on its way out too. SP 800-131A Rev. 2 (March 2019) § 2.1:
+//! three-key TDEA encryption was deprecated through 2023 and is disallowed
+//! after 31 December 2023; two-key TDEA encryption is disallowed; decryption
+//! of either is legacy use. SP 800-67 Rev. 2 § 3.1 also limits a key bundle
+//! to 2^20 64-bit blocks. `TripleDes` and `TripleDesCt` build keying options
+//! 1 (3TDEA) and 2 (2TDEA) of SP 800-67 Rev. 2 § 3.1 and refuse the
+//! degenerate bundles those options exclude; keying option 3 of SP 800-67
+//! Rev. 1 (K1 = K2 = K3, plain DES) was withdrawn in Rev. 2 and is not
+//! constructible through the public API.
+//!
+//! # Paths
+//!
+//! `Des` and `TripleDes` are the fast byte-table and fused `SP_TABLE`
+//! software path, variable-time because the table indices are the secret
+//! round state. `DesCt` and `TripleDesCt` replace the secret-indexed round
+//! function with loop-based permutations and packed ANF evaluation of the DES
+//! S-boxes (`sbox_ct`, checked exhaustively against `SBOXES`). Both TDEA
+//! types report their keying option through `mode()`.
+//!
+//! # Tests
+//!
+//! Known answers are, each named at its use: the NIST CAVP `KAT_TDES.zip`
+//! tables (CAVS 11.1, 2011-04-21, from csrc.nist.gov: TECBvartext,
+//! TECBinvperm, TECBvarkey, TECBpermop, TECBsubtab, whose "KEYs" bundles
+//! are K1 = K2 = K3); the worked 3TDEA example of SP 800-67 Rev. 2 Appendix
+//! B; and the installed `openssl` tool as a black-box oracle. The remaining
+//! tests are differential (fast against `Ct`) or check the key screens.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FIPS 46-3 Tables (1-indexed positions, converted to 0-indexed in code)
@@ -305,16 +334,6 @@ fn permute64(input: u64, table: &[u8]) -> u64 {
     out
 }
 
-/// Apply a permutation table that maps a 64-bit input to a 48-bit value
-/// (returned as u64, upper 16 bits zero).
-fn permute64_to48(input: u64, table: &[u8; 48]) -> u64 {
-    let mut out = 0u64;
-    for (i, &src) in table.iter().enumerate() {
-        out |= bit64(input, src) << (47 - i);
-    }
-    out
-}
-
 #[inline]
 fn rotate_left(val: u32, n: u8, bits: u8) -> u32 {
     let mask = (1u32 << bits) - 1;
@@ -334,31 +353,43 @@ pub type KeySchedule = [u64; 16];
 /// For decryption, pass the returned schedule reversed to the block
 /// function (`Des::decrypt` does this internally).
 #[must_use]
-pub fn key_schedule(key: u64) -> KeySchedule {
+pub fn key_schedule(mut key: u64) -> KeySchedule {
     // PC-1: select and permute 56 bits.
     // The first 28 bits of pc1_out form C0, the next 28 bits form D0.
-    let pc1_out = permute64(key, &PC1);
+    let mut pc1_out = permute64(key, &PC1);
 
-    let c_bytes = ((pc1_out >> 28) & 0x0FFF_FFFF).to_be_bytes();
-    let d_bytes = (pc1_out & 0x0FFF_FFFF).to_be_bytes();
+    let mut c_bytes = ((pc1_out >> 28) & 0x0FFF_FFFF).to_be_bytes();
+    let mut d_bytes = (pc1_out & 0x0FFF_FFFF).to_be_bytes();
     let mut c = u32::from_be_bytes([c_bytes[4], c_bytes[5], c_bytes[6], c_bytes[7]]); // bits 1-28 → C0
     let mut d = u32::from_be_bytes([d_bytes[4], d_bytes[5], d_bytes[6], d_bytes[7]]); // bits 29-56 → D0
 
     let mut schedule = [0u64; 16];
+    let mut cd_shifted = 0u64;
     for i in 0..16 {
         c = rotate_left(c, SHIFTS[i], 28);
         d = rotate_left(d, SHIFTS[i], 28);
 
         // Merge C and D into a 56-bit value for PC-2 selection.
         // C occupies the upper 28 bits; D the lower 28.
-        let cd: u64 = (u64::from(c) << 28) | u64::from(d);
-
+        //
         // PC-2 references bit positions 1–56 within the 56-bit CD register.
         // We represent CD as a 64-bit value with the 56 bits in the MSBs
         // (i.e., shifted left by 8 so that position 1 in the FIPS table
         //  corresponds to bit 63 of our u64).
-        let cd_shifted = cd << 8; // bit 1 of CD → bit 63 of cd_shifted
-        schedule[i] = permute64_to48(cd_shifted, &PC2);
+        cd_shifted = ((u64::from(c) << 28) | u64::from(d)) << 8;
+        schedule[i] = permute64(cd_shifted, &PC2);
+    }
+
+    // The sixteen shifts total 28, so C16 = C0 and D16 = D0: the registers end
+    // as the PC-1 key bits themselves. Wipe them, their byte forms, and this
+    // function's copy of the key; only the subkeys leave.
+    crate::ct::zeroize_slice(c_bytes.as_mut_slice());
+    crate::ct::zeroize_slice(d_bytes.as_mut_slice());
+    for word in [&mut key, &mut pc1_out, &mut cd_shifted] {
+        crate::ct::zeroize_slice(core::slice::from_mut(word));
+    }
+    for half in [&mut c, &mut d] {
+        crate::ct::zeroize_slice(core::slice::from_mut(half));
     }
     schedule
 }
@@ -522,11 +553,17 @@ pub struct DesCt {
 /// Error returned when a DES/TDEA constructor rejects key material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesKeyError {
-    /// The provided DES key is weak or semi-weak (FIPS 74 / SP 800-67).
+    /// The provided DES key is one of the four weak or twelve semi-weak keys
+    /// (SP 800-67 Rev. 2 § 3.3.2); see [`is_weak_or_semi_weak_key`].
     WeakOrSemiWeakKey,
+    /// Two TDEA key components carry the same 56 key bits (parity ignored),
+    /// so the keying option would silently collapse: SP 800-67 §3.1 requires
+    /// K1 ≠ K2 ≠ K3 for 3TDEA and K1 ≠ K2 for 2TDEA.
+    RepeatedKeyComponent,
 }
 
-/// Canonical weak DES keys from FIPS 74 / NIST literature.
+/// The four weak DES keys (SP 800-67 Rev. 2 § 3.3.2, first table), written
+/// with odd parity as the standard prints them.
 const WEAK_KEYS: [[u8; 8]; 4] = [
     [0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
     [0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE],
@@ -534,7 +571,8 @@ const WEAK_KEYS: [[u8; 8]; 4] = [
     [0x1F, 0x1F, 0x1F, 0x1F, 0x0E, 0x0E, 0x0E, 0x0E],
 ];
 
-/// Canonical semi-weak DES key pairs from FIPS 74 / NIST literature.
+/// The six semi-weak DES key pairs (SP 800-67 Rev. 2 § 3.3.2, second table),
+/// written with odd parity as the standard prints them.
 const SEMI_WEAK_KEY_PAIRS: [([u8; 8], [u8; 8]); 6] = [
     (
         [0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE],
@@ -571,14 +609,21 @@ fn strip_parity_bits(key: &[u8; 8]) -> [u8; 8] {
     out
 }
 
-/// Return `true` when `key` is weak or semi-weak under DES.
+/// Return `true` when `key` is one of the four weak or twelve semi-weak DES
+/// keys of SP 800-67 Rev. 2 § 3.3.2.
 ///
-/// The comparison against every known weak/semi-weak key is accumulated without
+/// The parity bits are ignored, so every byte string that carries the 56 key
+/// bits of a listed key is caught, whatever parity it was written with. The
+/// scope is exactly those sixteen keys: the 48 "possibly weak" keys of FIPS
+/// 74 (whose schedules contain only four distinct subkeys) are not screened,
+/// and no other key-quality check is made.
+///
+/// The comparison against every listed key is accumulated without
 /// short-circuiting, so the running time does not depend on how many leading
 /// bytes of the secret key match a pattern.
 #[must_use]
 pub fn is_weak_or_semi_weak_key(key: &[u8; 8]) -> bool {
-    let normalized = strip_parity_bits(key);
+    let mut normalized = strip_parity_bits(key);
     let mut hit = 0u8;
     for wk in WEAK_KEYS.iter() {
         hit |= crate::ct::constant_time_eq_mask(&strip_parity_bits(wk), &normalized);
@@ -587,6 +632,8 @@ pub fn is_weak_or_semi_weak_key(key: &[u8; 8]) -> bool {
         hit |= crate::ct::constant_time_eq_mask(&strip_parity_bits(a), &normalized);
         hit |= crate::ct::constant_time_eq_mask(&strip_parity_bits(b), &normalized);
     }
+    // `normalized` is the caller's key with only the parity bits cleared.
+    crate::ct::zeroize_slice(normalized.as_mut_slice());
     hit != 0
 }
 
@@ -599,20 +646,24 @@ impl Des {
         Ok(Self::new_unchecked(key))
     }
 
-    /// Create DES from an 8-byte key without weak-key screening.
+    /// Create DES from an 8-byte key without the weak-key screen.
     ///
-    /// This is intended for known-answer tests that intentionally exercise weak
-    /// key behavior from FIPS 74 style vector sets.
+    /// Crate-internal: [`new`](Self::new) calls it after screening, and the
+    /// CAVP tables (whose keys include the weak key `01..01`) are run through
+    /// it in this module's tests.
     #[must_use]
-    pub fn new_unchecked(key: &[u8; 8]) -> Self {
-        let k = u64::from_be_bytes(*key);
-        let enc_schedule = key_schedule(k);
-        let mut dec_schedule = enc_schedule;
-        dec_schedule.reverse();
-        Des {
-            enc_schedule,
-            dec_schedule,
-        }
+    pub(crate) fn new_unchecked(key: &[u8; 8]) -> Self {
+        // Both schedules are written straight into the struct, and the key's
+        // integer form is wiped once they exist.
+        let mut k = u64::from_be_bytes(*key);
+        let mut cipher = Des {
+            enc_schedule: key_schedule(k),
+            dec_schedule: [0u64; 16],
+        };
+        cipher.dec_schedule = cipher.enc_schedule;
+        cipher.dec_schedule.reverse();
+        crate::ct::zeroize_slice(core::slice::from_mut(&mut k));
+        cipher
     }
 
     /// Create a new DES instance and wipe the provided key buffer.
@@ -646,17 +697,19 @@ impl DesCt {
         Ok(Self::new_unchecked(key))
     }
 
-    /// Create constant-time DES from an 8-byte key without weak-key screening.
+    /// Create constant-time DES from an 8-byte key without the weak-key
+    /// screen; crate-internal, as [`Des::new_unchecked`] is.
     #[must_use]
-    pub fn new_unchecked(key: &[u8; 8]) -> Self {
-        let k = u64::from_be_bytes(*key);
-        let enc_schedule = key_schedule(k);
-        let mut dec_schedule = enc_schedule;
-        dec_schedule.reverse();
-        DesCt {
-            enc_schedule,
-            dec_schedule,
-        }
+    pub(crate) fn new_unchecked(key: &[u8; 8]) -> Self {
+        let mut k = u64::from_be_bytes(*key);
+        let mut cipher = DesCt {
+            enc_schedule: key_schedule(k),
+            dec_schedule: [0u64; 16],
+        };
+        cipher.dec_schedule = cipher.enc_schedule;
+        cipher.dec_schedule.reverse();
+        crate::ct::zeroize_slice(core::slice::from_mut(&mut k));
+        cipher
     }
 
     /// Create a new constant-time DES instance and wipe the provided key buffer.
@@ -682,164 +735,315 @@ impl DesCt {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Triple-DES (TDEA) — FIPS 46-3 §4, NIST SP 800-67
+// Triple-DES (TDEA) — FIPS 46-3 §4, NIST SP 800-67 Rev. 2
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// TDEA operates as EDE (Encrypt-Decrypt-Encrypt):
+// TDEA operates as EDE (Encrypt-Decrypt-Encrypt), SP 800-67 Rev. 2 §3.2:
 //   Encrypt:  C = E(K3, D(K2, E(K1, P)))
 //   Decrypt:  P = D(K1, E(K2, D(K3, C)))
 //
-// Key sizes and keying options (NIST SP 800-67 §3.1):
-//   Option 1 (3TDEA): K1, K2, K3 all independent — 168-bit key material
-//                     (112-bit effective security)
-//   Option 2 (2TDEA): K1 = K3 ≠ K2           — 112-bit key material
-//                     (80-bit effective security)
-//   Option 3:         K1 = K2 = K3            — degenerates to single DES
-//                     (NOT recommended for new applications)
+// Keying options (SP 800-67 Rev. 2 §3.1):
+//   Option 1 (3TDEA): K1, K2, K3 independent — 168 key bits, 112-bit strength
+//   Option 2 (2TDEA): K1 = K3 ≠ K2           — 112 key bits, 80-bit strength
+//   Keying option 3 of Rev. 1 (K1 = K2 = K3, plain DES) was withdrawn in
+//   Rev. 2. It is not constructible through the public API; the test-only
+//   `new_single_key*` constructors build it for the CAVP "KEYs" tables.
 //
-// The NIST CAVP test vectors use "KEYs = <hex>" meaning K1=K2=K3=that value,
-// which exercises the EDE path with a single key and validates DES-equivalent
-// behaviour (E(K,D(K,E(K,P))) = E(K,P) since D∘E = identity on same key).
+// `new_3key` and `new_2key` reject a repeated component (compared with the
+// parity bits stripped): 3TDEA with K1 = K3 is really 2TDEA, and either
+// option with K1 = K2 is really single DES, so accepting such keys would
+// silently downgrade the security strength the caller asked for.
+//
+// The NIST CAVP KAT_TDES tables use "KEYs = <hex>" meaning K1 = K2 = K3, which
+// exercises the EDE path with a single key: E(K, D(K, E(K, P))) = E(K, P),
+// since D∘E is the identity under one key.
 
-/// Keying option for Triple-DES.
+/// Keying option for Triple-DES (NIST SP 800-67 §3.1).
+///
+/// Reported by [`TripleDes::mode`] and [`TripleDesCt::mode`] so callers that
+/// need the effective security strength (112 bits for 3TDEA, 80 bits for
+/// 2TDEA, 56 bits for the single-key degenerate case) can ask the cipher
+/// instead of remembering which constructor built it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TDesMode {
-    /// Keying option 1: K1, K2, K3 all independent (24-byte / 192-bit key).
+    /// Keying option 1 (3TDEA): K1, K2, K3 mutually distinct (24-byte key).
     ThreeKey,
-    /// Keying option 2: K1 = K3 ≠ K2 (16-byte / 128-bit key: K1 ∥ K2).
+    /// Keying option 2 (2TDEA): K1 = K3 ≠ K2 (16-byte key K1 ∥ K2).
     TwoKey,
+    /// Keying option 3 of SP 800-67 Rev. 1 (withdrawn in Rev. 2): K1 = K2 = K3,
+    /// which degenerates to single DES. No public constructor builds it; it
+    /// is reported only by instances this crate's own tests build for the
+    /// NIST CAVP "KEYs" tables.
+    SingleKey,
 }
 
-/// A Triple-DES (TDEA) cipher.
-pub struct TripleDes {
+/// `true` when two DES key components carry the same 56 key bits, ignoring
+/// the parity bits that DES discards in PC-1.
+///
+/// Evaluated without short-circuiting, like [`is_weak_or_semi_weak_key`], so
+/// the running time does not depend on where the secret components differ.
+#[inline]
+fn same_des_key(a: &[u8; 8], b: &[u8; 8]) -> bool {
+    let mut a_bits = strip_parity_bits(a);
+    let mut b_bits = strip_parity_bits(b);
+    let same = crate::ct::constant_time_eq_mask(&a_bits, &b_bits) != 0;
+    // Both are key components with only the parity bits cleared.
+    crate::ct::zeroize_slice(a_bits.as_mut_slice());
+    crate::ct::zeroize_slice(b_bits.as_mut_slice());
+    same
+}
+
+/// The six resident subkey schedules of a TDEA instance, plus the keying
+/// option that built them.
+///
+/// Shared by [`TripleDes`] and [`TripleDesCt`]: the key schedule is the same
+/// for both paths (FIPS 46-3 PC-1/PC-2 with the round-shift table), only the
+/// per-block DES core differs, so the two public types wrap one of these and
+/// pass their core function to [`TdeaSchedules::encrypt`] and
+/// [`TdeaSchedules::decrypt`]. Holding all six schedules keeps repeated ECB
+/// calls from re-deriving anything.
+struct TdeaSchedules {
     k1_enc: KeySchedule,
     k1_dec: KeySchedule,
     k2_enc: KeySchedule,
     k2_dec: KeySchedule,
     k3_enc: KeySchedule,
     k3_dec: KeySchedule,
+    mode: TDesMode,
 }
 
-impl TripleDes {
-    /// Construct a 3TDEA instance from a 24-byte key K1 ∥ K2 ∥ K3.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal fixed-size key splits fail, which would only
-    /// happen if this constructor were changed inconsistently with its type.
-    pub fn new_3key(key: &[u8; 24]) -> Result<Self, DesKeyError> {
+impl TdeaSchedules {
+    /// Keying option 1 from K1 ∥ K2 ∥ K3, rejecting weak components first and
+    /// then any pair of equal components (SP 800-67 requires the three keys
+    /// to be independent; a repeated component silently collapses 3TDEA to
+    /// 2TDEA or to single DES).
+    fn three_key(key: &[u8; 24]) -> Result<Self, DesKeyError> {
         let k1: &[u8; 8] = key[0..8].try_into().expect("first DES key split");
         let k2: &[u8; 8] = key[8..16].try_into().expect("second DES key split");
         let k3: &[u8; 8] = key[16..24].try_into().expect("third DES key split");
         if is_weak_or_semi_weak_key(k1)
-            || is_weak_or_semi_weak_key(k2)
-            || is_weak_or_semi_weak_key(k3)
+            | is_weak_or_semi_weak_key(k2)
+            | is_weak_or_semi_weak_key(k3)
         {
             return Err(DesKeyError::WeakOrSemiWeakKey);
+        }
+        if same_des_key(k1, k2) | same_des_key(k2, k3) | same_des_key(k1, k3) {
+            return Err(DesKeyError::RepeatedKeyComponent);
         }
         Ok(Self::from_keys(
             u64::from_be_bytes(*k1),
             u64::from_be_bytes(*k2),
             u64::from_be_bytes(*k3),
+            TDesMode::ThreeKey,
         ))
     }
 
-    /// Construct a 3TDEA instance and wipe the provided key buffer.
-    pub fn new_3key_wiping(key: &mut [u8; 24]) -> Result<Self, DesKeyError> {
-        let out = Self::new_3key(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-
-    /// Construct a 2TDEA instance from a 16-byte key K1 ∥ K2 (K3 = K1).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal fixed-size key splits fail, which would only
-    /// happen if this constructor were changed inconsistently with its type.
-    pub fn new_2key(key: &[u8; 16]) -> Result<Self, DesKeyError> {
+    /// Keying option 2 from K1 ∥ K2 with K3 = K1, rejecting weak components
+    /// and K1 = K2 (which would collapse 2TDEA to single DES).
+    fn two_key(key: &[u8; 16]) -> Result<Self, DesKeyError> {
         let k1: &[u8; 8] = key[0..8].try_into().expect("first DES key split");
         let k2: &[u8; 8] = key[8..16].try_into().expect("second DES key split");
-        if is_weak_or_semi_weak_key(k1) || is_weak_or_semi_weak_key(k2) {
+        if is_weak_or_semi_weak_key(k1) | is_weak_or_semi_weak_key(k2) {
             return Err(DesKeyError::WeakOrSemiWeakKey);
+        }
+        if same_des_key(k1, k2) {
+            return Err(DesKeyError::RepeatedKeyComponent);
         }
         Ok(Self::from_keys(
             u64::from_be_bytes(*k1),
             u64::from_be_bytes(*k2),
             u64::from_be_bytes(*k1),
+            TDesMode::TwoKey,
         ))
     }
 
-    /// Construct a 2TDEA instance and wipe the provided key buffer.
-    pub fn new_2key_wiping(key: &mut [u8; 16]) -> Result<Self, DesKeyError> {
-        let out = Self::new_2key(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-
-    /// Construct from three 8-byte keys.  K1=K2=K3 is valid (degenerates to
-    /// single DES) and is used by the NIST CAVP "KEYs" tests.
-    pub fn new_single_key(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+    /// Withdrawn keying option 3: K1 = K2 = K3, with the weak-key screen.
+    #[cfg(test)]
+    fn single_key(key: &[u8; 8]) -> Result<Self, DesKeyError> {
         if is_weak_or_semi_weak_key(key) {
             return Err(DesKeyError::WeakOrSemiWeakKey);
         }
-        Ok(Self::new_single_key_unchecked(key))
+        Ok(Self::single_key_unchecked(key))
     }
 
-    /// Construct from one DES key used as K1 = K2 = K3 without weak-key checks.
-    #[must_use]
-    pub fn new_single_key_unchecked(key: &[u8; 8]) -> Self {
-        let k = u64::from_be_bytes(*key);
-        Self::from_keys(k, k, k)
+    /// Withdrawn keying option 3 without the weak-key screen.
+    #[cfg(test)]
+    fn single_key_unchecked(key: &[u8; 8]) -> Self {
+        let mut k = u64::from_be_bytes(*key);
+        let keys = Self::from_keys(k, k, k, TDesMode::SingleKey);
+        crate::ct::zeroize_slice(core::slice::from_mut(&mut k));
+        keys
     }
 
-    /// Construct from one DES key used as K1 = K2 = K3 and wipe the buffer.
-    pub fn new_single_key_wiping(key: &mut [u8; 8]) -> Result<Self, DesKeyError> {
-        let out = Self::new_single_key(key);
-        crate::ct::zeroize_slice(key.as_mut_slice());
-        out
-    }
-
-    fn from_keys(k1: u64, k2: u64, k3: u64) -> Self {
-        let k1_enc = key_schedule(k1);
-        let k2_enc = key_schedule(k2);
-        let k3_enc = key_schedule(k3);
-        let mut k1_dec = k1_enc;
-        let mut k2_dec = k2_enc;
-        let mut k3_dec = k3_enc;
-        k1_dec.reverse();
-        k2_dec.reverse();
-        k3_dec.reverse();
-        TripleDes {
-            k1_enc,
-            k1_dec,
-            k2_enc,
-            k2_dec,
-            k3_enc,
-            k3_dec,
+    /// Build all six schedules in place from the three key components, then
+    /// wipe this function's copies of the components.
+    fn from_keys(mut k1: u64, mut k2: u64, mut k3: u64, mode: TDesMode) -> Self {
+        let mut keys = TdeaSchedules {
+            k1_enc: key_schedule(k1),
+            k1_dec: [0u64; 16],
+            k2_enc: key_schedule(k2),
+            k2_dec: [0u64; 16],
+            k3_enc: key_schedule(k3),
+            k3_dec: [0u64; 16],
+            mode,
+        };
+        keys.k1_dec = keys.k1_enc;
+        keys.k2_dec = keys.k2_enc;
+        keys.k3_dec = keys.k3_enc;
+        keys.k1_dec.reverse();
+        keys.k2_dec.reverse();
+        keys.k3_dec.reverse();
+        for component in [&mut k1, &mut k2, &mut k3] {
+            crate::ct::zeroize_slice(core::slice::from_mut(component));
         }
+        keys
     }
 
-    /// Encrypt a single 64-bit block: C = E(K3, D(K2, E(K1, P)))
-    #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    /// C = E(K3, D(K2, E(K1, P))) with `core` as the single-DES block function.
+    #[inline]
+    fn encrypt(&self, block: &[u8; 8], core: fn(u64, &KeySchedule) -> u64) -> [u8; 8] {
         let p = u64::from_be_bytes(*block);
-        let t1 = des_block(p, &self.k1_enc); // E with K1
-        let t2 = des_block(t1, &self.k2_dec); // D with K2
-        let c = des_block(t2, &self.k3_enc); // E with K3
+        let t1 = core(p, &self.k1_enc); // E with K1
+        let t2 = core(t1, &self.k2_dec); // D with K2
+        let c = core(t2, &self.k3_enc); // E with K3
         c.to_be_bytes()
     }
 
-    /// Decrypt a single 64-bit block: P = D(K1, E(K2, D(K3, C)))
-    #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    /// P = D(K1, E(K2, D(K3, C))) with `core` as the single-DES block function.
+    #[inline]
+    fn decrypt(&self, block: &[u8; 8], core: fn(u64, &KeySchedule) -> u64) -> [u8; 8] {
         let c = u64::from_be_bytes(*block);
-        let t1 = des_block(c, &self.k3_dec); // D with K3
-        let t2 = des_block(t1, &self.k2_enc); // E with K2
-        let p = des_block(t2, &self.k1_dec); // D with K1
+        let t1 = core(c, &self.k3_dec); // D with K3
+        let t2 = core(t1, &self.k2_enc); // E with K2
+        let p = core(t2, &self.k1_dec); // D with K1
         p.to_be_bytes()
     }
 }
+
+impl Drop for TdeaSchedules {
+    fn drop(&mut self) {
+        // TDEA keeps six schedules resident; wipe all of them on drop.
+        crate::ct::zeroize_slice(self.k1_enc.as_mut_slice());
+        crate::ct::zeroize_slice(self.k1_dec.as_mut_slice());
+        crate::ct::zeroize_slice(self.k2_enc.as_mut_slice());
+        crate::ct::zeroize_slice(self.k2_dec.as_mut_slice());
+        crate::ct::zeroize_slice(self.k3_enc.as_mut_slice());
+        crate::ct::zeroize_slice(self.k3_dec.as_mut_slice());
+    }
+}
+
+/// A Triple-DES (TDEA) cipher on the fast table-driven DES core.
+///
+/// Wraps the same key material as [`TripleDesCt`]; only the per-block core
+/// differs. The schedules are wiped on drop.
+pub struct TripleDes {
+    keys: TdeaSchedules,
+}
+
+/// A Triple-DES (TDEA) cipher on the constant-time DES core of [`DesCt`].
+///
+/// Identical constructors, weak-key screening, keying-option rules and
+/// zeroization policy to [`TripleDes`]; each of the three DES passes runs
+/// through `des_block_ct`, so no secret-indexed table lookup occurs.
+pub struct TripleDesCt {
+    keys: TdeaSchedules,
+}
+
+/// Generate the public TDEA surface for one wrapper type around
+/// [`TdeaSchedules`], parameterised on the single-DES block core it uses.
+macro_rules! impl_tdea {
+    ($name:ident, $core:ident) => {
+        impl $name {
+            /// Construct a 3TDEA instance (keying option 1) from a 24-byte key
+            /// K1 ∥ K2 ∥ K3.
+            ///
+            /// # Errors
+            ///
+            /// [`DesKeyError::WeakOrSemiWeakKey`] if any component is weak or
+            /// semi-weak; [`DesKeyError::RepeatedKeyComponent`] if any two
+            /// components carry the same 56 key bits (parity ignored).
+            pub fn new_3key(key: &[u8; 24]) -> Result<Self, DesKeyError> {
+                TdeaSchedules::three_key(key).map(|keys| Self { keys })
+            }
+
+            /// Construct a 3TDEA instance and wipe the provided key buffer.
+            pub fn new_3key_wiping(key: &mut [u8; 24]) -> Result<Self, DesKeyError> {
+                let out = Self::new_3key(key);
+                crate::ct::zeroize_slice(key.as_mut_slice());
+                out
+            }
+
+            /// Construct a 2TDEA instance (keying option 2) from a 16-byte key
+            /// K1 ∥ K2, with K3 = K1.
+            ///
+            /// # Errors
+            ///
+            /// [`DesKeyError::WeakOrSemiWeakKey`] if either component is weak
+            /// or semi-weak; [`DesKeyError::RepeatedKeyComponent`] if K1 = K2
+            /// (parity ignored), which would collapse the cipher to single DES.
+            pub fn new_2key(key: &[u8; 16]) -> Result<Self, DesKeyError> {
+                TdeaSchedules::two_key(key).map(|keys| Self { keys })
+            }
+
+            /// Construct a 2TDEA instance and wipe the provided key buffer.
+            pub fn new_2key_wiping(key: &mut [u8; 16]) -> Result<Self, DesKeyError> {
+                let out = Self::new_2key(key);
+                crate::ct::zeroize_slice(key.as_mut_slice());
+                out
+            }
+
+            /// Test-only: one DES key as K1 = K2 = K3, the keying option 3
+            /// that SP 800-67 Rev. 2 withdrew, with the weak-key screen.
+            #[cfg(test)]
+            pub(crate) fn new_single_key(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+                TdeaSchedules::single_key(key).map(|keys| Self { keys })
+            }
+
+            /// Test-only: K1 = K2 = K3 without the weak-key screen, for the
+            /// NIST CAVP "KEYs" tables whose key is the weak key `01..01`.
+            #[cfg(test)]
+            #[must_use]
+            pub(crate) fn new_single_key_unchecked(key: &[u8; 8]) -> Self {
+                Self {
+                    keys: TdeaSchedules::single_key_unchecked(key),
+                }
+            }
+
+            /// The keying option this instance was built with.
+            #[must_use]
+            pub fn mode(&self) -> TDesMode {
+                self.keys.mode
+            }
+
+            /// Encrypt a single 64-bit block: C = E(K3, D(K2, E(K1, P)))
+            #[must_use]
+            pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+                self.keys.encrypt(block, $core)
+            }
+
+            /// Decrypt a single 64-bit block: P = D(K1, E(K2, D(K3, C)))
+            #[must_use]
+            pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+                self.keys.decrypt(block, $core)
+            }
+        }
+
+        impl crate::BlockCipher for $name {
+            const BLOCK_LEN: usize = 8;
+            fn encrypt(&self, block: &mut [u8]) {
+                let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+                block.copy_from_slice(&self.encrypt_block(arr));
+            }
+            fn decrypt(&self, block: &mut [u8]) {
+                let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
+                block.copy_from_slice(&self.decrypt_block(arr));
+            }
+        }
+    };
+}
+
+impl_tdea!(TripleDes, des_block);
+impl_tdea!(TripleDesCt, des_block_ct);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BlockCipher trait implementations
@@ -869,18 +1073,6 @@ impl crate::BlockCipher for DesCt {
     }
 }
 
-impl crate::BlockCipher for TripleDes {
-    const BLOCK_LEN: usize = 8;
-    fn encrypt(&self, block: &mut [u8]) {
-        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
-        block.copy_from_slice(&self.encrypt_block(arr));
-    }
-    fn decrypt(&self, block: &mut [u8]) {
-        let arr: &[u8; 8] = (&*block).try_into().expect("wrong block length");
-        block.copy_from_slice(&self.decrypt_block(arr));
-    }
-}
-
 impl Drop for Des {
     fn drop(&mut self) {
         // DES instances retain both schedules for repeated ECB calls.
@@ -896,52 +1088,22 @@ impl Drop for DesCt {
     }
 }
 
-impl Drop for TripleDes {
-    fn drop(&mut self) {
-        // TDEA keeps six schedules resident; wipe all of them on drop.
-        crate::ct::zeroize_slice(self.k1_enc.as_mut_slice());
-        crate::ct::zeroize_slice(self.k1_dec.as_mut_slice());
-        crate::ct::zeroize_slice(self.k2_enc.as_mut_slice());
-        crate::ct::zeroize_slice(self.k2_dec.as_mut_slice());
-        crate::ct::zeroize_slice(self.k3_enc.as_mut_slice());
-        crate::ct::zeroize_slice(self.k3_dec.as_mut_slice());
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Tests — all vectors from NIST CAVP KAT_TDES.zip (csrc.nist.gov)
+// Tests — sources are named per test: NIST CAVP KAT_TDES.zip (CAVS 11.1),
+// SP 800-67 Rev. 2 Appendix B, OpenSSL as oracle, and differential checks
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── helpers ──────────────────────────────────────────────────────────────
-
-    fn from_hex(s: &str) -> u64 {
-        u64::from_str_radix(s, 16).unwrap()
-    }
-
-    fn hex_to_bytes8(s: &str) -> [u8; 8] {
-        from_hex(s).to_be_bytes()
-    }
-
-    fn hex_to_bytes24(s: &str) -> [u8; 24] {
-        let mut out = [0u8; 24];
-        for (idx, chunk) in s.as_bytes().chunks_exact(2).enumerate() {
-            let hi = (chunk[0] as char).to_digit(16).unwrap();
-            let lo = (chunk[1] as char).to_digit(16).unwrap();
-            out[idx] = u8::try_from((hi << 4) | lo).expect("decoded hex byte fits in u8");
-        }
-        out
-    }
+    use crate::test_utils::decode_hex_array;
 
     /// Run a single NIST CAVP TDES ECB test vector using the TDES EDE path
     /// (K1=K2=K3 per the "KEYs" notation in the .rsp files).
     fn tdes_kat(key_hex: &str, pt_hex: &str, ct_hex: &str) {
-        let key = hex_to_bytes8(key_hex);
-        let pt = hex_to_bytes8(pt_hex);
-        let ct = hex_to_bytes8(ct_hex);
+        let key = decode_hex_array::<8>(key_hex);
+        let pt = decode_hex_array::<8>(pt_hex);
+        let ct = decode_hex_array::<8>(ct_hex);
         let cipher = TripleDes::new_single_key_unchecked(&key);
         assert_eq!(
             cipher.encrypt_block(&pt),
@@ -957,9 +1119,9 @@ mod tests {
 
     /// Run a DES ECB test using the single-key DES path.
     fn des_kat(key_hex: &str, pt_hex: &str, ct_hex: &str) {
-        let key = hex_to_bytes8(key_hex);
-        let pt = hex_to_bytes8(pt_hex);
-        let ct = hex_to_bytes8(ct_hex);
+        let key = decode_hex_array::<8>(key_hex);
+        let pt = decode_hex_array::<8>(pt_hex);
+        let ct = decode_hex_array::<8>(ct_hex);
         let cipher = Des::new_unchecked(&key);
         assert_eq!(
             cipher.encrypt_block(&pt),
@@ -974,9 +1136,9 @@ mod tests {
     }
 
     fn des_ct_kat(key_hex: &str, pt_hex: &str, ct_hex: &str) {
-        let key = hex_to_bytes8(key_hex);
-        let pt = hex_to_bytes8(pt_hex);
-        let ct = hex_to_bytes8(ct_hex);
+        let key = decode_hex_array::<8>(key_hex);
+        let pt = decode_hex_array::<8>(pt_hex);
+        let ct = decode_hex_array::<8>(ct_hex);
         let fast = Des::new_unchecked(&key);
         let slow = DesCt::new_unchecked(&key);
         assert_eq!(
@@ -997,7 +1159,9 @@ mod tests {
     }
 
     // ── TECBvartext.rsp — Variable Plaintext KAT ─────────────────────────────
-    // Key is all-ones parity (0x0101010101010101, all actual key bits = 0).
+    // Key 0101010101010101 (every key bit 0, odd parity): this is the weak
+    // key whose sixteen subkeys are all zero. Each plaintext has exactly one
+    // bit set, walking from the MSB to the LSB.
     // From NIST CAVP KAT_TDES/TECBvartext.rsp (CAVS 11.1, 2011-04-21).
 
     #[test]
@@ -1075,8 +1239,12 @@ mod tests {
     }
 
     // ── TECBinvperm.rsp — Inverse Permutation KAT ───────────────────────────
-    // Same vectors as vartext but with plaintext and ciphertext swapped:
-    // encrypting the ciphertext should reproduce the plaintext (tests IP⁻¹).
+    // The vartext pairs with plaintext and ciphertext swapped. This works
+    // only because the key is weak: all sixteen subkeys are equal, so the
+    // reversed schedule is the schedule and E_K is its own inverse (an
+    // involution). DES under an ordinary key is not an involution. The table
+    // therefore exercises encryption once more from the other side, ending
+    // in IP⁻¹ on the vartext plaintexts.
 
     #[test]
     fn invperm_sample() {
@@ -1091,7 +1259,8 @@ mod tests {
     }
 
     // ── TECBvarkey.rsp — Variable Key KAT ───────────────────────────────────
-    // Plaintext = 0x0000000000000000, each key has exactly one real key bit set.
+    // Plaintext 0000000000000000; each key has exactly one of the 56 key
+    // bits set, MSB first, the parity bits adjusted to keep odd parity.
 
     #[test]
     fn varkey_all_56() {
@@ -1263,10 +1432,37 @@ mod tests {
 
     // ── 3TDEA — three independent keys ──────────────────────────────────────
     // These exercise the full EDE path with K1 ≠ K2 ≠ K3.
-    // Vectors hand-generated and cross-checked with OpenSSL:
-    //   echo -n <pt_hex> | xxd -r -p |
-    //   openssl enc -des-ede3 -nopad -nosalt -K <k1k2k3_hex> -iv 0 -e |
-    //   xxd -p
+
+    /// NIST SP 800-67 Rev. 2, Appendix B: the worked TECB example with
+    /// K1 = 0123456789ABCDEF, K2 = 23456789ABCDEF01, K3 = 456789ABCDEF0123 on
+    /// the plaintext "The qufck brown fox jump" (sic). Pins the K1/K2/K3
+    /// ordering, which a round trip alone cannot distinguish from a swap.
+    #[test]
+    fn tdes_3key_sp800_67_appendix_b_kat() {
+        let key: [u8; 24] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD,
+            0xEF, 0x01, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23,
+        ];
+        let cipher = TripleDes::new_3key(&key).expect("SP 800-67 keys are not weak");
+        let vectors: [([u8; 8], [u8; 8]); 3] = [
+            (
+                *b"The qufc",
+                [0xA8, 0x26, 0xFD, 0x8C, 0xE5, 0x3B, 0x85, 0x5F],
+            ),
+            (
+                *b"k brown ",
+                [0xCC, 0xE2, 0x1C, 0x81, 0x12, 0x25, 0x6F, 0xE6],
+            ),
+            (
+                *b"fox jump",
+                [0x68, 0xD5, 0xC0, 0x5D, 0xD9, 0xB6, 0xB9, 0x00],
+            ),
+        ];
+        for (pt, ct) in vectors {
+            assert_eq!(cipher.encrypt_block(&pt), ct);
+            assert_eq!(cipher.decrypt_block(&ct), pt);
+        }
+    }
 
     #[test]
     fn tdes_3key_roundtrip() {
@@ -1314,15 +1510,28 @@ mod tests {
     fn des_matches_openssl_ecb() {
         let key_hex = "133457799bbcdff1";
         let pt_hex = "0123456789abcdef";
-        let Some(expected) =
-            crate::test_utils::run_openssl_enc("-des-ecb", key_hex, None, &hex_to_bytes8(pt_hex))
-        else {
+        let Some(expected) = crate::test_utils::openssl_enc(
+            "-des-ecb",
+            key_hex,
+            None,
+            &decode_hex_array::<8>(pt_hex),
+        )
+        .or_skip("des_matches_openssl_ecb") else {
             return;
         };
 
-        let cipher = Des::new(&hex_to_bytes8(key_hex)).expect("non-weak DES key");
+        let cipher = Des::new(&decode_hex_array::<8>(key_hex)).expect("non-weak DES key");
         assert_eq!(
-            cipher.encrypt_block(&hex_to_bytes8(pt_hex)).as_slice(),
+            cipher
+                .encrypt_block(&decode_hex_array::<8>(pt_hex))
+                .as_slice(),
+            expected.as_slice()
+        );
+        let cipher_ct = DesCt::new(&decode_hex_array::<8>(key_hex)).expect("non-weak DES key");
+        assert_eq!(
+            cipher_ct
+                .encrypt_block(&decode_hex_array::<8>(pt_hex))
+                .as_slice(),
             expected.as_slice()
         );
     }
@@ -1331,18 +1540,30 @@ mod tests {
     fn tdes_matches_openssl_ecb() {
         let key_hex = "133457799bbcdff100112233445566778899aabbccddeeff";
         let pt_hex = "0123456789abcdef";
-        let Some(expected) = crate::test_utils::run_openssl_enc(
+        let Some(expected) = crate::test_utils::openssl_enc(
             "-des-ede3-ecb",
             key_hex,
             None,
-            &hex_to_bytes8(pt_hex),
-        ) else {
+            &decode_hex_array::<8>(pt_hex),
+        )
+        .or_skip("tdes_matches_openssl_ecb") else {
             return;
         };
 
-        let cipher = TripleDes::new_3key(&hex_to_bytes24(key_hex)).expect("non-weak TDES keys");
+        let cipher =
+            TripleDes::new_3key(&decode_hex_array::<24>(key_hex)).expect("non-weak TDES keys");
         assert_eq!(
-            cipher.encrypt_block(&hex_to_bytes8(pt_hex)).as_slice(),
+            cipher
+                .encrypt_block(&decode_hex_array::<8>(pt_hex))
+                .as_slice(),
+            expected.as_slice()
+        );
+        let cipher_ct =
+            TripleDesCt::new_3key(&decode_hex_array::<24>(key_hex)).expect("non-weak TDES keys");
+        assert_eq!(
+            cipher_ct
+                .encrypt_block(&decode_hex_array::<8>(pt_hex))
+                .as_slice(),
             expected.as_slice()
         );
     }
@@ -1351,10 +1572,10 @@ mod tests {
     fn des_weak_keys_are_rejected_by_checked_constructor() {
         // FIPS 74 / NIST weak-key set: checked constructors must reject these.
         let weak_keys: [[u8; 8]; 4] = [
-            hex_to_bytes8("0101010101010101"),
-            hex_to_bytes8("FEFEFEFEFEFEFEFE"),
-            hex_to_bytes8("E0E0E0E0F1F1F1F1"),
-            hex_to_bytes8("1F1F1F1F0E0E0E0E"),
+            decode_hex_array::<8>("0101010101010101"),
+            decode_hex_array::<8>("FEFEFEFEFEFEFEFE"),
+            decode_hex_array::<8>("E0E0E0E0F1F1F1F1"),
+            decode_hex_array::<8>("1F1F1F1F0E0E0E0E"),
         ];
         for key in weak_keys {
             assert!(matches!(
@@ -1377,28 +1598,28 @@ mod tests {
         // Semi-weak pairs are disallowed in checked constructors.
         let pairs: [([u8; 8], [u8; 8]); 6] = [
             (
-                hex_to_bytes8("01FE01FE01FE01FE"),
-                hex_to_bytes8("FE01FE01FE01FE01"),
+                decode_hex_array::<8>("01FE01FE01FE01FE"),
+                decode_hex_array::<8>("FE01FE01FE01FE01"),
             ),
             (
-                hex_to_bytes8("1FE01FE00EF10EF1"),
-                hex_to_bytes8("E01FE01FF10EF10E"),
+                decode_hex_array::<8>("1FE01FE00EF10EF1"),
+                decode_hex_array::<8>("E01FE01FF10EF10E"),
             ),
             (
-                hex_to_bytes8("01E001E001F101F1"),
-                hex_to_bytes8("E001E001F101F101"),
+                decode_hex_array::<8>("01E001E001F101F1"),
+                decode_hex_array::<8>("E001E001F101F101"),
             ),
             (
-                hex_to_bytes8("1FFE1FFE0EFE0EFE"),
-                hex_to_bytes8("FE1FFE1FFE0EFE0E"),
+                decode_hex_array::<8>("1FFE1FFE0EFE0EFE"),
+                decode_hex_array::<8>("FE1FFE1FFE0EFE0E"),
             ),
             (
-                hex_to_bytes8("011F011F010E010E"),
-                hex_to_bytes8("1F011F010E010E01"),
+                decode_hex_array::<8>("011F011F010E010E"),
+                decode_hex_array::<8>("1F011F010E010E01"),
             ),
             (
-                hex_to_bytes8("E0FEE0FEF1FEF1FE"),
-                hex_to_bytes8("FEE0FEE0FEF1FEF1"),
+                decode_hex_array::<8>("E0FEE0FEF1FEF1FE"),
+                decode_hex_array::<8>("FEE0FEE0FEF1FEF1"),
             ),
         ];
         for (k1, k2) in pairs {
@@ -1415,12 +1636,345 @@ mod tests {
         }
     }
 
+    /// Under a weak key every subkey is the same, so encryption is an
+    /// involution: this is the property behind the TECBinvperm table.
     #[test]
     fn weak_key_math_still_holds_in_unchecked_path() {
-        let key = hex_to_bytes8("0101010101010101");
-        let pt = hex_to_bytes8("0123456789ABCDEF");
+        let key = decode_hex_array::<8>("0101010101010101");
+        let pt = decode_hex_array::<8>("0123456789ABCDEF");
         let des = Des::new_unchecked(&key);
         let ct = des.encrypt_block(&pt);
         assert_eq!(des.encrypt_block(&ct), pt);
+    }
+
+    /// The screen compares the 56 key bits, so a listed key written with the
+    /// wrong (even) parity, or with any mix of parity bits, is still refused
+    /// by every checked constructor.
+    #[test]
+    fn parity_flipped_weak_keys_are_refused() {
+        let mut listed: Vec<[u8; 8]> = WEAK_KEYS.to_vec();
+        for (a, b) in SEMI_WEAK_KEY_PAIRS {
+            listed.push(a);
+            listed.push(b);
+        }
+        assert_eq!(listed.len(), 16);
+        for key in listed {
+            for pattern in [0x01u8, 0x55, 0xaa, 0xff] {
+                let mut flipped = key;
+                for (i, byte) in flipped.iter_mut().enumerate() {
+                    *byte ^= (pattern >> i) & 1;
+                }
+                assert!(is_weak_or_semi_weak_key(&flipped), "{flipped:02x?}");
+                assert_eq!(
+                    Des::new(&flipped).err(),
+                    Some(DesKeyError::WeakOrSemiWeakKey),
+                    "Des {flipped:02x?}"
+                );
+                assert_eq!(
+                    DesCt::new(&flipped).err(),
+                    Some(DesKeyError::WeakOrSemiWeakKey),
+                    "DesCt {flipped:02x?}"
+                );
+                let mut bundle = [0u8; 24];
+                bundle[..8].copy_from_slice(&KA);
+                bundle[8..16].copy_from_slice(&flipped);
+                bundle[16..].copy_from_slice(&KC);
+                assert_eq!(
+                    TripleDes::new_3key(&bundle).err(),
+                    Some(DesKeyError::WeakOrSemiWeakKey),
+                    "TripleDes {flipped:02x?}"
+                );
+                let mut pair = [0u8; 16];
+                pair[..8].copy_from_slice(&flipped);
+                pair[8..].copy_from_slice(&KB);
+                assert_eq!(
+                    TripleDesCt::new_2key(&pair).err(),
+                    Some(DesKeyError::WeakOrSemiWeakKey),
+                    "TripleDesCt {flipped:02x?}"
+                );
+            }
+        }
+        // The all-even-parity form of 01..01 is the all-zero key.
+        assert!(is_weak_or_semi_weak_key(&[0u8; 8]));
+    }
+
+    /// The contract scrub.rs relies on: the ANF evaluation used by `DesCt`
+    /// reproduces every entry of every FIPS 46-3 S-box table.
+    #[test]
+    fn sbox_ct_matches_tables() {
+        for (i, table) in SBOXES.iter().enumerate() {
+            for input in 0u8..64 {
+                let row = usize::from(((input & 0x20) >> 4) | (input & 0x01));
+                let col = usize::from((input >> 1) & 0x0f);
+                assert_eq!(
+                    sbox_ct(i, input),
+                    table[row * 16 + col],
+                    "S{} input {input:06b}",
+                    i + 1
+                );
+            }
+        }
+    }
+
+    /// The `BlockCipher` trait works on slices and refuses any length other
+    /// than the block.
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_trait_refuses_short_block() {
+        use crate::BlockCipher;
+        let cipher = Des::new(&decode_hex_array::<8>("133457799bbcdff1")).expect("non-weak");
+        let mut short = [0u8; 7];
+        cipher.encrypt(&mut short);
+    }
+
+    #[test]
+    #[should_panic(expected = "wrong block length")]
+    fn block_cipher_trait_refuses_long_block_on_decrypt() {
+        use crate::BlockCipher;
+        let key = decode_hex_array::<24>("133457799bbcdff100112233445566778899aabbccddeeff");
+        let cipher = TripleDesCt::new_3key(&key).expect("non-weak");
+        let mut long = [0u8; 16];
+        cipher.decrypt(&mut long);
+    }
+
+    // ── TripleDesCt — constant-time core through the same TDEA composition ──
+
+    /// The SP 800-67 Appendix B vectors must also hold on the constant-time
+    /// core, pinning the K1/K2/K3 ordering there too.
+    #[test]
+    fn tdes_ct_3key_sp800_67_appendix_b_kat() {
+        let key: [u8; 24] = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD,
+            0xEF, 0x01, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23,
+        ];
+        let cipher = TripleDesCt::new_3key(&key).expect("SP 800-67 keys are not weak");
+        let vectors: [([u8; 8], [u8; 8]); 3] = [
+            (
+                *b"The qufc",
+                [0xA8, 0x26, 0xFD, 0x8C, 0xE5, 0x3B, 0x85, 0x5F],
+            ),
+            (
+                *b"k brown ",
+                [0xCC, 0xE2, 0x1C, 0x81, 0x12, 0x25, 0x6F, 0xE6],
+            ),
+            (
+                *b"fox jump",
+                [0x68, 0xD5, 0xC0, 0x5D, 0xD9, 0xB6, 0xB9, 0x00],
+            ),
+        ];
+        for (pt, ct) in vectors {
+            assert_eq!(cipher.encrypt_block(&pt), ct);
+            assert_eq!(cipher.decrypt_block(&ct), pt);
+        }
+    }
+
+    /// Deterministic xorshift64* filler for differential tests; the seed is
+    /// fixed so a failure reproduces.
+    fn fill_bytes(state: &mut u64, out: &mut [u8]) {
+        for byte in out.iter_mut() {
+            *state ^= *state >> 12;
+            *state ^= *state << 25;
+            *state ^= *state >> 27;
+            *byte = (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 56) as u8;
+        }
+    }
+
+    #[test]
+    fn tdes_and_tdes_ct_match_random_vectors_3key() {
+        let mut rng = 0x3DE5_3DE5_0000_0001u64;
+        let mut checked = 0;
+        while checked < 128 {
+            let mut key = [0u8; 24];
+            let mut pt = [0u8; 8];
+            fill_bytes(&mut rng, &mut key);
+            fill_bytes(&mut rng, &mut pt);
+            let (Ok(fast), Ok(slow)) = (TripleDes::new_3key(&key), TripleDesCt::new_3key(&key))
+            else {
+                // Both constructors apply the same screen; a random key that
+                // trips it is skipped, not counted.
+                assert_eq!(
+                    TripleDes::new_3key(&key).err(),
+                    TripleDesCt::new_3key(&key).err()
+                );
+                continue;
+            };
+            assert_eq!(fast.mode(), TDesMode::ThreeKey);
+            assert_eq!(slow.mode(), TDesMode::ThreeKey);
+            let ct = fast.encrypt_block(&pt);
+            assert_eq!(slow.encrypt_block(&pt), ct, "3TDEA encrypt key={key:02x?}");
+            assert_eq!(slow.decrypt_block(&ct), pt, "3TDEA decrypt key={key:02x?}");
+            assert_eq!(fast.decrypt_block(&ct), pt);
+            checked += 1;
+        }
+    }
+
+    #[test]
+    fn tdes_and_tdes_ct_match_random_vectors_2key() {
+        let mut rng = 0x2DE5_2DE5_0000_0001u64;
+        let mut checked = 0;
+        while checked < 128 {
+            let mut key = [0u8; 16];
+            let mut pt = [0u8; 8];
+            fill_bytes(&mut rng, &mut key);
+            fill_bytes(&mut rng, &mut pt);
+            let (Ok(fast), Ok(slow)) = (TripleDes::new_2key(&key), TripleDesCt::new_2key(&key))
+            else {
+                assert_eq!(
+                    TripleDes::new_2key(&key).err(),
+                    TripleDesCt::new_2key(&key).err()
+                );
+                continue;
+            };
+            assert_eq!(fast.mode(), TDesMode::TwoKey);
+            assert_eq!(slow.mode(), TDesMode::TwoKey);
+            let ct = fast.encrypt_block(&pt);
+            assert_eq!(slow.encrypt_block(&pt), ct, "2TDEA encrypt key={key:02x?}");
+            assert_eq!(slow.decrypt_block(&ct), pt, "2TDEA decrypt key={key:02x?}");
+            assert_eq!(fast.decrypt_block(&ct), pt);
+            checked += 1;
+        }
+    }
+
+    #[test]
+    fn tdes_ct_single_key_equals_des_ct() {
+        let key: [u8; 8] = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
+        let pt: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
+        let des = DesCt::new(&key).expect("non-weak DES key");
+        let tdes = TripleDesCt::new_single_key(&key).expect("non-weak DES key");
+        assert_eq!(tdes.mode(), TDesMode::SingleKey);
+        assert_eq!(des.encrypt_block(&pt), tdes.encrypt_block(&pt));
+        assert_eq!(
+            tdes.encrypt_block(&pt),
+            TripleDes::new_single_key_unchecked(&key).encrypt_block(&pt)
+        );
+    }
+
+    #[test]
+    fn tdes_ct_block_cipher_trait_matches_fast() {
+        use crate::BlockCipher;
+        let key = decode_hex_array::<24>("133457799bbcdff100112233445566778899aabbccddeeff");
+        let fast = TripleDes::new_3key(&key).expect("non-weak TDES keys");
+        let slow = TripleDesCt::new_3key(&key).expect("non-weak TDES keys");
+        let mut a = *b"blockone";
+        let mut b = a;
+        fast.encrypt(&mut a);
+        slow.encrypt(&mut b);
+        assert_eq!(a, b);
+        slow.decrypt(&mut b);
+        assert_eq!(b, *b"blockone");
+    }
+
+    // ── Keying-option independence (SP 800-67 §3.1) ─────────────────────────
+
+    const KA: [u8; 8] = [0x01, 0x33, 0x45, 0x77, 0x99, 0xBB, 0xCD, 0xFF];
+    const KB: [u8; 8] = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77];
+    const KC: [u8; 8] = [0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+
+    fn cat3(k1: &[u8; 8], k2: &[u8; 8], k3: &[u8; 8]) -> [u8; 24] {
+        let mut out = [0u8; 24];
+        out[..8].copy_from_slice(k1);
+        out[8..16].copy_from_slice(k2);
+        out[16..].copy_from_slice(k3);
+        out
+    }
+
+    fn cat2(k1: &[u8; 8], k2: &[u8; 8]) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        out[..8].copy_from_slice(k1);
+        out[8..].copy_from_slice(k2);
+        out
+    }
+
+    /// KA with every parity bit flipped: a different byte string, the same
+    /// 56 DES key bits.
+    fn ka_parity_flipped() -> [u8; 8] {
+        let mut k = KA;
+        for byte in k.iter_mut() {
+            *byte ^= 0x01;
+        }
+        k
+    }
+
+    #[test]
+    fn tdes_3key_rejects_repeated_components() {
+        let cases: [([u8; 24], &str); 4] = [
+            (cat3(&KA, &KA, &KC), "K1 = K2"),
+            (cat3(&KA, &KB, &KB), "K2 = K3"),
+            (cat3(&KA, &KB, &KA), "K1 = K3 (would be 2TDEA)"),
+            (cat3(&KA, &KB, &ka_parity_flipped()), "K1 = K3 up to parity"),
+        ];
+        for (key, why) in cases {
+            assert_eq!(
+                TripleDes::new_3key(&key).err(),
+                Some(DesKeyError::RepeatedKeyComponent),
+                "TripleDes must reject {why}"
+            );
+            assert_eq!(
+                TripleDesCt::new_3key(&key).err(),
+                Some(DesKeyError::RepeatedKeyComponent),
+                "TripleDesCt must reject {why}"
+            );
+            let mut wiped = key;
+            assert!(TripleDes::new_3key_wiping(&mut wiped).is_err());
+            // The caller's key is erased even when the key is rejected.
+            assert_eq!(wiped, [0u8; 24]);
+        }
+        // Three distinct components are accepted, and the screen order is
+        // weak-key first.
+        assert!(TripleDes::new_3key(&cat3(&KA, &KB, &KC)).is_ok());
+        assert!(TripleDesCt::new_3key(&cat3(&KA, &KB, &KC)).is_ok());
+        let weak_twice = cat3(&[0x01; 8], &[0x01; 8], &KC);
+        assert_eq!(
+            TripleDes::new_3key(&weak_twice).err(),
+            Some(DesKeyError::WeakOrSemiWeakKey)
+        );
+    }
+
+    #[test]
+    fn tdes_2key_rejects_equal_halves() {
+        for (key, why) in [
+            (cat2(&KA, &KA), "K1 = K2"),
+            (cat2(&KA, &ka_parity_flipped()), "K1 = K2 up to parity"),
+        ] {
+            assert_eq!(
+                TripleDes::new_2key(&key).err(),
+                Some(DesKeyError::RepeatedKeyComponent),
+                "TripleDes must reject {why}"
+            );
+            assert_eq!(
+                TripleDesCt::new_2key(&key).err(),
+                Some(DesKeyError::RepeatedKeyComponent),
+                "TripleDesCt must reject {why}"
+            );
+            let mut wiped = key;
+            assert!(TripleDesCt::new_2key_wiping(&mut wiped).is_err());
+            assert_eq!(wiped, [0u8; 16]);
+        }
+        assert!(TripleDes::new_2key(&cat2(&KA, &KB)).is_ok());
+        assert!(TripleDesCt::new_2key(&cat2(&KA, &KB)).is_ok());
+    }
+
+    #[test]
+    fn tdes_mode_reports_keying_option() {
+        assert_eq!(
+            TripleDes::new_3key(&cat3(&KA, &KB, &KC)).unwrap().mode(),
+            TDesMode::ThreeKey
+        );
+        assert_eq!(
+            TripleDes::new_2key(&cat2(&KA, &KB)).unwrap().mode(),
+            TDesMode::TwoKey
+        );
+        assert_eq!(
+            TripleDes::new_single_key(&KA).unwrap().mode(),
+            TDesMode::SingleKey
+        );
+        assert_eq!(
+            TripleDesCt::new_single_key_unchecked(&[0x01; 8]).mode(),
+            TDesMode::SingleKey
+        );
+        let mut buf = cat3(&KA, &KB, &KC);
+        let cipher = TripleDesCt::new_3key_wiping(&mut buf).unwrap();
+        assert_eq!(cipher.mode(), TDesMode::ThreeKey);
+        assert_eq!(buf, [0u8; 24]);
     }
 }

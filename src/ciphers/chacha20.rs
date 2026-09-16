@@ -42,37 +42,35 @@ fn quarter_round(state: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) 
     (state[a], state[b], state[c], state[d]) = (xa, xb, xc, xd);
 }
 
+/// The 20 ChaCha rounds (ten column-then-diagonal double rounds) in place.
 #[inline]
-fn chacha20_block_words(state: &[u32; 16]) -> [u32; 16] {
-    let mut x = *state;
-
+fn chacha20_rounds(x: &mut [u32; 16]) {
     for _ in 0..10 {
-        quarter_round(&mut x, 0, 4, 8, 12);
-        quarter_round(&mut x, 1, 5, 9, 13);
-        quarter_round(&mut x, 2, 6, 10, 14);
-        quarter_round(&mut x, 3, 7, 11, 15);
+        quarter_round(x, 0, 4, 8, 12);
+        quarter_round(x, 1, 5, 9, 13);
+        quarter_round(x, 2, 6, 10, 14);
+        quarter_round(x, 3, 7, 11, 15);
 
-        quarter_round(&mut x, 0, 5, 10, 15);
-        quarter_round(&mut x, 1, 6, 11, 12);
-        quarter_round(&mut x, 2, 7, 8, 13);
-        quarter_round(&mut x, 3, 4, 9, 14);
+        quarter_round(x, 0, 5, 10, 15);
+        quarter_round(x, 1, 6, 11, 12);
+        quarter_round(x, 2, 7, 8, 13);
+        quarter_round(x, 3, 4, 9, 14);
     }
-
-    for i in 0..16 {
-        x[i] = x[i].wrapping_add(state[i]);
-    }
-
-    x
 }
 
+/// One ChaCha20 block (RFC 8439 §2.3) for `state`, serialized into `out`.
+///
+/// The permuted working copy is wiped before returning: it differs from the
+/// keystream block by exactly the input state, so the two together would
+/// reveal the key.
 #[inline]
-fn chacha20_block_bytes(state: &[u32; 16]) -> [u8; 64] {
-    let words = chacha20_block_words(state);
-    let mut out = [0u8; 64];
+fn chacha20_block_into(state: &[u32; 16], out: &mut [u8; 64]) {
+    let mut x = *state;
+    chacha20_rounds(&mut x);
     for i in 0..16 {
-        out[4 * i..4 * i + 4].copy_from_slice(&words[i].to_le_bytes());
+        out[4 * i..4 * i + 4].copy_from_slice(&x[i].wrapping_add(state[i]).to_le_bytes());
     }
-    out
+    crate::ct::zeroize_slice(x.as_mut_slice());
 }
 
 #[inline]
@@ -118,36 +116,35 @@ fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
         load_u32_le(&nonce[12..16]),
     ];
 
-    for _ in 0..10 {
-        quarter_round(&mut state, 0, 4, 8, 12);
-        quarter_round(&mut state, 1, 5, 9, 13);
-        quarter_round(&mut state, 2, 6, 10, 14);
-        quarter_round(&mut state, 3, 7, 11, 15);
-
-        quarter_round(&mut state, 0, 5, 10, 15);
-        quarter_round(&mut state, 1, 6, 11, 12);
-        quarter_round(&mut state, 2, 7, 8, 13);
-        quarter_round(&mut state, 3, 4, 9, 14);
-    }
+    chacha20_rounds(&mut state);
 
     // HChaCha20 keeps the "outer" words after 20 rounds; that is exactly the
     // subkey extraction step the XChaCha construction uses to turn a 24-byte
     // nonce into a one-time ChaCha20 key.
-    let output = [
-        state[0], state[1], state[2], state[3], state[12], state[13], state[14], state[15],
-    ];
     let mut out = [0u8; 32];
-    for i in 0..8 {
-        out[4 * i..4 * i + 4].copy_from_slice(&output[i].to_le_bytes());
+    for (i, word) in [0usize, 1, 2, 3, 12, 13, 14, 15].into_iter().enumerate() {
+        out[4 * i..4 * i + 4].copy_from_slice(&state[word].to_le_bytes());
     }
+    // Without ChaCha's feed-forward the rounds are an invertible permutation,
+    // so the full permuted state would give back the key: only the subkey
+    // words may leave this function.
+    crate::ct::zeroize_slice(state.as_mut_slice());
     out
 }
 
 /// `ChaCha20` stream cipher (RFC 8439 / IETF variant).
+///
+/// The block counter is 32 bits, so one `(key, nonce)` addresses at most 2^32
+/// blocks (2^38 bytes) of keystream. A request for keystream past the block at
+/// counter `u32::MAX` panics instead of wrapping to block 0 and repeating
+/// keystream; [`ChaCha20::set_counter`] starts a new range.
 pub struct ChaCha20 {
     state: [u32; 16],
     block: [u8; 64],
     offset: usize,
+    // Set once the block for counter `u32::MAX` has been generated: the
+    // counter has no further value to take.
+    exhausted: bool,
 }
 
 impl ChaCha20 {
@@ -164,6 +161,7 @@ impl ChaCha20 {
             state: state_from_key_nonce(key, nonce, counter),
             block: [0u8; 64],
             offset: 64,
+            exhausted: false,
         }
     }
 
@@ -175,15 +173,41 @@ impl ChaCha20 {
         out
     }
 
+    /// Keystream bytes still available before the block counter would wrap:
+    /// the unread rest of the current block, plus one block for every counter
+    /// value from the next one through `u32::MAX`.
+    fn keystream_remaining(&self) -> u64 {
+        let buffered = u64::try_from(64 - self.offset).expect("offset is at most 64");
+        let blocks = if self.exhausted {
+            0
+        } else {
+            (1u64 << 32) - u64::from(self.state[12])
+        };
+        buffered + blocks * 64
+    }
+
     #[inline]
     fn refill(&mut self) {
-        self.block = chacha20_block_bytes(&self.state);
+        debug_assert!(!self.exhausted, "apply_keystream checks the counter bound");
+        chacha20_block_into(&self.state, &mut self.block);
         self.offset = 0;
-        self.state[12] = self.state[12].wrapping_add(1);
+        let (next, wrapped) = self.state[12].overflowing_add(1);
+        self.state[12] = next;
+        self.exhausted = wrapped;
     }
 
     /// XOR the `ChaCha20` keystream into `buf` in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics, before modifying `buf`, if `buf` is longer than the keystream
+    /// left under the 32-bit block counter: RFC 8439 defines no block after
+    /// counter `u32::MAX`, and wrapping to block 0 would repeat keystream.
     pub fn apply_keystream(&mut self, buf: &mut [u8]) {
+        assert!(
+            u64::try_from(buf.len()).is_ok_and(|len| len <= self.keystream_remaining()),
+            "ChaCha20 block counter exhausted: the 32-bit counter would wrap and repeat keystream"
+        );
         let mut done = 0usize;
         while done < buf.len() {
             if self.offset == 64 {
@@ -199,22 +223,34 @@ impl ChaCha20 {
     }
 
     /// Fill `buf` with keystream bytes by `XORing` into the existing contents.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same block-counter bound as
+    /// [`ChaCha20::apply_keystream`].
     pub fn fill(&mut self, buf: &mut [u8]) {
         self.apply_keystream(buf);
     }
 
     /// Return the next 64 bytes of keystream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if fewer than 64 bytes of keystream remain under the 32-bit
+    /// block counter.
     pub fn keystream_block(&mut self) -> [u8; 64] {
         let mut out = [0u8; 64];
         self.apply_keystream(&mut out);
         out
     }
 
-    /// Seek to a 64-byte block boundary.
+    /// Seek to a 64-byte block boundary. Seeking also re-arms a stream whose
+    /// block counter was exhausted.
     pub fn set_counter(&mut self, counter: u32) {
         self.state[12] = counter;
         crate::ct::zeroize_slice(self.block.as_mut_slice());
         self.offset = 64;
+        self.exhausted = false;
     }
 }
 
@@ -262,21 +298,36 @@ impl XChaCha20 {
     }
 
     /// XOR the `XChaCha20` keystream into `buf` in place.
+    ///
+    /// # Panics
+    ///
+    /// Panics, before modifying `buf`, if `buf` is longer than the keystream
+    /// left under the inner `ChaCha20`'s 32-bit block counter.
     pub fn apply_keystream(&mut self, buf: &mut [u8]) {
         self.inner.apply_keystream(buf);
     }
 
     /// Fill `buf` with keystream bytes by `XORing` into the existing contents.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same block-counter bound as
+    /// [`XChaCha20::apply_keystream`].
     pub fn fill(&mut self, buf: &mut [u8]) {
         self.inner.fill(buf);
     }
 
     /// Return the next 64 bytes of keystream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if fewer than 64 bytes of keystream remain under the 32-bit
+    /// block counter.
     pub fn keystream_block(&mut self) -> [u8; 64] {
         self.inner.keystream_block()
     }
 
-    /// Seek to a 64-byte block boundary.
+    /// Seek to a 64-byte block boundary, re-arming an exhausted counter.
     pub fn set_counter(&mut self, counter: u32) {
         self.inner.set_counter(counter);
     }
@@ -285,15 +336,7 @@ impl XChaCha20 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(bytes: &[u8]) -> String {
-        let mut out = String::with_capacity(bytes.len() * 2);
-        for b in bytes {
-            use core::fmt::Write;
-            let _ = write!(&mut out, "{b:02x}");
-        }
-        out
-    }
+    use crate::test_utils::encode_hex;
 
     #[test]
     fn chacha20_rfc8439_block1_vector() {
@@ -307,7 +350,7 @@ mod tests {
         let mut c = ChaCha20::with_counter(&key, &nonce, 1);
         let block = c.keystream_block();
         assert_eq!(
-            hex(&block),
+            encode_hex(&block),
             "10f1e7e4d13b5915500fdd1fa32071c4".to_owned()
                 + "c7d1f4c733c068030422aa9ac3d46c4e"
                 + "d2826446079faa0914c2d705d98b02a2"
@@ -327,7 +370,7 @@ mod tests {
         ];
         let subkey = hchacha20(&key, &nonce);
         assert_eq!(
-            hex(&subkey),
+            encode_hex(&subkey),
             "82413b4227b27bfed30e42508a877d73".to_owned() + "a0f9e4d58a74a853c12ec41326d3ecdc"
         );
     }
@@ -374,5 +417,90 @@ mod tests {
         dec.apply_keystream(&mut ct);
 
         assert_eq!(ct, msg);
+    }
+
+    /// The block at counter `u32::MAX` is the last one RFC 8439's 32-bit
+    /// counter addresses, and it is produced normally.
+    #[test]
+    fn last_counter_block_is_available() {
+        let key = [0x42u8; 32];
+        let nonce = [0x24u8; 12];
+        let mut seeked = ChaCha20::new(&key, &nonce);
+        seeked.set_counter(u32::MAX);
+        let mut direct = ChaCha20::with_counter(&key, &nonce, u32::MAX);
+        assert_eq!(seeked.keystream_block(), direct.keystream_block());
+    }
+
+    #[test]
+    #[should_panic(expected = "ChaCha20 block counter exhausted")]
+    fn keystream_past_the_last_block_panics() {
+        let mut c = ChaCha20::new(&[0x42u8; 32], &[0x24u8; 12]);
+        c.set_counter(u32::MAX);
+        let _ = c.keystream_block();
+        c.apply_keystream(&mut [0u8; 1]);
+    }
+
+    /// A request that does not fit is refused whole: no partial keystream is
+    /// written, and a seek re-arms the stream.
+    #[test]
+    fn counter_exhaustion_is_checked_before_any_output() {
+        let mut c = ChaCha20::new(&[0x42u8; 32], &[0x24u8; 12]);
+        c.set_counter(u32::MAX);
+        let mut buf = [0xa5u8; 65];
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.apply_keystream(&mut buf);
+        }));
+        assert!(refused.is_err());
+        assert_eq!(buf, [0xa5u8; 65]);
+
+        c.set_counter(0);
+        c.apply_keystream(&mut buf);
+        assert_ne!(buf, [0xa5u8; 65]);
+    }
+
+    #[test]
+    #[should_panic(expected = "ChaCha20 block counter exhausted")]
+    fn xchacha20_past_the_last_block_panics() {
+        let mut x = XChaCha20::new(&[7u8; 32], &[9u8; 24]);
+        x.set_counter(u32::MAX);
+        x.apply_keystream(&mut [0u8; 65]);
+    }
+
+    /// `ChaCha20::new_wiping` zeroes the caller's key and nonce and yields the
+    /// same stream as `new`.
+    #[test]
+    fn chacha20_new_wiping_zeroes_inputs_and_matches_new() {
+        let key: [u8; 32] = core::array::from_fn(|i| u8::try_from(i).expect("i < 32"));
+        let nonce: [u8; 12] = core::array::from_fn(|i| u8::try_from(i * 5).expect("i < 12"));
+        let mut expected = [0u8; 100];
+        ChaCha20::new(&key, &nonce).fill(&mut expected);
+
+        let mut key_buf = key;
+        let mut nonce_buf = nonce;
+        let mut cipher = ChaCha20::new_wiping(&mut key_buf, &mut nonce_buf);
+        assert_eq!(key_buf, [0u8; 32]);
+        assert_eq!(nonce_buf, [0u8; 12]);
+        let mut out = [0u8; 100];
+        cipher.fill(&mut out);
+        assert_eq!(out, expected);
+    }
+
+    /// `XChaCha20::new_wiping` zeroes the caller's key and 24-byte nonce and
+    /// yields the same stream as `new`.
+    #[test]
+    fn xchacha20_new_wiping_zeroes_inputs_and_matches_new() {
+        let key: [u8; 32] = core::array::from_fn(|i| u8::try_from(i * 7).expect("i < 32"));
+        let nonce: [u8; 24] = core::array::from_fn(|i| u8::try_from(i * 11).expect("i < 24"));
+        let mut expected = [0u8; 100];
+        XChaCha20::new(&key, &nonce).fill(&mut expected);
+
+        let mut key_buf = key;
+        let mut nonce_buf = nonce;
+        let mut cipher = XChaCha20::new_wiping(&mut key_buf, &mut nonce_buf);
+        assert_eq!(key_buf, [0u8; 32]);
+        assert_eq!(nonce_buf, [0u8; 24]);
+        let mut out = [0u8; 100];
+        cipher.fill(&mut out);
+        assert_eq!(out, expected);
     }
 }

@@ -30,15 +30,15 @@ fuzz_target!(|data: &[u8]| {
     }
     // Dispatch across all 10 variants.  Key sizes and block sizes from the paper.
     match data[0] % 10 {
-        0 => roundtrip!(&data[1..],  8,  4, Simon32_64),    // Simon 32/64
-        1 => roundtrip!(&data[1..],  9,  6, Simon48_72),    // Simon 48/72
-        2 => roundtrip!(&data[1..], 12,  6, Simon48_96),    // Simon 48/96
-        3 => roundtrip!(&data[1..], 12,  8, Simon64_96),    // Simon 64/96
-        4 => roundtrip!(&data[1..], 16,  8, Simon64_128),   // Simon 64/128
-        5 => roundtrip!(&data[1..], 12, 12, Simon96_96),    // Simon 96/96
-        6 => roundtrip!(&data[1..], 18, 12, Simon96_144),   // Simon 96/144
-        7 => roundtrip!(&data[1..], 16, 16, Simon128_128),  // Simon 128/128
-        8 => roundtrip!(&data[1..], 24, 16, Simon128_192),  // Simon 128/192
-        _ => roundtrip!(&data[1..], 32, 16, Simon128_256),  // Simon 128/256
+        0 => roundtrip!(&data[1..], 8, 4, Simon32_64), // Simon 32/64
+        1 => roundtrip!(&data[1..], 9, 6, Simon48_72), // Simon 48/72
+        2 => roundtrip!(&data[1..], 12, 6, Simon48_96), // Simon 48/96
+        3 => roundtrip!(&data[1..], 12, 8, Simon64_96), // Simon 64/96
+        4 => roundtrip!(&data[1..], 16, 8, Simon64_128), // Simon 64/128
+        5 => roundtrip!(&data[1..], 12, 12, Simon96_96), // Simon 96/96
+        6 => roundtrip!(&data[1..], 18, 12, Simon96_144), // Simon 96/144
+        7 => roundtrip!(&data[1..], 16, 16, Simon128_128), // Simon 128/128
+        8 => roundtrip!(&data[1..], 24, 16, Simon128_192), // Simon 128/192
+        _ => roundtrip!(&data[1..], 32, 16, Simon128_256), // Simon 128/256
     }
 });
