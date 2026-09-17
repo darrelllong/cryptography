@@ -43,9 +43,17 @@
 //! early version of this program prepared the random class by drawing bytes
 //! and the fixed class by not drawing them, and flagged both AES-128 and the
 //! X25519 ladder; what it had measured was its own preparation. Both classes
-//! now draw the same bytes and copy the same buffers, and the key schedule is
-//! built outside the timed span, so what differs between the classes is the
-//! value the operation is given and nothing else.
+//! now draw the same bytes and copy the same buffers, and a key schedule is
+//! built outside the timed span.
+//!
+//! Both classes are also *fixed* values, not one fixed value against fresh
+//! random ones. A class that repeats one input leaves the machine in the same
+//! state every time — same cache contents, same operands — which a class of
+//! fresh values does not, and for an operation as large as a scalar
+//! multiplication that difference alone was enough to flag: on an idle Linux
+//! host, a fixed scalar against random scalars gave `|t| = 10.4` while two
+//! fixed scalars gave 0.9. Two fixed values, chosen to differ in the way the
+//! implementation might notice, compare like with like.
 //!
 //! That is why every run includes a positive control: a byte comparison that
 //! stops at the first difference, whose classes differ in where that first
@@ -344,11 +352,11 @@ fn main() {
         failures.push("Hmac::<Sha256>::verify separated the two tag classes");
     }
 
-    // A fixed key and block against random ones: the bitsliced AES claims the
-    // same work whatever the secret is.
+    // Two fixed keys and blocks, one all-zero and one dense: the bitsliced AES
+    // claims the same work whatever the secret is.
     let (aes, _) = experiment(
         "Aes128Ct::encrypt_block",
-        ["fixed key and block", "random key and block"],
+        ["all-zero key and block", "dense key and block"],
         &mut coin,
         |class, coin| {
             // Both classes do the same work before the timed span: draw the
@@ -362,14 +370,14 @@ fn main() {
             let mut key = [0u8; 16];
             let mut block = [0u8; 16];
             key.copy_from_slice(if class == 0 {
-                &FIXED_KEY[..16]
+                &[0u8; 16]
             } else {
-                &drawn_key
+                &FIXED_KEY[..16]
             });
             block.copy_from_slice(if class == 0 {
-                &FIXED_BLOCK
+                &[0u8; 16]
             } else {
-                &drawn_block
+                &FIXED_BLOCK
             });
             (Aes128Ct::new(&key), block)
         },
@@ -389,13 +397,13 @@ fn main() {
     };
     let (ladder, _) = experiment(
         "X25519::scalar_mult",
-        ["fixed scalar", "random scalar"],
+        ["scalar of zero bytes", "dense scalar"],
         &mut coin,
         |class, coin| {
             let mut drawn = [0u8; 32];
             coin.fill(&mut drawn);
             let mut scalar = [0u8; 32];
-            scalar.copy_from_slice(if class == 0 { &FIXED_KEY } else { &drawn });
+            scalar.copy_from_slice(if class == 0 { &[0u8; 32] } else { &FIXED_KEY });
             scalar
         },
         |scalar| {
@@ -434,13 +442,13 @@ fn main() {
     // must not take a different amount of time to do so.
     let (points, _) = experiment(
         "X25519::scalar_mult (point)",
-        ["low-order point", "random point"],
+        ["low-order point", "ordinary point"],
         &mut coin,
         |class, coin| {
             let mut drawn = [0u8; 32];
             coin.fill(&mut drawn);
             let mut u = [0u8; 32];
-            u.copy_from_slice(if class == 0 { &LOW_ORDER_POINT } else { &drawn });
+            u.copy_from_slice(if class == 0 { &LOW_ORDER_POINT } else { &base });
             u
         },
         |u| {
@@ -498,8 +506,9 @@ fn main() {
             coin.fill(&mut position);
             let mut wire = good_wire.clone();
             if class == 1 {
-                let index = usize::from_le_bytes(position) % wire.len();
-                wire[index] ^= 1;
+                // A fixed position, so this class repeats one ciphertext as
+                // the other does.
+                wire[0] ^= 1;
             }
             MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem768, &wire)
                 .expect("ciphertext of the right length")
