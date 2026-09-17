@@ -9,11 +9,11 @@
 //!
 //! What holds this in place is the emitted code: `scripts/ct_codegen.sh`
 //! classifies every conditional branch in the release assembly of
-//! `X25519::scalar_mult`. Under rustc 1.93.1 on `aarch64-apple-darwin` and
-//! rustc 1.95.0 on `x86_64-unknown-linux-gnu` the ladder holds six or seven
-//! of them, and each is the loop over bits 254 down to 0, an index check that
-//! loop bound already implies, or a loop of `fe_pow_public`, whose windows
-//! are digits of the public exponent `p − 2`. None takes the scalar or `u` as
+//! `X25519::scalar_mult` and of the functions it calls, and
+//! `scripts/ct_budgets/` records the count each target's reading accounted
+//! for. Every branch is the loop over bits 254 down to 0, an index check that
+//! loop bound already implies, or a loop of `fe_pow_public`, whose windows are
+//! digits of the public exponent `p − 2`. None takes the scalar or `u` as
 //! input.
 //!
 //! Unlike the rest of `crate::vt`, X25519 here is intended to be

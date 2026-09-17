@@ -9,10 +9,10 @@
 //!
 //! What holds this in place is the emitted code: `scripts/ct_codegen.sh`
 //! classifies every conditional branch in the release assembly of
-//! `X448::scalar_mult`. Under rustc 1.93.1 on `aarch64-apple-darwin` and
-//! rustc 1.95.0 on `x86_64-unknown-linux-gnu` the ladder holds nine of them,
-//! and each is the loop over bits 447 down to 0, an index check that loop
-//! bound already implies, a loop over the limbs in `fe_mul_a24` and
+//! `X448::scalar_mult` and of the functions it calls, and
+//! `scripts/ct_budgets/` records the count each target's reading accounted
+//! for. Every branch is the loop over bits 447 down to 0, an index check that
+//! loop bound already implies, a loop over the limbs in `fe_mul_a24` and
 //! `fe_reduce_u128`, or one of the fixed squaring runs of `fe_invert`'s
 //! addition chain. None takes the scalar or `u` as input.
 //!

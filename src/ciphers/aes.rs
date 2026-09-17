@@ -518,12 +518,11 @@ fn aes_decrypt(block: &[u8; BLOCK_BYTES], dk: &[u32], nr: usize) -> [u8; BLOCK_B
 //
 // What holds that in place is the emitted code: `scripts/ct_codegen.sh`
 // classifies every conditional branch in the release assembly of
-// `Aes128Ct::encrypt_block`. Under rustc 1.93.1 on `aarch64-apple-darwin` and
-// rustc 1.95.0 on `x86_64-unknown-linux-gnu` it holds three: the round loop,
-// and two index checks on the round-key slice. Neither the key nor the block
-// reaches a branch or a table index. All three widths call `aes_encrypt_ct`
-// with their round count, so that reading is the reading for `Aes192Ct` and
-// `Aes256Ct` as well.
+// `Aes128Ct::encrypt_block` and of the functions it calls. On both targets it
+// has been run on, every branch is the round loop or an index check on the
+// round-key slice; neither the key nor the block reaches a branch or a table
+// index. All three widths call `aes_encrypt_ct` with their round count, so
+// that reading is the reading for `Aes192Ct` and `Aes256Ct` as well.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[inline]
