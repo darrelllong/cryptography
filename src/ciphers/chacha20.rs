@@ -138,6 +138,11 @@ fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
 /// blocks (2^38 bytes) of keystream. A request for keystream past the block at
 /// counter `u32::MAX` panics instead of wrapping to block 0 and repeating
 /// keystream; [`ChaCha20::set_counter`] starts a new range.
+///
+/// Dropping the value wipes the key-bearing `state` and the buffered
+/// keystream `block`. The layout is `#[repr(C)]`, so those 128 bytes lead the
+/// value, which is where `tests/wipe_behaviour.rs` observes the wipe.
+#[repr(C)]
 pub struct ChaCha20 {
     state: [u32; 16],
     block: [u8; 64],

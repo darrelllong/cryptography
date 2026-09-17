@@ -10,6 +10,10 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Added
+- `tests/wipe_behaviour.rs` observes that dropping a `ChaCha20` zeroes its
+  key-bearing state and buffered keystream block, a contract entropy's
+  fast-key-erasure generator relies on; `ChaCha20` is `#[repr(C)]` so those
+  128 bytes have a fixed place.
 - `fuzz/regressions/`, minimized inputs for `fuzz_elgamal` and
   `fuzz_ec_elgamal`, and `fuzz/campaigns/2026-09-16.txt`, the record of a
   four-hour campaign over all 45 targets (build, hosts, executions and

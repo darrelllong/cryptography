@@ -13,7 +13,7 @@ use core::mem::{size_of, MaybeUninit};
 use core::ptr;
 
 use cryptography::vt::{MlKemSharedSecret, X25519PrivateKey};
-use cryptography::{Aes256, Aes256Ct, CtrDrbgAes256, Hmac, Poly1305, Sha256};
+use cryptography::{Aes256, Aes256Ct, ChaCha20, CtrDrbgAes256, Hmac, Poly1305, Sha256};
 
 /// The bytes of a `T`'s storage before and after `drop_in_place`.
 ///
@@ -101,6 +101,35 @@ fn aes256_round_keys_are_zero_after_drop() {
 #[test]
 fn aes256ct_round_keys_are_zero_after_drop() {
     assert_wiped("Aes256Ct", Aes256Ct::new(&KEY_32), 2 * 60 * 4, 400);
+}
+
+/// `ChaCha20` is `#[repr(C)]` with its key-bearing state (16 words) and its
+/// buffered keystream block (64 bytes) first; the offset and exhaustion flag
+/// that follow carry no secret, and the struct's tail padding is not a field,
+/// so only the leading 128 bytes are inspected.
+#[test]
+fn chacha20_state_and_keystream_block_are_zero_after_drop() {
+    const SECRET_BYTES: usize = 16 * 4 + 64;
+    let mut cipher = ChaCha20::new(&KEY_32, &[0x24; 12]);
+    let mut buffer = [0u8; 10];
+    cipher.apply_keystream(&mut buffer);
+    let (before, after) = bytes_before_and_after_drop(cipher);
+    let live = before[..SECRET_BYTES]
+        .iter()
+        .filter(|byte| **byte != 0)
+        .count();
+    assert!(
+        live >= 100,
+        "ChaCha20: only {live} nonzero secret bytes while live"
+    );
+    let leftover = after[..SECRET_BYTES]
+        .iter()
+        .filter(|byte| **byte != 0)
+        .count();
+    assert_eq!(
+        leftover, 0,
+        "ChaCha20: {leftover} of {SECRET_BYTES} state and block bytes nonzero after drop"
+    );
 }
 
 #[test]
