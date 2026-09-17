@@ -34,6 +34,15 @@ Items are marked **owner** when only the repository owner can do them.
    timed span); re-sweep on quiet benchmark hosts, moving the tree to them by
    git, and regenerate the tables and radar plots with their units.
 
+   State on 2026-09-17: pilot-bench's installed binaries no longer load —
+   `libboost_log` 1.74 on darby, 1.83 on twilight, and a program-options
+   symbol against Boost 1.92 on dyson — so each host needs it rebuilt from
+   source before it can measure. Done on dyson (`~/pilot-bench/build-2026`);
+   dennard's rebuild of 2026-09-05 runs. A sweep also needs the host quiet,
+   which none of dyson, twilight or baase were: the three-platform set is
+   dennard or twilight for x86-64, darby for aarch64 Linux, and dyson for
+   Apple silicon, each taken when it is idle.
+
 ## Security contracts and evidence
 
 5. **A message-encryption API.** Raw ElGamal (and the other raw schemes) are
