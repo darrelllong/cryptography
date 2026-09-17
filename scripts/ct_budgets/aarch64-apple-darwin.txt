@@ -1,3 +1,7 @@
+# Unclassified branches a reading accounted for, per claim, on
+# aarch64-apple-darwin. Read under rustc 1.93.1.
+#
+# `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
 tag-comparison 2
 aes128-ct 0
 camellia128-ct 0

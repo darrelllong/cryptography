@@ -274,6 +274,14 @@ done
 
 if [ "$accept" = yes ]; then
     mkdir -p "$(dirname "$budgets")"
+    # Keep the file's header, which says what compilers the counts were read
+    # under; the counts themselves are replaced.
+    if [ -f "$budgets" ]; then
+        grep '^#' "$budgets" > "$out/$target.header" || true
+        cat "$out/$target.header" "$out/$target.budgets" > "$out/$target.merged"
+        mv "$out/$target.merged" "$out/$target.budgets"
+        rm -f "$out/$target.header"
+    fi
     mv "$out/$target.budgets" "$budgets"
     echo
     echo "recorded $(grep -c . "$budgets") claims in $budgets"
