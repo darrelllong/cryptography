@@ -81,28 +81,28 @@ source in a header comment.
 
 ## Public-key schemes
 
-| Scheme | Specification | Known answers | Refusals and limits |
-|---|---|---|---|
-| RSA primitive | Rivest–Shamir–Adleman (1978); RFC 8017 §3 key shapes | key derivation and CRT checks in `rsa::tests` | RFC 8017 exponent ranges, CRT fault check, blinding |
-| RSAES-OAEP, RSASSA-PSS, PKCS #1 v1.5 | RFC 8017 §7.1, §8.1, §8.2 | RFC 8017 test vectors in `rsa_pkcs1::tests` | modulus floors, salt and label rules, decoding refusals |
-| DSA | FIPS 186-4 | `tests/kat_fips186_dsa.rs` (CAVP key pairs, siggen, sigver), `tests/kat_rfc6979.rs` | domain-parameter validation, nonce draw bound, refusal of `r` or `s` = 0 |
-| Diffie-Hellman | SP 800-56A Rev. 3 §5.7.1.1 | `tests/kat_kas_ffc.rs` (CAVP KAS FFC) | partial public-key validation, small-subgroup refusal |
-| ECDSA | FIPS 186-5 (SEC 1 v2.0 arithmetic) | `tests/kat_rfc6979.rs` (deterministic vectors), CAVP-style checks in `ecdsa::tests` | identity and off-curve keys refused, high-`s` accepted on verify, strict and BER DER decoders |
-| ECDH | SP 800-56A Rev. 3, RFC 5903 | `tests/kat_rfc5903_ecdh.rs` (§8, three curves) | peer-curve mismatch, identity and invalid points refused |
-| X25519, X448 | RFC 7748 §5, §6 | `tests/kat_rfc7748.rs`, including the million-iteration cases (release-only) | all-zero shared secret refused; constant-time ladder |
-| Ed25519 | RFC 8032 §5.1 | RFC 8032 §7.1 vectors in `ed25519::tests` | decoding exactly per §5.1.3, cofactored verification, small-order keys accepted and documented |
-| EdDSA (generic Edwards) | Schnorr/EdDSA construction over this crate's Edwards arithmetic | round-trip and cross-checks in `eddsa::tests` | curve and order validation, identity refusal |
-| ECIES | SEC 1 v2.0 §5.1 | GEC 2 vectors in `tests/vectors/sec1_gec2_ecaes.txt` | key-derivation and MAC rules, ciphertext refusal |
-| EC-ElGamal, Edwards ElGamal | ElGamal's map over curve groups (this crate's profile) | round-trip and homomorphism tests | identity and off-curve points refused; message class published (documented) |
-| ElGamal (finite field) | ElGamal (1985) | small-modulus vectors in `elgamal::tests` | safe prime and primitive root required, degenerate nonce and secret refused |
-| Paillier | Paillier (1999) | homomorphic identities in `paillier::tests` | modulus and base validation |
-| Rabin | Rabin (1979), with a tag to select the root | round-trip and root-selection tests | four-root ambiguity resolved by tag; refusal on tampering |
-| Schmidt-Samoa | Schmidt-Samoa (2005) | round-trip tests | prime and modulus validation |
-| Cocks | Cocks, CESG memorandum (1973) | round-trip tests | prime validation, `pi` invertibility |
-| ML-KEM | FIPS 203 | `tests/vectors/ml_kem_acvp_fips203.txt` (NIST ACVP), pq-crystals oracle vectors | §7.2 and §7.3 key checks, pair-wise test on seedless import, implicit rejection |
-| ML-DSA | FIPS 204 | `tests/vectors/ml_dsa_fips204_subset.txt` (ACVP keyGen, sigGen, sigVer) | expanded-key consistency, range checks, hedged and deterministic paths |
-| NTRU (round 3) | NIST round-3 submission, "NTRU: Algorithm Specifications and Supporting Documentation" | the four submission KAT files, 100 entries each (release-only) | zero polynomials refused, sampler bounds, implicit rejection |
-| NTRUEncrypt SVES-3 | EESS #1 v3.1 (IEEE Std 1363.1-2008 / ANSI X9.98 sets) | `tests/vectors/ntru_ees_sves3_reference.txt` (interoperability with the standard authors' implementation) | step p refusal rates measured, `dm0` pinned two ways, canonical encoding enforced; parameter sources are tabulated in the `ntru_ees_core` module documentation |
+| Scheme | Operations the known answers cover | Specification | Known answers | Refusals and limits |
+|---|---|---|---|---|
+| RSA primitive | keygen, encrypt, decrypt | Rivest–Shamir–Adleman (1978); RFC 8017 §3 key shapes | key derivation and CRT checks in `rsa::tests` | RFC 8017 exponent ranges, CRT fault check, blinding |
+| RSAES-OAEP, RSASSA-PSS, PKCS #1 v1.5 | encrypt, decrypt, sign, verify | RFC 8017 §7.1, §8.1, §8.2 | RFC 8017 test vectors in `rsa_pkcs1::tests` | modulus floors, salt and label rules, decoding refusals |
+| DSA | parameter generation, keygen, sign, verify | FIPS 186-4 | `tests/kat_fips186_dsa.rs` (CAVP key pairs, siggen, sigver), `tests/kat_rfc6979.rs` | domain-parameter validation, nonce draw bound, refusal of `r` or `s` = 0 |
+| Diffie-Hellman | keygen, agree | SP 800-56A Rev. 3 §5.7.1.1 | `tests/kat_kas_ffc.rs` (CAVP KAS FFC) | partial public-key validation, small-subgroup refusal |
+| ECDSA | keygen, sign, verify | FIPS 186-5 (SEC 1 v2.0 arithmetic) | `tests/kat_rfc6979.rs` (deterministic vectors), CAVP-style checks in `ecdsa::tests` | identity and off-curve keys refused, high-`s` accepted on verify, strict and BER DER decoders |
+| ECDH | keygen, agree | SP 800-56A Rev. 3, RFC 5903 | `tests/kat_rfc5903_ecdh.rs` (§8, three curves) | peer-curve mismatch, identity and invalid points refused |
+| X25519, X448 | scalar mult, agree | RFC 7748 §5, §6 | `tests/kat_rfc7748.rs`, including the million-iteration cases (release-only) | all-zero shared secret refused; constant-time ladder |
+| Ed25519 | keygen, sign, verify | RFC 8032 §5.1 | RFC 8032 §7.1 vectors in `ed25519::tests` | decoding exactly per §5.1.3, cofactored verification, small-order keys accepted and documented |
+| EdDSA (generic Edwards) | keygen, sign, verify | Schnorr/EdDSA construction over this crate's Edwards arithmetic | round-trip and cross-checks in `eddsa::tests` | curve and order validation, identity refusal |
+| ECIES | encrypt, decrypt | SEC 1 v2.0 §5.1 | GEC 2 vectors in `tests/vectors/sec1_gec2_ecaes.txt` | key-derivation and MAC rules, ciphertext refusal |
+| EC-ElGamal, Edwards ElGamal | keygen, encrypt, decrypt | ElGamal's map over curve groups (this crate's profile) | round-trip and homomorphism tests | identity and off-curve points refused; message class published (documented) |
+| ElGamal (finite field) | keygen, encrypt, decrypt | ElGamal (1985) | small-modulus vectors in `elgamal::tests` | safe prime and primitive root required, degenerate nonce and secret refused |
+| Paillier | keygen, encrypt, decrypt, add | Paillier (1999) | homomorphic identities in `paillier::tests` | modulus and base validation |
+| Rabin | keygen, encrypt, decrypt | Rabin (1979), with a tag to select the root | round-trip and root-selection tests | four-root ambiguity resolved by tag; refusal on tampering |
+| Schmidt-Samoa | keygen, encrypt, decrypt | Schmidt-Samoa (2005) | round-trip tests | prime and modulus validation |
+| Cocks | keygen, encrypt, decrypt | Cocks, CESG memorandum (1973) | round-trip tests | prime validation, `pi` invertibility |
+| ML-KEM | keygen, encaps, decaps | FIPS 203 | `tests/vectors/ml_kem_acvp_fips203.txt` (NIST ACVP), pq-crystals oracle vectors | §7.2 and §7.3 key checks, pair-wise test on seedless import, implicit rejection |
+| ML-DSA | keygen, sign, verify | FIPS 204 | `tests/vectors/ml_dsa_fips204_subset.txt` (ACVP keyGen, sigGen, sigVer) | expanded-key consistency, range checks, hedged and deterministic paths |
+| NTRU (round 3) | keygen, encaps, decaps | NIST round-3 submission, "NTRU: Algorithm Specifications and Supporting Documentation" | the four submission KAT files, 100 entries each (release-only) | zero polynomials refused, sampler bounds, implicit rejection |
+| NTRUEncrypt SVES-3 | keygen, encrypt, decrypt | EESS #1 v3.1 (IEEE Std 1363.1-2008 / ANSI X9.98 sets) | `tests/vectors/ntru_ees_sves3_reference.txt` (interoperability with the standard authors' implementation) | step p refusal rates measured, `dm0` pinned two ways, canonical encoding enforced; parameter sources are tabulated in the `ntru_ees_core` module documentation |
 
 ## Key encodings
 

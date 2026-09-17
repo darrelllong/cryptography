@@ -92,9 +92,10 @@ Items are marked **owner** when only the repository owner can do them.
 9. **A specification-to-test map.** `SPECIFICATIONS.md` carries it: per
    algorithm, the document and section it is written from, where its known
    answers come from, and the tests that refuse malformed input, with
-   conformance, interoperability and refusal kept apart. What it does not yet
-   do is split a scheme's row per operation, so a reader cannot see which
-   test covers signing as against verification.
+   conformance, interoperability and refusal kept apart, and each public-key
+   row names the operations its known answers cover. What it does not yet do
+   is name the individual test behind each of those operations, so a reader
+   who wants the sigVer case specifically still has to open the file.
 
 ## Statistical residuals to decide on
 
