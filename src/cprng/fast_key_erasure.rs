@@ -48,30 +48,53 @@ impl FastKeyErasure {
         }
     }
 
-    /// Replace the key with the first `KEY` bytes of keystream and keep the
-    /// rest to serve.
-    fn refill(&mut self) {
-        let mut stream = [0u8; REFILL];
-        ChaCha20::new(&self.key, &NONCE).keystream(&mut stream);
-        self.key.copy_from_slice(&stream[..KEY]);
-        self.buffer[KEY..].copy_from_slice(&stream[KEY..]);
-        zeroize_slice(stream.as_mut_slice());
-        self.position = KEY;
+    /// Output bytes one refill serves: the keystream past the next key.
+    const SERVED: usize = REFILL - KEY;
+
+    /// Take the next key from the front of a refill's keystream and write the
+    /// rest to `out`, which must be [`FastKeyErasure::SERVED`] bytes.
+    ///
+    /// The two writes are consecutive bytes of one ChaCha20 keystream, so
+    /// this is the refill's `stream[..KEY]` and `stream[KEY..]` without a
+    /// copy of the served bytes.
+    fn refill_into(&mut self, out: &mut [u8]) {
+        debug_assert_eq!(out.len(), Self::SERVED);
+        let mut stream = ChaCha20::new(&self.key, &NONCE);
+        stream.keystream(&mut self.key);
+        stream.keystream(out);
     }
 
-    /// Serve the next `out.len()` bytes, erasing each from the buffer.
+    /// Serve the next `out.len()` bytes.
+    ///
+    /// Whole refills go straight to the caller, so their bytes never enter
+    /// the generator; a partial refill is buffered, and each buffered byte is
+    /// erased as it is served.
     pub fn fill(&mut self, out: &mut [u8]) {
         let mut done = 0;
-        while done < out.len() {
-            if self.position == REFILL {
-                self.refill();
-            }
-            let take = (REFILL - self.position).min(out.len() - done);
+        if self.position < REFILL {
+            let take = (REFILL - self.position).min(out.len());
             let served = &mut self.buffer[self.position..self.position + take];
-            out[done..done + take].copy_from_slice(served);
+            out[..take].copy_from_slice(served);
             zeroize_slice(served);
             self.position += take;
-            done += take;
+            done = take;
+        }
+        while out.len() - done >= Self::SERVED {
+            let (start, end) = (done, done + Self::SERVED);
+            self.refill_into(&mut out[start..end]);
+            done = end;
+        }
+        if done < out.len() {
+            let mut served = [0u8; Self::SERVED];
+            self.refill_into(&mut served);
+            self.buffer[KEY..].copy_from_slice(&served);
+            zeroize_slice(served.as_mut_slice());
+            self.position = KEY;
+            let take = out.len() - done;
+            let from_buffer = &mut self.buffer[KEY..KEY + take];
+            out[done..].copy_from_slice(from_buffer);
+            zeroize_slice(from_buffer);
+            self.position += take;
         }
     }
 
@@ -277,6 +300,75 @@ mod tests {
         assert!(
             child.lines().any(|line| line.trim() == hex),
             "child printed {child}, expected {hex}"
+        );
+    }
+
+    /// The stream does not depend on how a caller splits it: whole refills go
+    /// straight to the caller, a partial one through the buffer, and the
+    /// bytes are the same either way.
+    #[test]
+    fn the_stream_is_the_same_however_requests_are_split() {
+        const TOTAL: usize = 4 * REFILL + 13;
+        let mut whole = [0u8; TOTAL];
+        FastKeyErasure::new([0x6b; KEY]).fill(&mut whole);
+        // Each shape is a run of request lengths; whatever is left over is one
+        // final request. Single bytes, lengths either side of a refill's
+        // served bytes, whole refills, and all but one byte at once.
+        let served = REFILL - KEY;
+        let shapes: [Vec<usize>; 4] = [
+            vec![1; TOTAL],
+            vec![7, served - 1, served, served + 1],
+            vec![served; 3],
+            vec![TOTAL - 1],
+        ];
+        for mut shape in shapes {
+            let taken: usize = shape.iter().sum();
+            if taken < TOTAL {
+                shape.push(TOTAL - taken);
+            }
+            assert_eq!(shape.iter().sum::<usize>(), TOTAL);
+            let mut rng = FastKeyErasure::new([0x6b; KEY]);
+            let mut got = Vec::with_capacity(TOTAL);
+            for len in shape {
+                let mut chunk = vec![0u8; len];
+                rng.fill(&mut chunk);
+                got.extend_from_slice(&chunk);
+            }
+            assert_eq!(got, whole);
+        }
+    }
+
+    /// Throughput of a bulk fill, which writes whole refills straight to the
+    /// caller, against one that goes through the buffer a word at a time.
+    /// Release-only: a debug build measures the compiler.
+    #[test]
+    #[ignore = "release-only timing experiment"]
+    fn bulk_fill_is_priced_against_word_at_a_time() {
+        use std::time::Instant;
+        const BYTES: usize = 16 << 20;
+        const SAMPLES: usize = 7;
+        let mebibyte = f64::from(1u32 << 20);
+        let mut fastest_bulk = f64::INFINITY;
+        let mut fastest_words = f64::INFINITY;
+        for _ in 0..SAMPLES {
+            let mut rng = FastKeyErasure::new([0x2c; KEY]);
+            let mut buffer = vec![0u8; BYTES];
+            let start = Instant::now();
+            rng.fill(&mut buffer);
+            fastest_bulk = fastest_bulk.min(start.elapsed().as_secs_f64());
+
+            let mut rng = FastKeyErasure::new([0x2c; KEY]);
+            let start = Instant::now();
+            for _ in 0..BYTES / 8 {
+                core::hint::black_box(rng.next_u64());
+            }
+            fastest_words = fastest_words.min(start.elapsed().as_secs_f64());
+        }
+        let mib = BYTES as f64 / mebibyte;
+        eprintln!(
+            "fast key erasure: bulk {:.0} MiB/s, next_u64 {:.0} MiB/s",
+            mib / fastest_bulk,
+            mib / fastest_words
         );
     }
 

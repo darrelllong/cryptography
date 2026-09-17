@@ -176,6 +176,13 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   bound 10⁻³), and the Spearman correlations between tests.
 
 ### Changed
+- `FastKeyErasure::fill` writes whole refills straight into the caller's
+  buffer: the next key and the served bytes are consecutive parts of one
+  ChaCha20 keystream, so bytes bound for the caller never enter the
+  generator and need no erasing. Only a partial refill is buffered, and its
+  bytes are still erased as they are served. Bulk fills run at 860 MiB/s
+  against 453 MiB/s word at a time on an Apple M4 Pro; the stream is
+  unchanged however a caller splits its requests.
 - Hash_DRBG's additions modulo 2^440 are a carry loop over the fixed 55
   bytes instead of big integers: 30.6 ns against 122.5 ns per §10.1.1.4
   update on an Apple M4 Pro (fastest of 101 samples of 10,000 additions),
