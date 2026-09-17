@@ -1,0 +1,59 @@
+Fuzz campaign, 2026-09-17
+
+Hosts: dennard (23 targets) and moore (22), 128-core x86-64 Ubuntu 24.04, shared with other users' jobs.
+Toolchain: rustc 1.100.0-nightly (215a8af4b 2026-09-15), cargo-fuzz 0.13.2, libFuzzer with AddressSanitizer.
+Each target ran on one core at nice 10 for 14,400 s (-max_total_time), from the seeds in fuzz/seeds/<target> where they exist, growing the corpus kept from earlier campaigns outside the repository.
+Binaries: cryptography 69d9fa6 with rump 0996ee6.
+
+Why this campaign: the previous one had been started from snapshot cf7440e, which predates the ElGamal repairs of 40a9bdf. Its two artifacts — fuzz_elgamal and fuzz_ec_elgamal — run clean against 69d9fa6, and both inputs are in fuzz/regressions, which scripts/fuzz_regressions.sh now replays in one command.
+
+No target stopped: 45 targets, 14,401 s each, no crash artifact and no regression input broken.
+
+Note on moore's logs: the launch command's second half ran only when its first half's ssh returned, which started a second generation of moore's 22 targets at 16:34 and truncated their logs. That generation was killed within seven minutes; the original processes were untouched and wrote their final statistics, which is what the table below holds. What is lost for moore is the progress detail, not the totals.
+
+target host executions seconds cov ft corpus
+fuzz_aead_decrypt dennard 29805357 14401 1995 4771 508/219Kb
+fuzz_aes dennard 786189958 14401 648 650 7/134b
+fuzz_camellia dennard 491631127 14401 878 884 6/133b
+fuzz_cast128 dennard 55428498 14401 1023 1025 2/25b
+fuzz_chacha20 dennard 346944807 14401 310 533 36/21Kb
+fuzz_cocks dennard 343112241 14401 665 976 37/5723b
+fuzz_cprng dennard 478705 14401 298 779 44/2771b
+fuzz_des dennard 153448221 14401 213 245 15/315b
+fuzz_dh dennard 1015348 14401 858 3022 278/53Kb
+fuzz_dsa dennard 800815 14401 1335 3631 321/73Kb
+fuzz_ecdh dennard 40450 14401 1730 5164 472/47Kb
+fuzz_ecdsa dennard 40088 14402 1814 6866 691/90Kb
+fuzz_ec_elgamal dennard 111566 14401 1291 3899 260/14243b
+fuzz_ecies dennard 844731 14401 2690 6233 312/114Kb
+fuzz_ed25519 dennard 112844 14401 1020 1949 137/24Kb
+fuzz_eddsa dennard 157739 14401 940 2771 173/21Kb
+fuzz_edwards_dh dennard 94557 14401 1483 3582 231/25Kb
+fuzz_edwards_elgamal dennard 140524 14401 1066 3067 184/9614b
+fuzz_elgamal dennard 1202892 14401 821 2918 239/37Kb
+fuzz_grasshopper dennard 47753238 14401 727 729 2/49b
+fuzz_hash dennard 10640048 14401 1449 2771 125/91Kb
+fuzz_mac dennard 89278788 14401 1014 1872 125/56Kb
+fuzz_magma dennard 1077223318 14401 248 250 2/41b
+fuzz_ml_dsa moore 346601 14401 1354 2865 157/13227b
+fuzz_ml_kem moore 1107640 14401 1063 1520 40/3862b
+fuzz_modes moore 67630533 14401 965 2825 157/57Kb
+fuzz_ntru moore 1299017 14401 9566 14796 569/34Kb
+fuzz_paillier moore 295658781 14401 645 1283 44/911b
+fuzz_pkix_parse moore 5725943 14401 10399 28007 2773/604Kb
+fuzz_pk_parse moore 2570605 14401 4578 12443 698/87Kb
+fuzz_present moore 175599272 14401 168 174 6/109b
+fuzz_rabbit moore 258760037 14401 156 443 31/12191b
+fuzz_rabin moore 5097133 14401 1279 1748 69/491b
+fuzz_rsa_pkcs1 moore 2244362 14401 2030 2847 66/21Kb
+fuzz_salsa20 moore 418271445 14401 194 334 39/26Kb
+fuzz_schmidt_samoa moore 407869617 14401 614 866 40/5776b
+fuzz_seed moore 435665468 14401 423 425 2/33b
+fuzz_serpent moore 753775317 14401 278 280 6/133b
+fuzz_simon moore 2255183660 14401 361 366 24/386b
+fuzz_sm4 moore 647275018 14401 144 146 2/33b
+fuzz_snow3g moore 52552013 14401 193 504 32/7214b
+fuzz_speck moore 2194979136 14401 363 388 25/387b
+fuzz_twofish moore 29261453 14401 607 610 7/134b
+fuzz_x25519 moore 1114951 14401 197 205 9/880b
+fuzz_zuc moore 65643538 14401 220 567 32/7049b

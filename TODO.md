@@ -82,7 +82,8 @@ Items are marked **owner** when only the repository owner can do them.
    fuzzer cannot. Still to aim at: explicit domain parameters, key-pair
    consistency as its own target, and nonce reuse across calls. Campaign
    records, with corpus, duration, features and revisions, are in
-   `fuzz/campaigns/`.
+   `fuzz/campaigns/`; the 2026-09-17 campaign ran all 45 targets for four
+   hours each at 69d9fa6 with no crash and no regression input broken.
 
 8. **Named constants across the tree.** Every block cipher, stream cipher,
    hash, the DRBGs, the modes, the curve modules, HMAC, HKDF, RFC 6979,
