@@ -8,7 +8,7 @@
 # the claims table in scripts/ct_codegen.sh names.
 #
 # `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
-tag-comparison 3
+tag-comparison 2
 aes128-ct 0
 camellia128-ct 0
 cast128-ct 20
@@ -24,6 +24,7 @@ x25519-ladder 1
 x448-ladder 3
 x25519-agree 1
 ml-kem-decaps 26
+ntru-hps509-decaps 4
 chacha20-keystream 16
 poly1305-mac 2
 chacha20poly1305-open 4

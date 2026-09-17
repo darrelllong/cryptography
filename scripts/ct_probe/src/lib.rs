@@ -8,8 +8,8 @@
 use cryptography::modes::chacha20_poly1305::ChaCha20Poly1305;
 use cryptography::ChaCha20;
 use cryptography::vt::{
-    MlKem, MlKemCiphertext, MlKemPrivateKey, MlKemSharedSecret, X25519, X25519PrivateKey,
-    X25519PublicKey, X448,
+    MlKem, MlKemCiphertext, MlKemPrivateKey, MlKemSharedSecret, NtruHps509, NtruHps509Ciphertext,
+    NtruHps509PrivateKey, NtruHps509SharedSecret, X25519, X25519PrivateKey, X25519PublicKey, X448,
 };
 use cryptography::{
     Aes128Ct, Camellia128Ct, Cast128Ct, DesCt, GrasshopperCt, Hmac, MagmaCt, Present80Ct, SeedCt,
@@ -158,4 +158,15 @@ pub extern "Rust" fn ml_kem_decaps(
     ciphertext: &MlKemCiphertext,
 ) -> Option<MlKemSharedSecret> {
     MlKem::decaps(key, ciphertext)
+}
+
+/// An NTRU round-3 KEM decapsulation: like ML-KEM's, its implicit rejection
+/// selects the shared secret under a mask.
+#[inline(never)]
+#[no_mangle]
+pub extern "Rust" fn ntru_hps509_decaps(
+    key: &NtruHps509PrivateKey,
+    ciphertext: &NtruHps509Ciphertext,
+) -> NtruHps509SharedSecret {
+    NtruHps509::decaps(key, ciphertext)
 }
