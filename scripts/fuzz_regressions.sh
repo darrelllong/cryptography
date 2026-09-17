@@ -9,8 +9,9 @@
 # over its own directory, which is quick — libFuzzer executes the named inputs
 # and exits — and reports the first that fails.
 #
-# The binaries come from `cargo +nightly fuzz build`, which this runs when they
-# are missing. A failure here means a repair was lost.
+# The binaries come from `cargo +nightly fuzz build`, which this always runs:
+# incremental when nothing changed, and never trusting a directory left over
+# from an older tree. A failure here means a repair was lost.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,10 +19,10 @@ target=${1:-$(rustc -vV | sed -n 's/^host: //p')}
 binaries=$root/fuzz/target/$target/release
 
 cd "$root"
-if [ ! -d "$binaries" ]; then
-    echo "building the fuzz targets for $target"
-    cargo +nightly fuzz build --target "$target"
-fi
+# Always build: an existing directory says nothing about when its binaries
+# were made, and a stale one turns a repaired defect into a false alarm.
+echo "building the fuzz targets for $target"
+cargo +nightly fuzz build --target "$target"
 
 failed=0
 checked=0
