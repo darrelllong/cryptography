@@ -145,8 +145,10 @@ for entry in "${claims[@]}"; do
     # work, wherever that was emitted.
     for _ in 1 2 3 4; do
         grep -qE "^[[:space:]]+$branches" "$body" && break
-        callee=$(grep -oE '^[[:space:]]+(b|bl|jmp|call|callq)[[:space:]]+[._a-zA-Z0-9$]+$' "$body" \
-                 | awk '{print $2}' | sort -u)
+        # A call may go through the GOT, which spells the symbol with a `*`
+        # and a relocation suffix; the name in between is the callee.
+        callee=$(grep -oE '^[[:space:]]+(b|bl|jmp|jmpq|call|callq)[[:space:]]+\*?[._a-zA-Z0-9$]+(@GOTPCREL\(%rip\))?$' "$body" \
+                 | awk '{print $2}' | sed 's/@GOTPCREL(%rip)$//; s/^\*//' | sort -u)
         [ "$(printf '%s' "$callee" | grep -c .)" -eq 1 ] || break
         callee_file=$(grep -lE "^${callee}:" $asm | head -1 || true)
         [ -n "$callee_file" ] || break
