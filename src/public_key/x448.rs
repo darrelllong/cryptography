@@ -288,6 +288,11 @@ fn fe_from_bytes(bytes: &[u8; X448_LEN]) -> Fe {
 }
 
 /// Encode a field element as 56 LE bytes, fully canonicalised mod `p`.
+///
+/// The conditional subtraction of `p` is mask-driven through
+/// [`crate::ct::select_u64`], whose barrier keeps the select from being
+/// emitted as a branch on the borrow — which is what happened to the X25519
+/// counterpart before that barrier existed.
 fn fe_to_bytes(a: &Fe) -> [u8; X448_LEN] {
     let mut t = a.0;
     // Two carry passes bring t into [0, 2*p).
@@ -331,9 +336,9 @@ fn fe_to_bytes(a: &Fe) -> [u8; X448_LEN] {
         borrow = (diff >> 63) & 1;
     }
     let select_t = 0u64.wrapping_sub(borrow);
-    let mut out = [0u64; 8];
-    for i in 0..8 {
-        out[i] = (t[i] & select_t) | (s[i] & !select_t);
+    let mut out = [0u64; LIMBS];
+    for i in 0..LIMBS {
+        out[i] = crate::ct::select_u64(select_t, t[i], s[i]);
     }
 
     // Pack 8 limbs of 56 bits each = 448 bits = 56 bytes; clean 7-byte boundaries.

@@ -257,7 +257,11 @@ fn fe_from_bytes(bytes: &[u8; X25519_LEN]) -> Fe {
 }
 
 /// Encode a field element into 32 LE bytes, fully canonicalised mod `p`.
-/// Constant-time: the conditional subtraction of `p` is mask-driven.
+///
+/// The conditional subtraction of `p` is mask-driven, and the mask goes
+/// through [`crate::ct::select_u64`]: written as a plain select, the compiler
+/// emitted a conditional branch on the borrow, which is a branch on the value
+/// being encoded.
 fn fe_to_bytes(a: &Fe) -> [u8; X25519_LEN] {
     let mut t = a.0;
     // Two carry passes bring t into [0, 2*p).
@@ -292,9 +296,9 @@ fn fe_to_bytes(a: &Fe) -> [u8; X25519_LEN] {
         borrow = (diff >> 63) & 1;
     }
     let select_t = 0u64.wrapping_sub(borrow);
-    let mut out = [0u64; 5];
+    let mut out = [0u64; LIMBS];
     for i in 0..LIMBS {
-        out[i] = (t[i] & select_t) | (s[i] & !select_t);
+        out[i] = crate::ct::select_u64(select_t, t[i], s[i]);
     }
 
     // Pack five 51-bit limbs into 32 LE bytes.

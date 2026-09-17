@@ -44,6 +44,10 @@ RUSTFLAGS="--emit asm" cargo build --release --manifest-path "$probe/Cargo.toml"
 asm=$(find "$out/target/$target/release" -name '*.s')
 [ -n "$asm" ] || { echo "no assembly emitted for $target" >&2; exit 1; }
 
+# A wrapper's whole body is the register shuffling around one call, which is
+# tens of instructions at most; anything longer computes something itself.
+WRAPPER_INSTRUCTIONS=40
+
 case $target in
     aarch64*) branches='\b(b\.[a-z]+|cbn?z|tbn?z)\b' ;;
     x86_64*)  branches='\bj(n?[abegloszcp]|n?[ab]e|n?ge|n?le)\b' ;;
@@ -112,23 +116,62 @@ echo "compiler: $(rustc -vV | sed -n 's/^release: /rustc /p')"
 
 # Each claim: its name, a pattern matching the symbol that carries it — the
 # probe's own wrapper where the code is generic and instantiated there, the
-# library's mangled symbol otherwise — and the unclassified branches the
-# modules have read and accounted for.
+# library's mangled symbol otherwise — and the unclassified branches a reading
+# has accounted for. What those readings found:
+#
+#   tag comparison       the key length against the block, the tag length
+#                        against the digest
+#   CAST-128             the round count (12 or 16, from the key length), the
+#                        round index mod 3 selecting F1/F2/F3, and the flag
+#                        that selects the constant-time S-box path
+#   Twofish              the key length in 64-bit words, and the same flag
+#   ChaCha20 keystream   the message length and the buffered offset, at block
+#                        boundaries
+#   Poly1305             the message length, whole blocks and the tail
+#   X25519, X448         the ladder's loop over the scalar's bits
+#   X25519 agreement     RFC 7748 §6.1's all-zero shared-secret test, which is
+#                        the value the function returns
+#   AEAD open            the §2.8 length bound, two zero-size tests before the
+#                        MAC input is freed, and the authentication result
+#
+# None of them tests a key, a scalar, a tag or a plaintext byte.
 claims=(
     "tag-comparison:verify_tag:2"
     "aes128-ct:Aes128Ct.*encrypt_block:0"
+    "camellia128-ct:camellia128_ct_encrypt_block|Camellia128Ct.*encrypt_block:0"
+    "cast128-ct:cast128_ct_encrypt_block|Cast128Ct.*encrypt_block:8"
+    "des-ct:des_ct_encrypt_block|DesCt.*encrypt_block:0"
+    "grasshopper-ct:grasshopper_ct_encrypt_block|GrasshopperCt.*encrypt_block:0"
+    "magma-ct:magma_ct_encrypt_block|MagmaCt.*encrypt_block:0"
+    "present80-ct:present80_ct_encrypt_block|Present80Ct.*encrypt_block:0"
+    "seed-ct:seed_ct_encrypt_block|SeedCt.*encrypt_block:0"
+    "sm4-ct:sm4_ct_encrypt_block|Sm4Ct.*encrypt_block:0"
+    "twofish128-ct:twofish128_ct_encrypt_block|Twofish128Ct.*encrypt_block:13"
+    "serpent128:serpent128_encrypt_block|Serpent128.*encrypt_block:0"
     "x25519-ladder:X255196scalar|X25519.*scalar_mult:1"
-    "x448-ladder:X4486scalar|X448.*scalar_mult:2"
-    "x25519-agree:x25519_agree|X25519PrivateKey.*agree:1"
-    "chacha20poly1305-open:chacha20poly1305_open|ChaCha20Poly1305.*decrypt_in_place:4"
+    "x448-ladder:X4486scalar|X448.*scalar_mult:3"
+    "x25519-agree:x25519_agree|X25519PrivateKey.*agree:1:d0"
+    "chacha20-keystream:chacha20_keystream|ChaCha2015apply_keystream:16"
+    "poly1305-mac:poly1305_one_shot|modes8poly130512poly1305_mac:2"
+    "chacha20poly1305-open:chacha20poly1305_open|ChaCha20Poly1305.*decrypt_in_place:4:d0"
 )
 unread=0
 for entry in "${claims[@]}"; do
     claim=${entry%%:*}
     rest=${entry#*:}
+    # name:pattern:budget[:dN], where dN is how far to follow this claim's own
+    # calls. A composite operation whose parts are claims of their own takes
+    # d0, so each piece is read once, where it is made.
+    depth=${rest##*:}
+    case $depth in
+        d[0-9]) depth=${depth#d}; rest=${rest%:*} ;;
+        *) depth=3 ;;
+    esac
     pattern=${rest%:*}
     budget=${rest##*:}
-    file=$(grep -lE "^[._a-zA-Z0-9\$]*($pattern)[._a-zA-Z0-9\$]*:" $asm | head -1)
+    # `set -o pipefail` would make a no-match exit the script before the
+    # message below is printed.
+    file=$(grep -lE "^[._a-zA-Z0-9\$]*($pattern)[._a-zA-Z0-9\$]*:" $asm | head -1 || true)
     [ -n "$file" ] || { echo "$claim: no symbol matching $pattern" >&2; exit 1; }
     symbol=$(grep -oE "^[._a-zA-Z0-9\$]*($pattern)[._a-zA-Z0-9\$]*:" "$file" | head -1 | tr -d ':')
     body=$out/$target-$claim.s
@@ -141,15 +184,17 @@ for entry in "${claims[@]}"; do
     }
     extract "$symbol" "$file" > "$body"
     [ -s "$body" ] || { echo "$claim: no body extracted for $symbol" >&2; exit 1; }
-    # A wrapper is a body that branches nowhere and hands the work to exactly
-    # one callee, by tail jump or by call; follow it to the code that does the
-    # work, wherever that was emitted.
+    # A wrapper is a short body that branches nowhere and hands the work to
+    # exactly one callee, by tail jump or by call; follow it to the code that
+    # does the work, wherever that was emitted. A body that does work of its
+    # own, even if it calls one helper, is the claim itself and is kept.
     for _ in 1 2 3 4; do
+        [ "$(grep -cE '^[[:space:]]+[a-z]' "$body" || true)" -le "$WRAPPER_INSTRUCTIONS" ] || break
         grep -qE "^[[:space:]]+$branches" "$body" && break
         # A call may go through the GOT, which spells the symbol with a `*`
         # and a relocation suffix; the name in between is the callee.
         callee=$(grep -oE '^[[:space:]]+(b|bl|jmp|jmpq|call|callq)[[:space:]]+\*?[._a-zA-Z0-9$]+(@GOTPCREL\(%rip\))?$' "$body" \
-                 | awk '{print $2}' | sed 's/@GOTPCREL(%rip)$//; s/^\*//' | sort -u)
+                 | awk '{print $2}' | sed 's/@GOTPCREL(%rip)$//; s/^\*//' | sort -u || true)
         [ "$(printf '%s' "$callee" | grep -c .)" -eq 1 ] || break
         callee_file=$(grep -lE "^${callee}:" $asm | head -1 || true)
         [ -n "$callee_file" ] || break
@@ -158,14 +203,40 @@ for entry in "${claims[@]}"; do
         mv "$body.next" "$body"
         symbol=$callee
     done
-    if ! grep -qE "^[[:space:]]+$branches" "$body" \
-       && grep -qE '^[[:space:]]+(bl|call|callq)[[:space:]]' "$body"; then
-        echo "$claim: $symbol branches nowhere but calls out; the work is in a" >&2
-        echo "  callee this script could not follow, so nothing was inspected." >&2
-        exit 1
-    fi
+    # The claim is the code this operation runs, so a function it calls is
+    # part of it: append each callee's body, and each of theirs, so a branch
+    # in a helper is not missed by looking only at the caller. Only this
+    # crate's own functions are followed — a call into the allocator or a
+    # panicking function ends a path the classification already names.
+    callees_of() {
+        grep -oE '^[[:space:]]+(bl|call|callq|b|jmp|jmpq)[[:space:]]+\*?[._a-zA-Z0-9$]+(@GOTPCREL\(%rip\))?$' "$1" \
+            | awk '{print $2}' | sed 's/@GOTPCREL(%rip)$//; s/^\*//' \
+            | grep -E 'cryptography|rump' | sort -u || true
+    }
+    seen=" $symbol "
+    queue=$(callees_of "$body")
+    hop=0
+    while [ "$hop" -lt "$depth" ]; do
+        hop=$((hop + 1))
+        next=""
+        for callee in $queue; do
+            case $seen in *" $callee "*) continue ;; esac
+            seen="$seen$callee "
+            callee_file=$(grep -lE "^${callee}:" $asm | head -1 || true)
+            [ -n "$callee_file" ] || continue
+            extract "$callee" "$callee_file" > "$body.part"
+            [ -s "$body.part" ] || continue
+            cat "$body.part" >> "$body"
+            next="$next $(callees_of "$body.part")"
+        done
+        rm -f "$body.part"
+        [ -n "$next" ] || break
+        queue=$next
+    done
+    reached=$(( $(printf '%s' "$seen" | wc -w) - 1 ))
     echo
-    echo "$claim: $(grep -cE '^[[:space:]]+[a-z]' "$body") instructions in $symbol"
+    echo "$claim: $(grep -cE '^[[:space:]]+[a-z]' "$body" || true) instructions in $symbol"
+    [ "$reached" -eq 0 ] || echo "  with $reached function(s) it calls"
     grep -nE "^[[:space:]]+$branches" "$body" | cut -d: -f1 > "$body.branches" || true
     if [ -s "$body.branches" ]; then
         classify "$body.branches" "$body" "$body.unread"

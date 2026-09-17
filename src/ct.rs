@@ -322,6 +322,25 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
 }
 
 // ---------------------------------------------------------------------------
+// Mask-driven selection
+// ---------------------------------------------------------------------------
+
+/// Returns `chosen` where `mask` has one bits and `other` where it has zeros;
+/// `mask` is all ones or all zeros.
+///
+/// The mask goes through `black_box` first. Written plainly, a selection whose
+/// mask comes from a borrow or a comparison is a pattern LLVM recognises and
+/// may emit as a conditional branch, which is what it did to the X25519 field
+/// canonicalisation: the branch then tests the secret the selection was there
+/// to protect. `scripts/ct_codegen.sh` is what catches that, and this is what
+/// keeps it from coming back.
+#[inline]
+pub(crate) fn select_u64(mask: u64, chosen: u64, other: u64) -> u64 {
+    let mask = black_box(mask);
+    (chosen & mask) | (other & !mask)
+}
+
+// ---------------------------------------------------------------------------
 // Slice equality
 // ---------------------------------------------------------------------------
 

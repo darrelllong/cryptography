@@ -9,6 +9,16 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
+### Fixed
+- X25519's field canonicalisation was compiled into a conditional branch on
+  the value being encoded. `fe_to_bytes` subtracts `p` under a mask built from
+  the borrow, which the source writes branch-free, but under rustc 1.93.1 on
+  `aarch64-apple-darwin` the optimizer recognised the select and emitted
+  `cmp`/`b.lt` over it — a branch on the secret the mask was there to protect.
+  The select now goes through `ct::select_u64`, whose `black_box` barrier
+  keeps it arithmetic; X448's identical canonicalisation takes the same route.
+  `scripts/ct_codegen.sh` found this, and now fails the build if it returns.
+
 ### Changed
 - Spec-fixed widths, round counts, table sizes and bounds across the ciphers,
   hashes, curve modules, HMAC, HKDF, RFC 6979, ML-KEM, ML-DSA and the prime
@@ -31,7 +41,10 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   comparisons unclassified, and `src/ct.rs`, `src/ciphers/aes.rs` and the two
   ladder modules record the reading. Each claim carries the number of
   unclassified branches that reading covers and CI runs the script on both
-  platforms, so a compiler that introduces another one fails the build.
+  platforms, so a compiler that introduces another one fails the build. The
+  claims now cover every `Ct` block cipher, the ChaCha20 keystream, the
+  Poly1305 MAC, a complete AEAD open and a complete X25519 key agreement, and
+  each claim's report includes the functions it calls.
 - Fast-key-erasure tests for the evidence the review asks of the
   construction: served bytes appear in no buffer it keeps, an interrupted
   fill leaves none behind, reseeding after a simulated state compromise
