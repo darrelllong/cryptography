@@ -18,20 +18,41 @@
 
 use super::{Digest, Xof};
 
+/// Keccak-f[1600] holds 25 lanes of 64 bits in a 5×5 array (FIPS 202 §3.1),
+/// and runs 24 rounds (§3.4).
+const LANES: usize = 25;
+const LANE_BYTES: usize = 8;
+const ROW: usize = 5;
+const STATE_BYTES: usize = LANES * LANE_BYTES;
+const ROUNDS: usize = 24;
+
+/// FIPS 202 §6: the rate is what the capacity leaves of the state, and the
+/// capacity is twice the security strength — for the fixed-output functions,
+/// twice the digest length.
+const fn rate_bytes(capacity_bits: usize) -> usize {
+    STATE_BYTES - capacity_bits / 8
+}
+
+/// Domain separation, appended to the message before `pad10*1`: `01` for the
+/// SHA-3 hash functions (§6.1) and `1111` for SHAKE (§6.2), each shown with
+/// the padding's first bit in Appendix B.2.
+const SHA3_SUFFIX: u8 = 0x06;
+const SHAKE_SUFFIX: u8 = 0x1f;
+
 // Keccak-f[1600] rho-step rotation offsets for lanes A[x,y] (FIPS 202,
 // Keccak-p permutation definition).
-const RHO: [u32; 25] = [
+const RHO: [u32; LANES] = [
     0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
 ];
 
 // Keccak-f[1600] pi-step lane permutation, flattened as index x + 5*y where
 // (x, y) -> (y, (2x + 3y) mod 5).
-const PI: [usize; 25] = [
+const PI: [usize; LANES] = [
     0, 10, 20, 5, 15, 16, 1, 11, 21, 6, 7, 17, 2, 12, 22, 23, 8, 18, 3, 13, 14, 24, 9, 19, 4,
 ];
 
 // Keccak-f[1600] iota-step round constants for rounds 0..23.
-const RC: [u64; 24] = [
+const RC: [u64; ROUNDS] = [
     0x0000_0000_0000_0001,
     0x0000_0000_0000_8082,
     0x8000_0000_0000_808A,
@@ -61,7 +82,7 @@ const RC: [u64; 24] = [
 // Runtime-dispatching entry point: hardware on aarch64 + FEAT_SHA3 when the
 // opt-in `arm-sha3` cargo feature is enabled, else the portable soft path.
 #[inline]
-fn keccak_f1600(state: &mut [u64; 25]) {
+fn keccak_f1600(state: &mut [u64; LANES]) {
     #[cfg(all(target_arch = "aarch64", feature = "arm-sha3"))]
     {
         if std::arch::is_aarch64_feature_detected!("sha3") {
@@ -76,41 +97,46 @@ fn keccak_f1600(state: &mut [u64; 25]) {
 }
 
 // Pure-Rust fallback — 24 rounds of theta → rho → pi → chi → iota.
-fn keccak_f1600_soft(state: &mut [u64; 25]) {
+fn keccak_f1600_soft(state: &mut [u64; LANES]) {
     // Round scratch lives outside the loop so one wipe clears the last round:
     // `b` is the state just before chi, which determines the output state,
     // capacity included.
-    let mut c = [0u64; 5];
-    let mut d = [0u64; 5];
-    let mut b = [0u64; 25];
+    let mut c = [0u64; ROW];
+    let mut d = [0u64; ROW];
+    let mut b = [0u64; LANES];
     for &rc in &RC {
         // theta: parity of each column.
-        for x in 0..5 {
-            c[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
+        for x in 0..ROW {
+            c[x] = state[x]
+                ^ state[x + ROW]
+                ^ state[x + 2 * ROW]
+                ^ state[x + 3 * ROW]
+                ^ state[x + 4 * ROW];
         }
 
         // theta: mix neighboring column parities.
-        for x in 0..5 {
-            d[x] = c[(x + 4) % 5] ^ c[(x + 1) % 5].rotate_left(1);
+        for x in 0..ROW {
+            d[x] = c[(x + ROW - 1) % ROW] ^ c[(x + 1) % ROW].rotate_left(1);
         }
 
         // theta: xor D[x] into each lane of column x.
-        for y in 0..5 {
-            for x in 0..5 {
-                state[x + 5 * y] ^= d[x];
+        for y in 0..ROW {
+            for x in 0..ROW {
+                state[x + ROW * y] ^= d[x];
             }
         }
 
         // rho + pi: per-lane rotate, then permute lane positions.
-        for i in 0..25 {
+        for i in 0..LANES {
             b[PI[i]] = state[i].rotate_left(RHO[i]);
         }
 
         // chi: nonlinear row step.
-        for y in 0..5 {
-            let row = 5 * y;
-            for x in 0..5 {
-                state[row + x] = b[row + x] ^ ((!b[row + ((x + 1) % 5)]) & b[row + ((x + 2) % 5)]);
+        for y in 0..ROW {
+            let row = ROW * y;
+            for x in 0..ROW {
+                state[row + x] =
+                    b[row + x] ^ ((!b[row + ((x + 1) % ROW)]) & b[row + ((x + 2) % ROW)]);
             }
         }
 
@@ -131,7 +157,7 @@ fn keccak_f1600_soft(state: &mut [u64; 25]) {
 #[cfg(all(target_arch = "aarch64", feature = "arm-sha3"))]
 #[target_feature(enable = "sha3")]
 #[allow(unsafe_code)]
-unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
+unsafe fn keccak_f1600_sha3(state: &mut [u64; LANES]) {
     use core::arch::aarch64::*;
 
     // Pack two scalars into a 128-bit SIMD register [a, b].
@@ -146,9 +172,9 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
     // below (`c01`, `c23`, `d01`, `d23`, `chi01`, `chi23`) carry the same
     // words through the intrinsics; they live in vector registers, have no
     // address to wipe, and are overwritten by the next round's values.
-    let mut c = [0u64; 5];
-    let mut d = [0u64; 5];
-    let mut b = [0u64; 25];
+    let mut c = [0u64; ROW];
+    let mut d = [0u64; ROW];
+    let mut b = [0u64; LANES];
     for &rc in &RC {
         // === Theta ===
         // Column parities: c[x] = XOR of 5 lanes in column x.
@@ -200,9 +226,9 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         ];
 
         // Apply D[x] to every lane in column x.
-        for y in 0..5 {
-            for x in 0..5 {
-                state[x + 5 * y] ^= d[x];
+        for y in 0..ROW {
+            for x in 0..ROW {
+                state[x + ROW * y] ^= d[x];
             }
         }
 
@@ -210,7 +236,7 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         // Each of the 24 non-zero-rotation lanes has a unique RHO value, so
         // XAR (which applies the same rotation to both elements of a pair)
         // gives no advantage.  Keep the existing scalar loop.
-        for i in 0..25 {
+        for i in 0..LANES {
             b[PI[i]] = state[i].rotate_left(RHO[i]);
         }
 
@@ -219,7 +245,7 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
         //        = BCAX(b[x], b[(x+2)%5], b[(x+1)%5])
         // vbcaxq_u64(a, b, c) = a ^ (b & !c), elementwise.
         // Process each row of 5 lanes as two SIMD pairs + one scalar.
-        for y in 0..5 {
+        for y in 0..ROW {
             let r = y * 5;
             // x=0: BCAX(b[0], b[2], b[1])    x=1: BCAX(b[1], b[3], b[2])
             let chi01 = vbcaxq_u64(
@@ -250,8 +276,8 @@ unsafe fn keccak_f1600_sha3(state: &mut [u64; 25]) {
 }
 
 #[inline]
-fn absorb_block<const RATE: usize>(state: &mut [u64; 25], block: &[u8; RATE]) {
-    debug_assert_eq!(RATE % 8, 0, "Keccak rate must be lane-aligned");
+fn absorb_block<const RATE: usize>(state: &mut [u64; LANES], block: &[u8; RATE]) {
+    debug_assert_eq!(RATE % LANE_BYTES, 0, "Keccak rate must be lane-aligned");
     let lanes = RATE / 8;
     let mut i = 0usize;
     while i < lanes {
@@ -265,7 +291,7 @@ fn absorb_block<const RATE: usize>(state: &mut [u64; 25], block: &[u8; RATE]) {
 /// Serialize the rate lanes of `state` into `out` (little-endian), writing in
 /// place so no temporary copy of the output block is left behind.
 #[inline]
-fn load_rate_bytes<const RATE: usize>(state: &[u64; 25], out: &mut [u8; RATE]) {
+fn load_rate_bytes<const RATE: usize>(state: &[u64; LANES], out: &mut [u8; RATE]) {
     let lanes = RATE / 8;
     let mut i = 0usize;
     while i < lanes {
@@ -444,7 +470,7 @@ macro_rules! define_sha3 {
             #[must_use]
             pub fn finalize(mut self) -> [u8; $out_len] {
                 let mut out = [0u8; $out_len];
-                self.inner.finalize_in_place(0x06, &mut out);
+                self.inner.finalize_in_place(SHA3_SUFFIX, &mut out);
                 // `self` drops here, and `Drop` wipes the final state.
                 out
             }
@@ -476,12 +502,12 @@ macro_rules! define_sha3 {
 
             fn finalize_into(mut self, out: &mut [u8]) {
                 assert_eq!(out.len(), $out_len, "wrong digest length");
-                self.inner.finalize_in_place(0x06, out);
+                self.inner.finalize_in_place(SHA3_SUFFIX, out);
             }
 
             fn finalize_reset(&mut self, out: &mut [u8]) {
                 assert_eq!(out.len(), $out_len, "wrong digest length");
-                self.inner.finalize_in_place(0x06, out);
+                self.inner.finalize_in_place(SHA3_SUFFIX, out);
                 // Assigning a fresh sponge drops the consumed one, and `Drop`
                 // wipes its state.
                 self.inner = Keccak::new();
@@ -494,10 +520,10 @@ macro_rules! define_sha3 {
     };
 }
 
-define_sha3!(Sha3_224, 144, 28);
-define_sha3!(Sha3_256, 136, 32);
-define_sha3!(Sha3_384, 104, 48);
-define_sha3!(Sha3_512, 72, 64);
+define_sha3!(Sha3_224, { rate_bytes(2 * 224) }, 28);
+define_sha3!(Sha3_256, { rate_bytes(2 * 256) }, 32);
+define_sha3!(Sha3_384, { rate_bytes(2 * 384) }, 48);
+define_sha3!(Sha3_512, { rate_bytes(2 * 512) }, 64);
 
 macro_rules! define_shake {
     ($name:ident, $rate:expr) => {
@@ -557,7 +583,7 @@ macro_rules! define_shake {
 
             fn squeeze(&mut self, out: &mut [u8]) {
                 if !self.inner.squeezing {
-                    self.inner.pad_and_permute(0x1f);
+                    self.inner.pad_and_permute(SHAKE_SUFFIX);
                 }
                 self.inner.squeeze(out);
             }
@@ -565,8 +591,8 @@ macro_rules! define_shake {
     };
 }
 
-define_shake!(Shake128, 168);
-define_shake!(Shake256, 136);
+define_shake!(Shake128, { rate_bytes(2 * 128) });
+define_shake!(Shake256, { rate_bytes(2 * 256) });
 
 #[cfg(test)]
 mod tests {

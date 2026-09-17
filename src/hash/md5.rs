@@ -8,7 +8,19 @@
 use super::Digest;
 
 // RFC 1321 §3.3 initial state words (A, B, C, D).
-const IV: [u32; 4] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476];
+/// RFC 1321 §3: MD5 works on 512-bit blocks of little-endian 32-bit words,
+/// keeps four of them as the state, and runs four rounds of sixteen steps.
+const BLOCK_BYTES: usize = 64;
+const WORD_BYTES: usize = 4;
+const STATE_WORDS: usize = 4;
+const DIGEST_BYTES: usize = STATE_WORDS * WORD_BYTES;
+const BLOCK_WORDS: usize = BLOCK_BYTES / WORD_BYTES;
+/// §3.1 padding: a `0x80` byte, zeros, and the 64-bit little-endian length.
+const PAD_START: u8 = 0x80;
+const LENGTH_BYTES: usize = 8;
+const LENGTH_OFFSET: usize = BLOCK_BYTES - LENGTH_BYTES;
+
+const IV: [u32; STATE_WORDS] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476];
 
 // RFC 1321 §3.4: four auxiliary functions, each taking three 32-bit words to
 // one. The RFC writes XY for the bitwise AND of X and Y, X v Y for their OR,
@@ -50,7 +62,7 @@ const fn I(X: u32, Y: u32, Z: u32) -> u32 {
 /// operations in the rounds; the `t_is_the_integer_part_of_4294967296_abs_sin_i`
 /// test recomputes them.
 #[rustfmt::skip]
-const T: [u32; 64] = [
+const T: [u32; 4 * BLOCK_WORDS] = [
     0xd76a_a478, 0xe8c7_b756, 0x2420_70db, 0xc1bd_ceee,
     0xf57c_0faf, 0x4787_c62a, 0xa830_4613, 0xfd46_9501,
     0x6980_98d8, 0x8b44_f7af, 0xffff_5bb1, 0x895c_d7be,
@@ -75,11 +87,11 @@ const T: [u32; 64] = [
 /// registers (A, B, C, D).
 #[allow(non_snake_case)]
 #[inline]
-fn compress(state: &mut [u32; 4], block: &[u8; 64]) {
+fn compress(state: &mut [u32; STATE_WORDS], block: &[u8; BLOCK_BYTES]) {
     // Copy block i into X. The RFC reads each four bytes as a word "with the
     // low-order (least significant) byte given first" (§2).
     let mut X = [0u32; 16];
-    for (j, bytes) in block.chunks_exact(4).enumerate() {
+    for (j, bytes) in block.chunks_exact(WORD_BYTES).enumerate() {
         X[j] = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     }
 
@@ -171,8 +183,8 @@ fn compress(state: &mut [u32; 4], block: &[u8; 64]) {
 /// for legacy interoperability, per the module warning.
 #[derive(Clone)]
 pub struct Md5 {
-    state: [u32; 4],
-    block: [u8; 64],
+    state: [u32; STATE_WORDS],
+    block: [u8; BLOCK_BYTES],
     pos: usize,
     bit_len: u64,
 }
@@ -187,9 +199,9 @@ impl Md5 {
     /// Compression-function block size in bytes (512 bits). This is the
     /// rate at which input is consumed and the pad width HMAC keys are
     /// sized against.
-    pub const BLOCK_LEN: usize = 64;
+    pub const BLOCK_LEN: usize = BLOCK_BYTES;
     /// Digest length in bytes (128 bits).
-    pub const OUTPUT_LEN: usize = 16;
+    pub const OUTPUT_LEN: usize = DIGEST_BYTES;
 
     /// Create a fresh hasher: the RFC 1321 §3.3 initial state (A, B, C, D)
     /// and an empty (zero-length) message.
@@ -234,21 +246,21 @@ impl Md5 {
     fn finalize_in_place(&mut self, out: &mut [u8; 16]) {
         self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
 
-        self.block[self.pos] = 0x80;
+        self.block[self.pos] = PAD_START;
         self.pos += 1;
 
-        if self.pos > 56 {
+        if self.pos > LENGTH_OFFSET {
             self.block[self.pos..].fill(0);
             compress(&mut self.state, &self.block);
-            self.block = [0u8; 64];
+            self.block = [0u8; BLOCK_BYTES];
             self.pos = 0;
         }
 
-        self.block[self.pos..56].fill(0);
-        self.block[56..].copy_from_slice(&self.bit_len.to_le_bytes());
+        self.block[self.pos..LENGTH_OFFSET].fill(0);
+        self.block[LENGTH_OFFSET..].copy_from_slice(&self.bit_len.to_le_bytes());
         compress(&mut self.state, &self.block);
 
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
+        for (chunk, word) in out.chunks_exact_mut(WORD_BYTES).zip(self.state.iter()) {
             chunk.copy_from_slice(&word.to_le_bytes());
         }
     }
@@ -258,14 +270,14 @@ impl Md5 {
 // methods delegate through the trait path, so neither pair can turn into
 // silent recursion if one half is removed.
 impl Digest for Md5 {
-    const BLOCK_LEN: usize = 64;
-    const OUTPUT_LEN: usize = 16;
+    const BLOCK_LEN: usize = BLOCK_BYTES;
+    const OUTPUT_LEN: usize = DIGEST_BYTES;
 
     /// The RFC 1321 §3.3 initial state (A, B, C, D) and an empty message.
     fn new() -> Self {
         Self {
             state: IV,
-            block: [0u8; 64],
+            block: [0u8; BLOCK_BYTES],
             pos: 0,
             bit_len: 0,
         }
@@ -273,16 +285,16 @@ impl Digest for Md5 {
 
     fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
-            let take = (64 - self.pos).min(data.len());
+            let take = (BLOCK_BYTES - self.pos).min(data.len());
             self.block[self.pos..self.pos + take].copy_from_slice(&data[..take]);
             self.pos += take;
             data = &data[take..];
 
-            if self.pos == 64 {
+            if self.pos == BLOCK_BYTES {
                 compress(&mut self.state, &self.block);
-                self.block = [0u8; 64];
+                self.block = [0u8; BLOCK_BYTES];
                 self.pos = 0;
-                self.bit_len = self.bit_len.wrapping_add(512);
+                self.bit_len = self.bit_len.wrapping_add(8 * BLOCK_BYTES as u64);
             }
         }
     }

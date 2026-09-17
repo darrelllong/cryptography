@@ -7,7 +7,21 @@
 use super::Digest;
 
 // FIPS 180-4 §5.3.1 initial hash value H(0) for SHA-1.
-const IV: [u32; 5] = [
+/// FIPS 180-4 §1: SHA-1 works on 512-bit blocks of 32-bit words, keeps five of
+/// them as the hash value, runs eighty rounds, and produces 160 bits.
+const BLOCK_BYTES: usize = 64;
+const WORD_BYTES: usize = 4;
+const STATE_WORDS: usize = 5;
+const ROUNDS: usize = 80;
+const DIGEST_BYTES: usize = STATE_WORDS * WORD_BYTES;
+/// The first sixteen schedule words are the block itself (§6.1.2 step 1).
+const BLOCK_WORDS: usize = BLOCK_BYTES / WORD_BYTES;
+/// §5.1.1 padding: a `0x80` byte, zeros, and the 64-bit big-endian length.
+const PAD_START: u8 = 0x80;
+const LENGTH_BYTES: usize = 8;
+const LENGTH_OFFSET: usize = BLOCK_BYTES - LENGTH_BYTES;
+
+const IV: [u32; STATE_WORDS] = [
     0x6745_2301,
     0xEFCD_AB89,
     0x98BA_DCFE,
@@ -76,14 +90,14 @@ const fn K(t: usize) -> u32 {
 // well, rather than iterating over W as Clippy's needless_range_loop prefers.
 #[allow(non_snake_case, clippy::needless_range_loop)]
 #[inline]
-fn compress(H: &mut [u32; 5], block: &[u8; 64]) {
+fn compress(H: &mut [u32; STATE_WORDS], block: &[u8; BLOCK_BYTES]) {
     // 1. Prepare the message schedule, {W_t}. The first sixteen words are the
     //    block's M_0^(i), ..., M_15^(i), each big-endian (§3.1, §5.2.1).
-    let mut W = [0u32; 80];
-    for (t, M_t) in block.chunks_exact(4).enumerate() {
+    let mut W = [0u32; ROUNDS];
+    for (t, M_t) in block.chunks_exact(WORD_BYTES).enumerate() {
         W[t] = u32::from_be_bytes([M_t[0], M_t[1], M_t[2], M_t[3]]);
     }
-    for t in 16..=79 {
+    for t in BLOCK_WORDS..ROUNDS {
         W[t] = (W[t - 3] ^ W[t - 8] ^ W[t - 14] ^ W[t - 16]).rotate_left(1);
     }
 
@@ -92,7 +106,7 @@ fn compress(H: &mut [u32; 5], block: &[u8; 64]) {
     let [mut a, mut b, mut c, mut d, mut e] = *H;
 
     // 3. For t=0 to 79:
-    for t in 0..=79 {
+    for t in 0..ROUNDS {
         let T = a
             .rotate_left(5)
             .wrapping_add(f(t, b, c, d))
@@ -128,8 +142,8 @@ fn compress(H: &mut [u32; 5], block: &[u8; 64]) {
 /// interoperability or HMAC, per the module warning.
 #[derive(Clone)]
 pub struct Sha1 {
-    state: [u32; 5],
-    block: [u8; 64],
+    state: [u32; STATE_WORDS],
+    block: [u8; BLOCK_BYTES],
     pos: usize,
     bit_len: u64,
 }
@@ -144,9 +158,9 @@ impl Sha1 {
     /// Compression-function block size in bytes (512 bits). This is the
     /// rate at which input is consumed and the pad width HMAC keys are
     /// sized against.
-    pub const BLOCK_LEN: usize = 64;
+    pub const BLOCK_LEN: usize = BLOCK_BYTES;
     /// Digest length in bytes (160 bits).
-    pub const OUTPUT_LEN: usize = 20;
+    pub const OUTPUT_LEN: usize = DIGEST_BYTES;
 
     /// Create a fresh hasher: the FIPS 180-4 §5.3.1 initial hash value and
     /// an empty (zero-length) message.
@@ -190,21 +204,21 @@ impl Sha1 {
     fn finalize_in_place(&mut self, out: &mut [u8; 20]) {
         self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
 
-        self.block[self.pos] = 0x80;
+        self.block[self.pos] = PAD_START;
         self.pos += 1;
 
-        if self.pos > 56 {
+        if self.pos > LENGTH_OFFSET {
             self.block[self.pos..].fill(0);
             compress(&mut self.state, &self.block);
-            self.block = [0u8; 64];
+            self.block = [0u8; BLOCK_BYTES];
             self.pos = 0;
         }
 
-        self.block[self.pos..56].fill(0);
-        self.block[56..].copy_from_slice(&self.bit_len.to_be_bytes());
+        self.block[self.pos..LENGTH_OFFSET].fill(0);
+        self.block[LENGTH_OFFSET..].copy_from_slice(&self.bit_len.to_be_bytes());
         compress(&mut self.state, &self.block);
 
-        for (chunk, word) in out.chunks_exact_mut(4).zip(self.state.iter()) {
+        for (chunk, word) in out.chunks_exact_mut(WORD_BYTES).zip(self.state.iter()) {
             chunk.copy_from_slice(&word.to_be_bytes());
         }
     }
@@ -214,14 +228,14 @@ impl Sha1 {
 // methods delegate through the trait path, so neither pair can turn into
 // silent recursion if one half is removed.
 impl Digest for Sha1 {
-    const BLOCK_LEN: usize = 64;
-    const OUTPUT_LEN: usize = 20;
+    const BLOCK_LEN: usize = BLOCK_BYTES;
+    const OUTPUT_LEN: usize = DIGEST_BYTES;
 
     /// The FIPS 180-4 §5.3.1 initial hash value and an empty message.
     fn new() -> Self {
         Self {
             state: IV,
-            block: [0u8; 64],
+            block: [0u8; BLOCK_BYTES],
             pos: 0,
             bit_len: 0,
         }
@@ -229,16 +243,16 @@ impl Digest for Sha1 {
 
     fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
-            let take = (64 - self.pos).min(data.len());
+            let take = (BLOCK_BYTES - self.pos).min(data.len());
             self.block[self.pos..self.pos + take].copy_from_slice(&data[..take]);
             self.pos += take;
             data = &data[take..];
 
-            if self.pos == 64 {
+            if self.pos == BLOCK_BYTES {
                 compress(&mut self.state, &self.block);
-                self.block = [0u8; 64];
+                self.block = [0u8; BLOCK_BYTES];
                 self.pos = 0;
-                self.bit_len = self.bit_len.wrapping_add(512);
+                self.bit_len = self.bit_len.wrapping_add(8 * BLOCK_BYTES as u64);
             }
         }
     }

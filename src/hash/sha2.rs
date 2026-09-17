@@ -23,6 +23,16 @@ use super::Digest;
 /// `sigma1` are its σ₀{256} and σ₁{256}.
 #[allow(non_snake_case)]
 mod sha256 {
+    /// FIPS 180-4 §1: SHA-256 works on 512-bit blocks of 32-bit words, keeps
+    /// eight of them as the hash value, and runs sixty-four rounds — one per
+    /// constant `K_t`.
+    pub(super) const BLOCK_BYTES: usize = 64;
+    pub(super) const WORD_BYTES: usize = 4;
+    pub(super) const STATE_WORDS: usize = 8;
+    pub(super) const ROUNDS: usize = 64;
+    /// The first sixteen schedule words are the block itself (§6.2.2 step 1).
+    pub(super) const BLOCK_WORDS: usize = BLOCK_BYTES / WORD_BYTES;
+
     // The Standard writes ∧ for bitwise AND, ⊕ for XOR, ¬ for the complement,
     // ROTR^n(x) for rotation right by n bits (`x.rotate_right(n)`), and
     // SHR^n(x) for the right shift `x >> n` (§2.2.2, §3.2).
@@ -73,7 +83,7 @@ mod sha256 {
     /// prime numbers", transcribed as the Standard prints them, eight to a
     /// row. A test re-derives every word from that definition.
     #[rustfmt::skip]
-    pub(super) const K: [u32; 64] = [
+    pub(super) const K: [u32; ROUNDS] = [
         0x428a_2f98, 0x7137_4491, 0xb5c0_fbcf, 0xe9b5_dba5, 0x3956_c25b, 0x59f1_11f1, 0x923f_82a4, 0xab1c_5ed5,
         0xd807_aa98, 0x1283_5b01, 0x2431_85be, 0x550c_7dc3, 0x72be_5d74, 0x80de_b1fe, 0x9bdc_06a7, 0xc19b_f174,
         0xe49b_69c1, 0xefbe_4786, 0x0fc1_9dc6, 0x240c_a1cc, 0x2de9_2c6f, 0x4a74_84aa, 0x5cb0_a9dc, 0x76f9_88da,
@@ -89,15 +99,15 @@ mod sha256 {
     /// H_7^(i-1) on entry and the ith on return. Addition (+) is performed
     /// modulo 2^32.
     #[inline]
-    pub(super) fn compress(H: &mut [u32; 8], block: &[u8; 64]) {
+    pub(super) fn compress(H: &mut [u32; STATE_WORDS], block: &[u8; BLOCK_BYTES]) {
         // 1. Prepare the message schedule, {W_t}. The first sixteen words are
         //    the block's M_0^(i), ..., M_15^(i), each big-endian (§3.1,
         //    §5.2.1).
-        let mut W = [0u32; 64];
-        for (t, M_t) in block.chunks_exact(4).enumerate() {
+        let mut W = [0u32; ROUNDS];
+        for (t, M_t) in block.chunks_exact(WORD_BYTES).enumerate() {
             W[t] = u32::from_be_bytes([M_t[0], M_t[1], M_t[2], M_t[3]]);
         }
-        for t in 16..=63 {
+        for t in BLOCK_WORDS..ROUNDS {
             W[t] = sigma1(W[t - 2])
                 .wrapping_add(W[t - 7])
                 .wrapping_add(sigma0(W[t - 15]))
@@ -109,7 +119,7 @@ mod sha256 {
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *H;
 
         // 3. For t=0 to 63:
-        for t in 0..=63 {
+        for t in 0..ROUNDS {
             let T1 = h
                 .wrapping_add(Sigma1(e))
                 .wrapping_add(Ch(e, f, g))
@@ -148,6 +158,14 @@ mod sha256 {
 /// `sigma1` are its σ₀{512} and σ₁{512}.
 #[allow(non_snake_case)]
 mod sha512 {
+    /// FIPS 180-4 §1: SHA-512 works on 1024-bit blocks of 64-bit words, keeps
+    /// eight of them as the hash value, and runs eighty rounds.
+    pub(super) const BLOCK_BYTES: usize = 128;
+    pub(super) const WORD_BYTES: usize = 8;
+    pub(super) const STATE_WORDS: usize = 8;
+    pub(super) const ROUNDS: usize = 80;
+    pub(super) const BLOCK_WORDS: usize = BLOCK_BYTES / WORD_BYTES;
+
     // The Standard writes ∧ for bitwise AND, ⊕ for XOR, ¬ for the complement,
     // ROTR^n(x) for rotation right by n bits (`x.rotate_right(n)`), and
     // SHR^n(x) for the right shift `x >> n` (§2.2.2, §3.2).
@@ -198,7 +216,7 @@ mod sha512 {
     /// prime numbers", transcribed as the Standard prints them, four to a
     /// row. A test re-derives every word from that definition.
     #[rustfmt::skip]
-    pub(super) const K: [u64; 80] = [
+    pub(super) const K: [u64; ROUNDS] = [
         0x428a_2f98_d728_ae22, 0x7137_4491_23ef_65cd, 0xb5c0_fbcf_ec4d_3b2f, 0xe9b5_dba5_8189_dbbc,
         0x3956_c25b_f348_b538, 0x59f1_11f1_b605_d019, 0x923f_82a4_af19_4f9b, 0xab1c_5ed5_da6d_8118,
         0xd807_aa98_a303_0242, 0x1283_5b01_4570_6fbe, 0x2431_85be_4ee4_b28c, 0x550c_7dc3_d5ff_b4e2,
@@ -226,17 +244,17 @@ mod sha512 {
     /// H_7^(i-1) on entry and the ith on return. Addition (+) is performed
     /// modulo 2^64.
     #[inline]
-    pub(super) fn compress(H: &mut [u64; 8], block: &[u8; 128]) {
+    pub(super) fn compress(H: &mut [u64; STATE_WORDS], block: &[u8; BLOCK_BYTES]) {
         // 1. Prepare the message schedule, {W_t}. The first sixteen words are
         //    the block's M_0^(i), ..., M_15^(i), each big-endian (§3.1,
         //    §5.2.2).
-        let mut W = [0u64; 80];
-        for (t, M_t) in block.chunks_exact(8).enumerate() {
+        let mut W = [0u64; ROUNDS];
+        for (t, M_t) in block.chunks_exact(WORD_BYTES).enumerate() {
             W[t] = u64::from_be_bytes([
                 M_t[0], M_t[1], M_t[2], M_t[3], M_t[4], M_t[5], M_t[6], M_t[7],
             ]);
         }
-        for t in 16..=79 {
+        for t in BLOCK_WORDS..ROUNDS {
             W[t] = sigma1(W[t - 2])
                 .wrapping_add(W[t - 7])
                 .wrapping_add(sigma0(W[t - 15]))
@@ -248,7 +266,7 @@ mod sha512 {
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *H;
 
         // 3. For t=0 to 79:
-        for t in 0..=79 {
+        for t in 0..ROUNDS {
             let T1 = h
                 .wrapping_add(Sigma1(e))
                 .wrapping_add(Ch(e, f, g))
@@ -281,19 +299,29 @@ mod sha512 {
     }
 }
 
+/// FIPS 180-4 §5.1.1 pads with a `0x80` byte, zeros, and the message length
+/// as a big-endian integer filling the block's last bytes.
+const PAD_START: u8 = 0x80;
+/// SHA-256's length field is 64 bits, SHA-512's 128 (§5.1.1, §5.1.2).
+const SHA256_LENGTH_BYTES: usize = 8;
+const SHA512_LENGTH_BYTES: usize = 16;
+/// The offset the length field starts at in the final block.
+const SHA256_LENGTH_OFFSET: usize = sha256::BLOCK_BYTES - SHA256_LENGTH_BYTES;
+const SHA512_LENGTH_OFFSET: usize = sha512::BLOCK_BYTES - SHA512_LENGTH_BYTES;
+
 #[derive(Clone)]
 struct Sha2_32Core {
-    state: [u32; 8],
-    block: [u8; 64],
+    state: [u32; sha256::STATE_WORDS],
+    block: [u8; sha256::BLOCK_BYTES],
     pos: usize,
     bit_len: u64,
 }
 
 impl Sha2_32Core {
-    fn new(iv: [u32; 8]) -> Self {
+    fn new(iv: [u32; sha256::STATE_WORDS]) -> Self {
         Self {
             state: iv,
-            block: [0u8; 64],
+            block: [0u8; sha256::BLOCK_BYTES],
             pos: 0,
             bit_len: 0,
         }
@@ -301,16 +329,16 @@ impl Sha2_32Core {
 
     fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
-            let take = (64 - self.pos).min(data.len());
+            let take = (sha256::BLOCK_BYTES - self.pos).min(data.len());
             self.block[self.pos..self.pos + take].copy_from_slice(&data[..take]);
             self.pos += take;
             data = &data[take..];
 
-            if self.pos == 64 {
+            if self.pos == sha256::BLOCK_BYTES {
                 sha256::compress(&mut self.state, &self.block);
-                self.block = [0u8; 64];
+                self.block = [0u8; sha256::BLOCK_BYTES];
                 self.pos = 0;
-                self.bit_len = self.bit_len.wrapping_add(512);
+                self.bit_len = self.bit_len.wrapping_add(8 * sha256::BLOCK_BYTES as u64);
             }
         }
     }
@@ -329,22 +357,25 @@ impl Sha2_32Core {
     /// (`finalize_reset`).
     fn finalize_in_place<const OUT: usize>(&mut self, out: &mut [u8; OUT]) {
         self.bit_len = self.bit_len.wrapping_add((self.pos as u64) * 8);
-        self.block[self.pos] = 0x80;
+        self.block[self.pos] = PAD_START;
         self.pos += 1;
 
-        if self.pos > 56 {
+        if self.pos > SHA256_LENGTH_OFFSET {
             self.block[self.pos..].fill(0);
             sha256::compress(&mut self.state, &self.block);
-            self.block = [0u8; 64];
+            self.block = [0u8; sha256::BLOCK_BYTES];
             self.pos = 0;
         }
 
-        self.block[self.pos..56].fill(0);
-        self.block[56..].copy_from_slice(&self.bit_len.to_be_bytes());
+        self.block[self.pos..SHA256_LENGTH_OFFSET].fill(0);
+        self.block[SHA256_LENGTH_OFFSET..].copy_from_slice(&self.bit_len.to_be_bytes());
         sha256::compress(&mut self.state, &self.block);
 
-        let mut full = [0u8; 32];
-        for (chunk, word) in full.chunks_exact_mut(4).zip(self.state.iter()) {
+        let mut full = [0u8; sha256::STATE_WORDS * sha256::WORD_BYTES];
+        for (chunk, word) in full
+            .chunks_exact_mut(sha256::WORD_BYTES)
+            .zip(self.state.iter())
+        {
             chunk.copy_from_slice(&word.to_be_bytes());
         }
         out.copy_from_slice(&full[..OUT]);
@@ -369,17 +400,17 @@ impl Drop for Sha2_32Core {
 
 #[derive(Clone)]
 struct Sha2_64Core {
-    state: [u64; 8],
-    block: [u8; 128],
+    state: [u64; sha512::STATE_WORDS],
+    block: [u8; sha512::BLOCK_BYTES],
     pos: usize,
     bit_len: u128,
 }
 
 impl Sha2_64Core {
-    fn new(iv: [u64; 8]) -> Self {
+    fn new(iv: [u64; sha512::STATE_WORDS]) -> Self {
         Self {
             state: iv,
-            block: [0u8; 128],
+            block: [0u8; sha512::BLOCK_BYTES],
             pos: 0,
             bit_len: 0,
         }
@@ -387,16 +418,16 @@ impl Sha2_64Core {
 
     fn update(&mut self, mut data: &[u8]) {
         while !data.is_empty() {
-            let take = (128 - self.pos).min(data.len());
+            let take = (sha512::BLOCK_BYTES - self.pos).min(data.len());
             self.block[self.pos..self.pos + take].copy_from_slice(&data[..take]);
             self.pos += take;
             data = &data[take..];
 
-            if self.pos == 128 {
+            if self.pos == sha512::BLOCK_BYTES {
                 sha512::compress(&mut self.state, &self.block);
-                self.block = [0u8; 128];
+                self.block = [0u8; sha512::BLOCK_BYTES];
                 self.pos = 0;
-                self.bit_len = self.bit_len.wrapping_add(1024);
+                self.bit_len = self.bit_len.wrapping_add(8 * sha512::BLOCK_BYTES as u128);
             }
         }
     }
@@ -415,22 +446,25 @@ impl Sha2_64Core {
     /// (`finalize_reset`).
     fn finalize_in_place<const OUT: usize>(&mut self, out: &mut [u8; OUT]) {
         self.bit_len = self.bit_len.wrapping_add((self.pos as u128) * 8);
-        self.block[self.pos] = 0x80;
+        self.block[self.pos] = PAD_START;
         self.pos += 1;
 
-        if self.pos > 112 {
+        if self.pos > SHA512_LENGTH_OFFSET {
             self.block[self.pos..].fill(0);
             sha512::compress(&mut self.state, &self.block);
-            self.block = [0u8; 128];
+            self.block = [0u8; sha512::BLOCK_BYTES];
             self.pos = 0;
         }
 
-        self.block[self.pos..112].fill(0);
-        self.block[112..].copy_from_slice(&self.bit_len.to_be_bytes());
+        self.block[self.pos..SHA512_LENGTH_OFFSET].fill(0);
+        self.block[SHA512_LENGTH_OFFSET..].copy_from_slice(&self.bit_len.to_be_bytes());
         sha512::compress(&mut self.state, &self.block);
 
-        let mut full = [0u8; 64];
-        for (chunk, word) in full.chunks_exact_mut(8).zip(self.state.iter()) {
+        let mut full = [0u8; sha512::STATE_WORDS * sha512::WORD_BYTES];
+        for (chunk, word) in full
+            .chunks_exact_mut(sha512::WORD_BYTES)
+            .zip(self.state.iter())
+        {
             chunk.copy_from_slice(&word.to_be_bytes());
         }
         out.copy_from_slice(&full[..OUT]);
