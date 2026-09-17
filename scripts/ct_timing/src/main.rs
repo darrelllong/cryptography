@@ -21,9 +21,16 @@
 //!   each percentile in `CROPS` the measurements above that percentile are
 //!   dropped and Welch's t between the classes is computed on what remains.
 //!   The experiment's statistic is the largest `|t|` over the crops.
-//! - An experiment is *flagged* when that statistic exceeds `THRESHOLD`. The
-//!   threshold is dudect's 4.5, which is `t` for a two-sided test at roughly
-//!   1e-5 with these sample sizes.
+//! - Each experiment is measured twice over: the statistic on the first
+//!   quarter of its measurements, and the statistic on all of them. A real
+//!   difference makes `|t|` grow with the square root of the sample size, so
+//!   four times the measurements roughly doubles it; noise near the threshold
+//!   does not grow.
+//! - An experiment is *flagged* when the full statistic exceeds `THRESHOLD`
+//!   **and** is at least `GROWTH` times the quarter statistic. The threshold
+//!   is dudect's 4.5, which is `t` for a two-sided test at roughly 1e-5 at
+//!   these sample sizes; the growth rule is what keeps a statistic that
+//!   wanders across the threshold from deciding the run.
 //!
 //! # What a run can conclude
 //!
@@ -50,11 +57,15 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use cryptography::{Aes128Ct, ChaCha20, Hmac, Sha256};
-use cryptography::vt::X25519;
+use cryptography::{Aes128Ct, ChaCha20, CtrDrbgAes256, Hmac, Sha256};
+use cryptography::vt::{MlKem, MlKemCiphertext, MlKemParameterSet, X25519};
 
-/// Timed runs per experiment, before cropping.
-const MEASUREMENTS: usize = 200_000;
+/// Timed runs per experiment, before cropping. The statistic is computed on
+/// the first quarter of them and on all of them.
+const MEASUREMENTS: usize = 800_000;
+/// How much the statistic must grow from the quarter to the whole for a
+/// difference to count as real: a leak's `|t|` doubles, noise does not.
+const GROWTH: f64 = 1.5;
 /// Measurements discarded while caches and frequency settle.
 const WARMUP: usize = 10_000;
 /// Tail percentiles kept, as thousandths, from all of it down to a tenth.
@@ -131,9 +142,12 @@ impl Samples {
         }
     }
 
-    /// The largest `|t|` over the crops, and the crop that produced it.
-    fn statistic(&self) -> (f64, u32) {
-        let mut all: Vec<f64> = self.class[0].iter().chain(self.class[1].iter()).copied().collect();
+    /// The largest `|t|` over the crops, and the crop that produced it, using
+    /// the first `fraction`th of each class's measurements.
+    fn statistic_over(&self, fraction: usize) -> (f64, u32) {
+        let take = |v: &Vec<f64>| v[..v.len() / fraction].to_vec();
+        let kept = [take(&self.class[0]), take(&self.class[1])];
+        let mut all: Vec<f64> = kept[0].iter().chain(kept[1].iter()).copied().collect();
         all.sort_by(|x, y| x.partial_cmp(y).expect("timings are finite"));
         let mut best = (0.0f64, CROPS[0]);
         for crop in CROPS {
@@ -143,7 +157,7 @@ impl Samples {
             }
             let ceiling = all[keep - 1];
             let mut moments = [Moments::default(), Moments::default()];
-            for (class, samples) in self.class.iter().enumerate() {
+            for (class, samples) in kept.iter().enumerate() {
                 for &value in samples {
                     if value <= ceiling {
                         moments[class].push(value);
@@ -218,14 +232,22 @@ fn experiment<T>(
             samples.class[class].push(elapsed);
         }
     }
-    let (t, crop) = samples.statistic();
-    let verdict = if t > THRESHOLD { "FLAGGED" } else { "no difference found" };
+    let (quarter, _) = samples.statistic_over(4);
+    let (t, crop) = samples.statistic_over(1);
+    let flagged = t > THRESHOLD && t >= GROWTH * quarter;
+    let verdict = if flagged {
+        "FLAGGED"
+    } else if t > THRESHOLD {
+        "over threshold but not growing"
+    } else {
+        "no difference found"
+    };
     println!(
-        "{name:28} |t| = {t:7.2} at crop {crop:4}/1000   {verdict}\n  \
+        "{name:31} |t| = {t:7.2} (quarter {quarter:6.2}) at crop {crop:4}/1000   {verdict}\n  \
          class 0: {}\n  class 1: {}",
         classes[0], classes[1]
     );
-    (t, crop)
+    (if flagged { t } else { 0.0 }, crop)
 }
 
 /// The positive control: a comparison that stops at the first differing byte.
@@ -275,6 +297,26 @@ fn main() {
     );
     if control <= THRESHOLD {
         failures.push("the positive control was not flagged: this run shows nothing");
+    }
+
+    // Negative control: two classes drawn from the same distribution. Anything
+    // flagged here is the apparatus, not the code under test.
+    let (null, _) = experiment(
+        "control: identical classes",
+        ["differs at byte 31", "differs at byte 31"],
+        &mut coin,
+        |_, _| {
+            let mut tag = reference;
+            let last = tag.len() - 1;
+            tag[last] ^= 0xff;
+            tag
+        },
+        |tag| {
+            black_box(Hmac::<Sha256>::verify(&key, &message, tag));
+        },
+    );
+    if null > THRESHOLD {
+        failures.push("the negative control was flagged: the apparatus separates equal classes");
     }
 
     // The same two classes through the crate's tag verification, which the
@@ -404,6 +446,43 @@ fn main() {
     );
     if middle > THRESHOLD {
         failures.push("Hmac::<Sha256>::verify separated the middle and last tag classes");
+    }
+
+    // ML-KEM decapsulation of a well-formed ciphertext against a tampered one.
+    // FIPS 203 §7.3 decapsulates both and selects the shared secret under a
+    // mask, so the two must take the same time; the fallback is what implicit
+    // rejection is for.
+    // The DRBG that builds the fixtures: seeded from the same constant, so a
+    // run's key pair and ciphertext are the same every time.
+    let mut drbg_seed = [0u8; 48];
+    drbg_seed[..SEED.len()].copy_from_slice(&SEED);
+    drbg_seed[SEED.len()..].copy_from_slice(&FIXED_BLOCK);
+    let mut drbg = CtrDrbgAes256::new(&drbg_seed);
+    let (public_key, private_key) =
+        MlKem::keygen(MlKemParameterSet::MlKem768, &mut drbg).expect("key pair");
+    let (ciphertext, _) = MlKem::encaps(&public_key, &mut drbg);
+    let good_wire = ciphertext.to_wire_bytes();
+    let (kem, _) = experiment(
+        "MlKem::decaps",
+        ["well-formed ciphertext", "tampered ciphertext"],
+        &mut coin,
+        |class, coin| {
+            let mut position = [0u8; 8];
+            coin.fill(&mut position);
+            let mut wire = good_wire.clone();
+            if class == 1 {
+                let index = usize::from_le_bytes(position) % wire.len();
+                wire[index] ^= 1;
+            }
+            MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem768, &wire)
+                .expect("ciphertext of the right length")
+        },
+        |ciphertext| {
+            black_box(MlKem::decaps(&private_key, ciphertext));
+        },
+    );
+    if kem > THRESHOLD {
+        failures.push("MlKem::decaps separated well-formed from tampered ciphertexts");
     }
 
     if failures.is_empty() {
