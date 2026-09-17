@@ -27,10 +27,14 @@
 //!   four times the measurements roughly doubles it; noise near the threshold
 //!   does not grow.
 //! - An experiment is *flagged* when the full statistic exceeds `THRESHOLD`
-//!   **and** is at least `GROWTH` times the quarter statistic. The threshold
-//!   is dudect's 4.5, which is `t` for a two-sided test at roughly 1e-5 at
-//!   these sample sizes; the growth rule is what keeps a statistic that
-//!   wanders across the threshold from deciding the run.
+//!   and either the quarter statistic does too — the difference was there all
+//!   along — or the full statistic is at least `GROWTH` times the quarter,
+//!   which is how a real difference behaves as the sample grows. The
+//!   threshold is dudect's 4.5, `t` for a two-sided test at roughly 1e-5 at
+//!   these sample sizes. The second clause is what keeps a statistic that
+//!   wanders across the threshold from deciding a run; the first is what
+//!   keeps a large, steady difference from being dismissed for not growing
+//!   fast enough.
 //!
 //! # What a run can conclude
 //!
@@ -247,7 +251,7 @@ fn experiment<T>(
     }
     let (quarter, _) = samples.statistic_over(4);
     let (t, crop) = samples.statistic_over(1);
-    let flagged = t > THRESHOLD && t >= GROWTH * quarter;
+    let flagged = t > THRESHOLD && (quarter > THRESHOLD || t >= GROWTH * quarter);
     let verdict = if flagged {
         "FLAGGED"
     } else if t > THRESHOLD {
