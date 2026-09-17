@@ -19,6 +19,9 @@ use crate::zeroize_slice;
 use crate::Hmac;
 use rump::BigUint;
 
+/// Bits in an octet: RFC 6979 reads its inputs as octet strings.
+const OCTET_BITS: usize = 8;
+
 /// RFC 6979 §2.3.2 `bits2int`: keep the leftmost `target_bits` bits of the
 /// input, interpreting the octets as a big-endian integer.
 ///
@@ -26,7 +29,7 @@ use rump::BigUint;
 /// width of the integer, so it does not depend on leading zero bits.
 pub(crate) fn bits_to_int(input: &[u8], target_bits: usize) -> BigUint {
     let mut value = BigUint::from_be_bytes(input);
-    let input_bits = input.len() * 8;
+    let input_bits = input.len() * OCTET_BITS;
     if input_bits > target_bits {
         value.shr_bits(input_bits - target_bits);
     }

@@ -5,6 +5,11 @@
 
 use super::Digest;
 
+/// The pad bytes of FIPS 198-1 §4 (RFC 2104 §2): `ipad` is 0x36 repeated and
+/// `opad` is 0x5c repeated, each as wide as the hash's block.
+const IPAD: u8 = 0x36;
+const OPAD: u8 = 0x5c;
+
 /// Streaming HMAC state over an arbitrary in-tree digest.
 ///
 /// `Clone` captures the keyed inner/outer states after ipad/opad absorption, so
@@ -45,10 +50,10 @@ impl<H: Digest> Hmac<H> {
         let mut ipad = key_block.clone();
         let mut opad = key_block;
         for b in &mut ipad {
-            *b ^= 0x36;
+            *b ^= IPAD;
         }
         for b in &mut opad {
-            *b ^= 0x5c;
+            *b ^= OPAD;
         }
 
         let mut inner = H::new();

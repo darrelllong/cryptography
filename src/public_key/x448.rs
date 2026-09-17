@@ -40,13 +40,23 @@ use crate::Csprng;
 /// Length in bytes of an X448 scalar / u-coordinate / shared secret.
 pub const X448_LEN: usize = 56;
 
-const MASK56: u64 = (1u64 << 56) - 1;
+/// The field element's eight limbs of 56 bits (`8 × 56 = 448`), and the
+/// scalar bits the ladder walks: 447 down to 0, the rest fixed by clamping.
+const LIMBS: usize = 8;
+const LIMB_BITS: u32 = 56;
+const SCALAR_TOP_BIT: usize = 447;
+
+/// RFC 7748 §5 `decodeScalar448`: clear the two low bits and set the top bit.
+const CLAMP_LOW_MASK: u8 = 0xfc;
+const CLAMP_HIGH_SET: u8 = 0x80;
+
+const MASK56: u64 = (1u64 << LIMB_BITS) - 1;
 
 // Field modulus p = 2^448 - 2^224 - 1 in 8x56 limbs.
 //   limbs 0..3 = 2^56 - 1   (bits 0..223)
 //   limb 4     = 2^56 - 2   (bit 224 = 0; bits 225..279 set)
 //   limbs 5..7 = 2^56 - 1   (bits 280..447)
-const P_LIMBS: [u64; 8] = [
+const P_LIMBS: [u64; LIMBS] = [
     0xff_ffff_ffff_ffff,
     0xff_ffff_ffff_ffff,
     0xff_ffff_ffff_ffff,
@@ -60,10 +70,10 @@ const P_LIMBS: [u64; 8] = [
 /// Field element modulo `p = 2^448 - 2^224 - 1`, stored in eight limbs of
 /// radix 2^56.
 #[derive(Clone, Copy, Debug)]
-struct Fe([u64; 8]);
+struct Fe([u64; LIMBS]);
 
 impl Fe {
-    const ZERO: Fe = Fe([0; 8]);
+    const ZERO: Fe = Fe([0; LIMBS]);
     const ONE: Fe = Fe([1, 0, 0, 0, 0, 0, 0, 0]);
 }
 
@@ -344,8 +354,8 @@ fn fe_to_bytes(a: &Fe) -> [u8; X448_LEN] {
 
 /// RFC 7748 §5 `decodeScalar448`: clamp the 56-byte scalar in place.
 fn clamp_scalar(scalar: &mut [u8; X448_LEN]) {
-    scalar[0] &= 252;
-    scalar[55] |= 128;
+    scalar[0] &= CLAMP_LOW_MASK;
+    scalar[X448_LEN - 1] |= CLAMP_HIGH_SET;
 }
 
 /// X448 Montgomery ladder.
@@ -377,7 +387,7 @@ fn x448_inner(scalar: &[u8; X448_LEN], u: &[u8; X448_LEN]) -> [u8; X448_LEN] {
     let mut aa_plus_a24e = Fe::ZERO;
 
     // Loop bits 447..0. After clamp, bit 447 is 1.
-    for t in (0..=447).rev() {
+    for t in (0..=SCALAR_TOP_BIT).rev() {
         let byte = t / 8;
         let bit = t % 8;
         let k_t = ((k[byte] >> bit) & 1) as u64;

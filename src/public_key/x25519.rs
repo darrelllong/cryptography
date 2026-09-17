@@ -41,12 +41,24 @@ use crate::Csprng;
 /// Length in bytes of an X25519 scalar / u-coordinate / shared secret.
 pub const X25519_LEN: usize = 32;
 
-const MASK51: u64 = (1u64 << 51) - 1;
+/// The field element's five limbs of 51 bits (`5 × 51 = 255`), and the scalar
+/// bits the ladder walks: 254 down to 0, the rest fixed by clamping.
+const LIMBS: usize = 5;
+const LIMB_BITS: u32 = 51;
+const SCALAR_TOP_BIT: usize = 254;
+
+/// RFC 7748 §5 `decodeScalar25519`: clear the three low bits, clear the top
+/// bit, set bit 254.
+const CLAMP_LOW_MASK: u8 = 0xf8;
+const CLAMP_HIGH_MASK: u8 = 0x7f;
+const CLAMP_HIGH_SET: u8 = 0x40;
+
+const MASK51: u64 = (1u64 << LIMB_BITS) - 1;
 
 // Field modulus p = 2^255 - 19 in 5x51 limbs.
 //   limb 0 = 2^51 - 19 = 0x7_ffff_ffff_ffed
 //   limbs 1..4 = 2^51 - 1 = 0x7_ffff_ffff_ffff
-const P_LIMBS: [u64; 5] = [
+const P_LIMBS: [u64; LIMBS] = [
     0x7_ffff_ffff_ffed,
     0x7_ffff_ffff_ffff,
     0x7_ffff_ffff_ffff,
@@ -60,10 +72,10 @@ const P_LIMBS: [u64; 5] = [
 /// long as the bound is respected by the next operation. `to_bytes`
 /// canonicalises before serialising.
 #[derive(Clone, Copy, Debug)]
-struct Fe([u64; 5]);
+struct Fe([u64; LIMBS]);
 
 impl Fe {
-    const ZERO: Fe = Fe([0; 5]);
+    const ZERO: Fe = Fe([0; LIMBS]);
     const ONE: Fe = Fe([1, 0, 0, 0, 0]);
 }
 
@@ -169,7 +181,7 @@ fn fe_mul_a24(a: &Fe) -> Fe {
 /// `20 = 0b1_0100` only clears bits 2 and 4 of its all-ones low byte, with no
 /// borrow: `0xff - 0x14 = 0xeb`. Bytes 1..=30 stay `0xff`; bit 255 is clear, so
 /// the top byte is `0x7f`.
-const P_MINUS_2_LE: [u8; 32] = {
+const P_MINUS_2_LE: [u8; X25519_LEN] = {
     let mut bytes = [0xff; 32];
     bytes[0] = 0xeb;
     bytes[31] = 0x7f;
@@ -184,7 +196,7 @@ const P_MINUS_2_LE: [u8; 32] = {
 /// table index is a digit of the public exponent, so neither the operation
 /// sequence nor the memory access pattern depends on `base`. A zero digit
 /// still multiplies (by `base^0 = 1`), which keeps the sequence uniform.
-fn fe_pow_public(base: &Fe, exponent: &[u8; 32]) -> Fe {
+fn fe_pow_public(base: &Fe, exponent: &[u8; X25519_LEN]) -> Fe {
     // powers[d] = base^d for each 4-bit digit d.
     let mut powers = [Fe::ONE; 16];
     for d in 1..powers.len() {
@@ -218,7 +230,7 @@ fn fe_invert(z: &Fe) -> Fe {
 #[inline(always)]
 fn fe_cswap(a: &mut Fe, b: &mut Fe, swap: u64) {
     let mask = 0u64.wrapping_sub(swap);
-    for i in 0..5 {
+    for i in 0..LIMBS {
         let t = mask & (a.0[i] ^ b.0[i]);
         a.0[i] ^= t;
         b.0[i] ^= t;
@@ -227,7 +239,7 @@ fn fe_cswap(a: &mut Fe, b: &mut Fe, swap: u64) {
 
 /// Decode 32 LE bytes into a field element. Per RFC 7748 §5, the high bit of
 /// the most-significant byte is masked off first.
-fn fe_from_bytes(bytes: &[u8; 32]) -> Fe {
+fn fe_from_bytes(bytes: &[u8; X25519_LEN]) -> Fe {
     let mut buf = *bytes;
     buf[31] &= 0x7f;
     let load = |off: usize| -> u64 {
@@ -246,7 +258,7 @@ fn fe_from_bytes(bytes: &[u8; 32]) -> Fe {
 
 /// Encode a field element into 32 LE bytes, fully canonicalised mod `p`.
 /// Constant-time: the conditional subtraction of `p` is mask-driven.
-fn fe_to_bytes(a: &Fe) -> [u8; 32] {
+fn fe_to_bytes(a: &Fe) -> [u8; X25519_LEN] {
     let mut t = a.0;
     // Two carry passes bring t into [0, 2*p).
     for _ in 0..2 {
@@ -271,7 +283,7 @@ fn fe_to_bytes(a: &Fe) -> [u8; 32] {
     // borrow propagation. If t < p (borrow=1), keep t; else use t - p.
     let mut s = [0u64; 5];
     let mut borrow: u64 = 0;
-    for i in 0..5 {
+    for i in 0..LIMBS {
         let diff = t[i].wrapping_sub(P_LIMBS[i]).wrapping_sub(borrow);
         s[i] = diff & MASK51;
         // Bit 63 of `diff` is set iff t[i] < P_LIMBS[i] + borrow (wraparound).
@@ -281,12 +293,12 @@ fn fe_to_bytes(a: &Fe) -> [u8; 32] {
     }
     let select_t = 0u64.wrapping_sub(borrow);
     let mut out = [0u64; 5];
-    for i in 0..5 {
+    for i in 0..LIMBS {
         out[i] = (t[i] & select_t) | (s[i] & !select_t);
     }
 
     // Pack five 51-bit limbs into 32 LE bytes.
-    let mut bytes = [0u8; 32];
+    let mut bytes = [0u8; X25519_LEN];
     bytes[0] = out[0] as u8;
     bytes[1] = (out[0] >> 8) as u8;
     bytes[2] = (out[0] >> 16) as u8;
@@ -328,15 +340,15 @@ fn fe_to_bytes(a: &Fe) -> [u8; 32] {
 }
 
 /// RFC 7748 §5 `decodeScalar25519`: clamp the 32-byte scalar in place.
-fn clamp_scalar(scalar: &mut [u8; 32]) {
-    scalar[0] &= 248;
-    scalar[31] &= 127;
-    scalar[31] |= 64;
+fn clamp_scalar(scalar: &mut [u8; X25519_LEN]) {
+    scalar[0] &= CLAMP_LOW_MASK;
+    scalar[X25519_LEN - 1] &= CLAMP_HIGH_MASK;
+    scalar[X25519_LEN - 1] |= CLAMP_HIGH_SET;
 }
 
 /// X25519 Montgomery ladder. Computes `scalar * u` per RFC 7748 §5 with
 /// constant-time scalar processing.
-fn x25519_inner(scalar: &[u8; 32], u: &[u8; 32]) -> [u8; 32] {
+fn x25519_inner(scalar: &[u8; X25519_LEN], u: &[u8; X25519_LEN]) -> [u8; X25519_LEN] {
     let mut k = *scalar;
     clamp_scalar(&mut k);
 
@@ -365,7 +377,7 @@ fn x25519_inner(scalar: &[u8; 32], u: &[u8; 32]) -> [u8; 32] {
 
     // Process bits 254 down to 0. Bits above 254 are forced to zero by the
     // clamp; bit 254 is forced to 1 (so swap on that bit is well-defined).
-    for t in (0..=254).rev() {
+    for t in (0..=SCALAR_TOP_BIT).rev() {
         let byte = t / 8;
         let bit = t % 8;
         let k_t = ((k[byte] >> bit) & 1) as u64;
@@ -448,14 +460,14 @@ impl X25519 {
     /// Compute `scalar * u` per RFC 7748 §5. The scalar is clamped before use.
     /// Constant-time in `scalar` and `u`.
     #[must_use]
-    pub fn scalar_mult(scalar: &[u8; 32], u: &[u8; 32]) -> [u8; 32] {
+    pub fn scalar_mult(scalar: &[u8; X25519_LEN], u: &[u8; X25519_LEN]) -> [u8; X25519_LEN] {
         x25519_inner(scalar, u)
     }
 
     /// Compute `scalar * G` where `G` is the X25519 base point (`u = 9`).
     #[must_use]
-    pub fn scalar_mult_base(scalar: &[u8; 32]) -> [u8; 32] {
-        let mut base = [0u8; 32];
+    pub fn scalar_mult_base(scalar: &[u8; X25519_LEN]) -> [u8; X25519_LEN] {
+        let mut base = [0u8; X25519_LEN];
         base[0] = 9;
         x25519_inner(scalar, &base)
     }
@@ -464,7 +476,7 @@ impl X25519 {
     /// 32 random bytes pre-clamping; clamping is applied at use time.
     #[must_use]
     pub fn generate<R: Csprng>(rng: &mut R) -> (X25519PublicKey, X25519PrivateKey) {
-        let mut secret = [0u8; 32];
+        let mut secret = [0u8; X25519_LEN];
         rng.fill_bytes(&mut secret);
         let public_bytes = X25519::scalar_mult_base(&secret);
         let pair = (X25519PublicKey(public_bytes), X25519PrivateKey(secret));
@@ -476,7 +488,7 @@ impl X25519 {
 
 /// X25519 private key: 32 raw bytes. Zeroised on drop.
 #[derive(Clone)]
-pub struct X25519PrivateKey([u8; 32]);
+pub struct X25519PrivateKey([u8; X25519_LEN]);
 
 impl PartialEq for X25519PrivateKey {
     /// Compares the scalars in constant time.
@@ -500,14 +512,14 @@ pub struct X25519PublicKey([u8; X25519_LEN]);
 impl X25519PrivateKey {
     /// Construct from raw scalar bytes (caller-supplied entropy required).
     #[must_use]
-    pub fn from_raw_bytes(bytes: &[u8; 32]) -> Self {
+    pub fn from_raw_bytes(bytes: &[u8; X25519_LEN]) -> Self {
         Self(*bytes)
     }
 
     /// Construct from a mutable buffer; the caller's buffer is zeroised after
     /// the private scalar is copied.
     #[must_use]
-    pub fn from_raw_bytes_wiping(bytes: &mut [u8; 32]) -> Self {
+    pub fn from_raw_bytes_wiping(bytes: &mut [u8; X25519_LEN]) -> Self {
         let key = Self(*bytes);
         zeroize_slice(&mut bytes[..]);
         key
@@ -515,7 +527,7 @@ impl X25519PrivateKey {
 
     /// Return the raw 32-byte scalar.
     #[must_use]
-    pub fn to_raw_bytes(&self) -> [u8; 32] {
+    pub fn to_raw_bytes(&self) -> [u8; X25519_LEN] {
         self.0
     }
 
@@ -529,7 +541,7 @@ impl X25519PrivateKey {
     /// the result is the all-zero u-coordinate (low-order point), per the
     /// conservative recommendation in RFC 7748 §6.1.
     #[must_use]
-    pub fn agree(&self, peer: &X25519PublicKey) -> Option<[u8; 32]> {
+    pub fn agree(&self, peer: &X25519PublicKey) -> Option<[u8; X25519_LEN]> {
         let shared = X25519::scalar_mult(&self.0, &peer.0);
         let nonzero: u8 = shared.iter().fold(0u8, |acc, &b| acc | b);
         if nonzero == 0 {
@@ -612,13 +624,13 @@ impl X25519PublicKey {
     /// after the high bit is masked, and the key stores the canonical
     /// encoding of the u-coordinate `bytes` names.
     #[must_use]
-    pub fn from_raw_bytes(bytes: &[u8; 32]) -> Self {
+    pub fn from_raw_bytes(bytes: &[u8; X25519_LEN]) -> Self {
         Self(canonical_u(bytes))
     }
 
     /// Return the canonical 32-byte u-coordinate.
     #[must_use]
-    pub fn to_raw_bytes(&self) -> [u8; 32] {
+    pub fn to_raw_bytes(&self) -> [u8; X25519_LEN] {
         self.0
     }
 

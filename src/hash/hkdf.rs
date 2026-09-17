@@ -12,6 +12,10 @@ use core::marker::PhantomData;
 use super::hmac::Hmac;
 use super::Digest;
 
+/// RFC 5869 §2.3 counts the expansion blocks in one octet starting at 1, so
+/// the output is at most 255 hash lengths.
+const MAX_EXPAND_BLOCKS: usize = 255;
+
 /// HKDF key schedule state holding one pseudorandom key (PRK).
 pub struct Hkdf<H: Digest> {
     prk: Vec<u8>,
@@ -65,7 +69,7 @@ impl<H: Digest> Hkdf<H> {
     /// RFC 5869.
     #[must_use]
     pub fn expand(&self, info: &[u8], out: &mut [u8]) -> bool {
-        let max = 255usize
+        let max = MAX_EXPAND_BLOCKS
             .checked_mul(H::OUTPUT_LEN)
             .expect("digest output length should keep HKDF max bounded");
         if out.len() > max {
