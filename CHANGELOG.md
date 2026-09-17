@@ -10,6 +10,9 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Added
+- `SPECIFICATIONS.md`: for every algorithm, the specification and section it
+  is written from, the source of its known answers, and the tests that refuse
+  malformed input, keeping conformance, interoperability and refusal apart.
 - `scripts/ct_codegen.sh`, which extracts the release assembly of the crate's
   tag comparison for a target and lists its conditional branches, with
   `scripts/ct_probe` giving that comparison a symbol of its own. Under rustc

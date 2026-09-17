@@ -391,6 +391,10 @@ cargo build
 This crate tracks the latest rump: CI checks out rump's `main`, so keep
 `../rump` on `main` as well.
 
+`SPECIFICATIONS.md` lists, for every algorithm, the document it is written
+from, where its known answers come from, and which tests refuse malformed
+input.
+
 ## How To Verify Correctness
 
 Run the full suite:

@@ -212,6 +212,12 @@ jobs:
       - name: entropy tests against this cryptography
         working-directory: entropy
         run: cargo test
+      # entropy without its default features has no dependencies at all, so
+      # this catches anything that leaks the cryptography or FFT paths into
+      # entropy's core.
+      - name: entropy without default features
+        working-directory: entropy
+        run: cargo test --no-default-features
 
   # The twelve release-only tests (million-iteration RFC 7748 ladders, every
   # CAVP prime-generation case, FIPS parameter generation at every approved
