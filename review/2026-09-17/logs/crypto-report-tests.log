@@ -1,0 +1,41 @@
+all p = 0.5 passes                                               ok
+exact 0 is a probability, and fails                              ok
+exact 1 is a probability, and passes                             ok
+p = alpha / m passes                                             ok
+p just below alpha / m fails                                     ok
+no results is invalid                                            ok
+NULL is invalid                                                  ok
+seven NA is invalid                                              ok
+one 0.5 and six NA is invalid                                    ok
+a missing result is invalid                                      ok
+a p-value of NaN is invalid                                      ok
+a p-value of Inf is invalid                                      ok
+a p-value of -Inf is invalid                                     ok
+a p-value of 2 is invalid                                        ok
+a p-value of 1.25 is invalid                                     ok
+a p-value of -0.5 is invalid                                     ok
+seven values of 2 are invalid                                    ok
+a duplicated name in place of another is invalid                 ok
+an extra duplicated result is invalid                            ok
+unnamed values are invalid                                       ok
+an unexpected name is invalid                                    ok
+character values are invalid                                     ok
+a producer that errors is invalid, with its message              ok
+an error alongside complete p-values is invalid                  ok
+exit status 0 when every cipher passes                           ok
+exit status 1 when one fails                                     ok
+exit status 2 when one is invalid                                ok
+a kept ciphertext of the same executable and plaintext is reused ok
+a ciphertext without a manifest is not reused                    ok
+a ciphertext of another executable is not reused                 ok
+a ciphertext of another plaintext is not reused                  ok
+a truncated ciphertext is not reused                             ok
+an altered ciphertext is not reused                              ok
+an analysis of the same ciphertext and script is reused          ok
+an analysis by another script is not reused                      ok
+an analysis of another ciphertext is not reused                  ok
+an analysis by another battery version is not reused             ok
+an atomic write leaves the file and no partial                   ok
+an interrupted write keeps the old file and removes the partial  ok
+
+0 failures

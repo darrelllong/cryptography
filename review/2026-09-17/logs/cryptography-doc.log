@@ -1,0 +1,64 @@
+    Finished `release` profile [optimized] target(s) in 0.00s
+   Doc-tests cryptography
+
+running 57 tests
+test src/lib.rs - ManualDoctests (line 1025) ... ok
+test src/lib.rs - ManualDoctests (line 1310) ... ok
+test src/lib.rs - ManualDoctests (line 1538) ... ok
+test src/lib.rs - ManualDoctests (line 1368) ... ok
+test src/lib.rs - ManualDoctests (line 1430) ... ok
+test src/lib.rs - ManualDoctests (line 1012) ... ok
+test src/lib.rs - ManualDoctests (line 1486) ... ok
+test src/lib.rs - ManualDoctests (line 1109) ... ok
+test src/lib.rs - ManualDoctests (line 1386) ... ok
+test src/lib.rs - ManualDoctests (line 1604) ... ok
+test src/lib.rs - ManualDoctests (line 1638) ... ok
+test src/lib.rs - ManualDoctests (line 487) ... ok
+test src/lib.rs - ManualDoctests (line 1176) ... ok
+test src/lib.rs - ManualDoctests (line 1680) ... ok
+test src/lib.rs - ManualDoctests (line 671) ... ok
+test src/lib.rs - ManualDoctests (line 590) ... ok
+test src/lib.rs - ManualDoctests (line 1711) ... ok
+test src/lib.rs - ManualDoctests (line 638) ... ok
+test src/lib.rs - ManualDoctests (line 647) ... ok
+test src/lib.rs - ManualDoctests (line 920) - compile ... ok
+test src/lib.rs - ManualDoctests (line 697) ... ok
+test src/lib.rs - ManualDoctests (line 717) ... ok
+test src/lib.rs - ManualDoctests (line 749) ... ok
+test src/lib.rs - ManualDoctests (line 735) ... ok
+test src/lib.rs - ManualDoctests (line 898) ... ok
+test src/lib.rs - ManualDoctests (line 848) ... ok
+test src/lib.rs - ManualDoctests (line 783) ... ok
+test src/lib.rs - ManualDoctests (line 996) ... ok
+test src/lib.rs - ManualDoctests (line 870) ... ok
+test src/lib.rs - ManualDoctests (line 1226) ... ok
+test src/lib.rs - ManualDoctests (line 885) ... ok
+test src/lib.rs - ReadmeDoctests (line 1019) ... ok
+test src/lib.rs - ReadmeDoctests (line 1053) ... ok
+test src/lib.rs - ReadmeDoctests (line 1072) ... ok
+test src/lib.rs - ReadmeDoctests (line 1091) ... ok
+test src/lib.rs - ReadmeDoctests (line 655) ... ok
+test src/lib.rs - ReadmeDoctests (line 1158) ... ok
+test src/lib.rs - ReadmeDoctests (line 639) ... ok
+test src/lib.rs - ReadmeDoctests (line 1179) ... ok
+test src/lib.rs - ReadmeDoctests (line 1108) ... ok
+test src/lib.rs - ReadmeDoctests (line 687) ... ok
+test src/lib.rs - ReadmeDoctests (line 671) ... ok
+test src/lib.rs - ReadmeDoctests (line 781) ... ok
+test src/lib.rs - ReadmeDoctests (line 799) ... ok
+test src/lib.rs - ReadmeDoctests (line 836) ... ok
+test src/lib.rs - ReadmeDoctests (line 745) ... ok
+test src/lib.rs - ReadmeDoctests (line 963) ... ok
+test src/modes/ocb.rs - modes::ocb::Ocb (line 201) - compile fail ... ok
+test src/modes/chacha20_poly1305.rs - modes::chacha20_poly1305::ChaCha20Poly1305 (line 52) ... ok
+test src/lib.rs - ReadmeDoctests (line 996) ... ok
+test src/lib.rs - ReadmeDoctests (line 974) ... ok
+test src/public_key/ed25519.rs - public_key::ed25519::Ed25519 (line 104) ... ok
+test src/modes/mod.rs - modes::Gcm (line 1332) ... ok
+test src/modes/ocb.rs - modes::ocb::Ocb (line 188) ... ok
+test src/lib.rs - ReadmeDoctests (line 1120) ... ok
+test src/lib.rs - ManualDoctests (line 1275) ... ok
+test src/lib.rs - ReadmeDoctests (line 1140) ... ok
+
+test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.63s
+

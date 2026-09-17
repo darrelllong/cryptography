@@ -1,0 +1,1803 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling rust-mp v0.3.0 (/private/var/folders/gb/w1nlpxrn08g9p44vcrxm2tlm0000gn/T/four-repo-review-20260917-hw1jc7q_/rump)
+   Compiling cryptography-rs v0.7.0 (/private/var/folders/gb/w1nlpxrn08g9p44vcrxm2tlm0000gn/T/four-repo-review-20260917-hw1jc7q_/cryptography)
+    Finished `release` profile [optimized] target(s) in 1m 20s
+     Running unittests src/lib.rs (target/release/deps/cryptography-caef53f3e0072d38)
+
+running 1402 tests
+test ciphers::aes::tests::fips197_appendix_a1_key_expansion ... ok
+test ciphers::aes::tests::gfsbox_256 ... ok
+test ciphers::aes::tests::block_cipher_trait_refuses_wrong_block_length - should panic ... ok
+test ciphers::aes::tests::bool_sbox_matches_tables ... ok
+test ciphers::aes::tests::decrypt_fast_matches_ct_on_arbitrary_blocks ... ok
+test ciphers::aes::tests::fips197_appendix_c1_aes128 ... ok
+test ciphers::aes::tests::fips197_appendix_c2_aes192 ... ok
+test ciphers::aes::tests::fips197_appendix_c3_aes256 ... ok
+test ciphers::aes::tests::gfsbox_128 ... ok
+test ciphers::aes::tests::gfsbox_192 ... ok
+test ciphers::aes::tests::keysbox_128 ... ok
+test ciphers::aes::tests::keysbox_192 ... ok
+test ciphers::aes::tests::keysbox_256 ... ok
+test ciphers::aes::tests::td0_spot_check ... ok
+test ciphers::aes::tests::te0_spot_check ... ok
+test ciphers::aes::tests::varkey_128 ... ok
+test ciphers::aes::tests::varkey_192 ... ok
+test ciphers::aes::tests::varkey_256 ... ok
+test ciphers::aes::tests::vartxt_128 ... ok
+test ciphers::aes::tests::vartxt_192 ... ok
+test ciphers::aes::tests::vartxt_256 ... ok
+test ciphers::camellia::tests::block_cipher_trait_refuses_wrong_block_length - should panic ... ok
+test ciphers::camellia::tests::ct_sbox_matches_table ... ok
+test ciphers::camellia::tests::camellia128_ct_kat ... ok
+test ciphers::camellia::tests::camellia128_kat ... ok
+test ciphers::camellia::tests::camellia192_ct_kat ... ok
+test ciphers::camellia::tests::camellia192_kat ... ok
+test ciphers::camellia::tests::camellia256_ct_kat ... ok
+test ciphers::camellia::tests::camellia256_kat ... ok
+test ciphers::cast128::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::cast128::tests::cast128_128bit_kat ... ok
+test ciphers::cast128::tests::cast128_full_maintenance_test ... ignored, RFC 2144 B.2 Full Maintenance Test: 2,000,000 key schedules and 4,000,000 encryptions; run with `cargo test --release -- --ignored`
+test ciphers::cast128::tests::cast128_40bit_kat ... ok
+test ciphers::cast128::tests::cast128_80bit_kat ... ok
+test ciphers::cast128::tests::empty_key_rejected - should panic ... ok
+test ciphers::cast128::tests::key_length_above_range_rejected - should panic ... ok
+test ciphers::cast128::tests::key_length_below_range_rejected - should panic ... ok
+test ciphers::cast128::tests::wiping_constructor_wipes_before_rejecting ... ok
+test ciphers::chacha20::tests::chacha20_new_wiping_zeroes_inputs_and_matches_new ... ok
+test ciphers::chacha20::tests::chacha20_rfc8439_block1_vector ... ok
+test ciphers::chacha20::tests::chacha20_roundtrip_xor ... ok
+test ciphers::camellia::tests::camellia_fast_and_ct_match_random_vectors ... ok
+test ciphers::chacha20::tests::counter_exhaustion_is_checked_before_any_output ... ok
+test ciphers::chacha20::tests::hchacha20_draft_vector ... ok
+test ciphers::chacha20::tests::last_counter_block_is_available ... ok
+test ciphers::chacha20::tests::xchacha20_matches_hchacha20_plus_chacha20 ... ok
+test ciphers::chacha20::tests::keystream_past_the_last_block_panics - should panic ... ok
+test ciphers::chacha20::tests::xchacha20_new_wiping_zeroes_inputs_and_matches_new ... ok
+test ciphers::chacha20::tests::xchacha20_past_the_last_block_panics - should panic ... ok
+test ciphers::des::tests::block_cipher_trait_refuses_long_block_on_decrypt - should panic ... ok
+test ciphers::des::tests::block_cipher_trait_refuses_short_block - should panic ... ok
+test ciphers::des::tests::des_ct_direct_subtab ... ok
+test ciphers::des::tests::des_direct_subtab ... ok
+test ciphers::des::tests::des_semi_weak_keys_are_rejected_by_checked_constructor ... ok
+test ciphers::des::tests::des_weak_keys_are_rejected_by_checked_constructor ... ok
+test ciphers::des::tests::invperm_sample ... ok
+test ciphers::des::tests::parity_flipped_weak_keys_are_refused ... ok
+test ciphers::des::tests::sbox_ct_matches_tables ... ok
+test ciphers::des::tests::permop_all_32 ... ok
+test ciphers::des::tests::subtab_all_19 ... ok
+test ciphers::des::tests::tdes_2key_rejects_equal_halves ... ok
+test ciphers::des::tests::tdes_2key_roundtrip ... ok
+test ciphers::des::tests::tdes_3key_rejects_repeated_components ... ok
+test ciphers::des::tests::tdes_3key_roundtrip ... ok
+test ciphers::des::tests::tdes_3key_sp800_67_appendix_b_kat ... ok
+test ciphers::des::tests::tdes_ct_3key_sp800_67_appendix_b_kat ... ok
+test ciphers::des::tests::tdes_ct_block_cipher_trait_matches_fast ... ok
+test ciphers::des::tests::tdes_ct_single_key_equals_des_ct ... ok
+test ciphers::des::tests::tdes_mode_reports_keying_option ... ok
+test ciphers::des::tests::tdes_single_key_equals_des ... ok
+test ciphers::des::tests::varkey_all_56 ... ok
+test ciphers::des::tests::weak_key_math_still_holds_in_unchecked_path ... ok
+test ciphers::des::tests::vartext_all_64 ... ok
+test ciphers::grasshopper::tests::ct_sboxes_match_tables ... ok
+test ciphers::grasshopper::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::grasshopper::tests::encrypt_decrypt_rfc ... ok
+test ciphers::grasshopper::tests::encrypt_decrypt_rfc_ct ... ok
+test ciphers::des::tests::tdes_and_tdes_ct_match_random_vectors_2key ... ok
+test ciphers::des::tests::tdes_and_tdes_ct_match_random_vectors_3key ... ok
+test ciphers::grasshopper::tests::key_schedule_vectors ... ok
+test ciphers::grasshopper::tests::l_vectors ... ok
+test ciphers::grasshopper::tests::r_vectors ... ok
+test ciphers::grasshopper::tests::round_const_vectors ... ok
+test ciphers::grasshopper::tests::roundtrip ... ok
+test ciphers::grasshopper::tests::s_vectors ... ok
+test ciphers::magma::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::grasshopper::tests::fused_round_matches_composition ... ok
+test ciphers::magma::tests::ct_sboxes_match_tables ... ok
+test ciphers::magma::tests::encrypt_decrypt_rfc ... ok
+test ciphers::magma::tests::encrypt_decrypt_rfc_ct ... ok
+test ciphers::magma::tests::g_vectors ... ok
+test ciphers::magma::tests::key_schedule_vectors ... ok
+test ciphers::magma::tests::t_vectors ... ok
+test ciphers::magma::tests::roundtrip ... ok
+test ciphers::present::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::present::tests::ct_sbox_matches_tables ... ok
+test ciphers::present::tests::bitwise_transcription_matches_appendix_i ... ok
+test ciphers::present::tests::present128_ct_kats ... ok
+test ciphers::present::tests::present128_kats ... ok
+test ciphers::present::tests::present80_ct_kats ... ok
+test ciphers::present::tests::present80_kats ... ok
+test ciphers::rabbit::tests::chunked_fill_matches_one_shot ... ok
+test ciphers::rabbit::tests::new_wiping_zeroes_inputs_and_matches_new ... ok
+test ciphers::rabbit::tests::rabbit_roundtrip ... ok
+test ciphers::rabbit::tests::rfc4503_appendix_a1_without_iv_setup ... ok
+test ciphers::rabbit::tests::rfc4503_appendix_a2_with_iv_setup ... ok
+test ciphers::rabbit::tests::without_iv_wiping_zeroes_key_and_matches_without_iv ... ok
+test ciphers::salsa20::tests::counter_carries_across_the_32_bit_boundary ... ok
+test ciphers::salsa20::tests::new_wiping_zeroes_inputs_and_matches_new ... ok
+test ciphers::salsa20::tests::new_matches_with_key_bytes ... ok
+test ciphers::salsa20::tests::salsa20_128bit_estream_set1_vector0 ... ok
+test ciphers::salsa20::tests::salsa20_256bit_estream_set1_vector0 ... ok
+test ciphers::salsa20::tests::salsa20_chunked_stream_matches_one_shot ... ok
+test ciphers::salsa20::tests::salsa20_roundtrip_xor ... ok
+test ciphers::salsa20::tests::set_counter_seeks_to_block_boundary ... ok
+test ciphers::salsa20::tests::with_key_bytes_wiping_refuses_a_bad_length - should panic ... ok
+test ciphers::salsa20::tests::with_key_bytes_refuses_a_bad_length - should panic ... ok
+test ciphers::salsa20::tests::with_key_bytes_wiping_wipes_before_refusing_a_bad_length ... ok
+test ciphers::salsa20::tests::with_key_bytes_wiping_zeroes_inputs_and_matches_with_key_bytes ... ok
+test ciphers::seed::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::seed::tests::ct_sboxes_match_tables ... ok
+test ciphers::seed::tests::round_keys_match_rfc4269_2_3_transcription ... ok
+test ciphers::seed::tests::round_keys_match_rfc4269_appendix_b1 ... ok
+test ciphers::present::tests::present_matches_bitwise_transcription ... ok
+test ciphers::seed::tests::seed_ct_kats ... ok
+test ciphers::seed::tests::seed_kats ... ok
+test ciphers::seed::tests::seed_and_seedct_match_random_vectors ... ok
+test ciphers::serpent::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::serpent::tests::inverse_sboxes_invert_forward_sboxes ... ok
+test ciphers::serpent::tests::submission_variable_key_vectors ... ok
+test ciphers::serpent::tests::serpent128_standard_byte_order_vector ... ok
+test ciphers::serpent::tests::submission_variable_text_vectors ... ok
+test ciphers::simon::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::simon::tests::simon128_128_kat ... ok
+test ciphers::simon::tests::simon128_192_kat ... ok
+test ciphers::simon::tests::simon128_256_kat ... ok
+test ciphers::simon::tests::simon32_64_kat ... ok
+test ciphers::simon::tests::simon48_72_kat ... ok
+test ciphers::simon::tests::simon48_96_kat ... ok
+test ciphers::simon::tests::simon64_128_kat ... ok
+test ciphers::simon::tests::simon64_96_kat ... ok
+test ciphers::simon::tests::simon96_144_kat ... ok
+test ciphers::simon::tests::simon96_96_kat ... ok
+test ciphers::simon::tests::z_sequences_match_paper ... ok
+test ciphers::sm4::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::sm4::tests::ct_sbox_matches_table ... ok
+test ciphers::sm4::tests::example_1_encrypt_decrypt ... ok
+test ciphers::sm4::tests::example_1_encrypt_decrypt_ct ... ok
+test ciphers::sm4::tests::sm4_and_sm4ct_match ... ok
+test ciphers::sm4::tests::sm4_and_sm4ct_match_random_vectors ... ok
+test ciphers::serpent::tests::word_parallel_sbox_matches_table_reference ... ok
+test ciphers::snow3g::tests::chunked_fill_matches_one_shot ... ok
+test ciphers::snow3g::tests::ct_sboxes_match_tables ... ok
+test ciphers::snow3g::tests::fill_partial_word ... ok
+test ciphers::snow3g::tests::fill_partial_word_ct ... ok
+test ciphers::snow3g::tests::fill_xor_roundtrip ... ok
+test ciphers::snow3g::tests::fill_xor_roundtrip_ct ... ok
+test ciphers::snow3g::tests::keystream_test_set_1 ... ok
+test ciphers::snow3g::tests::keystream_test_set_1_ct ... ok
+test ciphers::snow3g::tests::keystream_test_set_2 ... ok
+test ciphers::snow3g::tests::keystream_test_set_2_ct ... ok
+test ciphers::snow3g::tests::keystream_test_set_3 ... ok
+test ciphers::snow3g::tests::keystream_test_set_3_ct ... ok
+test ciphers::snow3g::tests::new_wiping_zeroes_inputs_and_matches_new ... ok
+test ciphers::snow3g::tests::next_word_discards_and_wipes_pending_bytes ... ok
+test ciphers::snow3g::tests::official_test_set_1_trace_fast_and_ct ... ok
+test ciphers::snow3g::tests::official_test_set_2_trace_fast_and_ct ... ok
+test ciphers::snow3g::tests::official_test_set_3_trace_fast_and_ct ... ok
+test ciphers::snow3g::tests::official_test_set_4_iterated_fast_and_ct ... ok
+test ciphers::snow3g::tests::snow3g_and_ct_match ... ok
+test ciphers::serpent::tests::encrypt_decrypt_roundtrip_random ... ok
+test ciphers::snow3g::tests::sub_word_fills_drain_one_pending_word_across_calls ... ok
+test ciphers::speck::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::speck::tests::speck128_128_kat ... ok
+test ciphers::speck::tests::speck128_192_kat ... ok
+test ciphers::speck::tests::speck128_256_kat ... ok
+test ciphers::snow3g::tests::snow3g_and_ct_match_random_streams ... ok
+test ciphers::speck::tests::speck32_64_kat ... ok
+test ciphers::speck::tests::speck48_72_kat ... ok
+test ciphers::speck::tests::speck48_96_kat ... ok
+test ciphers::speck::tests::speck64_128_kat ... ok
+test ciphers::speck::tests::speck64_96_kat ... ok
+test ciphers::speck::tests::speck96_144_kat ... ok
+test ciphers::speck::tests::speck96_96_kat ... ok
+test ciphers::twofish::tests::ct_types_carry_no_keyed_tables_and_all_types_wipe ... ok
+test ciphers::twofish::tests::block_cipher_rejects_wrong_length - should panic ... ok
+test ciphers::twofish::tests::ecb_tbl_128 ... ok
+test ciphers::twofish::tests::ecb_tbl_192 ... ok
+test ciphers::twofish::tests::ecb_encrypt_monte_carlo_128 ... ok
+test ciphers::twofish::tests::ecb_tbl_256 ... ok
+test ciphers::twofish::tests::q_tables_match_ct_path ... ok
+test ciphers::grasshopper::tests::differential_roundtrip_random ... ok
+test ciphers::zuc::tests::chunked_fill_matches_one_shot ... ok
+test ciphers::zuc::tests::ct_sboxes_match_tables ... ok
+test ciphers::zuc::tests::fill_partial_word ... ok
+test ciphers::zuc::tests::fill_partial_word_ct ... ok
+test ciphers::zuc::tests::fill_xor_roundtrip ... ok
+test ciphers::zuc::tests::fill_xor_roundtrip_ct ... ok
+test ciphers::sm4::tests::sm4_matches_openssl_ecb ... ok
+test ciphers::zuc::tests::keystream_mixed ... ok
+test ciphers::zuc::tests::keystream_mixed_ct ... ok
+test ciphers::zuc::tests::keystream_ones ... ok
+test ciphers::des::tests::tdes_matches_openssl_ecb ... ok
+test ciphers::cast128::tests::cast128_matches_openssl_ecb ... ok
+test ciphers::des::tests::des_matches_openssl_ecb ... ok
+test ciphers::zuc::tests::keystream_ones_ct ... ok
+test ciphers::zuc::tests::keystream_test_set_4_z2000 ... ok
+test ciphers::zuc::tests::keystream_zeros ... ok
+test ciphers::zuc::tests::keystream_zeros_ct ... ok
+test ciphers::zuc::tests::new_wiping_zeroes_inputs_and_matches_new ... ok
+test ciphers::zuc::tests::next_word_discards_and_wipes_pending_bytes ... ok
+test ciphers::zuc::tests::state_after_initialisation_test_sets_1_to_4 ... ok
+test ciphers::zuc::tests::sub_word_fills_drain_one_pending_word_across_calls ... ok
+test ciphers::zuc::tests::zuc128_and_ct_match ... ok
+test ciphers::seed::tests::seed_matches_openssl_ecb ... ok
+test ciphers::zuc::tests::zuc128_and_ct_match_random_streams ... ok
+test cprng::ctr_drbg::tests::additional_input_changes_stream ... ok
+test cprng::ctr_drbg::tests::additional_input_longer_than_seedlen_is_refused - should panic ... ok
+test cprng::ctr_drbg::tests::empty_additional_input_equals_none ... ok
+test cprng::ctr_drbg::tests::instantiate_refuses_a_personalization_string_over_seedlen - should panic ... ok
+test cprng::ctr_drbg::tests::instantiate_without_personalization_is_new ... ok
+test cprng::ctr_drbg::tests::instantiate_xors_the_zero_padded_personalization_string ... ok
+test cprng::ctr_drbg::tests::nist_cavs_count0_no_df_kat ... ok
+test cprng::ctr_drbg::tests::nist_cavs_count0_no_df_kat_ct ... ok
+test cprng::ctr_drbg::tests::fill_bytes_spans_the_per_request_limit ... ok
+test cprng::ctr_drbg::tests::oversized_request_is_refused - should panic ... ok
+test cprng::ctr_drbg::tests::reseed_wiping_matches_reseed_and_erases_the_seed ... ok
+test cprng::ctr_drbg::tests::reseed_counter_tracks_requests_and_reseeds ... ok
+test cprng::ctr_drbg::tests::reseed_with_additional_input_xors_the_zero_padded_input ... ok
+test cprng::ctr_drbg::tests::same_seed_same_stream ... ok
+test ciphers::aes::tests::aes_matches_openssl_ecb ... ok
+test cprng::ctr_drbg::tests::short_additional_input_is_zero_padded_to_seedlen ... ok
+test ct::tests::constant_time_eq_mask_has_no_gross_early_exit ... ignored, release-only timing experiment
+test ciphers::camellia::tests::camellia_matches_openssl_ecb ... ok
+test cprng::ctr_drbg::tests::table_and_ct_instantiations_agree ... ok
+test ct::tests::byte_sbox_anf_matches_direct_lookup_all_inputs ... ok
+test ct::tests::ct_lookup_u8_16_picks_exact_entry ... ok
+test ct::tests::nibble_sbox_anf_matches_direct_lookup_all_inputs ... ok
+test ct::tests::parity_helpers_known_values ... ok
+test ct::tests::subset_mask8_single_bit ... ok
+test ct::tests::subset_mask8_zero_and_all_ones ... ok
+test ct::tests::zeroize_slice_zeros_integers_and_arrays ... ok
+test hash::hkdf::tests::derive_matches_extract_expand ... ok
+test hash::hkdf::tests::expand_rejects_overlong_output ... ok
+test hash::hkdf::tests::expand_zero_length_output ... ok
+test hash::hkdf::tests::from_prk_accepts_only_a_digest_width_prk ... ok
+test hash::hkdf::tests::rfc5869_case_1_sha256 ... ok
+test hash::hkdf::tests::rfc5869_case_2_sha256_long_inputs ... ok
+test hash::hkdf::tests::rfc5869_case_3_sha256_zero_salt ... ok
+test hash::hkdf::tests::rfc5869_case_4_sha1 ... ok
+test hash::hkdf::tests::rfc5869_case_5_sha1_long_inputs ... ok
+test hash::hkdf::tests::rfc5869_case_6_sha1_zero_salt_info ... ok
+test hash::hkdf::tests::rfc5869_case_7_sha1_no_salt ... ok
+test hash::hmac::tests::hmac_sha256_rfc4231_case1 ... ok
+test hash::hmac::tests::hmac_sha256_rfc4231_case2 ... ok
+test hash::hmac::tests::hmac_sha256_rfc4231_case3 ... ok
+test hash::hmac::tests::hmac_sha256_rfc4231_case4 ... ok
+test hash::hmac::tests::hmac_sha256_rfc4231_case5_truncated ... ok
+test hash::hmac::tests::hmac_sha256_rfc4231_case6 ... ok
+test hash::hmac::tests::hmac_sha256_rfc4231_case7 ... ok
+test hash::hmac::tests::hmac_sha3_256_regression_vector ... ok
+test hash::hmac::tests::hmac_sha256_verify_refuses_every_wrong_tag ... ok
+test hash::hmac::tests::hmac_sha3_256_streaming_matches_one_shot ... ok
+test hash::hmac::tests::hmac_sha3_512_regression_vector ... ok
+test hash::md5::tests::finalize_reset_and_zeroize_scrub_the_state ... ok
+test hash::hmac::tests::hmac_sha512_verify_refuses_every_wrong_tag ... ok
+test hash::md5::tests::md5_empty ... ok
+test hash::hmac::tests::hmac_sha3_256_verify_refuses_every_wrong_tag ... ok
+test hash::md5::tests::md5_known_vector ... ok
+test hash::md5::tests::md5_streaming_abc ... ok
+test hash::md5::tests::t_is_the_integer_part_of_4294967296_abs_sin_i ... ok
+test hash::ripemd160::tests::finalize_reset_and_zeroize_scrub_the_state ... ok
+test hash::ripemd160::tests::ripemd160_abc ... ok
+test hash::ripemd160::tests::ripemd160_empty ... ok
+test hash::hmac::tests::hmac_sha256_matches_openssl ... ok
+test hash::ripemd160::tests::ripemd160_message_digest ... ok
+test hash::sha1::tests::finalize_reset_and_zeroize_scrub_the_state ... ok
+test hash::sha1::tests::sha1_abc_streaming ... ok
+test hash::sha1::tests::sha1_empty ... ok
+test hash::sha2::tests::finalize_reset_and_zeroize_scrub_the_state ... ok
+test hash::sha2::tests::initial_hash_values_are_the_square_root_fractions_of_primes ... ok
+test hash::sha2::tests::sha224_abc_streaming ... ok
+test hash::sha2::tests::k_words_are_the_cube_root_fractions_of_the_first_primes ... ok
+test hash::hkdf::tests::expand_at_the_maximum_length ... ok
+test hash::sha2::tests::sha224_empty ... ok
+test hash::sha2::tests::sha256_abc_streaming ... ok
+test hash::sha2::tests::sha256_empty ... ok
+test hash::sha2::tests::sha384_abc_streaming ... ok
+test hash::sha1::tests::sha1_matches_openssl ... ok
+test hash::sha2::tests::sha384_empty ... ok
+test hash::hmac::tests::hmac_sha3_256_matches_openssl ... ok
+test hash::sha2::tests::sha512_224_abc_streaming ... ok
+test hash::sha2::tests::sha512_224_empty ... ok
+test hash::sha2::tests::sha512_256_abc_streaming ... ok
+test hash::sha2::tests::sha512_256_empty ... ok
+test hash::ripemd160::tests::ripemd160_matches_openssl ... ok
+test hash::sha2::tests::sha512_abc_streaming ... ok
+test hash::sha2::tests::sha512_empty ... ok
+test hash::sha2::tests::sha512_t_initial_values_come_from_the_iv_generation_function ... ok
+test hash::sha2::tests::sha256_matches_openssl ... ok
+test hash::sha3::tests::finalize_reset_and_zeroize_scrub_the_state ... ok
+test hash::sha3::tests::pi_permutation_is_algorithm_3 ... ok
+test hash::sha3::tests::rho_offsets_come_from_the_algorithm_2_walk ... ok
+test hash::sha3::tests::round_constants_come_from_the_algorithm_5_lfsr ... ok
+test hash::sha3::tests::sha3_224_empty ... ok
+test hash::sha3::tests::sha3_256_abc_streaming ... ok
+test hash::sha3::tests::sha3_256_empty ... ok
+test hash::sha2::tests::sha224_matches_openssl ... ok
+test hash::md5::tests::md5_matches_openssl ... ok
+test hash::sha3::tests::sha3_384_empty ... ok
+test hash::sha2::tests::sha512_224_matches_openssl ... ok
+test hash::sha2::tests::sha384_matches_openssl ... ok
+test hash::sha2::tests::sha512_256_matches_openssl ... ok
+test hash::sha3::tests::sha3_384_matches_openssl ... ok
+test hash::sha3::tests::sha3_512_empty ... ok
+test hash::sha2::tests::sha512_matches_openssl ... ok
+test hash::sha3::tests::sha3_256_matches_openssl ... ok
+test hash::sha3::tests::shake128_chunked_squeeze_matches_one_shot ... ok
+test hash::sha3::tests::shake128_abc_streaming_32 ... ok
+test hash::sha3::tests::shake128_empty_32 ... ok
+test hash::sha3::tests::shake256_empty_64 ... ok
+test hash::sha3::tests::shake128_update_after_squeeze_panics - should panic ... ok
+test hash::sha3::tests::shake256_update_after_squeeze_panics - should panic ... ok
+test hash::tests::md5_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::sha3_224_matches_openssl ... ok
+test hash::tests::ripemd160_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::sha3_512_matches_openssl ... ok
+test hash::tests::sha1_finalize_reset_yields_a_fresh_hasher ... ok
+test ciphers::sm4::tests::example_2_million_encryptions ... ok
+test hash::tests::sha224_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::sha3_224_pad_edges_match_openssl ... ok
+test hash::tests::sha256_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::shake256_pad_edges_match_openssl ... ok
+test hash::tests::sha384_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::sha3_384_pad_edges_match_openssl ... ok
+test hash::tests::sha3_224_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::tests::sha3_256_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::tests::sha3_384_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::shake128_pad_edges_match_openssl ... ok
+test hash::tests::sha3_512_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::sha3_256_pad_edges_match_openssl ... ok
+test hash::tests::sha512_224_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::tests::sha512_256_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::tests::sha512_finalize_reset_yields_a_fresh_hasher ... ok
+test hash::sha3::tests::sha3_512_pad_edges_match_openssl ... ok
+test modes::chacha20_poly1305::tests::plaintext_bound_is_the_payload_keystream ... ok
+test modes::chacha20_poly1305::tests::property_roundtrip_and_tamper_detection ... ok
+test modes::chacha20_poly1305::tests::rfc8439_aead_vector ... ok
+test hash::tests::ripemd160_padding_boundaries_match_openssl ... ok
+test hash::tests::sha1_padding_boundaries_match_openssl ... ok
+test modes::chacha20_poly1305::tests::rfc8439_poly1305_vector ... ok
+test modes::chacha20_poly1305::tests::roundtrip_with_aad ... ok
+test modes::chacha20_poly1305::tests::tampered_ciphertext_rejected ... ok
+test modes::eax::tests::eax_aes128_eprint_2003_069_known_vectors ... ok
+test modes::eax::tests::eax_roundtrip_various_lengths ... ok
+test modes::eax::tests::eax_tamper_rejected ... ok
+test modes::gcm_siv::tests::aes256_roundtrip_smoke ... ok
+test modes::gcm_siv::tests::nonce_keys_are_wiped_on_drop ... ok
+test modes::gcm_siv::tests::derive_keys_match_first_rfc8452_vector ... ok
+test modes::gcm_siv::tests::polyval_worked_example_rfc8452_appendix_a ... ok
+test modes::gcm_siv::tests::rfc8452_c1_first_three_vectors_encrypt_and_decrypt ... ok
+test modes::gcm_siv::tests::rfc8452_c2_first_three_vectors_encrypt_and_decrypt ... ok
+test modes::gcm_siv::tests::tamper_rejected ... ok
+test modes::ghash::tests::field_laws ... ok
+test modes::ghash::tests::rfc8452_appendix_a_mulx_ghash ... ok
+test modes::ghash::tests::constant_time_and_variable_time_paths_agree ... ok
+test modes::ghash::tests::rfc8452_appendix_a_worked_example ... ok
+test modes::ghash::tests::rfc8452_section_7_dot ... ok
+test modes::ghash::tests::subkey_table_is_wiped_on_drop ... ok
+test modes::ghash::tests::variable_time_subkey_is_wiped_on_drop ... ok
+test modes::ocb::tests::nonce_block_carries_taglen_mod_128 ... ok
+test modes::ocb::tests::ocb_offsets_are_wiped_on_drop ... ok
+test modes::ocb::tests::offset_window_covers_every_bottom_value ... ok
+test hash::tests::md5_padding_boundaries_match_openssl ... ok
+test modes::ocb::tests::rfc7253_sample_vector_1_empty ... ok
+test modes::ocb::tests::rfc7253_sample_vector_2_short_aad_and_pt ... ok
+test modes::ocb::tests::rfc7253_sample_vector_4_short_pt_no_aad ... ok
+test modes::ocb::tests::tag_length_is_not_a_truncation ... ok
+test modes::ocb::tests::taglen_128_authenticates ... ok
+test modes::ocb::tests::taglen_64_authenticates ... ok
+test modes::poly1305::tests::absorb_holds_at_the_derived_bounds ... ok
+test modes::ocb::tests::taglen_96_authenticates ... ok
+test modes::poly1305::tests::poly1305_key_is_wiped_on_drop ... ok
+test modes::poly1305::tests::rfc8439_poly1305_vector ... ok
+test modes::poly1305::tests::tag_state_is_wiped_on_drop ... ok
+test modes::poly1305::tests::wrapper_verify_roundtrip ... ok
+test modes::siv::tests::accepts_126_associated_data_components ... ok
+test modes::poly1305::tests::matches_rfc8439_pseudocode ... ok
+test modes::siv::tests::decrypt_refuses_127_associated_data_components_without_panicking ... ok
+test modes::siv::tests::empty_nonce_is_absent_but_empty_aad_is_a_component ... ok
+test modes::siv::tests::plaintext_bound_is_2_39_minus_128_bits ... ok
+test modes::siv::tests::encrypt_refuses_127_associated_data_components - should panic ... ok
+test modes::siv::tests::rfc5297_a1_deterministic_vector ... ok
+test modes::siv::tests::rfc5297_a2_nonce_based_vector ... ok
+test modes::siv::tests::tamper_rejected_without_plaintext_commit ... ok
+test modes::tests::aes_key_wrap_failed_unwrap_wipes_the_output ... ok
+test modes::tests::aes_key_wrap_rejects_bad_lengths_and_tampering ... ok
+test modes::tests::aes_key_wrap_rfc3394_4_1 ... ok
+test modes::tests::aes_key_wrap_rfc3394_4_2 ... ok
+test modes::tests::aes_key_wrap_rfc3394_4_3 ... ok
+test modes::tests::aes_key_wrap_rfc3394_4_4 ... ok
+test modes::tests::aes_key_wrap_rfc3394_4_6 ... ok
+test modes::tests::aes_key_wrap_rfc3394_4_5 ... ok
+test modes::tests::cbc_aes128_sp800_38a ... ok
+test modes::tests::cbc_aes192_sp800_38a ... ok
+test modes::tests::cbc_aes256_sp800_38a ... ok
+test modes::tests::ccm_aes128_cavp_tlen_16_vector ... ok
+test modes::tests::ccm_aad_length_encoding_thresholds ... ok
+test modes::tests::ccm_aes128_cavp_tlen_4_vector ... ok
+test modes::tests::ccm_aes128_rfc3610_packet_vector_1 ... ok
+test modes::tests::ccm_aes128_rfc3610_packet_vector_2 ... ok
+test modes::tests::ccm_b0_and_ctr0_match_sp800_38c_appendix_c ... ok
+test modes::tests::ccm_decrypt_rejects_length_that_does_not_fit_l ... ok
+test modes::tests::ccm_formatting_for_every_l ... ok
+test modes::tests::ccm_pack_len_guard_at_every_l ... ok
+test modes::tests::ccm_tag_mismatch_rejected ... ok
+test modes::tests::cfb8_aes128_roundtrip ... ok
+test modes::tests::cfb8_aes128_sp800_38a_prefix_vector ... ok
+test modes::tests::cfb8_aes192_sp800_38a ... ok
+test modes::tests::cfb8_aes256_sp800_38a ... ok
+test modes::tests::cfb_aes128_sp800_38a ... ok
+test modes::tests::cfb_aes192_sp800_38a ... ok
+test modes::tests::cfb_aes256_sp800_38a ... ok
+test modes::tests::cmac_aes128_sp800_38b ... ok
+test modes::tests::ctr_aes128_sp800_38a ... ok
+test modes::tests::ctr_aes192_sp800_38a ... ok
+test modes::tests::ctr_aes256_sp800_38a ... ok
+test modes::tests::ctr_des_roundtrip_generic ... ok
+test modes::tests::ecb_aes128_sp800_38a ... ok
+test modes::tests::ecb_aes192_sp800_38a ... ok
+test modes::tests::ecb_aes256_sp800_38a ... ok
+test modes::tests::gcm_aes128_test_case_1_empty ... ok
+test modes::tests::gcm_aes128_test_case_4_with_aad ... ok
+test modes::tests::gcm_aes128_test_case_2_single_block ... ok
+test modes::tests::gcm_aes256_non_96bit_iv_auth_only_cavp ... ok
+test modes::tests::gcm_aes256_single_block_cavp ... ok
+test modes::tests::gcm_ct_and_vt_backends_match ... ok
+test modes::tests::gcm_empty_iv_is_rejected - should panic ... ok
+test modes::tests::gcm_payload_limit_matches_sp800_38d_bound ... ok
+test modes::tests::gcm_rejects_wrong_tag_without_decrypting ... ok
+test modes::tests::gmac_ct_and_vt_backends_match ... ok
+test modes::tests::gmac_matches_gcm_on_empty_plaintext ... ok
+test modes::tests::ofb_aes128_sp800_38a ... ok
+test modes::tests::ofb_aes192_sp800_38a ... ok
+test modes::tests::ofb_aes256_sp800_38a ... ok
+test modes::tests::xts_aes128_ciphertext_stealing_matches_openssl ... ok
+test modes::tests::xts_aes128_ieee1619_annex_b_vectors ... ok
+test modes::tests::xts_aes128_nist_cavp_vector ... ok
+test modes::tests::xts_aes128_two_block_matches_openssl ... ok
+test modes::tests::xts_data_unit_bound_is_2_20_blocks ... ok
+test modes::tests::xts_decrypt_refuses_data_unit_longer_than_2_20_blocks - should panic ... ok
+test modes::tests::xts_encrypt_refuses_data_unit_longer_than_2_20_blocks - should panic ... ok
+test public_key::cocks::tests::byte_wrapper_roundtrip ... ok
+test public_key::cocks::tests::byte_ciphertext_roundtrip ... ok
+test public_key::cocks::tests::derive_small_reference_key ... ok
+test public_key::cocks::tests::exact_small_ciphertext_known_answer ... ok
+test public_key::cocks::tests::generate_rejects_too_few_bits ... ok
+test public_key::cocks::tests::generate_keypair_roundtrip ... ok
+test public_key::cocks::tests::generated_key_serialization_roundtrip ... ok
+test public_key::cocks::tests::key_parse_rejects_tampered_fields ... ok
+test public_key::cocks::tests::key_serialization_roundtrip ... ok
+test public_key::cocks::tests::rejects_non_invertible_choice ... ok
+test public_key::cocks::tests::rejects_unordered_primes ... ok
+test public_key::cocks::tests::roundtrip_small_messages ... ok
+test public_key::curve_pkix::tests::ber_keys_reach_the_helpers_through_the_ber_receiver ... ok
+test public_key::curve_pkix::tests::pkcs8_framing_follows_section_7_and_refuses_the_rest ... ok
+test public_key::curve_pkix::tests::identifiers_match_rfc8410_section_3 ... ok
+test public_key::curve_pkix::tests::spki_framing_follows_section_4_and_refuses_the_rest ... ok
+test public_key::dh::tests::agreement_toy_params ... ok
+test public_key::dh::tests::debug_private_key_redacted ... ok
+test hash::tests::sha224_padding_boundaries_match_openssl ... ok
+test public_key::dh::tests::explicit_exponents_agree ... ok
+test public_key::dh::tests::from_public_component_applies_full_public_key_validation ... ok
+test public_key::dh::tests::generated_fb_and_fc_params_validate_serialize_and_agree ... ignored, FIPS 186-4 generation at 2048 bits is slow in debug; run with --release --ignored
+test public_key::dh::tests::agreement_generated_toy_params ... ok
+test public_key::dh::tests::generate_params_refuses_what_the_standards_refuse ... ok
+test public_key::dh::tests::mismatched_params_rejected ... ok
+test public_key::dh::tests::new_rejects_degenerate_groups ... ok
+test public_key::dh::tests::params_binary_roundtrip ... ok
+test public_key::dh::tests::params_accessors_and_extraction ... ok
+test modes::tests::xts_aes128_runtime_cross_check_with_openssl ... ok
+test public_key::dh::tests::params_parse_rejects_tampered_fields ... ok
+test public_key::dh::tests::params_xml_roundtrip ... ok
+test public_key::dh::tests::params_pem_roundtrip ... ok
+test public_key::dh::tests::private_key_binary_roundtrip ... ok
+test modes::ghash::tests::matches_schoolbook_oracle ... ok
+test public_key::dh::tests::private_key_xml_roundtrip ... ok
+test public_key::dh::tests::private_key_pem_roundtrip ... ok
+test public_key::dh::tests::public_key_binary_roundtrip ... ok
+test public_key::dh::tests::public_key_pem_roundtrip ... ok
+test public_key::dh::tests::public_key_parse_rejects_tampered_fields ... ok
+test public_key::dh::tests::private_key_parse_rejects_tampered_fields ... ok
+test public_key::dh::tests::q_equals_two_is_refused_and_z_equals_p_minus_one_would_be_too ... ok
+test public_key::dh::tests::public_key_xml_roundtrip ... ok
+test public_key::dh::tests::public_params_extraction_rejects_group_that_fails_hardened_check ... ok
+test public_key::dh::tests::to_public_key_matches ... ok
+test public_key::dh::tests::toy_params_refuse_sizes_a_standard_covers_or_that_cannot_be_built ... ok
+test public_key::dsa::tests::cross_key_signature_is_rejected ... ok
+test public_key::dsa::tests::derive_small_reference_key_components ... ok
+test public_key::dsa::tests::deterministic_signing_retries_zero_r_and_s ... ok
+test public_key::dsa::tests::digest_to_scalar_truncates_by_digest_width ... ok
+test public_key::dsa::tests::deterministic_signing_gives_up_where_every_nonce_is_rejected ... ok
+test public_key::dsa::tests::generated_params_at_every_approved_size_validate_and_sign ... ignored, FIPS 186-4 generation at 2048 and 3072 bits is slow in debug; run with --release --ignored
+test public_key::dsa::tests::exact_small_signature_matches_reference ... ok
+test public_key::dsa::tests::generate_params_refuses_a_hash_shorter_than_n ... ok
+test public_key::dsa::tests::from_public_component_applies_full_public_key_validation ... ok
+test public_key::dsa::tests::public_key_parse_rejects_tampered_fields ... ok
+test public_key::dsa::tests::oversized_parameters_are_refused_before_any_arithmetic ... ok
+test public_key::dsa::tests::private_key_parse_rejects_tampered_fields ... ok
+test public_key::dsa::tests::randomized_signing_retries_a_zeroing_nonce_and_refuses_a_source_stuck_on_it ... ok
+test public_key::dsa::tests::rejects_invalid_parameters ... ok
+test public_key::dsa::tests::serialization_roundtrip_preserves_verification ... ok
+test public_key::dsa::tests::serialization_roundtrip ... ok
+test public_key::dsa::tests::sign_and_verify_roundtrip ... ok
+test public_key::dsa::tests::sign_bytes_roundtrip ... ok
+test public_key::dsa::tests::sign_digest_with_nonce_is_deterministic_for_fixed_nonce ... ok
+test hash::tests::sha256_padding_boundaries_match_openssl ... ok
+test public_key::dsa::tests::sign_digest_with_nonce_rejects_out_of_range_nonce ... ok
+test public_key::dsa::tests::sign_message_roundtrip ... ok
+test public_key::dsa::tests::signature_binary_roundtrip ... ok
+test public_key::dsa::tests::signature_der_matches_key_blob ... ok
+test public_key::dsa::tests::toy_params_refuse_sizes_fips_covers_or_that_cannot_be_built ... ok
+test public_key::dsa::tests::tampered_signature_is_rejected ... ok
+test public_key::dsa::tests::verify_message_matches_explicit_digest ... ok
+test public_key::ec::tests::anomalous_curves_are_recognised_at_the_helper ... ok
+test public_key::dsa::tests::verify_rejects_r_and_s_outside_subgroup_range ... ok
+test public_key::dsa::tests::with_secret_exponent_checks_only_the_exponent_range ... ok
+test hash::tests::sha384_padding_boundaries_match_openssl ... ok
+test public_key::ec::tests::b163_base_point_on_curve ... ok
+test public_key::ec::tests::b163_double_add_consistency ... ok
+test public_key::ec::tests::b163_encode_decode_compressed ... ok
+test public_key::ec::tests::b163_negation_sums_to_infinity ... ok
+test public_key::ec::tests::b163_ecdh_shared_secret_agrees ... ok
+test public_key::ec::tests::b163_encode_decode_uncompressed ... ok
+test public_key::ec::tests::b233_base_point_on_curve ... ok
+test public_key::ec::tests::b233_double_add_consistency ... ok
+test public_key::ec::tests::b163_order_times_base_is_infinity ... ok
+test public_key::ec::tests::b233_order_times_base_is_infinity ... ok
+test public_key::ec::tests::b283_base_point_on_curve ... ok
+test public_key::ec::tests::b283_double_add_consistency ... ok
+test public_key::ec::tests::b571_base_point_on_curve ... ok
+test public_key::ec::tests::b409_base_point_on_curve ... ok
+test public_key::ec::tests::composite_field_prime_is_refused ... ok
+test public_key::ec::tests::binary_two_torsion_point_round_trips_through_compression ... ok
+test hash::tests::sha512_224_padding_boundaries_match_openssl ... ok
+test public_key::ec::tests::cofactor_above_the_security_level_is_refused ... ok
+test hash::tests::sha512_256_padding_boundaries_match_openssl ... ok
+test hash::tests::sha512_padding_boundaries_match_openssl ... ok
+test public_key::dsa::tests::rfc6979_dsa_1024_sha256_sample_vector ... ok
+test public_key::ec::tests::diff_k163 ... ok
+test public_key::ec::tests::diff_b163 ... ok
+test public_key::ec::tests::diff_b233 ... ok
+test public_key::ec::tests::diff_k233 ... ok
+test public_key::ec::tests::diff_k283 ... ok
+test public_key::ec::tests::diff_p192 ... ok
+test public_key::ec::tests::diff_b283 ... ok
+test public_key::ec::tests::diff_b409 ... ok
+test public_key::ec::tests::diff_p224 ... ok
+test public_key::ec::tests::encoding_reduces_non_canonical_coordinates ... ok
+test public_key::ec::tests::diff_k409 ... ok
+test public_key::ec::tests::hasse_quotient_cofactor_agrees_with_a_floating_point_reference ... ok
+test public_key::ec::tests::hasse_quotient_holds_for_every_named_curve_and_no_neighbour ... ok
+test public_key::ec::tests::identity_decodes_but_is_never_a_valid_public_point ... ok
+test public_key::ec::tests::k163_base_point_on_curve ... ok
+test public_key::ec::tests::k163_double_add_consistency ... ok
+test public_key::ec::tests::k163_encode_decode_compressed ... ok
+test public_key::ec::tests::k163_encode_decode_uncompressed ... ok
+test public_key::ec::tests::k163_negation_sums_to_infinity ... ok
+test public_key::ec::tests::k163_order_times_base_is_infinity ... ok
+test public_key::ec::tests::k233_base_point_on_curve ... ok
+test public_key::ec::tests::k233_double_add_consistency ... ok
+test public_key::ec::tests::k233_order_times_base_is_infinity ... ok
+test public_key::ec::tests::k283_base_point_on_curve ... ok
+test public_key::ec::tests::k283_double_add_consistency ... ok
+test public_key::ec::tests::k283_ecdh_shared_secret_agrees ... ok
+test public_key::ec::tests::explicit_parameters_are_accepted_only_by_the_sec1_primitive ... ok
+test public_key::ec::tests::k409_base_point_on_curve ... ok
+test public_key::ec::tests::k571_base_point_on_curve ... ok
+test public_key::ec::tests::multiplicative_order_bound_and_table_1_polynomials ... ok
+test public_key::ec::tests::diff_p256 ... ok
+test public_key::ec::tests::new_binary_rejects_reducible_or_even_degree_modulus ... ok
+test public_key::ec::tests::order_that_does_not_annihilate_the_base_point_is_refused ... ok
+test public_key::ec::tests::oversized_explicit_parameters_are_refused_before_any_arithmetic ... ok
+test public_key::ec::tests::p192_base_point_on_curve ... ok
+test public_key::ec::tests::p192_double_equals_add_self ... ok
+test public_key::ec::tests::p192_encode_decode_compressed_roundtrip ... ok
+test public_key::ec::tests::p192_encode_decode_uncompressed_roundtrip ... ok
+test public_key::ec::tests::p224_base_point_on_curve ... ok
+test public_key::ec::tests::p224_compressed_roundtrip ... ok
+test public_key::ec::tests::p224_double_equals_add_self ... ok
+test public_key::ec::tests::p224_uncompressed_roundtrip ... ok
+test public_key::ec::tests::p256_base_point_on_curve ... ok
+test public_key::ec::tests::p256_decode_rejects_bad_length ... ok
+test public_key::ec::tests::p256_decode_rejects_off_curve_point ... ok
+test public_key::ec::tests::p256_double_equals_add_self ... ok
+test public_key::ec::tests::named_curves_base_point_is_on_curve_with_order_n ... ok
+test public_key::ec::tests::p256_encode_decode_compressed_roundtrip ... ok
+test public_key::ec::tests::p256_encode_decode_uncompressed_roundtrip ... ok
+test public_key::ec::tests::p256_infinity_encodes_as_single_zero_byte ... ok
+test public_key::ec::tests::p256_negation_sums_to_infinity ... ok
+test public_key::ec::tests::p256_order_times_base_point_is_infinity ... ok
+test public_key::ec::tests::p256_scalar_invert_roundtrip ... ok
+test public_key::ec::tests::p256_scalar_mul_matches_repeated_add ... ok
+test public_key::ec::tests::p256_ecdh_shared_secret_agrees ... ok
+test public_key::ec::tests::p384_base_point_on_curve ... ok
+test public_key::ec::tests::p384_double_equals_add_self ... ok
+test public_key::ec::tests::p521_base_point_on_curve ... ok
+test public_key::ec::tests::p521_double_equals_add_self ... ok
+test public_key::ec::tests::p384_order_times_base_point_is_infinity ... ok
+test public_key::ec::tests::p521_encode_decode_compressed_roundtrip ... ok
+test public_key::ec::tests::prime_compressed_two_torsion_has_one_encoding ... ok
+test public_key::ec::tests::public_point_validation_rejects_non_canonical_coordinates ... ok
+test public_key::ec::tests::same_curve_distinguishes_named_curves ... ok
+test public_key::ec::tests::secp256k1_base_point_on_curve ... ok
+test public_key::ec::tests::secp256k1_double_equals_add_self ... ok
+test public_key::ec::tests::secp256k1_encode_decode_compressed_roundtrip ... ok
+test public_key::ec::tests::secp256k1_order_times_base_point_is_infinity ... ok
+test public_key::ec_edwards::tests::ed25519_base_point_on_curve ... ok
+test public_key::ec_edwards::tests::ed25519_basepoint_multiples_match_regression_encodings ... ok
+test public_key::ec_edwards::tests::ed25519_decode_rejects_bad_length ... ok
+test public_key::ec_edwards::tests::ed25519_decode_rejects_neutral_with_sign_bit_set ... ok
+test public_key::ec_edwards::tests::ed25519_decode_rejects_non_canonical_y ... ok
+test public_key::ec_edwards::tests::ed25519_double_equals_add_self ... ok
+test public_key::ec::tests::supersingular_curve_is_refused_by_the_embedding_degree_step ... ok
+test public_key::ec_edwards::tests::ed25519_encode_decode_2g_roundtrip ... ok
+test public_key::ec_edwards::tests::ed25519_encode_decode_roundtrip ... ok
+test public_key::ec_edwards::tests::ed25519_negation_sums_to_neutral ... ok
+test public_key::ec_edwards::tests::ed25519_neutral_encodes_correctly ... ok
+test public_key::ec_edwards::tests::ed25519_neutral_roundtrip_preserves_identity ... ok
+test public_key::ec_edwards::tests::ed25519_ecdh_shared_secret_agrees ... ok
+test public_key::ec_edwards::tests::ed25519_scalar_invert_roundtrip ... ok
+test public_key::ec_edwards::tests::ed25519_scalar_mul_base_matches_generic_base_path ... ok
+test public_key::ec_edwards::tests::ed25519_scalar_mul_matches_repeated_add ... ok
+test public_key::ec_edwards::tests::ed448_decode_refuses_non_canonical_encodings ... ok
+test public_key::ec_edwards::tests::ed25519_order_times_base_point_is_neutral ... ok
+test public_key::ec_edwards::tests::ed448_decodes_the_rfc8032_section_7_4_public_key ... ok
+test public_key::ec_edwards::tests::ed448_encodes_in_57_octets_and_round_trips_both_parities ... ok
+test public_key::ec_edwards::tests::from_explicit_refuses_a_composite_order ... ok
+test public_key::ec_edwards::tests::from_explicit_accepts_ed25519_and_ed448 ... ok
+test public_key::ec_edwards::tests::general_a_addition_agrees_with_doubling_on_ed448 ... ok
+test public_key::ec_edwards::tests::new_refuses_unit_moduli ... ok
+test public_key::ec_edwards::tests::from_explicit_refuses_each_parameter_fault ... ok
+test public_key::ec_elgamal::tests::add_ciphertexts_homomorphic ... ok
+test public_key::ec_elgamal::tests::add_ciphertexts_three_terms ... ok
+test public_key::ec_elgamal::tests::bytes_at_the_koblitz_capacity_round_trip_and_one_more_is_refused ... ok
+test public_key::ec::tests::diff_secp256k1 ... ok
+test public_key::ec_elgamal::tests::bytes_roundtrip_p224 ... ok
+test public_key::ec_elgamal::tests::bytes_roundtrip_p256 ... ok
+test public_key::ec_elgamal::tests::bytes_roundtrip_p384 ... ok
+test public_key::ec_elgamal::tests::bytes_roundtrip_secp256k1 ... ok
+test public_key::ec_elgamal::tests::ceil_sqrt_helper_is_exact_for_boundaries ... ok
+test public_key::ec_elgamal::tests::ciphertext_binary_roundtrip ... ok
+test public_key::ec::tests::diff_k571 ... ok
+test public_key::ec_elgamal::tests::ciphertext_pem_roundtrip ... ok
+test public_key::ec_elgamal::tests::ciphertext_with_c2_at_infinity_round_trips ... ok
+test public_key::ec_elgamal::tests::ciphertext_xml_roundtrip ... ok
+test public_key::ec_elgamal::tests::decrypt_point_rejects_invalid_ciphertext_components ... ok
+test public_key::ec::tests::named_curves_pass_the_sec1_validation_primitive ... ok
+test public_key::ec_elgamal::tests::ec_key_io::key_blob_field_count_is_exact ... ok
+test public_key::ec_elgamal::tests::ec_key_io::key_blob_refuses_every_other_field_type_octet ... ok
+test public_key::ec_elgamal::tests::ec_key_io::toy_curve_is_refused_on_every_path ... ok
+test public_key::ec_elgamal::tests::encrypt_point_refuses_plaintexts_outside_the_subgroup ... ok
+test public_key::ec_elgamal::tests::encrypt_point_with_nonce_is_repeatable_for_fixed_nonce ... ok
+test ciphers::twofish::tests::fast_roundtrip_and_ct_equivalence_random ... ok
+test public_key::ec_elgamal::tests::decrypt_int_bound_is_exclusive ... ok
+test public_key::ec_elgamal::tests::int_out_of_range_returns_none ... ok
+test public_key::ec_elgamal::tests::int_roundtrip_zero ... ok
+test public_key::ec_elgamal::tests::point_roundtrip_b163 ... ok
+test public_key::ec_elgamal::tests::point_roundtrip_infinity ... ok
+test public_key::ec_elgamal::tests::private_key_binary_roundtrip ... ok
+test public_key::ec_elgamal::tests::point_roundtrip_p256 ... ok
+test public_key::ec_elgamal::tests::private_key_debug_redacted ... ok
+test public_key::ec_elgamal::tests::private_key_pem_roundtrip ... ok
+test public_key::ec_elgamal::tests::ec_key_io::every_encoding_round_trips_on_prime_binary_and_unnamed_curves ... ok
+test public_key::ec_elgamal::tests::private_key_whose_public_point_is_the_identity_is_refused ... ok
+test public_key::ec_elgamal::tests::private_key_xml_roundtrip ... ok
+test public_key::ec_elgamal::tests::public_key_bytes_roundtrip ... ok
+test public_key::ec_elgamal::tests::public_key_binary_roundtrip ... ok
+test public_key::ec_elgamal::tests::public_key_pem_roundtrip ... ok
+test public_key::ec_elgamal::tests::public_key_xml_roundtrip ... ok
+test public_key::ec_elgamal::tests::to_public_key_matches ... ok
+test public_key::ec_pkix::tests::ec_private_key_follows_rfc5915 ... ok
+test public_key::ec_elgamal::tests::public_key_imports_refuse_the_identity_and_every_invalid_point ... ok
+test public_key::ec_pkix::tests::id_ec_dh_names_ecdh_keys_only ... ok
+test public_key::ec_pkix::tests::keys_on_curves_without_an_identifier_have_no_standard_encoding ... ok
+test public_key::ec_pkix::tests::named_curve_identifiers_match_rfc9500_encodings ... ok
+test public_key::ec_pkix::tests::ber_receivers_follow_rfc5958_and_rfc5915 ... ok
+test public_key::ec_elgamal::tests::int_roundtrip_small ... ok
+test public_key::ec_pkix::tests::openssl_reads_our_pem_encodings ... ok
+test public_key::ec_pkix::tests::openssl_reads_the_ber_forms_as_the_same_key ... ok
+test public_key::ec_pkix::tests::every_named_curve_round_trips_under_its_identifier ... ok
+test public_key::ec_pkix::tests::pkcs8_names_the_curve_once_or_consistently ... ok
+test public_key::ec_pkix::tests::the_identity_has_no_subject_public_key ... ok
+test public_key::ec_pkix::tests::subject_public_key_follows_rfc5480 ... ok
+test public_key::ecdh::tests::agreement_b163 ... ok
+test public_key::ecdh::tests::agreement_p256 ... ok
+test public_key::ecdh::tests::agreement_p384 ... ok
+test public_key::ecdh::tests::agreement_rejects_peer_on_a_different_curve ... ok
+test public_key::ecdh::tests::agreement_p521 ... ok
+test public_key::ecdh::tests::debug_private_key_redacted ... ok
+test public_key::ecdh::tests::agreement_secp256k1 ... ok
+test public_key::ec::tests::diff_b571 ... ok
+test public_key::ecdh::tests::ec_key_io::key_blob_field_count_is_exact ... ok
+test public_key::ecdh::tests::different_keys_give_different_secrets ... ok
+test public_key::ecdh::tests::ec_key_io::toy_curve_is_refused_on_every_path ... ok
+test public_key::ecdh::tests::ec_key_io::key_blob_refuses_every_other_field_type_octet ... ok
+test public_key::ecdh::tests::from_secret_scalar_accepts_exactly_one_through_n_minus_one ... ok
+test public_key::ec::tests::diff_p384 ... ok
+test public_key::ecdh::tests::key_blob_rejects_non_canonical_public_coordinate ... ok
+test public_key::ecdh::tests::private_key_binary_roundtrip ... ok
+test public_key::ecdh::tests::private_key_pem_roundtrip ... ok
+test public_key::ecdh::tests::private_key_whose_public_point_is_the_identity_is_refused ... ok
+test public_key::ecdh::tests::private_key_xml_roundtrip ... ok
+test public_key::ecdh::tests::from_secret_scalar_rebuilds_a_generated_key ... ok
+test public_key::ecdh::tests::public_key_binary_roundtrip ... ok
+test public_key::ecdh::tests::public_key_xml_roundtrip ... ok
+test public_key::ecdh::tests::public_key_pem_roundtrip ... ok
+test public_key::dsa::tests::seeded_params_round_trip_and_sign_in_their_group ... ok
+test public_key::ecdh::tests::to_public_key_consistent ... ok
+test public_key::ecdh::tests::to_bytes_from_bytes_roundtrip ... ok
+test public_key::ecdsa::tests::der_signature_roundtrip_and_strictness ... ok
+test public_key::ec_pkix::tests::rfc9500_ec_private_keys_decode_and_reencode_exactly ... ok
+test public_key::ecdsa::tests::deterministic_signing_gives_up_when_every_nonce_fails ... ok
+test public_key::ecdsa::tests::deterministic_signing_retries_zero_r_and_s ... ok
+test public_key::ecdsa::tests::ec_key_io::key_blob_field_count_is_exact ... ok
+test public_key::ecdsa::tests::ec_key_io::key_blob_refuses_every_other_field_type_octet ... ok
+test public_key::ecdsa::tests::both_s_and_n_minus_s_verify ... ok
+test public_key::ecdsa::tests::ec_key_io::toy_curve_is_refused_on_every_path ... ok
+test public_key::ecdsa::tests::from_secret_scalar_rejects_out_of_range ... ok
+test public_key::ecdsa::tests::from_secret_scalar_rejects_zero ... ok
+test public_key::ecdh::tests::public_key_imports_refuse_the_identity_and_every_invalid_point ... ok
+test public_key::ecdsa::tests::private_key_binary_roundtrip ... ok
+test public_key::ecdsa::tests::empty_digest_is_refused_and_the_zero_representative_forgery_is_the_equations_own ... ok
+test public_key::ecdsa::tests::private_key_debug_redacted ... ok
+test public_key::ecdsa::tests::private_key_pem_roundtrip ... ok
+test public_key::ecdsa::tests::private_key_xml_roundtrip ... ok
+test public_key::ecdsa::tests::public_key_binary_roundtrip ... ok
+test public_key::ecdsa::tests::identity_public_key_is_refused_and_its_public_data_forgery_fails ... ok
+test public_key::ecdsa::tests::public_key_bytes_roundtrip ... ok
+test public_key::ecdsa::tests::private_key_whose_public_point_is_the_identity_is_refused ... ok
+test public_key::ecdsa::tests::public_key_xml_roundtrip ... ok
+test public_key::ecdsa::tests::public_key_pem_roundtrip ... ok
+test public_key::ecdsa::tests::randomized_signing_redraws_once_after_a_zeroing_nonce ... ok
+test public_key::ecdsa::tests::randomized_signing_refuses_a_source_stuck_on_a_zeroing_nonce ... ok
+test public_key::ecdsa::tests::public_key_imports_refuse_every_invalid_point ... ok
+test public_key::ecdsa::tests::rfc6979_ecdsa_p256_sha256_sample_vector_signs_exactly ... ok
+test public_key::ecdsa::tests::sign_bytes_verify_bytes_roundtrip ... ok
+test public_key::ecdsa::tests::rfc6979_ecdsa_p256_sha256_sample_vector_verifies_as_published ... ok
+test public_key::ecdsa::tests::sign_digest_with_nonce_equal_to_n_rejected ... ok
+test public_key::ecdsa::tests::sign_digest_with_nonce_is_deterministic ... ok
+test public_key::ecdsa::tests::sign_digest_with_nonce_zero_rejected ... ok
+test public_key::ecdsa::tests::sign_digest_with_nonce_repeatable_for_fixed_nonce ... ok
+test public_key::ecdsa::tests::sign_verify_roundtrip_b163 ... ok
+test public_key::ecdsa::tests::sign_message_bytes_verify_message_bytes_roundtrip ... ok
+test public_key::ecdsa::tests::sign_verify_roundtrip_p256 ... ok
+test public_key::ecdsa::tests::sign_verify_roundtrip_p384 ... ok
+test public_key::ecdsa::tests::signature_binary_roundtrip ... ok
+test public_key::ecdsa::tests::sign_verify_roundtrip_secp256k1 ... ok
+test public_key::ecdsa::tests::sign_verify_roundtrip_p521 ... ok
+test public_key::ecdsa::tests::tampered_r_rejected ... ok
+test public_key::ecdsa::tests::signing_emits_the_fips_value_and_to_low_s_flips_only_high_s ... ok
+test public_key::ecdsa::tests::to_public_key_matches_generated ... ok
+test public_key::ecdsa::tests::tampered_s_rejected ... ok
+test public_key::dh::tests::seeded_params_round_trip_and_old_blobs_still_parse ... ok
+test public_key::ecdsa::tests::wrong_key_rejected ... ok
+test public_key::ecies::tests::aes_cbc_and_cmac_compose_as_section_5_1_3_states ... ok
+test public_key::ecies::tests::ansi_x963_kdf_matches_nist_cavp_vectors ... ok
+test public_key::ecdsa::tests::wrong_message_rejected ... ok
+test public_key::ecies::tests::debug_private_key_redacted ... ok
+test public_key::ecies::tests::diffie_hellman_with_the_point_at_infinity_is_invalid ... ok
+test public_key::ecies::tests::cbc_takes_whole_blocks_only ... ok
+test public_key::ecies::tests::ec_key_io::key_blob_field_count_is_exact ... ok
+test public_key::ecies::tests::ec_key_io::key_blob_refuses_every_other_field_type_octet ... ok
+test public_key::ecies::tests::ec_key_io::toy_curve_is_refused_on_every_path ... ok
+test public_key::ecies::tests::decryption_needs_the_same_setup_and_key ... ok
+test public_key::ecies::tests::empty_message_round_trips_where_the_scheme_allows_it ... ok
+test public_key::ecies::tests::encrypt_is_randomized ... ok
+test public_key::ecies::tests::encryption_key_lengths_are_section_3_8s ... ok
+test public_key::ecdh::tests::ec_key_io::every_encoding_round_trips_on_prime_binary_and_unnamed_curves ... ok
+test public_key::ecies::tests::gec2_3_1_secp160r1 ... ok
+test public_key::ecies::tests::gec2_3_2_sect163k1_standard_diffie_hellman ... ok
+test public_key::ecies::tests::gec2_3_3_sect163k1_cofactor_diffie_hellman ... ok
+test public_key::ecies::tests::kdf_refuses_key_data_at_the_section_3_6_1_bound ... ok
+test public_key::ecies::tests::keying_data_split_follows_section_5_1_3_step_6 ... ok
+test public_key::ecdsa::tests::ec_key_io::every_encoding_round_trips_on_prime_binary_and_unnamed_curves ... ok
+test public_key::ecies::tests::mac_key_and_tag_lengths_are_section_3_7s ... ok
+test public_key::ecies::tests::gec2_standard_and_cofactor_ciphertexts_differ_on_sect163k1 ... ok
+test public_key::ec_elgamal::tests::bytes_roundtrip_b163 ... ok
+test public_key::ecies::tests::negated_and_re_encoded_r_decrypt_to_the_same_plaintext ... ok
+test public_key::ecies::tests::private_key_binary_roundtrip ... ok
+test public_key::ecies::tests::public_key_bytes_roundtrip ... ok
+test public_key::ecies::tests::private_key_xml_roundtrip ... ok
+test public_key::ecies::tests::public_key_binary_roundtrip ... ok
+test public_key::ecies::tests::private_key_pem_roundtrip ... ok
+test public_key::ec_elgamal::tests::bytes_roundtrip_k163 ... ok
+test public_key::ecies::tests::public_key_pem_roundtrip ... ok
+test public_key::ecies::tests::public_key_xml_roundtrip ... ok
+test public_key::ecies::tests::recommended_setup_is_the_documented_one ... ok
+test public_key::ecies::tests::private_key_whose_public_point_is_the_identity_is_refused ... ok
+test public_key::ecies::tests::recommended_setup_composes_as_section_5_1_3_states ... ok
+test public_key::ecies::tests::public_key_imports_refuse_the_identity_and_every_invalid_point ... ok
+test public_key::ecies::tests::step_1_rejects_unknown_leading_octets_and_short_ciphertexts ... ok
+test public_key::ecies::tests::shared_info_binds_the_kdf_and_the_mac ... ok
+test public_key::ecies::tests::step_3_standard_primitive_rejects_r_outside_the_subgroup ... ok
+test public_key::ecies::tests::step_4_cofactor_primitive_clears_the_small_subgroup ... ok
+test public_key::ecies::tests::roundtrip_every_kdf_hash ... ok
+test public_key::ecies::tests::steps_2_and_3_reject_r_that_is_not_a_valid_point ... ok
+test public_key::ecies::tests::tdes_refuses_a_derived_key_whose_components_collapse ... ok
+test public_key::ecies::tests::step_8_rejects_a_changed_tag_em_or_length ... ok
+test public_key::ecies::tests::the_mac_input_is_em_then_shared_info2_with_no_separator ... ok
+test public_key::ecies::tests::wire_bytes_reject_the_point_at_infinity ... ok
+test public_key::ecies::tests::xor_takes_the_mac_key_from_the_left_of_k ... ok
+test public_key::ecies::tests::to_public_key_matches ... ok
+test public_key::ed25519::tests::key_binary_roundtrip ... ok
+test public_key::ed25519::tests::key_xml_roundtrip ... ok
+test public_key::ecies::tests::roundtrip_every_encryption_scheme_on_prime_and_binary_curves ... ok
+test public_key::ed25519::tests::decoding_refuses_exactly_what_section_5_1_3_refuses ... ok
+test public_key::ecies::tests::tdes_cbc_matches_openssl_des_ede3_cbc ... ok
+test public_key::ed25519::tests::pkcs8_ber_accepts_an_indefinite_length_container ... ok
+test public_key::ed25519::tests::private_key_equality_follows_the_seed ... ok
+test public_key::ed25519::tests::public_key_accepts_neutral_encoding ... ok
+test public_key::ed25519::tests::raw_bytes_aliases_match_binary_encoding ... ok
+test public_key::ed25519::tests::private_key_import_takes_any_32_octets ... ok
+test public_key::ed25519::tests::rfc8410_section_10_examples_decode_and_reencode_exactly ... ok
+test public_key::ed25519::tests::sign_verify_roundtrip ... ok
+test public_key::ed25519::tests::signature_accepts_neutral_r_encoding ... ok
+test public_key::ecies::tests::roundtrip_every_mac_scheme ... ok
+test public_key::ed25519::tests::signature_binary_roundtrip ... ok
+test public_key::ed25519::tests::signature_rejects_non_canonical_s ... ok
+test public_key::ed25519::tests::mixed_order_key_and_nonce_verify_by_the_cofactored_equation ... ok
+test public_key::ed25519::tests::tampered_signature_is_rejected ... ok
+test public_key::ed25519::tests::standard_encodings_round_trip_and_apply_the_key_checks ... ok
+test public_key::eddsa::tests::key_import_refuses_a_composite_order ... ok
+test public_key::eddsa::tests::key_serialization_roundtrip ... ok
+test public_key::ed25519::tests::small_order_keys_decode_and_verify_as_section_5_1_7_defines ... ok
+test public_key::eddsa::tests::public_bytes_roundtrip ... ok
+test public_key::eddsa::tests::public_blob_rejects_non_canonical_coordinates ... ok
+test public_key::eddsa::tests::public_key_import_refuses_a_400000_bit_order_quickly ... ok
+test public_key::ed25519::tests::openssl_ed25519_keys_and_signatures_interoperate ... ok
+test public_key::eddsa::tests::public_xml_rejects_non_canonical_coordinates ... ok
+test public_key::eddsa::tests::sign_message_with_nonce_is_repeatable ... ok
+test public_key::eddsa::tests::signature_binary_rejects_a_neutral_r ... ok
+test public_key::eddsa::tests::private_key_equality_compares_scalars ... ok
+test public_key::eddsa::tests::signature_binary_rejects_out_of_range_s ... ok
+test public_key::eddsa::tests::signature_binary_rejects_non_canonical_r ... ok
+test public_key::eddsa::tests::roundtrip_sign_verify_ed25519 ... ok
+test public_key::ed25519::tests::rfc8032_test_vectors ... ok
+test public_key::eddsa::tests::sign_with_explicit_nonce_roundtrip ... ok
+test public_key::edwards_dh::tests::agreement_of_7_with_11g_is_the_regression_encoding_of_77g ... ok
+test public_key::eddsa::tests::signature_binary_roundtrip ... ok
+test public_key::eddsa::tests::tampered_signature_is_rejected ... ok
+test public_key::edwards_dh::tests::debug_redacts_private_key ... ok
+test public_key::edwards_dh::tests::private_serialization_roundtrip ... ok
+test public_key::edwards_dh::tests::agreement_roundtrip_ed25519 ... ok
+test public_key::eddsa::tests::verify_rejects_a_nonce_point_with_a_small_order_component ... ok
+test public_key::edwards_elgamal::tests::ceil_sqrt_helper_is_exact_for_boundaries ... ok
+test public_key::ecies::tests::ec_key_io::every_encoding_round_trips_on_prime_binary_and_unnamed_curves ... ok
+test public_key::edwards_dh::tests::public_blob_rejects_non_canonical_coordinates ... ok
+test public_key::edwards_elgamal::tests::ciphertext_rejects_low_order_component ... ok
+test public_key::edwards_dh::tests::public_xml_rejects_non_canonical_coordinates ... ok
+test public_key::edwards_elgamal::tests::debug_redacts_private_key ... ok
+test public_key::edwards_elgamal::tests::ciphertext_blob_rejects_non_canonical_coordinates ... ok
+test public_key::edwards_dh::tests::public_serialization_roundtrip ... ok
+test public_key::edwards_elgamal::tests::ciphertext_serialization_roundtrip ... ok
+test public_key::edwards_elgamal::tests::ciphertext_xml_rejects_non_canonical_coordinates ... ok
+test public_key::edwards_elgamal::tests::decrypt_int_refuses_bounds_above_the_limit ... ok
+test public_key::edwards_elgamal::tests::integer_roundtrip_ed25519 ... ok
+test public_key::edwards_elgamal::tests::public_blob_rejects_non_canonical_coordinates ... ok
+test public_key::edwards_elgamal::tests::homomorphic_addition_ed25519 ... ok
+test public_key::edwards_elgamal::tests::private_serialization_roundtrip ... ok
+test public_key::edwards_elgamal::tests::public_bytes_roundtrip ... ok
+test public_key::elgamal::tests::byte_ciphertext_roundtrip ... ok
+test public_key::elgamal::tests::byte_wrapper_refuses_zero_and_drops_leading_zeros ... ok
+test public_key::elgamal::tests::byte_wrapper_roundtrip ... ok
+test public_key::elgamal::tests::decryption_refuses_out_of_range_and_small_subgroup_gamma ... ok
+test public_key::elgamal::tests::derive_small_reference_key ... ok
+test public_key::elgamal::tests::exact_small_ciphertext_matches_reference ... ok
+test public_key::elgamal::tests::encrypt_with_nonce_is_repeatable_for_fixed_nonce ... ok
+test public_key::edwards_elgamal::tests::small_multiples_fixture_matches_the_regression_encodings_of_11g_and_82g ... ok
+test public_key::elgamal::tests::generate_refuses_a_hash_shorter_than_n ... ok
+test public_key::elgamal::tests::generate_keypair_roundtrip ... ok
+test public_key::edwards_elgamal::tests::public_xml_rejects_non_canonical_coordinates ... ok
+test public_key::elgamal::tests::generate_toy_refuses_sizes_fips_covers_or_that_cannot_be_built ... ok
+test public_key::elgamal::tests::generate_then_random_encrypt_roundtrip ... ok
+test public_key::elgamal::tests::key_serialization_roundtrip ... ok
+test public_key::elgamal::tests::generated_key_serialization_roundtrip ... ok
+test public_key::elgamal::tests::public_key_parse_rejects_tampered_fields ... ok
+test public_key::elgamal::tests::private_key_parse_rejects_tampered_fields ... ok
+test public_key::edwards_elgamal::tests::public_serialization_roundtrip ... ok
+test public_key::elgamal::tests::rejects_invalid_ephemeral_exponent ... ok
+test public_key::elgamal::tests::rejects_invalid_parameters ... ok
+test public_key::elgamal::tests::roundtrip_small_messages ... ok
+test public_key::elgamal::tests::safe_prime_key_refuses_gamma_of_order_two ... ok
+test public_key::elgamal::tests::raw_ciphertexts_publish_the_message_class ... ok
+test public_key::ffc_pkix::tests::dh_decoders_follow_rfc3279 ... ok
+test public_key::elgamal::tests::only_the_nonce_q_would_send_the_plaintext_and_it_is_refused ... ok
+test public_key::ffc_pkix::tests::dsa_parameters_are_dss_parms ... ok
+test public_key::ffc_pkix::tests::dsa_decoders_follow_rfc3279_and_rfc5958 ... ok
+test public_key::edwards_elgamal::tests::decrypt_int_bound_is_exclusive ... ok
+test public_key::ecdsa::tests::openssl_p256_sha256_interop ... ok
+test public_key::elgamal::tests::fips_group_keypair_round_trips ... ok
+test public_key::ffc_pkix::tests::openssl_converts_rfc9500_dsa_key_to_the_same_encodings ... ok
+test public_key::io::tests::base64_must_be_canonical ... ok
+test public_key::io::tests::ber_examples_of_x690_convert_to_their_der ... ok
+test public_key::io::tests::ber_length_forms_follow_clause_8_1_3 ... ok
+test public_key::io::tests::ber_nesting_is_bounded ... ok
+test public_key::io::tests::ber_reader_is_total_on_random_truncated_and_mutated_input ... ok
+test public_key::io::tests::ber_rejects_what_clause_8_forbids ... ok
+test public_key::io::tests::ber_to_der_is_the_identity_on_der_and_undoes_every_ber_style ... ok
+test public_key::io::tests::ber_values_and_segments_are_bounded ... ok
+test public_key::io::tests::ber_values_take_their_der_forms ... ok
+test public_key::io::tests::binary_roundtrip ... ok
+test public_key::io::tests::bit_string_requires_zero_unused_bits ... ok
+test public_key::io::tests::crate_labels_are_read_by_the_rfc7468_parser_rules ... ok
+test public_key::io::tests::der_accepted_by_the_der_reader_converts_to_itself ... ok
+test public_key::io::tests::der_encoders_allocate_exactly_their_length ... ok
+test public_key::io::tests::explicit_tags_hold_exactly_one_der_value ... ok
+test public_key::io::tests::integer_blobs_are_bounded_by_the_field_count ... ok
+test public_key::io::tests::integer_encoding_is_minimal_and_sign_safe ... ok
+test public_key::io::tests::long_form_length_roundtrip ... ok
+test public_key::io::tests::pem_and_xml_armor_allocate_exactly_their_length ... ok
+test public_key::io::tests::pem_encapsulated_text_is_bounded ... ok
+test public_key::io::tests::pem_roundtrip ... ok
+test public_key::io::tests::rejects_indefinite_length ... ok
+test public_key::io::tests::rejects_leading_zero_length_octet ... ok
+test public_key::io::tests::rejects_length_octets_wider_than_usize ... ok
+test public_key::io::tests::rejects_long_form_length_below_128 ... ok
+test public_key::ffc_pkix::tests::openssl_reads_the_ber_forms_of_a_dsa_key_as_the_same_key ... ok
+test public_key::io::tests::rejects_negative_and_empty_integer ... ok
+test public_key::io::tests::rejects_non_minimal_integer ... ok
+test public_key::io::tests::rejects_trailing_bytes_and_truncation ... ok
+test public_key::io::tests::rejects_wrong_tags ... ok
+test public_key::io::tests::small_integer_reader_bounds_the_value ... ok
+test public_key::io::tests::xml_rejects_trailing_content ... ok
+test public_key::io::tests::xml_rejects_truncated_input ... ok
+test public_key::io::tests::xml_rejects_wrong_field_name ... ok
+test public_key::io::tests::xml_rejects_wrong_root ... ok
+test public_key::io::tests::wiped_buffers_allocate_exactly_their_length ... ok
+test public_key::io::tests::xml_roundtrip ... ok
+test public_key::ml_dsa::tests::acvp_keygen_vectors_match_for_every_parameter_set ... ok
+test public_key::ecies::tests::roundtrip_both_primitives_and_point_formats_on_prime_and_binary_curves ... ok
+test public_key::ml_dsa::tests::an_expanded_key_with_s1_out_of_range_is_refused_when_t0_and_tr_agree ... ok
+test public_key::ml_dsa::tests::acvp_sigver_vectors_get_nists_verdict_for_every_parameter_set ... ok
+test public_key::ml_dsa::tests::context_longer_than_255_bytes_is_rejected ... ok
+test public_key::ml_dsa::tests::acvp_siggen_vectors_match_for_every_parameter_set_and_both_variants ... ok
+test public_key::ml_dsa::tests::hint_encoding_with_exactly_omega_ones_parses_and_round_trips ... ok
+test public_key::ml_dsa::tests::keygen_matches_reference_kat_for_every_parameter_set ... ok
+test public_key::ml_dsa::tests::ml_dsa_87_runs_on_a_256_kib_stack ... ok
+test public_key::ecies::tests::cofactor_diffie_hellman_matches_nist_cavp_ecc_cdh_vectors ... ok
+test public_key::ml_dsa::tests::ml_dsa_barrett_reduction_agrees_with_remainder ... ok
+test public_key::ml_dsa::tests::ml_dsa_bit_rev8_and_integer_to_bytes ... ok
+test public_key::ml_dsa::tests::ml_dsa_coeff_from_half_byte_matches_algorithm_15_for_every_nibble ... ok
+test public_key::ml_dsa::tests::deterministic_signing_matches_reference_kat_for_every_parameter_set ... ok
+test public_key::ml_dsa::tests::ml_dsa_floor_division_constants_are_the_derived_ones ... ok
+test public_key::ml_dsa::tests::expanded_keys_with_an_inconsistent_tr_or_t0_are_refused ... ok
+test public_key::ml_dsa::tests::ml_dsa_matrix_vector_ntt_equals_algorithm_48_as_written ... ok
+test public_key::ml_dsa::tests::ml_dsa_multiply_ntt_is_multiplication_in_r_q ... ok
+test public_key::ml_dsa::tests::ml_dsa_bit_string_codec_matches_algorithms_9_to_13 ... ok
+test public_key::ml_dsa::tests::ml_dsa_ntt_inverse_undoes_ntt_and_ntt_undoes_inverse ... ok
+test public_key::ml_dsa::tests::ml_dsa_ntt_evaluates_at_odd_powers_of_zeta ... ok
+test public_key::ml_dsa::tests::ml_dsa_rejection_tests_sit_exactly_on_their_bounds ... ok
+test public_key::ml_dsa::tests::ml_dsa_residue_helpers_match_their_definitions ... ok
+test public_key::ml_dsa::tests::ml_dsa_samplers_match_algorithms_29_to_31_as_written ... ok
+test public_key::ml_dsa::tests::ml_dsa_table_1_values_and_derived_sizes ... ok
+test public_key::ml_dsa::tests::ml_dsa_verification_norm_test_sits_exactly_on_its_bound ... ok
+test public_key::ml_dsa::tests::ml_dsa_xof_byte_stream_equals_one_long_squeeze ... ok
+test public_key::ml_dsa::tests::ml_dsa_zetas_match_fips204_appendix_b ... ok
+test public_key::ml_dsa::tests::non_canonical_hint_encodings_are_rejected_at_parse ... ok
+test public_key::ml_dsa::tests::ml_dsa_power2_round_matches_algorithm_35_for_every_residue ... ok
+test public_key::ml_dsa::tests::parameter_lengths_match_known_profiles ... ok
+test public_key::ml_dsa::tests::pkcs8_ber_accepts_an_indefinite_length_container ... ok
+test public_key::ml_dsa::tests::pkcs8_writes_the_seed_when_retained_and_the_expanded_key_otherwise ... ok
+test public_key::ml_dsa::tests::private_key_with_out_of_range_secret_coefficient_is_refused ... ok
+test public_key::ml_dsa::tests::rfc9881_appendix_c1_private_keys_decode_in_every_form ... ok
+test public_key::ml_dsa::tests::rfc9881_appendix_c4_inconsistent_private_keys_are_refused ... ok
+test public_key::ml_dsa::tests::sign_verify_roundtrip_each_parameter ... ok
+test public_key::ml_dsa::tests::signing_returns_nothing_once_the_attempt_limit_is_spent ... ok
+test public_key::ml_dsa::tests::spki_and_pkcs8_refuse_what_rfc9881_does_not_allow ... ok
+test public_key::ml_dsa::tests::verify_refuses_a_signature_of_another_parameter_set ... ok
+test public_key::ml_dsa::tests::ml_dsa_decompose_matches_algorithm_36_for_every_residue_and_both_gamma2 ... ok
+test public_key::ml_dsa::tests::verify_rejects_tampered_signature ... ok
+test public_key::ml_dsa::tests::wire_and_key_blob_roundtrip_shapes ... ok
+test public_key::ffc_pkix::tests::openssl_generated_dsa_key_round_trips ... ok
+test public_key::ml_kem::tests::byte_codec_and_compression_follow_fips203_section_4_2_1 ... ok
+test public_key::ml_kem::tests::compress_rounding_matches_division_for_every_input ... ok
+test public_key::ml_kem::tests::decaps_refuses_a_ciphertext_of_another_parameter_set ... ok
+test public_key::ml_kem::tests::deterministic_encapsulation_matches_decapsulation ... ok
+test public_key::ml_kem::tests::encapsulation_key_modulus_check_rejects_unreduced_fields ... ok
+test public_key::ml_kem::tests::expanded_keys_get_the_pair_wise_consistency_test_on_every_import_path ... ok
+test public_key::ml_kem::tests::implicit_rejection_is_deterministic_and_distinct ... ok
+test public_key::ml_kem::tests::key_blobs_refuse_an_empty_blob_and_an_unknown_tag ... ok
+test public_key::ml_kem::tests::keygen_runs_the_pair_wise_consistency_test_on_the_new_pair ... ok
+test public_key::ml_kem::tests::ml_kem_512_acvp_keygen_encaps_and_implicit_rejection_decaps ... ok
+test public_key::ml_kem::tests::ml_kem_decapsulation_matches_nist_acvp_for_every_parameter_set ... ok
+test public_key::ml_dsa::tests::verify_refuses_reference_signature_with_one_flipped_bit_at_every_offset ... ok
+test public_key::ml_kem::tests::ml_kem_encapsulation_matches_nist_acvp_for_every_parameter_set ... ok
+test public_key::ml_kem::tests::ml_kem_encaps_and_decaps_match_reference_kat_for_every_parameter_set ... ok
+test public_key::ml_kem::tests::ml_kem_key_checks_refuse_nist_acvp_invalid_keys ... ok
+test public_key::ml_kem::tests::ml_kem_implicit_rejection_matches_reference_kat_for_every_parameter_set ... ok
+test public_key::ml_kem::tests::ml_kem_keygen_matches_reference_kat_for_every_parameter_set ... ok
+test public_key::ml_kem::tests::ml_kem_ntt_tables_match_fips203_appendix_a ... ok
+test public_key::ml_kem::tests::ml_kem_parameter_lengths_match_profiles ... ok
+test public_key::ml_kem::tests::ml_kem_keygen_matches_nist_acvp_for_every_parameter_set ... ok
+test public_key::ml_kem::tests::multiply_ntts_is_multiplication_in_r_q ... ok
+test public_key::ml_kem::tests::ntt_inverse_undoes_ntt_on_random_polynomials ... ok
+test public_key::ml_kem::tests::pair_wise_consistency_tells_a_matched_pair_from_a_mismatched_one ... ok
+test public_key::ml_kem::tests::pkcs8_ber_accepts_an_indefinite_length_container ... ok
+test public_key::ml_kem::tests::pkcs8_writes_the_seed_when_retained_and_the_expanded_key_otherwise ... ok
+test public_key::ml_kem::tests::rfc9935_appendix_c1_private_keys_decode_in_every_form ... ok
+test public_key::ml_kem::tests::rfc9935_appendix_c4_inconsistent_private_keys ... ok
+test public_key::ml_kem::tests::spki_and_pkcs8_refuse_what_rfc9935_does_not_allow ... ok
+test public_key::ml_kem::tests::wire_and_blob_roundtrips ... ok
+test public_key::ml_kem::tests::wire_constructors_refuse_every_wrong_length ... ok
+test public_key::ml_pkix::tests::each_alternative_is_chosen_by_its_tag_and_round_trips ... ok
+test public_key::ml_pkix::tests::sizes_order_trailing_data_and_other_tags_are_refused ... ok
+test public_key::ml_pkix::tests::the_choice_stays_der_inside_a_ber_container ... ok
+test public_key::ml_kem::tests::barrett_reduction_is_exact_on_its_whole_domain ... ok
+test public_key::ntru_ees1087ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees1087ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1087ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees1087ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1087ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees1087ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees1087ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees1087ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees1087ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees1087ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees1087ep2::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees1087ep2::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees1087ep2::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1087ep2::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1087ep2::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees1087ep2::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees1087ep2::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees1087ep2::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees1087ep2::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees1087ep2::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees1171ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees1171ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1171ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees1171ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1171ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees1171ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees1171ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees1171ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees1171ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees1171ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees1499ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees1499ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1499ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees1499ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ffc_pkix::tests::openssl_agrees_on_rfc9500_group_as_dh_keys ... ok
+test public_key::ntru_ees1499ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees1499ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees1499ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees1499ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees401ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees1499ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees1499ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees401ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees401ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees401ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees401ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees401ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees401ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees401ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees443ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees401ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees401ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees443ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees443ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees443ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees443ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees443ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees443ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees443ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees443ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees443ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees449ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees449ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees449ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees449ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees449ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees449ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees449ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees449ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees449ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees541ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees541ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees449ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees541ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees541ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees541ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees541ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees541ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees541ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees541ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees541ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees677ep1::tests::corrupted_ciphertext_rejected ... ok
+test public_key::ntru_ees677ep1::tests::malformed_private_key_blobs_are_rejected ... ok
+test public_key::ntru_ees677ep1::tests::malformed_public_key_blobs_are_rejected ... ok
+test public_key::ntru_ees677ep1::tests::public_key_plausibility_test ... ok
+test public_key::ntru_ees677ep1::tests::reference_implementation_vectors ... ok
+test public_key::ntru_ees677ep1::tests::rejects_oversize_message ... ok
+test public_key::ntru_ees677ep1::tests::sizes_match_the_parameter_set ... ok
+test public_key::ntru_ees677ep1::tests::crate_vector_blocks_are_reproduced ... ok
+test public_key::ntru_ees_core::tests::branch_free_helpers ... ok
+test public_key::ntru_ees_core::tests::centring_is_the_half_open_interval ... ok
+test public_key::ntru_ees_core::tests::each_decryption_failure_rule_rejects_on_its_own ... ok
+test public_key::ntru_ees_core::tests::emit_crate_vector_blocks ... ignored, regenerates part of tests/vectors/ntru_ees_sves3_reference.txt
+test public_key::ntru_ees677ep1::tests::round_trip_empty_and_full_messages ... ok
+test public_key::ntru_ees_core::tests::first_three_bits_become_first_two_trits ... ok
+test public_key::ntru_ees_core::tests::hash_stream_uses_hashed_seed_and_four_octet_big_endian_counter ... ok
+test public_key::ntru_ees_core::tests::igf2_reads_candidates_most_significant_bit_first ... ok
+test public_key::ntru_ees_core::tests::index_generator_ternary_takes_plus_then_minus ... ok
+test public_key::ntru_ees_core::tests::invertibility_mod_q_follows_invertibility_mod_2 ... ok
+test public_key::ntru_ees_core::tests::key_generation_panics_after_eight_non_invertible_f - should panic ... ok
+test public_key::ntru_ees677ep1::tests::wire_format_roundtrip_keys_and_ct ... ok
+test public_key::ntru_ees_core::tests::key_generation_panics_after_eight_non_invertible_g - should panic ... ok
+test public_key::ntru_ees_core::tests::key_generation_under_a_source_of_all_ones_panics - should panic ... ok
+test public_key::ntru_ees_core::tests::mgf_tp1_takes_base3_digits_least_significant_first ... ok
+test public_key::ntru_ees_core::tests::multiples_of_a_factor_of_phi_401_are_not_invertible ... ok
+test public_key::ntru_ees_core::tests::phi_n_splits_over_gf2_as_tabulated ... ok
+test public_key::ntru_ees_core::tests::ring_element_packing_matches_eess1_example ... ok
+test public_key::ntru_ees_core::tests::scripted_draws_drive_random_ternary_to_a_chosen_polynomial ... ok
+test public_key::ntru_ees_core::tests::step_p_ees443ep1_refusal_rate_under_independent_seeds ... ignored, ten million ees443ep1 encryptions; run with `cargo test --release -- --ignored`
+test public_key::ffc_pkix::tests::dh_parameters_carry_validation_parms ... ok
+test public_key::ntru_ees_core::tests::encryption_under_a_source_stuck_on_a_refused_b_panics - should panic ... ok
+test public_key::ntru_ees_core::tests::step_p_refusal_rates_separate_dm0_from_its_neighbours ... ignored, a million ees443ep1 encryptions; run with `cargo test --release -- --ignored`
+test public_key::ffc_pkix::tests::rfc9500_dlp1024_dsa_key_round_trips ... ok
+test public_key::ntru_ees_core::tests::trit_encoding_round_trips_and_flags_the_unused_pair ... ok
+test public_key::ntru_ees_core::tests::trit_packed_keys_reject_each_malformation_on_its_own ... ok
+test public_key::ntru_hps509::tests::encaps_never_uses_zero_hrss_m ... ok
+test public_key::ntru_hps509::tests::encaps_never_uses_zero_r ... ok
+test public_key::ntru_hps509::tests::implicit_rejection_on_corrupted_ciphertext ... ok
+test public_key::ntru_hps509::tests::keygen_never_uses_zero_f ... ok
+test public_key::ntru_hps509::tests::keygen_never_uses_zero_hrss_g ... ok
+test public_key::ntru_hps509::tests::keygen_panics_when_two_draws_sample_zero_f - should panic ... ok
+test public_key::ec::tests::diff_p521 ... ok
+test public_key::ntru_hps509::tests::nist_kat_full ... ignored, replays all 100 KAT entries, which a debug build takes seconds per set to do; release builds run them by default in `nist_kat`; opt in with `cargo test --lib ntru -- --ignored`
+test public_key::ntru_hps509::tests::nonzero_padding_bits_are_rejected ... ok
+test public_key::ntru_hps509::tests::parameter_byte_lengths ... ok
+test public_key::ntru_hps509::tests::roundtrip_multiple_seeds ... ok
+test public_key::ntru_hps509::tests::roundtrip_random ... ok
+test public_key::ntru_hps509::tests::wire_format_roundtrip ... ok
+test public_key::ntru_hps677::tests::encaps_never_uses_zero_hrss_m ... ok
+test public_key::ntru_hps677::tests::encaps_never_uses_zero_r ... ok
+test public_key::ntru_hps677::tests::implicit_rejection_on_corrupted_ciphertext ... ok
+test public_key::ec_pkix::tests::openssl_keys_agree_on_every_named_curve ... ok
+test public_key::ntru_hps677::tests::keygen_never_uses_zero_hrss_g ... ok
+test public_key::ntru_hps677::tests::keygen_panics_when_two_draws_sample_zero_f - should panic ... ok
+test public_key::ntru_hps677::tests::keygen_never_uses_zero_f ... ok
+test public_key::ntru_hps677::tests::nist_kat_full ... ignored, replays all 100 KAT entries, which a debug build takes seconds per set to do; release builds run them by default in `nist_kat`; opt in with `cargo test --lib ntru -- --ignored`
+test public_key::ntru_hps677::tests::nonzero_padding_bits_are_rejected ... ok
+test public_key::ntru_hps677::tests::parameter_byte_lengths ... ok
+test public_key::ntru_hps677::tests::roundtrip_multiple_seeds ... ok
+test public_key::ntru_hps677::tests::roundtrip_random ... ok
+test public_key::ntru_hps677::tests::wire_format_roundtrip ... ok
+test public_key::ntru_hps821::tests::encaps_never_uses_zero_hrss_m ... ok
+test public_key::ntru_hps821::tests::encaps_never_uses_zero_r ... ok
+test public_key::ntru_hps821::tests::implicit_rejection_on_corrupted_ciphertext ... ok
+test public_key::ntru_hps821::tests::keygen_never_uses_zero_f ... ok
+test public_key::ntru_hps821::tests::keygen_never_uses_zero_hrss_g ... ok
+test public_key::ntru_hps821::tests::keygen_panics_when_two_draws_sample_zero_f - should panic ... ok
+test public_key::ml_dsa::tests::openssl_ml_dsa_keys_and_signatures_interoperate ... ok
+test public_key::ntru_hps821::tests::nist_kat_full ... ignored, replays all 100 KAT entries, which a debug build takes seconds per set to do; release builds run them by default in `nist_kat`; opt in with `cargo test --lib ntru -- --ignored`
+test public_key::ntru_hps821::tests::nonzero_padding_bits_are_rejected ... ok
+test public_key::ntru_hps821::tests::parameter_byte_lengths ... ok
+test public_key::ml_kem::tests::openssl_ml_kem_keys_interoperate ... ok
+test public_key::ntru_hps821::tests::roundtrip_random ... ok
+test public_key::ntru_hps821::tests::wire_format_roundtrip ... ok
+test public_key::ntru_hrss701::tests::encaps_never_uses_zero_hrss_m ... ok
+test public_key::ntru_hps821::tests::roundtrip_multiple_seeds ... ok
+test public_key::ntru_hrss701::tests::implicit_rejection_on_corrupted_ciphertext ... ok
+test public_key::ntru_hrss701::tests::encaps_never_uses_zero_r ... ok
+test public_key::ntru_hrss701::tests::keygen_never_uses_zero_f ... ok
+test public_key::ntru_hrss701::tests::keygen_panics_when_two_draws_sample_zero_f - should panic ... ok
+test public_key::ntru_hrss701::tests::keygen_never_uses_zero_hrss_g ... ok
+test public_key::ntru_hrss701::tests::nist_kat_full ... ignored, replays all 100 KAT entries, which a debug build takes seconds per set to do; release builds run them by default in `nist_kat`; opt in with `cargo test --lib ntru -- --ignored`
+test public_key::ntru_hrss701::tests::nonzero_padding_bits_are_rejected ... ok
+test public_key::ntru_hrss701::tests::parameter_byte_lengths ... ok
+test public_key::ntru_hrss701::tests::roundtrip_multiple_seeds ... ok
+test public_key::ntru_hrss701::tests::roundtrip_random ... ok
+test public_key::ntru_hrss701::tests::wire_format_roundtrip ... ok
+test public_key::ntru_poly_mul::tests::handles_zero_input ... ok
+test public_key::ntru_poly_mul::tests::matches_reference_at_threshold_and_above ... ok
+test public_key::ntru_poly_mul::tests::scratch_requirement_is_bounded_and_monotone ... ok
+test public_key::ntru_poly_mul::tests::scratch_requirement_is_sufficient ... ok
+test public_key::ntru_pqc_shared::tests::centered_mod_q_is_exhaustively_correct ... ok
+test public_key::ntru_pqc_shared::tests::ct_compare_exchange_orders_every_pair ... ok
+test public_key::ntru_pqc_shared::tests::ct_mask_lt_u32_matches_definition ... ok
+test public_key::ntru_pqc_shared::tests::ct_mask_nonzero_u32_matches_definition ... ok
+test public_key::ntru_pqc_shared::tests::ct_mod3_is_exhaustively_correct ... ok
+test public_key::ntru_pqc_shared::tests::ct_mod3_signed_is_exhaustively_correct ... ok
+test public_key::ntru_pqc_shared::tests::ct_mod3_step_maxima_match_the_derivation ... ok
+test public_key::ntru_pqc_shared::tests::ct_reduce_once_matches_definition ... ok
+test public_key::ntru_pqc_shared::tests::decryption_treats_zero_polynomials_as_outside_the_sample_spaces ... ok
+test public_key::ntru_pqc_shared::tests::derived_constants_match_the_specification_table ... ok
+test public_key::ntru_pqc_shared::tests::dpke_public_key_meets_its_output_conditions ... ok
+test public_key::ntru_pqc_shared::tests::encodings_match_their_definitions ... ok
+test public_key::ntru_pqc_shared::tests::explicit_coins_sampling_zero_hrss_m_are_refused ... ok
+test public_key::ntru_ees_core::tests::tampering_past_the_message_is_rejected_ees443ep1 ... ok
+test public_key::ntru_pqc_shared::tests::explicit_coins_sampling_zero_r_are_refused ... ok
+test public_key::ntru_pqc_shared::tests::explicit_seeds_sampling_zero_f_are_refused ... ok
+test public_key::ntru_pqc_shared::tests::field_inverse_is_correct_at_the_recommended_degrees ... ok
+test public_key::ntru_pqc_shared::tests::field_inverse_is_exhaustively_correct_for_n_5 ... ok
+test public_key::ntru_pqc_shared::tests::fixed_type_matches_the_specification ... ok
+test public_key::ntru_pqc_shared::tests::lift_satisfies_its_specification ... ok
+test public_key::ntru_pqc_shared::tests::membership_masks_match_their_definitions ... ok
+test public_key::ntru_pqc_shared::tests::recommended_parameters_satisfy_the_family_conditions ... ok
+test public_key::ntru_pqc_shared::tests::s3_digits_match_the_base_3_expansion ... ok
+test public_key::ntru_pqc_shared::tests::s3_residue_helpers_match_integer_arithmetic ... ok
+test public_key::ntru_pqc_shared::tests::sample_fg_refuses_exactly_the_zero_polynomials ... ok
+test public_key::ntru_pqc_shared::tests::sort_u32_constant_time_matches_std_sort ... ok
+test public_key::ntru_pqc_shared::tests::explicit_seeds_sampling_zero_hrss_g_are_refused ... ok
+test public_key::ntru_pqc_shared::tests::ternary_and_ternary_plus_match_the_specification ... ok
+test public_key::paillier::tests::add_ciphertexts_wrapper_matches_plaintext_addition ... ok
+test public_key::paillier::tests::byte_ciphertext_roundtrip ... ok
+test public_key::paillier::tests::byte_wrapper_roundtrip_and_rerandomize ... ok
+test public_key::paillier::tests::decrypt_raw_survives_ciphertext_sharing_a_factor_with_n ... ok
+test public_key::paillier::tests::decrypt_rejects_zero_congruent_ciphertext_without_panicking ... ok
+test public_key::paillier::tests::derive_small_reference_key ... ok
+test public_key::paillier::tests::exact_small_ciphertext_matches_reference ... ok
+test public_key::paillier::tests::generate_keypair_roundtrip ... ok
+test public_key::paillier::tests::generated_key_serialization_roundtrip ... ok
+test public_key::paillier::tests::key_serialization_roundtrip ... ok
+test public_key::paillier::tests::private_key_parse_rejects_tampered_fields ... ok
+test public_key::paillier::tests::public_key_parse_rejects_tampered_fields ... ok
+test public_key::paillier::tests::raw_paillier_is_additively_homomorphic ... ok
+test public_key::paillier::tests::rejects_invalid_nonce ... ok
+test public_key::paillier::tests::rejects_invalid_parameters ... ok
+test public_key::paillier::tests::rerandomize_range_checks_before_drawing_randomness ... ok
+test public_key::paillier::tests::roundtrip_small_messages ... ok
+test public_key::paillier::tests::wrappers_reject_out_of_range_ciphertexts ... ok
+test public_key::pkix::tests::a_ber_container_does_not_relax_contents_an_algorithm_requires_in_der ... ok
+test public_key::pkix::tests::attributes_must_be_a_der_set_of_attribute ... ok
+test public_key::pkix::tests::ber_containers_fail_where_ber_or_the_structure_does ... ok
+test public_key::pkix::tests::object_identifiers_match_x690_and_the_rfcs ... ok
+test public_key::pkix::tests::one_asymmetric_key_enforces_rfc5958_structure ... ok
+test public_key::pkix::tests::one_asymmetric_key_in_every_ber_form_converts_to_its_der ... ok
+test public_key::pkix::tests::pem_decode_follows_the_rfc7468_parser_rules ... ok
+test public_key::pkix::tests::pem_decode_rejects_what_rfc7468_does_not_allow ... ok
+test public_key::pkix::tests::read_element_applies_the_schema_free_der_rules ... ok
+test public_key::ntru_pqc_shared::tests::sq_inverse_is_correct_at_the_recommended_parameters ... ok
+test public_key::pkix::tests::rfc8410_version_1_example_decodes_and_reencodes_exactly ... ok
+test public_key::pkix::tests::rfc8410_version_2_example_with_attribute_and_public_key_decodes ... ok
+test public_key::pkix::tests::subject_public_key_info_in_every_ber_form_converts_to_its_der ... ok
+test public_key::pkix::tests::subject_public_key_info_round_trips_and_rejects_non_der ... ok
+test public_key::primes::tests::a112_refuses_short_hashes_and_seeds ... ok
+test public_key::pkix::tests::rfc8410_ber_example_is_the_der_example_in_ber ... ok
+test public_key::primes::tests::approved_sizes_are_exactly_section_4_2 ... ok
+test public_key::primes::tests::cavp_a112_every_seed_reproduces_p_q_and_counter ... ignored, A.1.1.2 from every CAVP seed, up to 3072 bits, is slow in debug; run with --release --ignored
+test public_key::primes::tests::a113_preconditions_are_enforced ... ok
+test public_key::primes::tests::cavp_a112_seed_reproduces_p_q_and_counter_per_1024_bit_hash ... ok
+test public_key::primes::tests::cavp_a113_every_valid_case ... ignored, A.1.1.3 on every valid record, up to 3072 bits, is slow in debug; run with --release --ignored
+test public_key::ntru_hps677::tests::nist_kat ... ok
+test public_key::ntru_hrss701::tests::nist_kat ... ok
+test public_key::ntru_hps509::tests::nist_kat ... ok
+test public_key::primes::tests::fips_generation_timing_at_every_approved_size ... ignored, timing report for every approved size; run with --release --ignored --nocapture
+test public_key::primes::tests::generation_primality_test_accepts_primes_and_rejects_pseudoprimes ... ok
+test public_key::primes::tests::hash_codes_round_trip_and_unknown_codes_are_refused ... ok
+test public_key::primes::tests::random_nonzero_below_rejects_unit_bound ... ok
+test public_key::primes::tests::fips_generation_at_1024_bits_validates_as_a_third_party_would ... ok
+test public_key::primes::tests::size_policy_is_checked_before_arithmetic ... ok
+test public_key::primes::tests::toy_generator_serves_only_sizes_below_fips ... ok
+test public_key::primes::tests::untrusted_hardening_rejects_pseudoprime_that_fools_fixed_bases ... ok
+test public_key::primes::tests::untrusted_still_accepts_primes_and_rejects_composites ... ok
+test public_key::rabin::tests::byte_ciphertext_roundtrip ... ok
+test public_key::rabin::tests::byte_wrapper_roundtrip ... ok
+test public_key::rabin::tests::decrypt_rejects_a_payload_with_the_wrong_tag ... ok
+test public_key::rabin::tests::derive_reference_key ... ok
+test public_key::rabin::tests::exact_small_ciphertext_matches_reference ... ok
+test public_key::rabin::tests::generate_keypair_roundtrip ... ok
+test public_key::rabin::tests::generate_rejects_too_few_bits ... ok
+test public_key::rabin::tests::key_serialization_roundtrip ... ok
+test public_key::rabin::tests::public_key_parse_rejects_non_blum_modulus ... ok
+test public_key::rabin::tests::rejects_invalid_primes ... ok
+test public_key::rabin::tests::rejects_malformed_serialized_private_key ... ok
+test public_key::rabin::tests::rejects_message_that_does_not_fit_tagged_payload ... ok
+test public_key::rabin::tests::roundtrip_small_messages ... ok
+test public_key::rfc6979::tests::bits_to_int_keeps_leftmost_bits_by_octet_width ... ok
+test public_key::rfc6979::tests::octet_conversions_are_fixed_width ... ok
+test public_key::rsa::tests::blinded_decrypt_matches_unblinded ... ok
+test public_key::rsa::tests::default_search_refuses_exponents_at_or_above_the_modulus ... ok
+test public_key::rsa::tests::default_search_takes_65537_when_it_fits ... ok
+test public_key::rsa::tests::exact_small_ciphertext_matches_reference ... ok
+test public_key::rsa::tests::explicit_exponent_matches_classic_example ... ok
+test public_key::rsa::tests::generate_keypair_roundtrip ... ok
+test public_key::rsa::tests::generate_refuses_an_exponent_that_cannot_fit_below_n ... ok
+test public_key::rsa::tests::generate_refuses_odd_sizes_and_exponents_outside_fips_range ... ok
+test public_key::primes::tests::cavp_a24_verdicts ... ok
+test public_key::rsa::tests::raw_rsa_is_multiplicatively_homomorphic ... ok
+test public_key::rsa::tests::rejects_non_invertible_exponent ... ok
+test public_key::rsa::tests::roundtrip_small_messages ... ok
+test public_key::rsa_io::tests::generated_key_xml_roundtrip ... ok
+test public_key::rsa_io::tests::openssl_accepts_pkcs8_pem ... ok
+test public_key::rsa_io::tests::openssl_accepts_spki_pem ... ok
+test public_key::rsa_io::tests::openssl_generated_private_key_parses ... ok
+test public_key::rsa_io::tests::openssl_reads_the_ber_forms_as_the_same_key ... ok
+test public_key::rsa_io::tests::pkcs1_accepts_phi_reduced_private_exponent ... ok
+test public_key::rsa_io::tests::pkcs1_rejects_multi_prime_version ... ok
+test public_key::rsa_io::tests::pkcs1_rejects_private_exponent_at_or_above_modulus ... ok
+test public_key::rsa_io::tests::pkcs1_rejects_private_exponent_not_congruent_to_inverse ... ok
+test public_key::rsa_io::tests::pkcs8_ber_receiver_follows_rfc5958_and_rfc5208 ... ok
+test public_key::rsa_io::tests::pkcs8_roundtrip ... ok
+test public_key::rsa_io::tests::pkcs8_version_2_public_key_must_match_the_private_key ... ok
+test public_key::rsa_io::tests::private_key_encodings_allocate_exactly_their_length ... ok
+test public_key::rsa_io::tests::private_key_parsers_cap_the_modulus_width_before_primality_testing ... ok
+test public_key::rsa_io::tests::public_key_parse_enforces_rfc8017_ranges ... ok
+test public_key::rsa_io::tests::rsa_containers_reject_absent_algorithm_parameters ... ok
+test public_key::rsa_io::tests::rsa_containers_reject_nonempty_algorithm_null ... ok
+test public_key::rsa_io::tests::rsa_rejects_nonminimal_der_lengths_and_integers ... ok
+test public_key::rsa_io::tests::spki_pem_takes_a_ber_container_around_a_der_rsa_public_key_only ... ok
+test public_key::rsa_io::tests::spki_roundtrip ... ok
+test public_key::rsa_io::tests::xml_roundtrip ... ok
+test public_key::rsa_pkcs1::tests::mgf1_refuses_a_mask_longer_than_the_counter_allows ... ok
+test public_key::ntru_ees_core::tests::tampering_past_the_message_is_rejected_ees1499ep1 ... ok
+test public_key::rsa_pkcs1::tests::nist_cavp_pss_sigver_sha1_vector_passes ... ok
+test public_key::rsa_pkcs1::tests::oaep_and_pss_reject_representatives_at_or_above_modulus ... ok
+test public_key::rsa_pkcs1::tests::oaep_decrypt_rejects_each_step_3g_condition ... ok
+test public_key::rsa_pkcs1::tests::oaep_decrypt_rng_roundtrip ... ok
+test public_key::rsa_pkcs1::tests::oaep_encrypt_rng_roundtrip ... ok
+test public_key::rsa_pkcs1::tests::oaep_rejects_wrong_label ... ok
+test public_key::rsa_pkcs1::tests::oaep_rejects_wrong_length_inputs ... ok
+test public_key::rsa_pkcs1::tests::oaep_roundtrip ... ok
+test public_key::rsa_pkcs1::tests::pss_rejects_bad_lengths ... ok
+test public_key::rsa_pkcs1::tests::pss_sign_and_verify ... ok
+test public_key::rsa_pkcs1::tests::pss_sign_rng_and_verify ... ok
+test public_key::rsa_pkcs1::tests::pss_verify_rejects_trailer_top_bits_and_separator_tampering ... ok
+test public_key::schmidt_samoa::tests::byte_ciphertext_roundtrip ... ok
+test public_key::schmidt_samoa::tests::byte_wrapper_roundtrip ... ok
+test public_key::schmidt_samoa::tests::derive_small_reference_key ... ok
+test public_key::schmidt_samoa::tests::exact_small_ciphertext_matches_reference ... ok
+test public_key::schmidt_samoa::tests::generate_keypair_roundtrip ... ok
+test public_key::schmidt_samoa::tests::generate_rejects_too_few_bits ... ok
+test public_key::schmidt_samoa::tests::key_parse_rejects_tampered_fields ... ok
+test public_key::schmidt_samoa::tests::key_serialization_roundtrip ... ok
+test public_key::schmidt_samoa::tests::rejects_invalid_parameters ... ok
+test public_key::schmidt_samoa::tests::roundtrip_small_messages ... ok
+test public_key::x25519::tests::agree_rejects_low_order_zero_output ... ok
+test public_key::x25519::tests::canonical_u_reads_u_coordinates_as_rfc7748_section_5_does ... ok
+test public_key::x25519::tests::ecdh_roundtrip ... ok
+test public_key::x25519::tests::fe_bytes_roundtrip ... ok
+test public_key::x25519::tests::fe_invert_simple ... ok
+test public_key::x25519::tests::fe_mul_by_one_is_identity ... ok
+test public_key::x25519::tests::field_invert_inverse_of_self ... ok
+test public_key::ntru_ees_core::tests::last_decoded_octet_by_parameter_set ... ok
+test public_key::x25519::tests::pkcs8_ber_accepts_an_indefinite_length_container ... ok
+test public_key::x25519::tests::pkcs8_round_trips_and_a_version_2_public_key_must_match ... ok
+test public_key::x25519::tests::private_key_equality_is_by_value ... ok
+test public_key::x25519::tests::public_key_import_canonicalises_the_u_coordinate ... ok
+test public_key::x25519::tests::rfc7748_section5_2_iter_1 ... ok
+test public_key::x25519::tests::rfc7748_section5_2_iter_1000 ... ok
+test public_key::x25519::tests::rfc7748_section5_2_iter_1m_x25519 ... ignored, RFC 7748 1M-iteration test; run with --release --ignored
+test public_key::x25519::tests::rfc7748_section5_2_vector_1 ... ok
+test public_key::x25519::tests::rfc7748_section5_2_vector_2 ... ok
+test public_key::x25519::tests::spki_decodes_the_rfc8410_section_10_2_certificate_key ... ok
+test public_key::x448::tests::agree_rejects_low_order_zero_output ... ok
+test public_key::x448::tests::canonical_u_reduces_non_canonical_u_coordinates ... ok
+test public_key::x448::tests::ecdh_roundtrip ... ok
+test public_key::x448::tests::fe_bytes_roundtrip ... ok
+test public_key::x448::tests::fe_invert_simple ... ok
+test public_key::rsa_pkcs1::tests::nist_acvp_kts_oaep_sha512_decrypt_vector_matches_plaintext ... ok
+test public_key::x448::tests::pkcs8_ber_accepts_an_indefinite_length_container ... ok
+test public_key::x448::tests::pkcs8_version_2_public_key_must_match ... ok
+test public_key::x448::tests::private_key_equality_is_by_value ... ok
+test public_key::x448::tests::public_key_import_canonicalises_the_u_coordinate ... ok
+test public_key::x448::tests::rfc7748_section5_2_iter_1 ... ok
+test public_key::ml_dsa::tests::ml_dsa_make_hint_and_use_hint_agree_with_algorithms_39_and_40 ... ok
+test public_key::x448::tests::rfc7748_section5_2_iter_1m_x448 ... ignored, RFC 7748 1M-iteration test; run with --release --ignored
+test public_key::x448::tests::rfc7748_section5_2_vector_1 ... ok
+test public_key::x448::tests::rfc7748_section5_2_vector_2 ... ok
+test public_key::x448::tests::spki_and_pkcs8_round_trip_in_rfc8410_framing ... ok
+test scrub::tests::cipher_modules_are_classified_for_ct_policy ... ok
+test scrub::tests::ct_rs_does_not_spell_comparisons_as_bool_casts ... ok
+test scrub::tests::explicit_agreement_names_stay_in_place ... ok
+test scrub::tests::hkdf_surface_remains_exported ... ok
+test scrub::tests::legacy_pk_api_names_do_not_reappear ... ok
+test scrub::tests::manifest_enables_rump_wipe_and_declares_no_wipe_feature ... ok
+test scrub::tests::public_key_types_have_no_root_level_reexport ... ok
+test scrub::tests::removed_reference_generators_do_not_reappear ... ok
+test scrub::tests::stream_and_aead_traits_remain_in_root_surface ... ok
+test public_key::x25519::tests::openssl_x25519_keys_interoperate ... ok
+test test_utils::tests::a_known_good_invocation_yields_output_when_openssl_is_present ... ok
+test scrub::tests::unsafe_code_stays_confined_to_audited_sites ... ok
+test test_utils::tests::diagnostics_about_the_invocation_are_bad_invocation ... ok
+test test_utils::tests::diagnostics_naming_a_missing_algorithm_are_lacks_algorithm ... ok
+test test_utils::tests::flavor_parses_version_lines ... ok
+test test_utils::tests::legacy_provider_set_is_single_des_and_friends ... ok
+test test_utils::tests::only_enc_refusing_a_mode_survives_required ... ok
+test test_utils::tests::other_failures_are_neither ... ok
+test public_key::rsa::tests::generated_keys_have_exactly_the_requested_modulus_length ... ok
+test test_utils::tests::a_nonsense_digest_is_reported_as_unsupported_not_output ... ok
+test public_key::x448::tests::openssl_x448_keys_interoperate ... ok
+test public_key::primes::tests::cavp_a113_every_invalid_case_and_a_valid_case_per_1024_bit_hash ... ok
+test public_key::primes::tests::cavp_a23_canonical_generators ... ok
+test public_key::ffc_pkix::tests::ber_receivers_keep_the_integer_rules_of_rfc3279 ... ok
+test public_key::ntru_hps821::tests::nist_kat ... ok
+test public_key::primes::tests::seeded_domain_round_trips_and_rejects_every_tampered_field ... ok
+test public_key::x448::tests::rfc7748_section5_2_iter_1000 ... ok
+test public_key::ntru_ees_core::tests::step_p_refusal_rates_by_parameter_set ... ok
+test ciphers::sm4::tests::example_2_million_encryptions_ct ... ok
+
+test result: ok. 1386 passed; 0 failed; 16 ignored; 0 measured; 0 filtered out; finished in 3.97s
+
+     Running unittests src/bin/bench_public_key.rs (target/release/deps/bench_public_key-222982b52cfbdd8a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/cipher_encrypt.rs (target/release/deps/cipher_encrypt-6f4b5936207a2de4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/pilot_cipher.rs (target/release/deps/pilot_cipher-291ee07863fee2fc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/pilot_hash.rs (target/release/deps/pilot_hash-e9164f6dfc54dcc5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/pilot_pk.rs (target/release/deps/pilot_pk-5bb975016a6c72ef)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/pilot_sm4.rs (target/release/deps/pilot_sm4-576a947fc9601de2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile_ct_anf.rs (target/release/deps/profile_ct_anf-b0a525616a070762)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/kat_ccm.rs (target/release/deps/kat_ccm-9933b7364b56f5ef)
+
+running 29 tests
+test rfc3610_packet_vector_01 ... ok
+test rfc3610_packet_vector_02 ... ok
+test rfc3610_packet_vector_03 ... ok
+test rfc3610_packet_vector_04 ... ok
+test rfc3610_packet_vector_05 ... ok
+test rfc3610_packet_vector_06 ... ok
+test rfc3610_packet_vector_07 ... ok
+test rfc3610_packet_vector_13 ... ok
+test rfc3610_packet_vector_08 ... ok
+test rfc3610_packet_vector_14 ... ok
+test rfc3610_packet_vector_09 ... ok
+test rfc3610_packet_vector_15 ... ok
+test rfc3610_packet_vector_16 ... ok
+test rfc3610_packet_vector_17 ... ok
+test rfc3610_packet_vector_10 ... ok
+test rfc3610_packet_vector_12 ... ok
+test rfc3610_packet_vector_19 ... ok
+test rfc3610_packet_vector_18 ... ok
+test rfc3610_packet_vector_11 ... ok
+test rfc3610_packet_vector_21 ... ok
+test rfc3610_packet_vector_20 ... ok
+test rfc3610_packet_vector_22 ... ok
+test rfc3610_packet_vector_23 ... ok
+test rfc3610_packet_vector_24 ... ok
+test rfc3610_section_8_parses_into_24_packet_vectors ... ok
+test sp800_38c_c1_example_1 ... ok
+test sp800_38c_c2_example_2 ... ok
+test sp800_38c_c3_example_3 ... ok
+test sp800_38c_c4_example_4_long_associated_data ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/kat_ctr_drbg.rs (target/release/deps/kat_ctr_drbg-76d3ff495b391034)
+
+running 9 tests
+test no_reseed_personalization_0_additional_input_384 ... ok
+test no_reseed_personalization_0_additional_input_0 ... ok
+test no_reseed_personalization_384_additional_input_384 ... ok
+test no_reseed_personalization_384_additional_input_0 ... ok
+test reseed_personalization_0_additional_input_0 ... ok
+test reseed_personalization_0_additional_input_384 ... ok
+test vector_file_holds_eight_groups ... ok
+test reseed_personalization_384_additional_input_0 ... ok
+test reseed_personalization_384_additional_input_384 ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/kat_fips186_dsa.rs (target/release/deps/kat_fips186_dsa-4fbaa9a295ae1bfc)
+
+running 6 tests
+test keypair_every_size ... ignored, hardened validation of the 2048- and 3072-bit domains is slow in debug; run with --release --ignored
+test siggen_every_group_every_record ... ignored, every record of every (L, N, hash) group; run with --release --ignored
+test sigver_every_group_every_record ... ignored, every (L, N, hash) group; run with --release --ignored
+test keypair_1024_160 ... ok
+test siggen_1024_160_every_hash ... ok
+test sigver_1024_160_every_hash_every_record ... ok
+
+test result: ok. 3 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/kat_gcm.rs (target/release/deps/kat_gcm-143e686ef8c14547)
+
+running 16 tests
+test test_case_03 ... ok
+test test_case_04 ... ok
+test test_case_05 ... ok
+test test_case_06 ... ok
+test test_case_07 ... ok
+test test_case_08 ... ok
+test test_case_09 ... ok
+test test_case_10 ... ok
+test test_case_11 ... ok
+test test_case_12 ... ok
+test test_case_13 ... ok
+test test_case_14 ... ok
+test test_case_15 ... ok
+test test_case_16 ... ok
+test test_case_17 ... ok
+test test_case_18 ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/kat_hash.rs (target/release/deps/kat_hash-a149b239de8f28e2)
+
+running 30 tests
+test md5_rfc1321_a5_1 ... ok
+test md5_rfc1321_a5_2 ... ok
+test md5_rfc1321_a5_3 ... ok
+test md5_rfc1321_a5_4 ... ok
+test ripemd160_appendix_b_1 ... ok
+test ripemd160_appendix_b_2 ... ok
+test ripemd160_appendix_b_4 ... ok
+test ripemd160_appendix_b_3 ... ok
+test ripemd160_appendix_b_5 ... ok
+test sha1_448_bit_message ... ok
+test sha224_448_bit_message ... ok
+test sha256_448_bit_message ... ok
+test sha384_896_bit_message ... ok
+test sha3_224_1600_bit_message ... ok
+test sha3_256_1600_bit_message ... ok
+test sha3_384_1600_bit_message ... ok
+test sha3_512_1600_bit_message ... ok
+test sha512_224_896_bit_message ... ok
+test sha512_256_896_bit_message ... ok
+test sha512_896_bit_message ... ok
+test shake128_msg0_4096_bit_output ... ok
+test shake128_msg1600_4096_bit_output ... ok
+test shake256_msg0_4096_bit_output ... ok
+test shake256_msg1600_4096_bit_output ... ok
+test sha384_million_a ... ok
+test sha512_million_a ... ok
+test sha224_million_a ... ok
+test sha256_million_a ... ok
+test ripemd160_appendix_b_6 ... ok
+test sha1_million_a ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/kat_hmac_cmac.rs (target/release/deps/kat_hmac_cmac-4d2d00c1b9be2b48)
+
+running 39 tests
+test cmac_aes128_example_3 ... ok
+test cmac_aes128_example_4 ... ok
+test cmac_aes192_example_1 ... ok
+test cmac_aes192_example_2 ... ok
+test cmac_aes192_example_3 ... ok
+test cmac_aes192_example_4 ... ok
+test cmac_aes256_example_1 ... ok
+test cmac_aes256_example_2 ... ok
+test cmac_aes256_example_3 ... ok
+test cmac_aes256_example_4 ... ok
+test cmac_tdea_2key_sample_1 ... ok
+test cmac_tdea_2key_sample_2 ... ok
+test cmac_tdea_2key_sample_3 ... ok
+test cmac_tdea_2key_sample_4 ... ok
+test cmac_tdea_3key_sample_1 ... ok
+test cmac_tdea_3key_sample_2 ... ok
+test cmac_tdea_3key_sample_3 ... ok
+test rfc4231_case_1_hmac_sha224 ... ok
+test cmac_tdea_3key_sample_4 ... ok
+test rfc4231_case_1_hmac_sha384 ... ok
+test rfc4231_case_1_hmac_sha512 ... ok
+test rfc4231_case_2_hmac_sha224 ... ok
+test rfc4231_case_2_hmac_sha384 ... ok
+test rfc4231_case_2_hmac_sha512 ... ok
+test rfc4231_case_3_hmac_sha224 ... ok
+test rfc4231_case_3_hmac_sha384 ... ok
+test rfc4231_case_3_hmac_sha512 ... ok
+test rfc4231_case_4_hmac_sha224 ... ok
+test rfc4231_case_4_hmac_sha384 ... ok
+test rfc4231_case_4_hmac_sha512 ... ok
+test rfc4231_case_5_hmac_sha224 ... ok
+test rfc4231_case_5_hmac_sha384 ... ok
+test rfc4231_case_5_hmac_sha512 ... ok
+test rfc4231_case_6_hmac_sha224 ... ok
+test rfc4231_case_6_hmac_sha384 ... ok
+test rfc4231_case_6_hmac_sha512 ... ok
+test rfc4231_case_7_hmac_sha224 ... ok
+test rfc4231_case_7_hmac_sha384 ... ok
+test rfc4231_case_7_hmac_sha512 ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/kat_kas_ffc.rs (target/release/deps/kat_kas_ffc-6059fbc7084f4253)
+
+running 1 test
+test dhephem_zz_only_initiator_fb_and_fc ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.71s
+
+     Running tests/kat_rfc5903_ecdh.rs (target/release/deps/kat_rfc5903_ecdh-7c1ec09c259ac3c8)
+
+running 3 tests
+test section_8_1_p256 ... ok
+test section_8_2_p384 ... ok
+test section_8_3_p521 ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/kat_rfc6979.rs (target/release/deps/kat_rfc6979-8480bce72947af72)
+
+running 18 tests
+test a2_13_ecdsa_b163 ... ok
+test a2_1_dsa_1024 ... ok
+test a2_4_ecdsa_p224 ... ok
+test a2_3_ecdsa_p192 ... ok
+test a2_8_ecdsa_k163 ... ok
+test a2_14_ecdsa_b233 ... ok
+test appendix_parses_into_seventeen_keys ... ok
+test a2_10_ecdsa_k283 ... ok
+test a2_15_ecdsa_b283 ... ok
+test a2_5_ecdsa_p256 ... ok
+test a2_9_ecdsa_k233 ... ok
+test a2_7_ecdsa_p521 ... ok
+test a2_16_ecdsa_b409 ... ok
+test a2_11_ecdsa_k409 ... ok
+test a2_6_ecdsa_p384 ... ok
+test a2_2_dsa_2048 ... ok
+test a2_12_ecdsa_k571 ... ok
+test a2_17_ecdsa_b571 ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/kat_rfc7253_ocb.rs (target/release/deps/kat_rfc7253_ocb-ccfc20d45f96e232)
+
+running 23 tests
+test iterative_aes_128_taglen_96 ... ok
+test iterative_aes_128_taglen_128 ... ok
+test iterative_aes_192_taglen_64 ... ok
+test iterative_aes_192_taglen_96 ... ok
+test iterative_aes_128_taglen_64 ... ok
+test iterative_aes_256_taglen_128 ... ok
+test iterative_aes_256_taglen_96 ... ok
+test sample_03 ... ok
+test iterative_aes_256_taglen_64 ... ok
+test sample_05 ... ok
+test sample_06 ... ok
+test sample_07 ... ok
+test sample_08 ... ok
+test sample_09 ... ok
+test iterative_aes_192_taglen_128 ... ok
+test sample_10 ... ok
+test sample_11 ... ok
+test sample_12 ... ok
+test sample_13 ... ok
+test sample_14 ... ok
+test sample_15 ... ok
+test sample_16 ... ok
+test sample_taglen_96 ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/kat_rfc7748.rs (target/release/deps/kat_rfc7748-e43b884c2f404586)
+
+running 2 tests
+test section_6_1_x25519 ... ok
+test section_6_2_x448 ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/kat_rfc8439.rs (target/release/deps/kat_rfc8439-ace7b310e2510f19)
+
+running 24 tests
+test a1_block_function_vector_1 ... ok
+test a1_block_function_vector_2 ... ok
+test a1_block_function_vector_3 ... ok
+test a1_block_function_vector_4 ... ok
+test a1_block_function_vector_5 ... ok
+test a2_encryption_vector_1 ... ok
+test a2_encryption_vector_2 ... ok
+test a2_encryption_vector_3 ... ok
+test a3_poly1305_vector_1 ... ok
+test a3_poly1305_vector_10 ... ok
+test a3_poly1305_vector_11 ... ok
+test a3_poly1305_vector_2 ... ok
+test a3_poly1305_vector_3 ... ok
+test a3_poly1305_vector_4 ... ok
+test a3_poly1305_vector_5 ... ok
+test a3_poly1305_vector_6 ... ok
+test a3_poly1305_vector_7 ... ok
+test a3_poly1305_vector_8 ... ok
+test a3_poly1305_vector_9 ... ok
+test a4_poly1305_key_generation_vector_1 ... ok
+test a4_poly1305_key_generation_vector_2 ... ok
+test a4_poly1305_key_generation_vector_3 ... ok
+test a5_aead_decryption ... ok
+test a5_tampering_is_refused ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/kat_rfc8452_gcm_siv.rs (target/release/deps/kat_rfc8452_gcm_siv-8a80cbccaf2e1f33)
+
+running 6 tests
+test c1_aead_aes_128_gcm_siv ... ok
+test appendix_parses_into_fifty_records ... ok
+test c1_aead_aes_128_gcm_siv_ct ... ok
+test c2_aead_aes_256_gcm_siv ... ok
+test c3_counter_wrap ... ok
+test c2_aead_aes_256_gcm_siv_ct ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/kat_xchacha20.rs (target/release/deps/kat_xchacha20-be5e190117066f7b)
+
+running 3 tests
+test a3_1_aead_xchacha20_poly1305_composed ... ok
+test a3_2_1_xchacha20_counter_0 ... ok
+test a3_2_2_xchacha20_counter_1 ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/manual_examples.rs (target/release/deps/manual_examples-fbe6a0d658404911)
+
+running 10 tests
+test manual_csprng_hash_xof_and_mac_examples ... ok
+test manual_stream_cipher_examples ... ok
+test manual_ctr_file_roundtrip_example ... ok
+test manual_symmetric_examples ... ok
+test manual_postquantum_examples ... ok
+test manual_edwards_examples ... ok
+test manual_standard_key_encoding_examples ... ok
+test manual_ec_examples ... ok
+test manual_rsa_examples ... ok
+test manual_finite_field_examples ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests/wipe_behaviour.rs (target/release/deps/wipe_behaviour-9c6c067438b0cea5)
+
+running 8 tests
+test aes256_round_keys_are_zero_after_drop ... ok
+test aes256ct_round_keys_are_zero_after_drop ... ok
+test control_a_plain_array_is_not_wiped_by_drop ... ok
+test ctr_drbg_key_and_v_are_zero_after_drop ... ok
+test hmac_sha256_keyed_states_are_zero_after_drop ... ok
+test ml_kem_shared_secret_is_zero_after_drop ... ok
+test poly1305_key_is_zero_after_drop ... ok
+test x25519_private_key_is_zero_after_drop ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/wipe_modes.rs (target/release/deps/wipe_modes-6fa961b615eab61e)
+
+running 8 tests
+test ccm_eax_ocb_wipe_on_drop ... ok
+test gcm_siv_wipes_its_key_generating_key_on_drop ... ok
+test cmac_wipes_its_subkeys_and_cipher_on_drop ... ok
+test poly1305_new_wiping_zeroes_the_key_and_keeps_the_tag ... ok
+test gcm_wipes_its_cipher_on_drop ... ok
+test chacha20_poly1305_new_wiping_zeroes_the_key_and_keeps_the_output ... ok
+test poly1305_and_chacha20_poly1305_wipe_their_keys_on_drop ... ok
+test siv_and_xts_wipe_both_ciphers_on_drop ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/wipe_policy.rs (target/release/deps/wipe_policy-8c7377db74f99fe6)
+
+running 3 tests
+test caller_key_erasure_preserves_cipher_output ... ok
+test seed_erasure_preserves_drbg_output ... ok
+test slice_scrubbing_is_always_active ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

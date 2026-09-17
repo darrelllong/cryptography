@@ -1,0 +1,52 @@
+{
+  "platform": "Apple M4 Pro, aarch64-apple-darwin",
+  "compiler": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+  "scope": "Frozen sources identified in snapshots.json; fresh functional checks. Ignored tests are not included.",
+  "checks": [
+    {
+      "command": "CRYPTOGRAPHY_OPENSSL_REQUIRED=1 cargo test --offline --locked --release --all-targets",
+      "log": "logs/cryptography-release.log",
+      "sha256": "280a01e2f2e132a541ea462ddbe392aba21acd395d8a8eab71261fd2ac55c8f3",
+      "last_line": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "totals": {
+        "passed": 1621,
+        "failed": 0,
+        "ignored": 19
+      }
+    },
+    {
+      "command": "CRYPTOGRAPHY_OPENSSL_REQUIRED=1 cargo test --offline --locked --release --all-targets --all-features",
+      "log": "logs/cryptography-features.log",
+      "sha256": "ec53a2aee121157f4cb3499ba0af3a985f661c2cc0c924b9e6c45054e0bd8469",
+      "last_line": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+      "totals": {
+        "passed": 1621,
+        "failed": 0,
+        "ignored": 19
+      }
+    },
+    {
+      "command": "cargo test --offline --locked --release --doc",
+      "log": "logs/cryptography-doc.log",
+      "sha256": "44113dd174660f209a142edc6f023d42fe3cd3ed4d65a75b44afffc728fbc3cb",
+      "last_line": "test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.63s",
+      "totals": {
+        "passed": 57,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "command": "cargo +1.87 check --offline --locked --all-targets",
+      "log": "logs/cryptography-msrv.log",
+      "sha256": "5dcfaac8b7dfaeadf5f9b94ab804089318797ca5724163a4b4501d30786fc5f0",
+      "last_line": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.29s"
+    },
+    {
+      "command": "Rscript scripts/cipher_randomness.R --self-test",
+      "log": "logs/crypto-report-tests.log",
+      "sha256": "0acc75cec0614a1c9d6914bbcb549dc42594f633ed339559e571127cb9a69bf3",
+      "last_line": "0 failures"
+    }
+  ]
+}

@@ -1,210 +1,217 @@
-# Cryptography audit
+# Cryptography audit — 2026-09-17
 
 > **Motto:** better that, better algorithms
 >
 > **Creed:** Experiment is asking God for peer review.
 
-## Reviewed state and method
+## Scope and evidence
 
-2026-09-16 PDT / 2026-09-17 UTC. Frozen sibling checkouts on
-`aarch64-apple-darwin`, rustc/Cargo 1.93.1; separate Rust 1.87 checks.
+This review covers the captured sibling combination below on Apple M4 Pro,
+`aarch64-apple-darwin`, rustc/Cargo 1.93.1, with separate Rust 1.87 checks.
 
-| Repository | HEAD at capture |
+| Repository | Captured HEAD |
 |---|---|
-| cryptography | `aa865da77502306f544b7031f65eaf3f7b7960b2` |
-| entropy | `de1bd2d061eea43fe1fca291edae346315b85983` |
-| rump | `66651ab0c82a21929c52da92823fad930766fef9` |
-| factoring | `d594060dc824a4f2c3a0800fdeb86c739dce7e71` |
+| cryptography | `0242a217f1d79ab01bd43d4e5b79fc2a7be7a88f` |
+| entropy | `63592e02ab50a494499a87c3abe0ab406ab01bf5` |
+| rump | `ae7566b1b100239e1b511a9b05ff8229ea6613bd` |
+| factoring | `732801274f7a27640b3616995b7503855a870e99` |
 
-This repository's reviewed-file manifest SHA-256 is
-`0e1c714db3d0e27250ffb05340a6ef29462e0d5aa2de9b897b535620ab6fee42` (572 files).
-The manifest covers tracked and nonignored untracked regular files, excluding
-AUDIT.md and SUGGESTIONS.md: sort relative paths, emit `SHA256(file)`, two
-spaces, path and newline, then SHA-256 the UTF-8 manifest. It identifies working
-contents as well as commits. Tests used fresh build directories in the frozen
-copies. Later edits require checking which evidence still applies.
+The reviewed-file manifest for this repository has SHA-256
+`8f6afba1a69537ba101491e9fcebe03ff5defc6a15564a92334a9d0883815c63` (574 files).
+[The manifest](review/2026-09-17/reviewed-files.sha256) contains sorted
+`SHA256(file)  relative/path` lines; its own digest identifies the capture.
+It covers tracked and nonignored regular files, excluding these two review
+documents and the review artifacts added afterward. Entropy's final capture includes its new
+seeding, sampling, thread-local and `CryptoRng` APIs through `63592e0`.
 
-This review combines source inspection, mathematical identities, the release
-suites, and focused boundary experiments. Reproduced failures, inspected risks,
-retained measurements and proposed experiments are distinguished below. Coverage
-is stated explicitly; passing suites do not establish every input domain,
-platform, timing property or statistical null law. This review changes the two
-review documents only. Diagnostic code ran in separate scratch copies.
+The review distinguishes reproduced results, source inspection, retained
+measurements and proposed experiments. The files record current findings and
+acceptance criteria; they do not implement the proposed changes. Implementation
+references are papers, standards and mathematics. External libraries were called
+through public APIs for comparison; their implementation source was not used.
 
 ## Assessment
 
-The default and all-feature release suites pass, including the required
-OpenSSL cross-checks. This pass concentrated on the changed ElGamal group
-validation, the reporting path, sibling composition, and the boundary between
-functional correctness and security claims. The reproduced report defects can
-produce a PASS without valid complete measurements. Raw ElGamal's message-space
-limitation is demonstrated separately; it is not a failed round-trip equation.
+The exercised primitive, encoding, malformed-input, wipe and cross-implementation
+checks pass. The report validates complete probability vectors and identifies
+its executable, input and analysis. The main remaining work is the placement and
+contract of cryptographic RNG state, measured ChaCha throughput, and qualification
+of security claims at complete-operation boundaries. This pass found no new
+primitive arithmetic counterexample in cryptography; that is limited evidence,
+not a claim that every construction or target is certified.
 
 ## Findings
 
-### C1 — High: the randomness report can declare PASS with no valid p-values
+### C1 — Medium: cryptographic RNG mechanisms have two owners
 
-**Reproduced from the current function.**
-[scripts/cipher_randomness.R](scripts/cipher_randomness.R), `verdict`, first
-removes missing values and then applies `all(p >= ALPHA_BONF)`.
+**Source inspection.** [src/cprng](src/cprng) owns CTR_DRBG, while entropy owns
+Hash_DRBG, HMAC_DRBG and fast-key-erasure key evolution. Those mechanisms specify
+cryptographic state transitions, request/reseed limits and erasure. Their core
+algorithms belong beside the other cryptographic mechanisms. OS acquisition,
+thread-local lifecycle, application sampling and battery adapters belong in
+entropy.
 
-| Supplied seven-test vector | Returned pass | Returned minimum |
-|---|---|---|
-| Seven NA values | TRUE | +Inf |
-| One 0.5 and six NA values | TRUE | 0.5 |
-| Seven values of 2 | TRUE | 2 |
-| Seven +Inf values | TRUE | +Inf |
+Cryptography already has `Csprng`; RSA and ElGamal key generation require it.
+Rump deliberately accepts quality-neutral bytes. Entropy now also has
+`CryptoRng`, including a documented distinction between a secure construction
+and a public test seed. The remaining issue is interoperable contracts and
+ownership, not the absence of any cryptographic RNG type boundary.
 
-The first case follows from `all(logical(0))` being true. These are fresh helper
-probes, not a claim that every retained report row had this condition. The
-report uses the returned Boolean to print both per-cipher PASS and “All ciphers
-pass” statements, so result validation must precede that decision.
+Hash_DRBG's 440-bit modular additions currently pass through generic BigUint.
+That is exact arithmetic, but its fixed width permits an independently derived
+55-byte carry loop with bounded storage. Price that operation before changing it;
+retain NIST request semantics separately from a buffered stream adapter.
+[SP 800-90A Rev. 1](https://csrc.nist.gov/pubs/sp/800/90/a/r1/final) specifies the
+mechanisms and their state transitions.
 
-Require the exact expected set of seven named, scalar, finite probabilities in
-[0,1]. Missing, duplicate, nonfinite or out-of-range results must remain explicit
-errors through caching, the summary and process exit. A statistical rejection
-and an incomplete measurement are distinct outcomes. Entropy's R report has the
-same class of gap ([E2](../entropy/AUDIT.md)), although its Rust result
-constructors already validate probabilities.
+### C2 — Medium: matched ChaCha20 throughput leaves substantial room
 
-### C2 — Medium: retained ciphertext and analysis caches do not identify the implementation tested
+**Fresh black-box measurement through entropy's adapter.** The comparison at
+[entropy's retained experiment](../entropy/review/2026-09-17/README.md) uses the
+same zero key/nonce/counter and verifies 100,000 matching 64-bit outputs before
+timing. Median process-CPU throughput over seven measured rounds:
 
-**Source inspection.** The same script's `encrypt` accepts any nonempty
-`cipher_outputs/<name>.bin` without invoking `cipher_encrypt`. `run_battery`
-accepts an analysis cache when its modification time is at least the
-ciphertext's and its stored battery version is current. Neither condition
-identifies the executable, sibling sources, feature selection, input digest,
-key/nonce experiment identity or analysis-script contents. The report is dated
-when rendered, and no build is performed by this script.
+| Path | Bulk MiB/s | Scalar u64 MiB/s |
+|---|---:|---:|
+| This crate through entropy `ChaCha20Rng` | 719.4 | 753.0 |
+| `chacha20` 0.10.2, 20-round RNG public API | 1,564.3 | 1,359.9 |
+| `rand_chacha` 0.10.0, 20-round public API | 869.4 | 809.0 |
 
-A changed cipher can therefore receive a newly rendered report based entirely
-on retained output from a different executable. Cached data is useful when
-presented as a retained experiment with its own identity; it cannot establish
-current-tree behavior without that identity. Build the requested executable,
-record its digest and the source graph, and key or label the retained experiment
-accordingly. A changed plaintext must also invalidate a current-input claim.
+The first matched bulk ratio is 2.17×. This compares complete generator paths;
+it does not isolate the permutation, prove a particular vector backend executed,
+or equalize erasure policy. The host was heavily loaded; both wall and process
+CPU times are retained, and these are exploratory single-host results.
 
-### C3 — Medium: raw ElGamal byte encryption discloses message-class information
+The current ChaCha implementation computes blocks from scalar state and its
+entropy adapter serves buffered words. Prioritize a direct bulk path and batched
+independent counters. Derive any vector kernel from the quarter-round equations
+and test it against independently constructed vectors. The IETF counter/nonce
+layout and counter-exhaustion behavior must remain explicit.
+[RFC 8439](https://www.rfc-editor.org/rfc/rfc8439) supplies the specification and
+known answers. Reduced rounds would change the security/performance comparison;
+they are not a transparent optimization of ChaCha20.
 
-**Derived and reproduced; security contract.**
-[src/public_key/elgamal.rs](src/public_key/elgamal.rs) accepts every integer
-`1 <= m < p`. In an order-q subgroup, `delta = m*b^k` implies
-`delta^q = m^q mod p`, which publicly identifies the message's subgroup coset.
-Rejecting zero and small-order ciphertext elements does not hide that class.
+### C3 — Medium: timing and state-erasure claims require target-specific evidence
 
-For the safe-prime primitive-root profile, write `chi(x)=x^((p-1)/2) mod p`.
-The public key b reveals the parity of a through chi(b), and gamma reveals
-that of k. Thus:
+**Source inspection; no fresh timing campaign.** The crate correctly distinguishes
+variable-time public-key primitives, table-driven symmetric implementations and
+`Ct` variants. Rump's erasure feature does not make generic multiprecision
+arithmetic constant-time. The ignored equality probe's fastest samples from two
+mismatch positions can detect a gross early exit but do not qualify all secret
+classes or complete operations.
 
-```text
-if chi(b) = 1:  chi(m) = chi(delta)
-otherwise:     chi(m) = chi(delta) * chi(gamma) mod p
-```
+The new fast-key-erasure state in entropy wipes served bytes and replaces the
+key on refill. It warrants review of compiler-produced copies, caller seed
+copies, panic/error paths, actual child-process reseeding and concurrent use.
+The exercised unit tests simulate PID changes; this review did not run a real
+fork campaign or establish physical-memory erasure of every compiler temporary.
+Keep the construction's mathematical claim distinct from what a volatile write
+and a functional test establish on a particular build.
 
-A public-API experiment with `p=23, g=5, a=7`, all 22 nonzero messages and all
-20 accepted nonces recovered the correct character in **440/440 cases**.
-Only public key/ciphertext values were used for recovery. This is an exact
-algebraic witness; it does not depend on solving a small discrete logarithm or
-on timing. Arbitrary large safe primes have the same identity.
+### C4 — Medium: statistical reports have a bounded interpretation
 
-The module already labels this as textbook/raw encryption and asks callers to
-supply a hybrid construction or padding. Keep that scope prominent on the byte
-entry points and supply a precisely specified authenticated hybrid path if the
-library intends to offer message confidentiality. Raw multiplicative ElGamal
-also remains malleable. The group algorithm and semantic-security distinction
-are discussed in [HAC §§8.4 and 8.7](https://cacr.uwaterloo.ca/hac/about/chap8.pdf).
-No new primitive arithmetic failure is asserted by this finding.
+**Source inspection and retained evidence.**
+[scripts/cipher_randomness.R](scripts/cipher_randomness.R) now requires the
+expected named, finite [0,1] results, rejects invalid/incomplete rows, builds the
+executable, fingerprints output/input/analysis and tests cache acceptance.
+Its fresh self-test passes. These checks make a retained experiment identifiable;
+they do not supply the null law of every statistic or establish confidentiality.
 
-### C4 — Medium: timing evidence supports a narrower claim than end-to-end constant time
+The retained 400,000-stream campaign at 5,638,480 bytes records 419 family
+rejections, a rate of 0.0010475 at nominal family alpha 0.001. That rate is
+compatible with sampling uncertainty. It applies to its recorded length, pooling
+and decision rule, not arbitrary future inputs or tuned thresholds. No new full
+ciphertext battery or null calibration was generated in this pass.
 
-**Source inspection; no new timing campaign.** [src/lib.rs](src/lib.rs)
-correctly labels the generic public-key operations variable-time and distinguishes
-table-driven symmetric types from their `Ct` variants. Rump wiping is enabled
-through the dependency graph; normalization, allocation and generic arithmetic
-remain value dependent.
+### C5 — Contract boundary: raw ElGamal is a primitive
 
-[src/ct.rs](src/ct.rs)'s ignored equality timing test compares the fastest of
-101 samples from two mismatch positions. That is a useful check for a gross
-early-exit regression; it cannot rule out smaller distributional differences,
-other secret classes, compiler changes or complete-operation leakage. Its name
-and a passing result must not become a certification of every API. Preserve
-source-level discipline, then qualify generated code and measured operations on
-the actual targets separately.
+The [ElGamal API](src/public_key/elgamal.rs) explicitly states its raw message
+contract and malleability. For an order-q subgroup, `delta = m*b^k` gives
+`delta^q = m^q mod p`, revealing the message's coset for unrestricted nonzero m.
+This is an algebraic limitation of that interface, not a round-trip failure.
+Keep byte encoding separate from a specified authenticated hybrid construction;
+changing comments or rejecting zero cannot create semantic security.
 
-### C5 — Medium: statistical and performance claims need matching evidence domains
+### C6 — Medium: dense NTRU profile parameters have incomplete documentary support
 
-**Retained statistical evidence; inspected performance limits.**
-[R-REPORT.md](R-REPORT.md) now describes the family threshold as nominal unless
-each marginal tail is valid. A fresh recount of the retained 400,000 null rows
-at 5,638,480 bytes gives the following counts below `0.001/7`:
+**Source inspection.** [src/public_key/ntru_ees_core.rs](src/public_key/ntru_ees_core.rs)
+distinguishes the public EESS specification, the parameter paper and measured
+interoperability. It explicitly leaves the dense sets' `minCallsR` and
+`minCallsMask` values unconfirmed. Those precomputation choices do not change the
+known-answer outputs, so passing vectors cannot identify or validate them.
+Several other profile fields are pinned by interoperability data rather than a
+retrieved complete normative parameter table.
 
-| byte chi-square | KS | serial | gap | permutation | Bartlett | runs | any |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 46 | 60 | 58 | 79 | 55 | 65 | 61 | 419 |
-
-The family rate 0.0010475 is compatible with ordinary sampling uncertainty
-around 0.001; these rows do not prove an excess family error. The gap marginal
-and any new stream length or tuned pooling rule require held-out validation at
-the deciding threshold. No new null streams were generated in this review.
-
-The comparison tables in [SYMMETRIC.md](SYMMETRIC.md),
-[ASYMMETRIC.md](ASYMMETRIC.md) and [POSTQUANTUM.md](POSTQUANTUM.md) identify stale
-performance data. Current correctness-suite durations are not replacement
-benchmarks. GHASH's 128 masked selections per block are an operation count;
-they do not establish which phase dominates a complete AEAD call.
-
-## Mathematical and implementation boundaries checked
-
-| Boundary | Evidence and remaining limit |
-|---|---|
-| ElGamal group validation | Safe-prime primitive-root and prime-order-subgroup profiles are explicit; degenerate secret/nonce and ciphertext membership checks are covered by the current suite. Message-space secrecy is a separate contract, C3. |
-| AEAD | Known answers, tag/AAD/ciphertext perturbations and wipe regressions pass; nonce and per-key usage requirements remain scheme-specific. |
-| EC and signature imports | The exercised invalid-point, identity-key and private/public consistency regressions pass. RFC 8032 cofactored verification is a chosen profile, not every application's key-registration policy. |
-| ML-KEM, ML-DSA and NTRU | Included known-answer, malformed-input and key-validation regressions pass. This is not a fresh clause-by-clause standards review or the entire ignored campaign. |
-| Randomness | CSPRNG/DRBG state is deterministic after seeding. Ciphertext uniformity cannot establish seed entropy, unpredictability, confidentiality or authenticity. |
-| Dependency graph | Cryptography enables rump wipe; both this crate and entropy default pass with the captured rump. |
+Keep algorithm correctness, interoperability and conformance to a named parameter
+profile separate. Establish a primary-document or mathematical derivation for
+each field; where that evidence is unavailable, state the implemented profile
+precisely without claiming complete standards conformance. The wire framing is
+also an interoperability choice where the specification leaves format open.
+This review did not retrieve the complete IEEE/ANSI parameter tables or reproduce
+a wrong NTRU ciphertext from these choices.
 
 ## Fresh verification
 
-OpenSSL 3.6.4 was discovered through the Homebrew path.
-`CRYPTOGRAPHY_OPENSSL_REQUIRED=1` was set on both release runs. The helper's
-explicit exception for modes unavailable through `openssl enc` remains part of
-that test contract.
-
 | Check | Result |
 |---|---|
-| `cargo test --offline --locked --release --all-targets` | 1,620 passed, 19 ignored |
-| Same `--all-features` | 1,620 passed, 19 ignored |
-| `cargo test --offline --locked --release --doc` | 57 passed |
-| `cargo +1.87 check --offline --locked --all-targets` | Passed |
-| Current R `verdict` with incomplete/invalid vectors | C1 reproduced |
-| Public ElGamal character-recovery experiment | 440/440 exact matches |
-| Recount of retained null CSV | C5 table reproduced |
+| Release, locked/offline, all targets | 1,621 passed; 19 ignored |
+| Same, all features (`ct_profile`, `arm-sha3`) | 1,621 passed; 19 ignored |
+| Release doctests | 57 passed |
+| Rust 1.87, locked/offline, all-target check | Passed |
+| `Rscript scripts/cipher_randomness.R --self-test` | Passed |
+| Matched ChaCha20 output comparison | 100,000 u64 outputs identical across three paths |
 
-All features means `ct_profile` and `arm-sha3` on this ARM64 host. These runs
-are functional evidence, not a new assembly/timing review. No fresh full fuzz
-campaign, ignored-test campaign, x86/Linux build or companion-fast-crate benchmark
-was run. Existing campaign and remote-host reports remain separately dated
-records; their results are not added to the fresh counts above.
+Both release suites set `CRYPTOGRAPHY_OPENSSL_REQUIRED=1`; the test helper's
+specified exceptions for modes unavailable through `openssl enc` still apply.
+These are functional checks on ARM64. No new full fuzz campaign, ignored-test
+campaign, assembly/timing campaign, Linux/x86 run or PQ standards certification
+was performed. [Retained validation](review/2026-09-17/validation.json) records
+commands and log digests; test durations are not performance measurements.
 
-## Cross-repository contracts
+## Cross-repository ownership
 
-| Owner | Obligation at the boundary |
-|---|---|
-| [rump](../rump/AUDIT.md) | Exact arithmetic and matrix identities; numerical domains, error and convergence; explicit search completion. |
-| [cryptography](../cryptography/AUDIT.md) | Scheme-specific validation, randomness requirements, confidentiality/authentication profiles, timing and secret handling. |
-| [entropy](../entropy/AUDIT.md) | Explicit input view, statistic, null law, calibrated decision and complete report; a statistical pass is not a security claim. |
-| [factoring](../factoring/AUDIT.md) | Exact relation identities and dependency expansion, verified proper divisors, measured selection cost; probable-prime leaves are not proofs. |
+Keep the four repositories, with a focused boundary refactor. The desired graph
+is `cryptography → rump`, `entropy → cryptography` when crypto generators are
+enabled, and `factoring → rump + entropy` with only the RNG/statistics features
+it needs. Rump must not depend on either consumer.
 
-The links assume sibling checkouts. Cryptography enables rump's additive `wipe`
-feature. Entropy default inherits it; entropy minimal and factoring alone do
-not. The same rump version string can therefore describe different timing and
-allocation costs. Record the resolved dependency revisions, lockfiles,
-features, compiler and target alongside results.
+| Owner | Keep here | Boundary change |
+|---|---|---|
+| rump | BigInt, modular arithmetic, primality, exact polynomial/finite-field/GF(2)/lattice support, caller-driven BigInt sampling | Move floating probability kernels out; retain reusable arithmetic without factoring policy or OS entropy |
+| cryptography | Ciphers, hashes, authenticated schemes, DRBG mechanisms, cryptographic state evolution and erasure | Own Hash_DRBG, HMAC_DRBG and fast-key-erasure cores; entropy supplies their adapters |
+| entropy | Noncryptographic PRNGs, OS seeding, sampling, stream views, thread-local access, probability functions and test batteries | Separate application RNG, statistics and batteries by features; make FFT/battery dependencies optional |
+| factoring | Rho/ECM/QS/GNFS orchestration, relation/cofactor policy, polynomial selection and size/cost dispatch | Reuse native modular arithmetic; keep schedule, graph forecasting and algorithm selection here |
 
-Implementations start from papers, specifications and mathematical derivations.
-State the equation, representation, hypotheses and invariant. Derive numerical
-tables reproducibly and separate approximation error from floating evaluation.
-Use published answer files and independently constructed oracles for checks;
-another implementation's source is not an implementation reference. A round
-trip alone cannot detect a shared error in its two halves.
+Generic exact algebra in rump is supporting mathematics, not a reason to move
+QS/GNFS policy there. `ln_gamma`, incomplete beta and Student quantiles are
+floating statistical functions; entropy already owns most probability kernels
+and factoring already depends on entropy. Move them in a coordinated API release
+with reference fixtures. A rump forwarding wrapper that calls entropy would
+create a dependency cycle and is unsuitable.
+
+Preserve the distinction between rump's quality-neutral `RandomSource`,
+cryptography's byte-oriented `Csprng`, and entropy's generator/`CryptoRng`
+interfaces. Add explicit adapters with documented security and byte-stream
+contracts; never blanket-implement a cryptographic contract for every test RNG.
+A marker describes a construction, not the entropy in a caller-supplied seed.
+
+Cryptography enables rump's additive `wipe` feature. Entropy default inherits it;
+entropy minimal and standalone factoring do not. Record the resolved graph in
+benchmarks: compiling factoring alongside a consumer that enables wipe can change
+its arithmetic costs. Separate processes/packages may be needed when measuring
+that configuration. Optional features should remove unwanted dependencies, not
+silently weaken a cryptographic build's erasure contract.
+
+## Standard for accepting changes
+
+Derive the formula and state its domain, representation and invariant. Retain
+published known answers, independent mathematical identities and reproducible
+coefficient/table generation. Test boundary strata and algorithm switches as
+well as ordinary inputs. Source comments should explain the invariant, assumption
+or non-obvious choice and cite the relevant paper section when useful.
+
+Use paired measurements with fixed inputs, seeds, compiler, target, features and
+sibling revisions. Record wall time, total process-tree CPU, memory and work
+counters. Separate the cost of setup, steady-state work and teardown, then report
+the complete operation too. Statistical acceptance, semantic security, exact
+factorization and performance are separate claims with separate evidence.

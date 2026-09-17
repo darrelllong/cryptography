@@ -1,100 +1,147 @@
-# Cryptography suggestions
+# Cryptography suggestions — 2026-09-17
 
 > **Motto:** better that, better algorithms
 >
 > **Creed:** Experiment is asking God for peer review.
 
-2026-09-16 PDT / 2026-09-17 UTC. Current findings, scope and measured evidence:
-[AUDIT.md](AUDIT.md). These are proposals, with their acceptance experiments;
-no implementation or speedup is claimed by this document. Work from the named
-papers, specifications and independently derived mathematics.
+Current evidence and limitations are in [AUDIT.md](AUDIT.md). Each proposal below
+has an acceptance experiment. Predicted improvements are not measured speedups.
 
 ## Priorities
 
-| Order | Work | Required outcome |
+| Order | Work | Acceptance evidence |
 |---|---|---|
-| 1 | Report completeness and probability validation | Missing/invalid measurements cannot become PASS |
-| 2 | Identified, reproducible retained experiments | A report states exactly which executable, input and analysis it describes |
-| 3 | Explicit raw-versus-hybrid encryption contracts | Message-security claims match a specified construction and message space |
-| 4 | Timing qualification and targeted fuzzing | Evidence tied to the complete operation, compiler, target and accepted-input profile |
-| 5 | Matched algorithm experiments | Exact answers preserved; lower complete cost on held-out workloads |
+| 1 | Consolidate cryptographic generator cores | Unchanged NIST vectors and stream contracts; no dependency cycle |
+| 2 | Bulk and batched ChaCha20 | Matched outputs at every block/tail boundary; paired complete-path gains |
+| 3 | Review fast-key erasure and fallible seeding together | Explicit compromise model; tested seed/read/reseed/fork failures |
+| 4 | Qualify complete operations on each target | Functional vectors, generated-code review and adequate timing distributions |
+| 5 | Retain identifiable statistical/performance experiments | Exact build/input/decision identity and honest scope |
 
-## Make measurement results dependable
+## Own mechanisms; let entropy own access
 
-For **C1**, validate all seven expected names and scalar probabilities before
-constructing a decision. Carry complete/invalid/unsupported status through RDS,
-markdown and exit codes. Preserve failure reasons instead of dropping NA values.
-Use the same boundary fixtures as entropy: no results, a missing result, a
-nonfinite value, values outside [0,1], duplicated names and a failed producer.
-A statistical failure is a scored result; a broken measurement is not.
+Move Hash_DRBG, HMAC_DRBG and the deterministic fast-key-erasure core from entropy
+into cryptography. Keep entropy's wrappers, OS source and thread-local policy in
+entropy. Preserve published `Generate` request boundaries: fetching 1 byte twice
+through a buffer is not automatically the same state transition as two NIST
+Generate requests. Test instantiation, reseeding, request limits, additional
+input, partial fills and complete state updates against the specification.
 
-For **C2**, create an experiment manifest containing source and sibling hashes,
-features, compiler, executable digest, input digest/length, output digest,
-analysis-script digest and the statistical rule/table identity. Retained
-ciphertext remains tied to the manifest that produced it. A re-render can have
-its own rendering date while keeping the measurement date and identity.
+Use the existing `Csprng` interface and named adapters from entropy's secure
+generators. Give fallible OS access an explicit error path. A caller should be
+able to distinguish a seeded deterministic generator from an OS operation that
+can fail. Do not let blanket adapters from `Rng` admit constant/test generators
+into security-sensitive APIs.
 
-Build before producing a current-tree report. Test invalidation with a changed
-executable, changed input, changed analysis and interrupted output write. Write
-artifacts atomically, and check expected lengths. Preserve useful retained
-experiments without presenting their cached outputs as new execution evidence.
+`Seedable::seed_from_u64` expands at most 64 bits of seed uncertainty even when
+the resulting state/key is 256 bits. Label it for deterministic experiments;
+cryptographic examples should use successful OS seeding or sufficiently entropic
+secret seed material. Neither a marker nor SplitMix expansion manufactures
+entropy. Include compile-fail examples for weak-generator substitution and
+runtime tests for unsuccessful OS seeding/reseeding.
 
-For **C5**, run held-out rare-tail validation at the actual Bonferroni threshold
-and supported lengths. Freeze tuning before that run. Report uncertainty for
-marginal and whole-battery rates and distinguish it from a theorem conditional
-on valid input p-values. Coordinate statistical kernels and fixtures with entropy.
+Replace Hash_DRBG's fixed-width BigUint additions only after a measurement shows
+useful savings. Derive addition modulo 2^440 directly, test carry chains across
+all 55 bytes and preserve wiping of every state and scratch buffer. Keep this
+specialized cryptographic state operation here; it does not belong in factoring.
 
-## A secure message API needs a specified composition
+## Improve the shared ChaCha engine
 
-For **C3**, keep raw group operations explicitly low-level. Arbitrary-byte
-messages multiplied into a subgroup reveal their coset; adding unspecified
-padding does not establish semantic or chosen-ciphertext security.
+Expose a bulk keystream path that consumes entire blocks without repeated
+per-word adapter work. Batch independent counter blocks, then evaluate scalar
+interleaving and target-specific vector arithmetic derived from
+[RFC 8439](https://www.rfc-editor.org/rfc/rfc8439). Retain a simple specification
+oracle and known answers; inspect generated code for the supported targets.
 
-If a message API is desired, select a complete published KEM/KDF/AEAD composition
-with domain separation, context binding, key/nonce schedules, validation rules
-and published vectors. [RFC 9180](https://www.rfc-editor.org/rfc/rfc9180.html)
-is one precise hybrid specification to evaluate; adopting it is a separate
-implementation task, not a claim that the current raw ElGamal type implements it.
+Measure one word, 16/64/480/512 bytes, 4 KiB and long streams. Include unaligned
+buffers, every short tail, mixed access widths, counter exhaustion, construction
+and erasure. Price ordinary ChaCha20 and fast-key-erasure separately, since
+reserved rekey bytes and wiping are real work. Require gains in the consumers,
+not just a permutation-only loop. Compare 20 rounds with 20 rounds; offer a
+reduced-round RNG only as a separately specified construction with an explicit
+security rationale.
 
-Preserve an algebraic regression demonstrating the raw API's message-class
-behavior so documentation cannot accidentally promise more. For a chosen hybrid
-construction, test corrupted encapsulations, ciphertext, AAD/context, invalid
-public keys, secret-dependent failure behavior and exact byte framing. Review
-its full threat model and randomness requirements from the specification.
+## Qualify security claims at the operation boundary
 
-## Timing and secret handling
+Keep known-answer, malformed-input and import consistency checks. Add a targeted
+matrix for the actual supported compiler/CPU paths before extending constant-time
+claims. Timing experiments should compare distributions across relevant secret
+classes and include whole AEAD/signature/key operations, with setup separated
+and then included. A nonsignificant timing test is evidence at its sensitivity,
+not proof of constant time. The methodology in
+[Reparaz, Balasch and Verbauwhede](https://eprint.iacr.org/2016/1123) is a useful
+experimental reference.
 
-For **C4**, start at fixed-width field arithmetic if adding constant-time public-key
-operations. A fixed scalar loop over normalized BigUint values cannot establish
-the property. Keep the existing variable-time APIs accurately named while
-qualifying any new path at the field, group and complete-operation levels.
+For fast-key erasure, state when compromise occurs and what survives: current
+key, unserved output, caller copies, forks and reseeding failures. Test real fork
+behavior on supported Unix systems as well as injected PID changes. Measure the
+PID/TLS check cost and add a bulk access path that amortizes it without serving
+bytes before the reseed decision.
 
-Inspect generated code for the supported compiler/target pairs. Use independent
-input-class timing experiments with a predeclared measurement rule, matched
-lengths, randomized/interleaved classes and reported uncertainty. A minimum-time
-ratio detects some gross regressions but does not replace distributional tests.
-Keep wiping, functional equality and timing as separate claims.
+A higher-level ElGamal interface requires a specified authenticated construction,
+encoding, KDF/domain separation and rejection behavior. Retain the raw primitive
+for callers who explicitly need it. A ciphertext randomness report is not the
+acceptance test for message confidentiality or authentication.
 
-Focus fresh fuzz campaigns on accepted-input boundaries and composition: all
-parser length/count fields, explicit domain parameters, key-pair consistency,
-nonce/counter exhaustion, authentication failure and failure-buffer contents.
-Use independent standard vectors and mathematical identities in addition to
-round trips. Record the exact corpus, target, duration, features and revisions.
+## Make every parameter profile reviewable from documents and equations
 
-## Algorithm experiments worth pricing
+For dense NTRU, retain a per-field table with value, meaning, exact source section
+or derivation, and validating experiment. Resolve `minCallsR`/`minCallsMask`
+against authoritative parameter material or define the chosen precomputation
+policy explicitly. Output agreement cannot determine a parameter that leaves
+outputs unchanged. Mark custom wire-format choices and validation strengthenings
+as part of the implemented profile, with interoperability tests and a mathematical
+reason for each rejection rule.
 
-GHASH/POLYVAL: derive folded field accumulation and carryless Karatsuba from the
-specified bit representation and reduction polynomial. Check multiplication
-against an independently written bit-polynomial oracle before measuring GCM and
-GCM-SIV. Include short messages, AAD, key setup, allocation and authentication.
-Do not infer a speedup from removing a table scan alone.
+Across algorithms, known-answer files may be published data or outputs from an
+independent executable. Keep that role distinct from the implementation's source
+of equations and constants. A traceability review should inspect those records;
+a keyword scan or a passing round trip cannot certify independent derivation of
+every line.
 
-Prime-field curves: measure fixed-width arithmetic and prepared contexts at
-complete scalar-multiplication/signature/KEM boundaries. NTT-based schemes:
-measure transforms, reductions and sampling separately, preserving exact
-coin-to-output maps and prescribed distributions. An implementation matching
-known answers must still enforce the required input and key-distribution rules.
+## Cross-repository ownership
 
-Use paired interleaved trials on an idle host, with fresh held-out inputs and
-both setup-inclusive and steady-state numbers. Retain negative results. Replace
-stale tables only with measurements of the exact qualified implementation.
+Keep the four repositories, with a focused boundary refactor. The desired graph
+is `cryptography → rump`, `entropy → cryptography` when crypto generators are
+enabled, and `factoring → rump + entropy` with only the RNG/statistics features
+it needs. Rump must not depend on either consumer.
+
+| Owner | Keep here | Boundary change |
+|---|---|---|
+| rump | BigInt, modular arithmetic, primality, exact polynomial/finite-field/GF(2)/lattice support, caller-driven BigInt sampling | Move floating probability kernels out; retain reusable arithmetic without factoring policy or OS entropy |
+| cryptography | Ciphers, hashes, authenticated schemes, DRBG mechanisms, cryptographic state evolution and erasure | Own Hash_DRBG, HMAC_DRBG and fast-key-erasure cores; entropy supplies their adapters |
+| entropy | Noncryptographic PRNGs, OS seeding, sampling, stream views, thread-local access, probability functions and test batteries | Separate application RNG, statistics and batteries by features; make FFT/battery dependencies optional |
+| factoring | Rho/ECM/QS/GNFS orchestration, relation/cofactor policy, polynomial selection and size/cost dispatch | Reuse native modular arithmetic; keep schedule, graph forecasting and algorithm selection here |
+
+Generic exact algebra in rump is supporting mathematics, not a reason to move
+QS/GNFS policy there. `ln_gamma`, incomplete beta and Student quantiles are
+floating statistical functions; entropy already owns most probability kernels
+and factoring already depends on entropy. Move them in a coordinated API release
+with reference fixtures. A rump forwarding wrapper that calls entropy would
+create a dependency cycle and is unsuitable.
+
+Preserve the distinction between rump's quality-neutral `RandomSource`,
+cryptography's byte-oriented `Csprng`, and entropy's generator/`CryptoRng`
+interfaces. Add explicit adapters with documented security and byte-stream
+contracts; never blanket-implement a cryptographic contract for every test RNG.
+A marker describes a construction, not the entropy in a caller-supplied seed.
+
+Cryptography enables rump's additive `wipe` feature. Entropy default inherits it;
+entropy minimal and standalone factoring do not. Record the resolved graph in
+benchmarks: compiling factoring alongside a consumer that enables wipe can change
+its arithmetic costs. Separate processes/packages may be needed when measuring
+that configuration. Optional features should remove unwanted dependencies, not
+silently weaken a cryptographic build's erasure contract.
+
+## Standard for accepting changes
+
+Derive the formula and state its domain, representation and invariant. Retain
+published known answers, independent mathematical identities and reproducible
+coefficient/table generation. Test boundary strata and algorithm switches as
+well as ordinary inputs. Source comments should explain the invariant, assumption
+or non-obvious choice and cite the relevant paper section when useful.
+
+Use paired measurements with fixed inputs, seeds, compiler, target, features and
+sibling revisions. Record wall time, total process-tree CPU, memory and work
+counters. Separate the cost of setup, steady-state work and teardown, then report
+the complete operation too. Statistical acceptance, semantic security, exact
+factorization and performance are separate claims with separate evidence.

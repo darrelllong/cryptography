@@ -17,8 +17,8 @@
 //!
 //! Entropy warning:
 //! - This crate does not provide an operating-system entropy source.
-//! - [`CtrDrbgAes256`] and [`CtrDrbgAes256Ct`] are deterministic DRBGs, not
-//!   seed generators.
+//! - [`CtrDrbgAes256`], [`CtrDrbgAes256Ct`], [`HashDrbg`], [`HmacDrbg`] and
+//!   [`FastKeyErasure`] are deterministic generators, not seed generators.
 //! - Callers must provide high-entropy external seed material for all
 //!   randomness-dependent operations.
 //!
@@ -175,6 +175,10 @@ pub use ciphers::twofish::{
 pub use ciphers::zuc::{Zuc128, Zuc128Ct};
 
 pub use cprng::ctr_drbg::{CtrDrbg, CtrDrbgAes256, CtrDrbgAes256Ct, CtrDrbgCipher};
+pub use cprng::fast_key_erasure::FastKeyErasure;
+pub use cprng::hash_drbg::HashDrbg;
+pub use cprng::hmac_drbg::HmacDrbg;
+pub use cprng::DrbgError;
 pub use hash::hkdf::Hkdf;
 pub use hash::hmac::Hmac;
 pub use hash::md5::Md5;

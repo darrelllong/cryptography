@@ -10,6 +10,24 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Added
+- `HashDrbg` (SP 800-90A Rev. 1 Hash_DRBG, SHA-256), `HmacDrbg` (HMAC_DRBG,
+  HMAC-SHA-256) and `FastKeyErasure` (fast-key-erasure ChaCha20), moved here
+  from `rng-entropy` so the cryptographic generator mechanisms have one owner;
+  entropy keeps operating-system seeding, per-thread use and its adapters.
+  Each Hash/HMAC `generate` is one Generate request and reports
+  `DrbgError::{ReseedRequired, RequestTooLarge, InputTooShort}`; both pass all
+  120 CAVP SHA-256 trials of `drbgvectors_no_reseed` and
+  `drbgvectors_pr_false` (`tests/kat_hash_hmac_drbg.rs`) and reproduce
+  entropy's earlier golden streams; `FastKeyErasure` matches OpenSSL's
+  ChaCha20 over its first two refills.
+- `ChaCha20::keystream` writes keystream without reading the buffer, and
+  `apply_keystream`/`keystream` compute whole blocks straight into the
+  caller's buffer instead of through the internal 64-byte block, matching the
+  one-block path at every length up to 700 bytes and every split. Against the
+  previous release, paired and interleaved on one core: 1.07× (64 KiB) to
+  1.26× (8-byte requests) on an AMD EPYC 7452, 1.19× to 1.39× on a Cortex-A76
+  (Raspberry Pi 5). Computing four blocks side by side, one array lane per
+  block, was measured and not adopted: 0.81× and 0.92× on those hosts.
 - `tests/wipe_behaviour.rs` observes that dropping a `ChaCha20` zeroes its
   key-bearing state and buffered keystream block, a contract entropy's
   fast-key-erasure generator relies on; `ChaCha20` is `#[repr(C)]` so those

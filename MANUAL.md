@@ -118,6 +118,25 @@ Key methods:
 - `fill_bytes(&mut [u8])` via the `Csprng` trait
 - `next_u64()` via the `Csprng` trait
 
+The other SP 800-90A mechanisms take entropy input and nonce as slices and
+report the standard's refusals as `DrbgError` instead of panicking:
+
+- `HashDrbg` (Hash_DRBG, SHA-256, §10.1.1) and `HmacDrbg` (HMAC_DRBG,
+  HMAC-SHA-256, §10.1.2): `instantiate(entropy_input, nonce,
+  personalization_string)` (at least 32 and 16 bytes), `reseed(entropy_input,
+  additional_input)`, and `generate(&mut [u8], additional_input)`, one
+  standard Generate request per call, refused above 2^16 bytes
+  (`RequestTooLarge`) or past 2^48 requests without a reseed
+  (`ReseedRequired`); `fill_bytes` splits into such requests.
+- `FastKeyErasure`: ChaCha20 with fast key erasure (Bernstein, 2017), from a
+  32-byte key: `fill`, `next_u32`, `next_u64` (little-endian), and
+  `reseed(&[u8; 32])`, which XORs fresh key material in and discards unserved
+  output. Each refill is `REFILL` = 512 keystream bytes, of which the first
+  `KEY` = 32 replace the key.
+
+Operating-system seeding, per-thread generators and sampling are the
+`rng-entropy` crate's, which adapts these types.
+
 Example:
 
 ```rust
