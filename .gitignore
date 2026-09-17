@@ -1,5 +1,7 @@
 /target
 /benchmarks/target
+/scripts/ct_probe/target
+/scripts/ct_timing/target
 /fuzz/target
 /fuzz/artifacts/
 /fuzz/corpus/
