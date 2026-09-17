@@ -129,18 +129,20 @@ for entry in "${claims[@]}"; do
     }
     extract "$symbol" "$file" > "$body"
     [ -s "$body" ] || { echo "$claim: no body extracted for $symbol" >&2; exit 1; }
-    # A wrapper compiles to a tail call; follow it to the code that does the
-    # work, wherever it was emitted.
+    # A wrapper is a body that branches nowhere and hands the work to exactly
+    # one callee, by tail jump or by call; follow it to the code that does the
+    # work, wherever that was emitted.
     for _ in 1 2 3 4; do
-        tail_call=$(grep -oE '^\s+(b|jmp)\s+[._a-zA-Z0-9$]+$' "$body" | awk '{print $2}' | tail -1 || true)
-        [ -n "$tail_call" ] || break
-        [ "$(grep -cE '^\s+[a-z]' "$body")" -le 8 ] || break
-        callee_file=$(grep -lE "^${tail_call}:" $asm | head -1 || true)
+        grep -qE "^[[:space:]]+$branches" "$body" && break
+        callee=$(grep -oE '^[[:space:]]+(b|bl|jmp|call|callq)[[:space:]]+[._a-zA-Z0-9$]+$' "$body" \
+                 | awk '{print $2}' | sort -u)
+        [ "$(printf '%s' "$callee" | grep -c .)" -eq 1 ] || break
+        callee_file=$(grep -lE "^${callee}:" $asm | head -1 || true)
         [ -n "$callee_file" ] || break
-        extract "$tail_call" "$callee_file" > "$body.next"
+        extract "$callee" "$callee_file" > "$body.next"
         [ -s "$body.next" ] || { rm -f "$body.next"; break; }
         mv "$body.next" "$body"
-        symbol=$tail_call
+        symbol=$callee
     done
     echo
     echo "$claim: $(grep -cE '^[[:space:]]+[a-z]' "$body") instructions in $symbol"
