@@ -10,9 +10,11 @@
 //!
 //! Every mode must: open its own honest ciphertext to the plaintext; refuse
 //! that ciphertext once one chosen bit of the ciphertext, of the tag, of the
-//! AAD or of the nonce is flipped; and refuse the payload itself presented as
-//! a ciphertext under a tag taken from the payload (a forgery succeeds with
-//! probability 2^-tag bits; the fuzzer never sees one).
+//! AAD or of the nonce is flipped; refuse the payload itself presented as a
+//! ciphertext under a tag taken from the payload (a forgery succeeds with
+//! probability 2^-tag bits; the fuzzer never sees one); and, when it refuses,
+//! leave the caller's buffer as it found it, so a caller that ignores the
+//! `false` cannot read a decryption that was never authenticated.
 #![no_main]
 
 use cryptography::{
@@ -86,6 +88,19 @@ where
             "{name}: accepted a nonce with one flipped bit"
         );
     }
+
+    // A refusal must leave the caller's buffer untouched: `decrypt_in_place`
+    // returns `false`, and what the buffer then holds is the ciphertext it was
+    // given, not a plaintext nobody authenticated.
+    let mut in_place = ciphertext.clone();
+    let mut wrong_tag = tag.clone();
+    flip(wrong_tag.as_mut(), flip_at, flip_bit);
+    let opened = aead.decrypt_in_place(nonce, aad, &mut in_place, &wrong_tag);
+    assert!(!opened, "{name}: accepted a tag with one flipped bit in place");
+    assert_eq!(
+        in_place, ciphertext,
+        "{name}: a refused decryption changed the caller's buffer"
+    );
 
     // The payload as a ciphertext under a tag from the payload.
     let mut forged = tag.clone();
