@@ -13,7 +13,22 @@
 // Eight 4-bit bijections Pi'_0 .. Pi'_7.
 // Pi'_i processes nibble i of the 32-bit word (nibble 0 = bits [3:0]).
 
-const PI: [[u8; 16]; 8] = [
+/// Magma is a 64-bit block cipher with a 256-bit key (GOST R 34.12-2015 §5.1),
+/// read as eight 32-bit key words.
+const BLOCK_BYTES: usize = 8;
+const KEY_BYTES: usize = 32;
+const KEY_WORDS: usize = 8;
+const WORD_BYTES: usize = KEY_BYTES / KEY_WORDS;
+
+/// Thirty-two rounds: the eight key words in order three times, then reversed
+/// (GOST R 34.12-2015 §5.1.3).
+const ROUNDS: usize = 32;
+const FORWARD_ROUNDS: usize = 3 * KEY_WORDS;
+
+/// The eight four-bit S-boxes of the substitution layer (§5.1.2).
+const SBOX_COUNT: usize = 8;
+
+const PI: [[u8; 16]; SBOX_COUNT] = [
     [12, 4, 6, 2, 10, 5, 11, 9, 14, 8, 13, 7, 0, 3, 15, 1], // Pi'_0
     [6, 8, 2, 3, 9, 10, 5, 12, 1, 14, 4, 7, 11, 13, 0, 15], // Pi'_1
     [11, 3, 5, 8, 2, 15, 10, 13, 14, 1, 7, 4, 12, 9, 6, 0], // Pi'_2
@@ -345,18 +360,22 @@ fn g_ct(k: u32, a: u32) -> u32 {
 /// Fill `enc` with the 32 encryption round keys and `dec` with the same keys
 /// reversed. The caller's schedule fields are written in place, and the eight
 /// key words `k`, which are the user key itself, are wiped before returning.
-fn build_round_keys(key: &[u8; 32], enc: &mut [u32; 32], dec: &mut [u32; 32]) {
-    let mut k = [0u32; 8];
-    for i in 0..8 {
-        k[i] = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
+fn build_round_keys(key: &[u8; KEY_BYTES], enc: &mut [u32; ROUNDS], dec: &mut [u32; ROUNDS]) {
+    let mut k = [0u32; KEY_WORDS];
+    for i in 0..KEY_WORDS {
+        k[i] = u32::from_be_bytes(
+            key[WORD_BYTES * i..WORD_BYTES * (i + 1)]
+                .try_into()
+                .unwrap(),
+        );
     }
 
-    for i in 0..24 {
-        enc[i] = k[i % 8];
-    } // rounds 1–24: forward three times
-    for i in 0..8 {
-        enc[24 + i] = k[7 - i];
-    } // rounds 25–32: reversed once
+    for i in 0..FORWARD_ROUNDS {
+        enc[i] = k[i % KEY_WORDS];
+    }
+    for i in 0..KEY_WORDS {
+        enc[FORWARD_ROUNDS + i] = k[KEY_WORDS - 1 - i];
+    }
 
     *dec = *enc;
     dec.reverse();
@@ -371,7 +390,7 @@ fn build_round_keys(key: &[u8; 32], enc: &mut [u32; 32], dec: &mut [u32; 32]) {
 // Rounds 1–31: G[k](a₁, a₀) = (a₀,  g[k](a₀) ⊕ a₁)  — apply then swap
 // Round 32:   G*[k](a₁, a₀) = (g[k](a₀) ⊕ a₁) || a₀  — apply, no swap
 
-fn magma_core(block: [u8; 8], rk: &[u32; 32]) -> [u8; 8] {
+fn magma_core(block: [u8; BLOCK_BYTES], rk: &[u32; ROUNDS]) -> [u8; BLOCK_BYTES] {
     let mut a1 = u32::from_be_bytes(block[0..4].try_into().unwrap()); // upper
     let mut a0 = u32::from_be_bytes(block[4..8].try_into().unwrap()); // lower
 
@@ -391,7 +410,7 @@ fn magma_core(block: [u8; 8], rk: &[u32; 32]) -> [u8; 8] {
     out
 }
 
-fn magma_core_ct(block: [u8; 8], rk: &[u32; 32]) -> [u8; 8] {
+fn magma_core_ct(block: [u8; BLOCK_BYTES], rk: &[u32; ROUNDS]) -> [u8; BLOCK_BYTES] {
     let mut a1 = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut a0 = u32::from_be_bytes(block[4..8].try_into().unwrap());
 
@@ -416,14 +435,14 @@ fn magma_core_ct(block: [u8; 8], rk: &[u32; 32]) -> [u8; 8] {
 ///
 /// 64-bit block, 256-bit key.  Pure Rust, no unsafe, no heap allocation.
 pub struct Magma {
-    enc_rk: [u32; 32],
-    dec_rk: [u32; 32],
+    enc_rk: [u32; ROUNDS],
+    dec_rk: [u32; ROUNDS],
 }
 
 impl Magma {
     /// Construct from a 32-byte (256-bit) key.
     #[must_use]
-    pub fn new(key: &[u8; 32]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = Magma {
             enc_rk: [0u32; 32],
             dec_rk: [0u32; 32],
@@ -433,7 +452,7 @@ impl Magma {
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -441,13 +460,13 @@ impl Magma {
 
     /// Encrypt a 64-bit block (ECB mode).
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         magma_core(*block, &self.enc_rk)
     }
 
     /// Decrypt a 64-bit block (ECB mode).
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         magma_core(*block, &self.dec_rk)
     }
 }
@@ -458,14 +477,14 @@ impl Magma {
 /// the nibble S-box lookups with the fixed boolean circuits above so the round
 /// function does not index memory with secret-derived values.
 pub struct MagmaCt {
-    enc_rk: [u32; 32],
-    dec_rk: [u32; 32],
+    enc_rk: [u32; ROUNDS],
+    dec_rk: [u32; ROUNDS],
 }
 
 impl MagmaCt {
     /// Construct from a 32-byte (256-bit) key.
     #[must_use]
-    pub fn new(key: &[u8; 32]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = MagmaCt {
             enc_rk: [0u32; 32],
             dec_rk: [0u32; 32],
@@ -475,7 +494,7 @@ impl MagmaCt {
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -483,13 +502,13 @@ impl MagmaCt {
 
     /// Encrypt a 64-bit block (ECB mode).
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         magma_core_ct(*block, &self.enc_rk)
     }
 
     /// Decrypt a 64-bit block (ECB mode).
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         magma_core_ct(*block, &self.dec_rk)
     }
 }

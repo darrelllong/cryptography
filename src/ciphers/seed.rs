@@ -9,6 +9,21 @@
 //! reads.
 
 // Byte masks from the SEED G-function linear map (RFC 4269 Appendix A).
+/// SEED is a 128-bit block cipher with a 128-bit key, both held as four
+/// 32-bit words (RFC 4269 §2).
+const BLOCK_BYTES: usize = 16;
+const KEY_BYTES: usize = 16;
+const KEY_WORDS: usize = 4;
+const WORD_BYTES: usize = BLOCK_BYTES / KEY_WORDS;
+
+/// Sixteen rounds, each taking a pair of round keys (RFC 4269 §2.2, §2.3).
+const ROUNDS: usize = 16;
+const ROUND_KEYS: usize = 2 * ROUNDS;
+
+/// The key schedule rotates a 64-bit key half by one byte per round
+/// (RFC 4269 §2.3).
+const KEY_ROTATION: u32 = 8;
+
 const M0: u8 = 0xfc;
 const M1: u8 = 0xf3;
 const M2: u8 = 0xcf;
@@ -135,11 +150,11 @@ fn round_f(r0: u32, r1: u32, k0: u32, k1: u32, use_ct: bool) -> (u32, u32) {
 
 /// RFC 4269 §2.3 key schedule, written directly into `out` (the caller's
 /// struct field): `out[2i] = K_{i+1,0}` and `out[2i+1] = K_{i+1,1}`.
-fn expand_round_keys(key: &[u8; 16], use_ct: bool, out: &mut [u32; 32]) {
+fn expand_round_keys(key: &[u8; KEY_BYTES], use_ct: bool, out: &mut [u32; ROUND_KEYS]) {
     // The key words K0..K3 and the rotated 64-bit halves they cycle through
     // are the user key in other shapes; both are wiped before returning.
-    let mut k = [0u32; 4];
-    for (word, chunk) in k.iter_mut().zip(key.chunks_exact(4)) {
+    let mut k = [0u32; KEY_WORDS];
+    for (word, chunk) in k.iter_mut().zip(key.chunks_exact(WORD_BYTES)) {
         *word = u32::from_be_bytes(chunk.try_into().unwrap());
     }
 
@@ -147,16 +162,16 @@ fn expand_round_keys(key: &[u8; 16], use_ct: bool, out: &mut [u32; 32]) {
     let mut rot = 0u64;
 
     let mut i = 0usize;
-    while i < 16 {
+    while i < ROUNDS {
         out[2 * i] = apply_g(k[0].wrapping_add(k[2]).wrapping_sub(KC[i]));
         out[2 * i + 1] = apply_g(k[1].wrapping_sub(k[3]).wrapping_add(KC[i]));
 
         if i.is_multiple_of(2) {
-            rot = ((u64::from(k[0]) << 32) | u64::from(k[1])).rotate_right(8);
+            rot = ((u64::from(k[0]) << 32) | u64::from(k[1])).rotate_right(KEY_ROTATION);
             k[0] = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
             k[1] = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
         } else {
-            rot = ((u64::from(k[2]) << 32) | u64::from(k[3])).rotate_left(8);
+            rot = ((u64::from(k[2]) << 32) | u64::from(k[3])).rotate_left(KEY_ROTATION);
             k[2] = u32::try_from(rot >> 32).expect("rotated upper word fits in u32");
             k[3] = u32::try_from(rot & 0xffff_ffff).expect("rotated lower word fits in u32");
         }
@@ -168,14 +183,18 @@ fn expand_round_keys(key: &[u8; 16], use_ct: bool, out: &mut [u32; 32]) {
     crate::ct::zeroize_slice(core::slice::from_mut(&mut rot));
 }
 
-fn seed_encrypt(block: [u8; 16], round_keys: &[u32; 32], use_ct: bool) -> [u8; 16] {
+fn seed_encrypt(
+    block: [u8; BLOCK_BYTES],
+    round_keys: &[u32; ROUND_KEYS],
+    use_ct: bool,
+) -> [u8; BLOCK_BYTES] {
     let mut l0 = u32::from_be_bytes(block[..4].try_into().unwrap());
     let mut l1 = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let mut r0 = u32::from_be_bytes(block[8..12].try_into().unwrap());
     let mut r1 = u32::from_be_bytes(block[12..].try_into().unwrap());
 
     let mut i = 0usize;
-    while i < 16 {
+    while i < ROUNDS {
         let (f0, f1) = round_f(r0, r1, round_keys[2 * i], round_keys[2 * i + 1], use_ct);
         let next_left0 = r0;
         let next_left1 = r1;
@@ -196,7 +215,11 @@ fn seed_encrypt(block: [u8; 16], round_keys: &[u32; 32], use_ct: bool) -> [u8; 1
     out
 }
 
-fn seed_decrypt(block: [u8; 16], round_keys: &[u32; 32], use_ct: bool) -> [u8; 16] {
+fn seed_decrypt(
+    block: [u8; BLOCK_BYTES],
+    round_keys: &[u32; ROUND_KEYS],
+    use_ct: bool,
+) -> [u8; BLOCK_BYTES] {
     let mut r0 = u32::from_be_bytes(block[..4].try_into().unwrap());
     let mut r1 = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let mut l0 = u32::from_be_bytes(block[8..12].try_into().unwrap());
@@ -226,7 +249,7 @@ fn seed_decrypt(block: [u8; 16], round_keys: &[u32; 32], use_ct: bool) -> [u8; 1
 
 /// SEED fast software path.
 pub struct Seed {
-    round_keys: [u32; 32],
+    round_keys: [u32; ROUND_KEYS],
 }
 
 impl Seed {
@@ -235,7 +258,7 @@ impl Seed {
     /// directly into the new instance, using the direct (secret-indexed)
     /// S0/S1 table lookups inside G.
     #[must_use]
-    pub fn new(key: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = Self {
             round_keys: [0u32; 32],
         };
@@ -245,7 +268,7 @@ impl Seed {
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
     /// key buffer so the master key survives only as expanded round keys.
-    pub fn new_wiping(key: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -259,7 +282,7 @@ impl Seed {
     /// bytes derived from the data and the round keys. [`SeedCt`] is the
     /// constant-time path.
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         seed_encrypt(*block, &self.round_keys, false)
     }
 
@@ -269,14 +292,14 @@ impl Seed {
     /// Not constant-time, for the same reason as [`Self::encrypt_block`];
     /// [`SeedCt`] is the constant-time path.
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         seed_decrypt(*block, &self.round_keys, false)
     }
 }
 
 /// SEED constant-time software path.
 pub struct SeedCt {
-    round_keys: [u32; 32],
+    round_keys: [u32; ROUND_KEYS],
 }
 
 impl SeedCt {
@@ -285,7 +308,7 @@ impl SeedCt {
     /// with the two 8-bit S-boxes evaluated in packed ANF form so key
     /// expansion performs no secret-indexed table reads.
     #[must_use]
-    pub fn new(key: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = Self {
             round_keys: [0u32; 32],
         };
@@ -295,7 +318,7 @@ impl SeedCt {
 
     /// Expand the key as [`Self::new`] does, then zeroize the caller-owned
     /// key buffer so the master key survives only as expanded round keys.
-    pub fn new_wiping(key: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -305,7 +328,7 @@ impl SeedCt {
     /// fast path, but every G-function call evaluates S0/S1 in packed ANF
     /// form instead of secret-indexed table lookups.
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         seed_encrypt(*block, &self.round_keys, true)
     }
 
@@ -313,7 +336,7 @@ impl SeedCt {
     /// every G-function call evaluates S0/S1 in packed ANF form instead of
     /// secret-indexed table lookups.
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         seed_decrypt(*block, &self.round_keys, true)
     }
 }

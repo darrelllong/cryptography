@@ -88,9 +88,18 @@ static T3: [u32; 256] = build_t_table(3);
 const SBOX_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&SBOX);
 
 // System parameter FK and round constants CK from GB/T 32907-2016.
-const FK: [u32; 4] = [0xa3b1_bac6, 0x56aa_3350, 0x677d_9197, 0xb270_22dc];
+/// Block and key size in bytes: SM4 is a 128-bit block cipher with a 128-bit
+/// key, both held as four 32-bit words (GB/T 32907-2016 §5).
+const BLOCK_BYTES: usize = 16;
+const KEY_BYTES: usize = 16;
+const STATE_WORDS: usize = 4;
 
-const CK: [u32; 32] = [
+/// Thirty-two rounds, each with its own round key (§6.1, §7.3).
+const ROUNDS: usize = 32;
+
+const FK: [u32; STATE_WORDS] = [0xa3b1_bac6, 0x56aa_3350, 0x677d_9197, 0xb270_22dc];
+
+const CK: [u32; ROUNDS] = [
     0x0007_0e15,
     0x1c23_2a31,
     0x383f_464d,
@@ -184,18 +193,18 @@ fn t_prime_ct(x: u32) -> u32 {
 /// the table S-box or the packed-ANF one. The running words `K_i` start as the
 /// user key xor `FK`, so they are wiped before returning.
 fn expand_round_keys(
-    key: &[u8; 16],
+    key: &[u8; KEY_BYTES],
     t_prime: fn(u32) -> u32,
-    enc: &mut [u32; 32],
-    dec: &mut [u32; 32],
+    enc: &mut [u32; ROUNDS],
+    dec: &mut [u32; ROUNDS],
 ) {
     let mut k = [0u32; 36];
-    for i in 0..4 {
+    for i in 0..STATE_WORDS {
         let mk = u32::from_be_bytes(key[4 * i..4 * i + 4].try_into().unwrap());
         k[i] = mk ^ FK[i];
     }
 
-    for i in 0..32 {
+    for i in 0..ROUNDS {
         k[i + 4] = k[i] ^ t_prime(k[i + 1] ^ k[i + 2] ^ k[i + 3] ^ CK[i]);
         enc[i] = k[i + 4];
     }
@@ -206,7 +215,7 @@ fn expand_round_keys(
 }
 
 #[inline]
-fn sm4_core(block: &[u8; 16], rk: &[u32; 32]) -> [u8; 16] {
+fn sm4_core(block: &[u8; BLOCK_BYTES], rk: &[u32; ROUNDS]) -> [u8; BLOCK_BYTES] {
     let mut x0 = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut x1 = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let mut x2 = u32::from_be_bytes(block[8..12].try_into().unwrap());
@@ -229,7 +238,7 @@ fn sm4_core(block: &[u8; 16], rk: &[u32; 32]) -> [u8; 16] {
 }
 
 #[inline]
-fn sm4_core_ct(block: &[u8; 16], rk: &[u32; 32]) -> [u8; 16] {
+fn sm4_core_ct(block: &[u8; BLOCK_BYTES], rk: &[u32; ROUNDS]) -> [u8; BLOCK_BYTES] {
     let mut x0 = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut x1 = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let mut x2 = u32::from_be_bytes(block[8..12].try_into().unwrap());
@@ -253,14 +262,14 @@ fn sm4_core_ct(block: &[u8; 16], rk: &[u32; 32]) -> [u8; 16] {
 
 /// SM4 block cipher (formerly SMS4).
 pub struct Sm4 {
-    enc_rk: [u32; 32],
-    dec_rk: [u32; 32],
+    enc_rk: [u32; ROUNDS],
+    dec_rk: [u32; ROUNDS],
 }
 
 /// SM4 constant-time software path using the packed ANF S-box form.
 pub struct Sm4Ct {
-    enc_rk: [u32; 32],
-    dec_rk: [u32; 32],
+    enc_rk: [u32; ROUNDS],
+    dec_rk: [u32; ROUNDS],
 }
 
 /// Historical SMS4 name retained as an alias.
@@ -273,7 +282,7 @@ impl Sm4 {
     /// expanded straight into the struct's fields; key expansion indexes the
     /// S-box with key-derived bytes and is not constant-time.
     #[must_use]
-    pub fn new(key: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = Self {
             enc_rk: [0u32; 32],
             dec_rk: [0u32; 32],
@@ -283,7 +292,7 @@ impl Sm4 {
     }
 
     /// Construct SM4 and wipe the caller-provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -295,7 +304,7 @@ impl Sm4 {
     /// derived from the data and the round key. [`Sm4Ct`] is the
     /// constant-time path.
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         sm4_core(block, &self.enc_rk)
     }
 
@@ -304,7 +313,7 @@ impl Sm4 {
     /// Not constant-time, for the same reason as [`Self::encrypt_block`];
     /// [`Sm4Ct`] is the constant-time path.
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         sm4_core(block, &self.dec_rk)
     }
 }
@@ -312,7 +321,7 @@ impl Sm4 {
 impl Sm4Ct {
     /// Construct `SM4Ct` from a 128-bit key.
     #[must_use]
-    pub fn new(key: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = Self {
             enc_rk: [0u32; 32],
             dec_rk: [0u32; 32],
@@ -322,7 +331,7 @@ impl Sm4Ct {
     }
 
     /// Construct `SM4Ct` and wipe the caller-provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -330,13 +339,13 @@ impl Sm4Ct {
 
     /// Encrypt one 128-bit block.
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         sm4_core_ct(block, &self.enc_rk)
     }
 
     /// Decrypt one 128-bit block.
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         sm4_core_ct(block, &self.dec_rk)
     }
 }

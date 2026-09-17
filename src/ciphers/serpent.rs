@@ -42,10 +42,36 @@ use crate::ct::zeroize_slice;
 use crate::BlockCipher;
 
 // Serpent key-schedule constant PHI = floor(2^32 * (sqrt(5)-1)/2).
+
+/// Block size in bytes: Serpent is a 128-bit block cipher, held as four
+/// 32-bit words (paper §2).
+const BLOCK_BYTES: usize = 16;
+const STATE_WORDS: usize = 4;
+const WORD_BYTES: usize = BLOCK_BYTES / STATE_WORDS;
+
+/// The key is padded to 256 bits before the schedule runs (paper §2).
+const PADDED_KEY_BYTES: usize = 32;
+const KEY128_BYTES: usize = 16;
+const KEY192_BYTES: usize = 24;
+const KEY256_BYTES: usize = 32;
+
+/// Thirty-two rounds take thirty-three round keys, the last one whitening the
+/// output (paper §2).
+const ROUNDS: usize = 32;
+const ROUND_KEYS: usize = ROUNDS + 1;
+
+/// The eight S-boxes, used in turn and reused every eighth round (paper §2).
+const SBOX_COUNT: usize = 8;
+
+/// The prekey recurrence starts from the eight words of the padded key and
+/// runs far enough to fill every round key: `w_-8..w_-1` then `w_0..w_131`.
+const PREKEY_SEED_WORDS: usize = PADDED_KEY_BYTES / WORD_BYTES;
+const PREKEY_WORDS: usize = PREKEY_SEED_WORDS + STATE_WORDS * ROUND_KEYS;
+
 const PHI: u32 = 0x9E37_79B9;
 
 // S-boxes from the Serpent AES submission (Anderson/Biham/Knudsen, 1998).
-const SBOXES: [[u8; 16]; 8] = [
+const SBOXES: [[u8; 16]; SBOX_COUNT] = [
     [3, 8, 15, 1, 10, 6, 5, 11, 14, 13, 4, 2, 7, 0, 9, 12],
     [15, 12, 2, 7, 9, 0, 5, 10, 1, 11, 14, 8, 6, 13, 3, 4],
     [8, 6, 7, 9, 3, 12, 10, 15, 13, 1, 14, 4, 0, 11, 5, 2],
@@ -57,7 +83,7 @@ const SBOXES: [[u8; 16]; 8] = [
 ];
 
 // Inverse S-box tables from the same Serpent submission.
-const INV_SBOXES: [[u8; 16]; 8] = [
+const INV_SBOXES: [[u8; 16]; SBOX_COUNT] = [
     [13, 3, 11, 0, 10, 6, 5, 12, 1, 14, 4, 7, 15, 9, 8, 2],
     [5, 8, 2, 14, 15, 6, 12, 3, 11, 4, 7, 9, 1, 13, 10, 0],
     [12, 9, 15, 4, 11, 14, 1, 2, 0, 3, 6, 13, 5, 8, 10, 7],
@@ -68,7 +94,7 @@ const INV_SBOXES: [[u8; 16]; 8] = [
     [3, 0, 6, 13, 9, 14, 15, 8, 5, 12, 11, 7, 10, 1, 4, 2],
 ];
 
-const fn build_sboxes_anf(sboxes: &[[u8; 16]; 8]) -> [[u16; 4]; 8] {
+const fn build_sboxes_anf(sboxes: &[[u8; 16]; SBOX_COUNT]) -> [[u16; STATE_WORDS]; SBOX_COUNT] {
     let mut out = [[0u16; 4]; 8];
     let mut i = 0usize;
     while i < 8 {
@@ -78,8 +104,8 @@ const fn build_sboxes_anf(sboxes: &[[u8; 16]; 8]) -> [[u16; 4]; 8] {
     out
 }
 
-const SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&SBOXES);
-const INV_SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&INV_SBOXES);
+const SBOXES_ANF: [[u16; STATE_WORDS]; SBOX_COUNT] = build_sboxes_anf(&SBOXES);
+const INV_SBOXES_ANF: [[u16; STATE_WORDS]; SBOX_COUNT] = build_sboxes_anf(&INV_SBOXES);
 
 /// Apply one 4-bit S-box to all 32 bitslice lanes at once, word-parallel.
 ///
@@ -102,7 +128,7 @@ const INV_SBOXES_ANF: [[u16; 4]; 8] = build_sboxes_anf(&INV_SBOXES);
 /// [`crate::ct::build_nibble_sbox_anf`], so the output is bit-for-bit identical
 /// to a direct table lookup.
 #[inline]
-fn apply_sbox_words(words: [u32; 4], coeffs: [u16; 4]) -> [u32; 4] {
+fn apply_sbox_words(words: [u32; STATE_WORDS], coeffs: [u16; STATE_WORDS]) -> [u32; STATE_WORDS] {
     let [x0, x1, x2, x3] = words;
 
     // mono[m] = AND over k of x_k for each bit k set in the subset mask m;
@@ -125,7 +151,7 @@ fn apply_sbox_words(words: [u32; 4], coeffs: [u16; 4]) -> [u32; 4] {
     mono[14] = mono[6] & x3;
     mono[15] = mono[7] & x3;
 
-    let mut out = [0u32; 4];
+    let mut out = [0u32; STATE_WORDS];
     let mut j = 0usize;
     while j < 4 {
         let c = coeffs[j];
@@ -146,21 +172,21 @@ fn apply_sbox_words(words: [u32; 4], coeffs: [u16; 4]) -> [u32; 4] {
 }
 
 #[inline]
-fn apply_sbox_round(words: [u32; 4], round: usize) -> [u32; 4] {
+fn apply_sbox_round(words: [u32; STATE_WORDS], round: usize) -> [u32; STATE_WORDS] {
     apply_sbox_words(words, SBOXES_ANF[round & 7])
 }
 
 #[inline]
-fn apply_inv_sbox_round(words: [u32; 4], round: usize) -> [u32; 4] {
+fn apply_inv_sbox_round(words: [u32; STATE_WORDS], round: usize) -> [u32; STATE_WORDS] {
     apply_sbox_words(words, INV_SBOXES_ANF[round & 7])
 }
 
 /// Lane-by-lane table lookup: the S-box definition applied directly, kept as
 /// the oracle the word-parallel evaluation is tested against.
 #[cfg(test)]
-fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
+fn apply_sbox_table(words: [u32; STATE_WORDS], table: &[u8; 16]) -> [u32; STATE_WORDS] {
     let [x0, x1, x2, x3] = words;
-    let mut out = [0u32; 4];
+    let mut out = [0u32; STATE_WORDS];
     let mut bit = 0u32;
     while bit < 32 {
         let nibble = (((x0 >> bit) & 1)
@@ -178,7 +204,7 @@ fn apply_sbox_table(words: [u32; 4], table: &[u8; 16]) -> [u32; 4] {
 }
 
 #[inline]
-fn lt(words: [u32; 4]) -> [u32; 4] {
+fn lt(words: [u32; STATE_WORDS]) -> [u32; STATE_WORDS] {
     let mut x0 = words[0].rotate_left(13);
     let mut x2 = words[2].rotate_left(3);
     let mut x1 = words[1] ^ x0 ^ x2;
@@ -193,7 +219,7 @@ fn lt(words: [u32; 4]) -> [u32; 4] {
 }
 
 #[inline]
-fn inv_lt(words: [u32; 4]) -> [u32; 4] {
+fn inv_lt(words: [u32; STATE_WORDS]) -> [u32; STATE_WORDS] {
     let mut x0 = words[0].rotate_right(5);
     let mut x1 = words[1];
     let mut x2 = words[2].rotate_right(22);
@@ -212,7 +238,7 @@ fn inv_lt(words: [u32; 4]) -> [u32; 4] {
 /// Block bytes to the paper's little-endian words: word `j` is bytes
 /// `4j..4j+4`, least significant byte first.
 #[inline]
-fn words_from_block(block: &[u8; 16]) -> [u32; 4] {
+fn words_from_block(block: &[u8; BLOCK_BYTES]) -> [u32; STATE_WORDS] {
     [
         u32::from_le_bytes(block[0..4].try_into().unwrap()),
         u32::from_le_bytes(block[4..8].try_into().unwrap()),
@@ -222,7 +248,7 @@ fn words_from_block(block: &[u8; 16]) -> [u32; 4] {
 }
 
 #[inline]
-fn block_from_words(words: [u32; 4]) -> [u8; 16] {
+fn block_from_words(words: [u32; STATE_WORDS]) -> [u8; BLOCK_BYTES] {
     let mut out = [0u8; 16];
     out[0..4].copy_from_slice(&words[0].to_le_bytes());
     out[4..8].copy_from_slice(&words[1].to_le_bytes());
@@ -236,36 +262,40 @@ fn block_from_words(words: [u32; 4]) -> [u8; 16] {
 /// bit at the most significant end followed by zeros (paper §2); the prekeys
 /// `w_{-8}..w_131` follow the paper's affine recurrence and the round keys are
 /// the S-boxed prekey groups, S-box `(3 - i) mod 8` for round key `i`.
-fn expand_round_keys<const N: usize>(user_key: &[u8; N], out: &mut [[u32; 4]; 33]) {
-    let mut padded = [0u8; 32];
+fn expand_round_keys<const N: usize>(
+    user_key: &[u8; N],
+    out: &mut [[u32; STATE_WORDS]; ROUND_KEYS],
+) {
+    let mut padded = [0u8; PADDED_KEY_BYTES];
     padded[..N].copy_from_slice(user_key);
-    if N < 32 {
+    if N < PADDED_KEY_BYTES {
         padded[N] = 1;
     }
 
-    let mut words = [0u32; 140];
+    let mut words = [0u32; PREKEY_WORDS];
     let mut i = 0usize;
-    while i < 8 {
-        let off = 4 * i;
-        words[i] = u32::from_le_bytes(padded[off..off + 4].try_into().unwrap());
+    while i < PREKEY_SEED_WORDS {
+        let off = WORD_BYTES * i;
+        words[i] = u32::from_le_bytes(padded[off..off + WORD_BYTES].try_into().unwrap());
         i += 1;
     }
-    while i < 140 {
+    while i < PREKEY_WORDS {
         words[i] = (words[i - 8]
             ^ words[i - 5]
             ^ words[i - 3]
             ^ words[i - 1]
             ^ PHI
-            ^ u32::try_from(i - 8).expect("round-key index fits in u32"))
+            ^ u32::try_from(i - PREKEY_SEED_WORDS).expect("round-key index fits in u32"))
         .rotate_left(11);
         i += 1;
     }
 
-    let mut input = [0u32; 4];
+    let mut input = [0u32; STATE_WORDS];
     let mut round = 0usize;
-    while round < 33 {
-        let sbox_idx = (3usize.wrapping_sub(round)) & 7;
-        input.copy_from_slice(&words[8 + 4 * round..8 + 4 * round + 4]);
+    while round < ROUND_KEYS {
+        let sbox_idx = (3usize.wrapping_sub(round)) & (SBOX_COUNT - 1);
+        let first = PREKEY_SEED_WORDS + STATE_WORDS * round;
+        input.copy_from_slice(&words[first..first + STATE_WORDS]);
         out[round] = apply_sbox_words(input, SBOXES_ANF[sbox_idx]);
         round += 1;
     }
@@ -277,9 +307,12 @@ fn expand_round_keys<const N: usize>(user_key: &[u8; N], out: &mut [[u32; 4]; 33
     zeroize_slice(input.as_mut_slice());
 }
 
-fn serpent_encrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u32; 4] {
+fn serpent_encrypt_words(
+    mut state: [u32; STATE_WORDS],
+    round_keys: &[[u32; STATE_WORDS]; ROUND_KEYS],
+) -> [u32; STATE_WORDS] {
     let mut round = 0usize;
-    while round < 31 {
+    while round < ROUNDS - 1 {
         state[0] ^= round_keys[round][0];
         state[1] ^= round_keys[round][1];
         state[2] ^= round_keys[round][2];
@@ -289,30 +322,33 @@ fn serpent_encrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u
         round += 1;
     }
 
-    state[0] ^= round_keys[31][0];
-    state[1] ^= round_keys[31][1];
-    state[2] ^= round_keys[31][2];
-    state[3] ^= round_keys[31][3];
-    state = apply_sbox_round(state, 31);
-    state[0] ^= round_keys[32][0];
-    state[1] ^= round_keys[32][1];
-    state[2] ^= round_keys[32][2];
-    state[3] ^= round_keys[32][3];
+    state[0] ^= round_keys[ROUNDS - 1][0];
+    state[1] ^= round_keys[ROUNDS - 1][1];
+    state[2] ^= round_keys[ROUNDS - 1][2];
+    state[3] ^= round_keys[ROUNDS - 1][3];
+    state = apply_sbox_round(state, ROUNDS - 1);
+    state[0] ^= round_keys[ROUNDS][0];
+    state[1] ^= round_keys[ROUNDS][1];
+    state[2] ^= round_keys[ROUNDS][2];
+    state[3] ^= round_keys[ROUNDS][3];
     state
 }
 
-fn serpent_decrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u32; 4] {
-    state[0] ^= round_keys[32][0];
-    state[1] ^= round_keys[32][1];
-    state[2] ^= round_keys[32][2];
-    state[3] ^= round_keys[32][3];
-    state = apply_inv_sbox_round(state, 31);
-    state[0] ^= round_keys[31][0];
-    state[1] ^= round_keys[31][1];
-    state[2] ^= round_keys[31][2];
-    state[3] ^= round_keys[31][3];
+fn serpent_decrypt_words(
+    mut state: [u32; STATE_WORDS],
+    round_keys: &[[u32; STATE_WORDS]; ROUND_KEYS],
+) -> [u32; STATE_WORDS] {
+    state[0] ^= round_keys[ROUNDS][0];
+    state[1] ^= round_keys[ROUNDS][1];
+    state[2] ^= round_keys[ROUNDS][2];
+    state[3] ^= round_keys[ROUNDS][3];
+    state = apply_inv_sbox_round(state, ROUNDS - 1);
+    state[0] ^= round_keys[ROUNDS - 1][0];
+    state[1] ^= round_keys[ROUNDS - 1][1];
+    state[2] ^= round_keys[ROUNDS - 1][2];
+    state[3] ^= round_keys[ROUNDS - 1][3];
 
-    let mut round = 31usize;
+    let mut round = ROUNDS - 1;
     while round > 0 {
         round -= 1;
         state = inv_lt(state);
@@ -327,10 +363,10 @@ fn serpent_decrypt_words(mut state: [u32; 4], round_keys: &[[u32; 4]; 33]) -> [u
 }
 
 macro_rules! serpent_type {
-    ($name:ident, $name_ct:ident, $key_len:literal, $doc:literal, $doc_ct:literal) => {
+    ($name:ident, $name_ct:ident, $key_len:expr, $doc:literal, $doc_ct:literal) => {
         #[doc = $doc]
         pub struct $name {
-            round_keys: [[u32; 4]; 33],
+            round_keys: [[u32; STATE_WORDS]; ROUND_KEYS],
         }
 
         impl $name {
@@ -338,7 +374,7 @@ macro_rules! serpent_type {
             #[must_use]
             pub fn new(key: &[u8; $key_len]) -> Self {
                 let mut cipher = Self {
-                    round_keys: [[0u32; 4]; 33],
+                    round_keys: [[0u32; STATE_WORDS]; ROUND_KEYS],
                 };
                 expand_round_keys(key, &mut cipher.round_keys);
                 cipher
@@ -354,7 +390,7 @@ macro_rules! serpent_type {
             /// Encrypt one 128-bit block (little-endian words, see the module
             /// documentation).
             #[must_use]
-            pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 block_from_words(serpent_encrypt_words(
                     words_from_block(block),
                     &self.round_keys,
@@ -364,7 +400,7 @@ macro_rules! serpent_type {
             /// Decrypt one 128-bit block (little-endian words, see the module
             /// documentation).
             #[must_use]
-            pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 block_from_words(serpent_decrypt_words(
                     words_from_block(block),
                     &self.round_keys,
@@ -376,13 +412,13 @@ macro_rules! serpent_type {
             const BLOCK_LEN: usize = 16;
 
             fn encrypt(&self, block: &mut [u8]) {
-                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
                 let ct = self.encrypt_block(arr);
                 block.copy_from_slice(&ct);
             }
 
             fn decrypt(&self, block: &mut [u8]) {
-                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
                 let pt = self.decrypt_block(arr);
                 block.copy_from_slice(&pt);
             }
@@ -404,21 +440,21 @@ macro_rules! serpent_type {
 serpent_type!(
     Serpent128,
     Serpent128Ct,
-    16,
+    KEY128_BYTES,
     "Serpent with a 128-bit key: 32 rounds over four little-endian 32-bit words, with the word-parallel bitsliced S-box (constant-time by construction).",
     "Alias of [`Serpent128`], retained for API symmetry with the other block ciphers: the shipped round function is already table-free, so there is no separate constant-time implementation."
 );
 serpent_type!(
     Serpent192,
     Serpent192Ct,
-    24,
+    KEY192_BYTES,
     "Serpent with a 192-bit key: 32 rounds over four little-endian 32-bit words, with the word-parallel bitsliced S-box (constant-time by construction).",
     "Alias of [`Serpent192`], retained for API symmetry with the other block ciphers: the shipped round function is already table-free, so there is no separate constant-time implementation."
 );
 serpent_type!(
     Serpent256,
     Serpent256Ct,
-    32,
+    KEY256_BYTES,
     "Serpent with a 256-bit key: 32 rounds over four little-endian 32-bit words, with the word-parallel bitsliced S-box (constant-time by construction).",
     "Alias of [`Serpent256`], retained for API symmetry with the other block ciphers: the shipped round function is already table-free, so there is no separate constant-time implementation."
 );

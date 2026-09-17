@@ -902,7 +902,7 @@ impl TdeaSchedules {
 
     /// Withdrawn keying option 3: K1 = K2 = K3, with the weak-key screen.
     #[cfg(test)]
-    fn single_key(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+    fn single_key(key: &[u8; KEY_BYTES]) -> Result<Self, DesKeyError> {
         if is_weak_or_semi_weak_key(key) {
             return Err(DesKeyError::WeakOrSemiWeakKey);
         }
@@ -911,7 +911,7 @@ impl TdeaSchedules {
 
     /// Withdrawn keying option 3 without the weak-key screen.
     #[cfg(test)]
-    fn single_key_unchecked(key: &[u8; 8]) -> Self {
+    fn single_key_unchecked(key: &[u8; KEY_BYTES]) -> Self {
         let mut k = u64::from_be_bytes(*key);
         let keys = Self::from_keys(k, k, k, TDesMode::SingleKey);
         crate::ct::zeroize_slice(core::slice::from_mut(&mut k));
@@ -944,7 +944,11 @@ impl TdeaSchedules {
 
     /// C = E(K3, D(K2, E(K1, P))) with `core` as the single-DES block function.
     #[inline]
-    fn encrypt(&self, block: &[u8; 8], core: fn(u64, &KeySchedule) -> u64) -> [u8; 8] {
+    fn encrypt(
+        &self,
+        block: &[u8; BLOCK_BYTES],
+        core: fn(u64, &KeySchedule) -> u64,
+    ) -> [u8; BLOCK_BYTES] {
         let p = u64::from_be_bytes(*block);
         let t1 = core(p, &self.k1_enc); // E with K1
         let t2 = core(t1, &self.k2_dec); // D with K2
@@ -954,7 +958,11 @@ impl TdeaSchedules {
 
     /// P = D(K1, E(K2, D(K3, C))) with `core` as the single-DES block function.
     #[inline]
-    fn decrypt(&self, block: &[u8; 8], core: fn(u64, &KeySchedule) -> u64) -> [u8; 8] {
+    fn decrypt(
+        &self,
+        block: &[u8; BLOCK_BYTES],
+        core: fn(u64, &KeySchedule) -> u64,
+    ) -> [u8; BLOCK_BYTES] {
         let c = u64::from_be_bytes(*block);
         let t1 = core(c, &self.k3_dec); // D with K3
         let t2 = core(t1, &self.k2_enc); // E with K2
@@ -1005,12 +1013,12 @@ macro_rules! impl_tdea {
             /// [`DesKeyError::WeakOrSemiWeakKey`] if any component is weak or
             /// semi-weak; [`DesKeyError::RepeatedKeyComponent`] if any two
             /// components carry the same 56 key bits (parity ignored).
-            pub fn new_3key(key: &[u8; 24]) -> Result<Self, DesKeyError> {
+            pub fn new_3key(key: &[u8; TDEA3_KEY_BYTES]) -> Result<Self, DesKeyError> {
                 TdeaSchedules::three_key(key).map(|keys| Self { keys })
             }
 
             /// Construct a 3TDEA instance and wipe the provided key buffer.
-            pub fn new_3key_wiping(key: &mut [u8; 24]) -> Result<Self, DesKeyError> {
+            pub fn new_3key_wiping(key: &mut [u8; TDEA3_KEY_BYTES]) -> Result<Self, DesKeyError> {
                 let out = Self::new_3key(key);
                 crate::ct::zeroize_slice(key.as_mut_slice());
                 out
@@ -1024,12 +1032,12 @@ macro_rules! impl_tdea {
             /// [`DesKeyError::WeakOrSemiWeakKey`] if either component is weak
             /// or semi-weak; [`DesKeyError::RepeatedKeyComponent`] if K1 = K2
             /// (parity ignored), which would collapse the cipher to single DES.
-            pub fn new_2key(key: &[u8; 16]) -> Result<Self, DesKeyError> {
+            pub fn new_2key(key: &[u8; TDEA2_KEY_BYTES]) -> Result<Self, DesKeyError> {
                 TdeaSchedules::two_key(key).map(|keys| Self { keys })
             }
 
             /// Construct a 2TDEA instance and wipe the provided key buffer.
-            pub fn new_2key_wiping(key: &mut [u8; 16]) -> Result<Self, DesKeyError> {
+            pub fn new_2key_wiping(key: &mut [u8; TDEA2_KEY_BYTES]) -> Result<Self, DesKeyError> {
                 let out = Self::new_2key(key);
                 crate::ct::zeroize_slice(key.as_mut_slice());
                 out
@@ -1038,7 +1046,7 @@ macro_rules! impl_tdea {
             /// Test-only: one DES key as K1 = K2 = K3, the keying option 3
             /// that SP 800-67 Rev. 2 withdrew, with the weak-key screen.
             #[cfg(test)]
-            pub(crate) fn new_single_key(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+            pub(crate) fn new_single_key(key: &[u8; KEY_BYTES]) -> Result<Self, DesKeyError> {
                 TdeaSchedules::single_key(key).map(|keys| Self { keys })
             }
 
@@ -1046,7 +1054,7 @@ macro_rules! impl_tdea {
             /// NIST CAVP "KEYs" tables whose key is the weak key `01..01`.
             #[cfg(test)]
             #[must_use]
-            pub(crate) fn new_single_key_unchecked(key: &[u8; 8]) -> Self {
+            pub(crate) fn new_single_key_unchecked(key: &[u8; KEY_BYTES]) -> Self {
                 Self {
                     keys: TdeaSchedules::single_key_unchecked(key),
                 }
@@ -1060,13 +1068,13 @@ macro_rules! impl_tdea {
 
             /// Encrypt a single 64-bit block: C = E(K3, D(K2, E(K1, P)))
             #[must_use]
-            pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+            pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 self.keys.encrypt(block, $core)
             }
 
             /// Decrypt a single 64-bit block: P = D(K1, E(K2, D(K3, C)))
             #[must_use]
-            pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+            pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 self.keys.decrypt(block, $core)
             }
         }

@@ -23,6 +23,19 @@
 //! `g`-function squares a secret 32-bit sum into 64 bits, so its running time
 //! is constant only where the hardware multiplier's is.
 
+/// Rabbit's key is 128 bits and its IV 64 (RFC 4503 §2.2, §2.4); the cipher
+/// emits 128 bits of keystream per round (§2.6).
+const KEY_BYTES: usize = 16;
+const IV_BYTES: usize = 8;
+const BLOCK_BYTES: usize = 16;
+
+/// Eight state words and eight counters (RFC 4503 §2.1).
+const SUBSTATES: usize = 8;
+
+/// The system is iterated four times after key setup and again after IV setup
+/// (RFC 4503 §2.3, §2.4).
+const SETUP_ITERATIONS: usize = 4;
+
 // Rabbit counter increments `A[i]` from RFC 4503 §2.5 (derived from the
 // fractional part of sqrt(pi) in the original Rabbit specification).
 const A: [u32; 8] = [
@@ -63,13 +76,13 @@ fn g_func(x: u32, c: u32) -> u32 {
 }
 
 struct RabbitCore {
-    x: [u32; 8],
-    c: [u32; 8],
+    x: [u32; SUBSTATES],
+    c: [u32; SUBSTATES],
     carry: u32,
 }
 
 impl RabbitCore {
-    fn from_key(key: &[u8; 16]) -> Self {
+    fn from_key(key: &[u8; KEY_BYTES]) -> Self {
         let mut k = [0u16; 8];
         for (i, chunk) in key.rchunks_exact(2).enumerate() {
             k[i] = load_u16_be(chunk);
@@ -99,12 +112,12 @@ impl RabbitCore {
             carry: 0,
         };
 
-        for _ in 0..4 {
+        for _ in 0..SETUP_ITERATIONS {
             core.next_state();
         }
 
-        for i in 0..8 {
-            core.c[i] ^= core.x[(i + 4) & 7];
+        for i in 0..SUBSTATES {
+            core.c[i] ^= core.x[(i + SUBSTATES / 2) & (SUBSTATES - 1)];
         }
 
         // `k` is the key split into its eight 16-bit subkeys.
@@ -112,7 +125,7 @@ impl RabbitCore {
         core
     }
 
-    fn apply_iv(&mut self, iv: &[u8; 8]) {
+    fn apply_iv(&mut self, iv: &[u8; IV_BYTES]) {
         let v0 = load_u32_be(&iv[4..8]);
         let v1 = cat16(load_u16_be(&iv[0..2]), load_u16_be(&iv[4..6]));
         let v2 = load_u32_be(&iv[0..4]);
@@ -127,7 +140,7 @@ impl RabbitCore {
         self.c[6] ^= v2;
         self.c[7] ^= v3;
 
-        for _ in 0..4 {
+        for _ in 0..SETUP_ITERATIONS {
             self.next_state();
         }
     }
@@ -136,7 +149,7 @@ impl RabbitCore {
     fn next_state(&mut self) {
         let mut old_c = self.c;
         let mut carry = self.carry;
-        for i in 0..8 {
+        for i in 0..SUBSTATES {
             let sum = u64::from(old_c[i]) + u64::from(A[i]) + u64::from(carry);
             self.c[i] = sum as u32;
             carry = (sum >> 32) as u32;
@@ -172,7 +185,7 @@ impl RabbitCore {
     }
 
     #[inline]
-    fn keystream_block(&mut self) -> [u8; 16] {
+    fn keystream_block(&mut self) -> [u8; BLOCK_BYTES] {
         self.next_state();
 
         let mut s = [
@@ -205,7 +218,7 @@ impl RabbitCore {
 /// instance keeps no block count; that budget is the caller's.
 pub struct Rabbit {
     core: RabbitCore,
-    block: [u8; 16],
+    block: [u8; BLOCK_BYTES],
     offset: usize,
 }
 
@@ -215,7 +228,7 @@ impl Rabbit {
     ///
     /// RFC 4503 §3.2: no IV may be reused under the same key.
     #[must_use]
-    pub fn new(key: &[u8; 16], iv: &[u8; 8]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> Self {
         let mut core = RabbitCore::from_key(key);
         core.apply_iv(iv);
         Self {
@@ -234,7 +247,7 @@ impl Rabbit {
     /// may be used for exactly one instance, for one continuous stream. Use
     /// [`Rabbit::new`] with a fresh IV wherever the cipher is re-synchronised.
     #[must_use]
-    pub fn without_iv(key: &[u8; 16]) -> Self {
+    pub fn without_iv(key: &[u8; KEY_BYTES]) -> Self {
         Self {
             core: RabbitCore::from_key(key),
             block: [0u8; 16],
@@ -243,7 +256,7 @@ impl Rabbit {
     }
 
     /// Create and wipe the caller's key and IV buffers.
-    pub fn new_wiping(key: &mut [u8; 16], iv: &mut [u8; 8]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], iv: &mut [u8; IV_BYTES]) -> Self {
         let out = Self::new(key, iv);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(iv.as_mut_slice());
@@ -253,7 +266,7 @@ impl Rabbit {
     /// Create without IV setup and wipe the caller's key buffer.
     ///
     /// The same one-instance-per-key rule as [`Rabbit::without_iv`] applies.
-    pub fn without_iv_wiping(key: &mut [u8; 16]) -> Self {
+    pub fn without_iv_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::without_iv(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -287,7 +300,7 @@ impl Rabbit {
     }
 
     /// Return the next 16 bytes of keystream.
-    pub fn keystream_block(&mut self) -> [u8; 16] {
+    pub fn keystream_block(&mut self) -> [u8; BLOCK_BYTES] {
         let mut out = [0u8; 16];
         self.apply_keystream(&mut out);
         out

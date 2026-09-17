@@ -15,6 +15,21 @@ use crate::BlockCipher;
 
 include!("cast128_tables.rs");
 
+/// CAST-128 enciphers a 64-bit block (RFC 2144 §2.1); its key sizes are named
+/// with the schedule below.
+const BLOCK_BYTES: usize = 8;
+
+/// Keys of 80 bits or less take twelve rounds, longer keys sixteen
+/// (RFC 2144 §2.5).
+const SHORT_KEY_BITS: usize = 80;
+const SHORT_KEY_ROUNDS: usize = 12;
+const ROUNDS: usize = 16;
+
+/// The key schedule runs two x/z cycles, each emitting sixteen of the RFC's
+/// intermediate `K` words: masking subkeys first, then rotation subkeys.
+const SCHEDULE_CYCLES: usize = 2;
+const WORDS_PER_CYCLE: usize = 16;
+
 #[inline]
 fn sbox(table: &[u32; 256], idx: u8, use_ct: bool) -> u32 {
     if use_ct {
@@ -25,12 +40,12 @@ fn sbox(table: &[u32; 256], idx: u8, use_ct: bool) -> u32 {
 }
 
 #[inline]
-fn pack(bytes: &[u8; 16], a: usize, b: usize, c: usize, d: usize) -> u32 {
+fn pack(bytes: &[u8; MAX_KEY_BYTES], a: usize, b: usize, c: usize, d: usize) -> u32 {
     u32::from_be_bytes([bytes[a], bytes[b], bytes[c], bytes[d]])
 }
 
 #[inline]
-fn unpack(bytes: &mut [u8; 16], start: usize, value: u32) {
+fn unpack(bytes: &mut [u8; MAX_KEY_BYTES], start: usize, value: u32) {
     bytes[start..start + 4].copy_from_slice(&value.to_be_bytes());
 }
 
@@ -39,7 +54,7 @@ fn unpack(bytes: &mut [u8; 16], start: usize, value: u32) {
 // K1..K32 formulas stay readable. Each writes into a caller-owned buffer, so
 // the key-derived states and intermediate K words live only in the caller's
 // frame, where the key schedule wipes them.
-fn x_to_z(x: &[u8; 16], z: &mut [u8; 16], use_ct: bool) {
+fn x_to_z(x: &[u8; MAX_KEY_BYTES], z: &mut [u8; MAX_KEY_BYTES], use_ct: bool) {
     let w0 = pack(x, 0, 1, 2, 3)
         ^ sbox(&S5, x[13], use_ct)
         ^ sbox(&S6, x[15], use_ct)
@@ -73,7 +88,7 @@ fn x_to_z(x: &[u8; 16], z: &mut [u8; 16], use_ct: bool) {
     unpack(z, 12, w3);
 }
 
-fn z_to_x(z: &[u8; 16], x: &mut [u8; 16], use_ct: bool) {
+fn z_to_x(z: &[u8; MAX_KEY_BYTES], x: &mut [u8; MAX_KEY_BYTES], use_ct: bool) {
     let w0 = pack(z, 8, 9, 10, 11)
         ^ sbox(&S5, z[5], use_ct)
         ^ sbox(&S6, z[7], use_ct)
@@ -107,7 +122,7 @@ fn z_to_x(z: &[u8; 16], x: &mut [u8; 16], use_ct: bool) {
     unpack(x, 12, w3);
 }
 
-fn extract_z_a(z: &[u8; 16], use_ct: bool, out: &mut [u32]) {
+fn extract_z_a(z: &[u8; MAX_KEY_BYTES], use_ct: bool, out: &mut [u32]) {
     out[0] = sbox(&S5, z[8], use_ct)
         ^ sbox(&S6, z[9], use_ct)
         ^ sbox(&S7, z[7], use_ct)
@@ -130,7 +145,7 @@ fn extract_z_a(z: &[u8; 16], use_ct: bool, out: &mut [u32]) {
         ^ sbox(&S8, z[12], use_ct);
 }
 
-fn extract_x_a(x: &[u8; 16], use_ct: bool, out: &mut [u32]) {
+fn extract_x_a(x: &[u8; MAX_KEY_BYTES], use_ct: bool, out: &mut [u32]) {
     out[0] = sbox(&S5, x[3], use_ct)
         ^ sbox(&S6, x[2], use_ct)
         ^ sbox(&S7, x[12], use_ct)
@@ -153,7 +168,7 @@ fn extract_x_a(x: &[u8; 16], use_ct: bool, out: &mut [u32]) {
         ^ sbox(&S8, x[7], use_ct);
 }
 
-fn extract_z_b(z: &[u8; 16], use_ct: bool, out: &mut [u32]) {
+fn extract_z_b(z: &[u8; MAX_KEY_BYTES], use_ct: bool, out: &mut [u32]) {
     out[0] = sbox(&S5, z[3], use_ct)
         ^ sbox(&S6, z[2], use_ct)
         ^ sbox(&S7, z[12], use_ct)
@@ -176,7 +191,7 @@ fn extract_z_b(z: &[u8; 16], use_ct: bool, out: &mut [u32]) {
         ^ sbox(&S8, z[6], use_ct);
 }
 
-fn extract_x_b(x: &[u8; 16], use_ct: bool, out: &mut [u32]) {
+fn extract_x_b(x: &[u8; MAX_KEY_BYTES], use_ct: bool, out: &mut [u32]) {
     out[0] = sbox(&S5, x[8], use_ct)
         ^ sbox(&S6, x[9], use_ct)
         ^ sbox(&S7, x[7], use_ct)
@@ -263,7 +278,7 @@ const fn key_len_is_valid(len: usize) -> bool {
 fn check_key_len(len: usize) {
     assert!(
         key_len_is_valid(len),
-        "CAST-128 key length must be 5..=16 bytes, got {len}"
+        "CAST-128 key length must be {MIN_KEY_BYTES}..={MAX_KEY_BYTES} bytes, got {len}"
     );
 }
 
@@ -272,20 +287,22 @@ fn check_key_len(len: usize) {
 fn expand_subkeys(key: &[u8], use_ct: bool, subkeys: &mut Subkeys) {
     check_key_len(key.len());
 
-    let mut x = [0u8; 16];
+    let mut x = [0u8; MAX_KEY_BYTES];
     x[..key.len()].copy_from_slice(key);
     // RFC 2144 §2.5: keys shorter than 128 bits are padded with zero bytes in
     // the least significant positions, and keys of 80 bits or less use 12
     // rounds instead of 16.
-    subkeys.rounds = if key.len() * 8 <= 80 { 12 } else { 16 };
+    subkeys.rounds = if key.len() * 8 <= SHORT_KEY_BITS {
+        SHORT_KEY_ROUNDS
+    } else {
+        ROUNDS
+    };
 
-    let mut z = [0u8; 16];
-    let mut k = [0u32; 32];
+    let mut z = [0u8; MAX_KEY_BYTES];
+    let mut k = [0u32; SCHEDULE_CYCLES * WORDS_PER_CYCLE];
     let mut offset = 0usize;
 
-    for _ in 0..2 {
-        // Each x/z cycle emits 16 of the RFC's intermediate K words; the
-        // first half becomes masking subkeys, the second half rotation subkeys.
+    for _ in 0..SCHEDULE_CYCLES {
         x_to_z(&x, &mut z, use_ct);
         extract_z_a(&z, use_ct, &mut k[offset..offset + 4]);
         z_to_x(&z, &mut x, use_ct);
@@ -294,7 +311,7 @@ fn expand_subkeys(key: &[u8], use_ct: bool, subkeys: &mut Subkeys) {
         extract_z_b(&z, use_ct, &mut k[offset + 8..offset + 12]);
         z_to_x(&z, &mut x, use_ct);
         extract_x_b(&x, use_ct, &mut k[offset + 12..offset + 16]);
-        offset += 16;
+        offset += WORDS_PER_CYCLE;
     }
 
     let mut i = 0usize;
@@ -311,7 +328,7 @@ fn expand_subkeys(key: &[u8], use_ct: bool, subkeys: &mut Subkeys) {
     zeroize_slice(&mut k);
 }
 
-fn cast_encrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
+fn cast_encrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; BLOCK_BYTES] {
     let mut l = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut r = u32::from_be_bytes(block[4..8].try_into().unwrap());
 
@@ -332,7 +349,7 @@ fn cast_encrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
     out
 }
 
-fn cast_decrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; 8] {
+fn cast_decrypt(block: [u8; 8], subkeys: &Subkeys, use_ct: bool) -> [u8; BLOCK_BYTES] {
     let mut l = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let mut r = u32::from_be_bytes(block[4..8].try_into().unwrap());
 
@@ -405,14 +422,14 @@ impl Cast128 {
     /// Encrypt one 8-byte block through the 12 or 16 Feistel rounds selected
     /// by the key size; not constant-time.
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         cast_encrypt(*block, &self.subkeys, false)
     }
 
     /// Decrypt one 8-byte block by applying the rounds with the subkeys in
     /// reverse order; not constant-time.
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         cast_decrypt(*block, &self.subkeys, false)
     }
 }
@@ -488,7 +505,7 @@ impl Cast128Ct {
     /// by the key size, with fixed-scan S-box lookups in place of direct
     /// indexing.
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         cast_encrypt(*block, &self.subkeys, true)
     }
 
@@ -496,7 +513,7 @@ impl Cast128Ct {
     /// reverse order, with fixed-scan S-box lookups in place of direct
     /// indexing.
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         cast_decrypt(*block, &self.subkeys, true)
     }
 }

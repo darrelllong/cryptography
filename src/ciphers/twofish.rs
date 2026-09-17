@@ -22,6 +22,26 @@ use crate::ct::zeroize_slice;
 use crate::BlockCipher;
 
 // Twofish key-schedule stride constant from the submission.
+/// Twofish is a 128-bit block cipher held as four 32-bit words, with sixteen
+/// rounds and keys of 128, 192 or 256 bits (Schneier et al., §3).
+const BLOCK_BYTES: usize = 16;
+const STATE_WORDS: usize = 4;
+const WORD_BYTES: usize = BLOCK_BYTES / STATE_WORDS;
+const ROUNDS: usize = 16;
+
+/// The key is read as 64-bit words, two 32-bit halves each: `Me` and `Mo`
+/// (§4.3).
+const KEY_WORD_BYTES: usize = 8;
+const MAX_KEY_WORDS: usize = 4;
+
+/// Four subkeys whiten the input, four the output, and each round takes two
+/// (§4.3): forty in all, produced two at a time.
+const WHITENING_SUBKEYS: usize = 2 * STATE_WORDS;
+const SUBKEYS: usize = WHITENING_SUBKEYS + 2 * ROUNDS;
+
+/// Bits in the field elements the MDS and RS matrices work over (§4.3).
+const FIELD_BITS: usize = 8;
+
 const RHO: u32 = 0x0101_0101;
 // Twofish uses two GF(2^8) reduction polynomials:
 // - MDS matrix multiply: v(x) = x^8 + x^6 + x^5 + x^3 + 1 (0x169)
@@ -151,7 +171,7 @@ fn q_perm(x: u8, which: usize, use_ct: bool) -> u8 {
 #[inline]
 fn gf_mul(mut a: u8, mut b: u8, poly: u16) -> u8 {
     let mut out = 0u8;
-    for _ in 0..8 {
+    for _ in 0..FIELD_BITS {
         let mask = 0u8.wrapping_sub(b & 1);
         out ^= a & mask;
         let hi = a & 0x80;
@@ -336,8 +356,8 @@ fn h(x: u32, l: &[u32; 4], words: usize, use_ct: bool) -> u32 {
 /// it wipes itself on drop. The fast types pair it with [`KeyedTables`]; the
 /// constant-time types carry it alone.
 struct TwofishKey {
-    subkeys: [u32; 40],
-    s: [u32; 4],
+    subkeys: [u32; SUBKEYS],
+    s: [u32; MAX_KEY_WORDS],
     words: usize,
 }
 
@@ -346,8 +366,8 @@ impl TwofishKey {
     /// to be filled in place by [`Self::expand`].
     fn empty(words: usize) -> Self {
         Self {
-            subkeys: [0u32; 40],
-            s: [0u32; 4],
+            subkeys: [0u32; SUBKEYS],
+            s: [0u32; MAX_KEY_WORDS],
             words,
         }
     }
@@ -357,27 +377,36 @@ impl TwofishKey {
     /// and `S` are written straight into `self`; the key's even and odd words
     /// `Me`/`Mo` are wiped before returning.
     fn expand<const N: usize>(&mut self, key: &[u8; N], use_ct: bool) {
-        let words = N / 8;
+        let words = N / KEY_WORD_BYTES;
         debug_assert_eq!(words, self.words);
-        let mut me = [0u32; 4];
-        let mut mo = [0u32; 4];
+        let mut me = [0u32; MAX_KEY_WORDS];
+        let mut mo = [0u32; MAX_KEY_WORDS];
 
         let mut word_idx = 0usize;
         while word_idx < words {
             // Even and odd 32-bit words feed separate `h()` calls in the subkey
             // schedule, while the RS matrix derives the S-box key words in reverse
             // chunk order.
-            me[word_idx] =
-                u32::from_le_bytes(key[word_idx * 8..word_idx * 8 + 4].try_into().unwrap());
-            mo[word_idx] =
-                u32::from_le_bytes(key[word_idx * 8 + 4..word_idx * 8 + 8].try_into().unwrap());
-            let chunk: &[u8; 8] = key[word_idx * 8..word_idx * 8 + 8].try_into().unwrap();
+            me[word_idx] = u32::from_le_bytes(
+                key[word_idx * KEY_WORD_BYTES..word_idx * KEY_WORD_BYTES + WORD_BYTES]
+                    .try_into()
+                    .unwrap(),
+            );
+            mo[word_idx] = u32::from_le_bytes(
+                key[word_idx * KEY_WORD_BYTES + WORD_BYTES..(word_idx + 1) * KEY_WORD_BYTES]
+                    .try_into()
+                    .unwrap(),
+            );
+            let chunk: &[u8; KEY_WORD_BYTES] = key
+                [word_idx * KEY_WORD_BYTES..(word_idx + 1) * KEY_WORD_BYTES]
+                .try_into()
+                .unwrap();
             self.s[words - 1 - word_idx] = rs_encode(*chunk);
             word_idx += 1;
         }
 
         let mut subkey_idx = 0usize;
-        while subkey_idx < 20 {
+        while subkey_idx < SUBKEYS / 2 {
             // K[0..3] are input whitening, K[4..7] output whitening, and the
             // remaining 32 words supply the 16 rounds.
             let even_input = u32::try_from(2 * subkey_idx).expect("subkey index fits in u32");
@@ -403,17 +432,21 @@ impl TwofishKey {
         let t1 = h_round(x1.rotate_left(8));
         let f0 = t0
             .wrapping_add(t1)
-            .wrapping_add(self.subkeys[8 + 2 * round]);
+            .wrapping_add(self.subkeys[WHITENING_SUBKEYS + 2 * round]);
         let f1 = t0
             .wrapping_add(t1.wrapping_add(t1))
-            .wrapping_add(self.subkeys[8 + 2 * round + 1]);
+            .wrapping_add(self.subkeys[WHITENING_SUBKEYS + 2 * round + 1]);
         (f0, f1)
     }
 
     /// Encrypt one block with `h_round` as the keyed `h()`: table lookups on
     /// the fast path, direct constant-time evaluation on the `Ct` path. Each
     /// path is monomorphized, so no per-round branch selects between them.
-    fn encrypt_block(&self, h_round: impl Fn(u32) -> u32, block: &[u8; 16]) -> [u8; 16] {
+    fn encrypt_block(
+        &self,
+        h_round: impl Fn(u32) -> u32,
+        block: &[u8; BLOCK_BYTES],
+    ) -> [u8; BLOCK_BYTES] {
         let mut x0 = u32::from_le_bytes(block[0..4].try_into().unwrap()) ^ self.subkeys[0];
         let mut x1 = u32::from_le_bytes(block[4..8].try_into().unwrap()) ^ self.subkeys[1];
         let mut x2 = u32::from_le_bytes(block[8..12].try_into().unwrap()) ^ self.subkeys[2];
@@ -448,7 +481,11 @@ impl TwofishKey {
     }
 
     /// Decrypt one block with `h_round` as the keyed `h()`.
-    fn decrypt_block(&self, h_round: impl Fn(u32) -> u32, block: &[u8; 16]) -> [u8; 16] {
+    fn decrypt_block(
+        &self,
+        h_round: impl Fn(u32) -> u32,
+        block: &[u8; BLOCK_BYTES],
+    ) -> [u8; BLOCK_BYTES] {
         let mut x2 = u32::from_le_bytes(block[0..4].try_into().unwrap()) ^ self.subkeys[4];
         let mut x3 = u32::from_le_bytes(block[4..8].try_into().unwrap()) ^ self.subkeys[5];
         let mut x0 = u32::from_le_bytes(block[8..12].try_into().unwrap()) ^ self.subkeys[6];
@@ -527,14 +564,14 @@ macro_rules! define_twofish_type {
             /// Encrypt one 128-bit block through the keyed tables
             /// (secret-indexed lookups; not constant-time).
             #[must_use]
-            pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 self.key.encrypt_block(|x| self.tables.h(x), block)
             }
 
             /// Decrypt one 128-bit block through the keyed tables
             /// (secret-indexed lookups; not constant-time).
             #[must_use]
-            pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 self.key.decrypt_block(|x| self.tables.h(x), block)
             }
         }
@@ -586,14 +623,14 @@ macro_rules! define_twofish_type {
 
             /// Encrypt one 128-bit block with the software constant-time path.
             #[must_use]
-            pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 let key = &self.key;
                 key.encrypt_block(|x| h(x, &key.s, key.words, true), block)
             }
 
             /// Decrypt one 128-bit block with the software constant-time path.
             #[must_use]
-            pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 let key = &self.key;
                 key.decrypt_block(|x| h(x, &key.s, key.words, true), block)
             }
