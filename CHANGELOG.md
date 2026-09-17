@@ -10,6 +10,18 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Added
+- `scripts/ct_codegen.sh`, which extracts the release assembly of the crate's
+  tag comparison for a target and lists its conditional branches, with
+  `scripts/ct_probe` giving that comparison a symbol of its own. Under rustc
+  1.93.1 on `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu` the
+  comparison is straight-line vector code and every conditional branch tests
+  a public length or the allocation.
+- Fast-key-erasure tests for the evidence the review asks of the
+  construction: served bytes appear in no buffer it keeps, an interrupted
+  fill leaves none behind, reseeding after a simulated state compromise
+  leaves the captured state's predictions behind, and a second process with
+  the same key produces the same stream, so the core carries no process
+  identity (the reseed-on-fork policy is the caller's).
 - `HashDrbg` (SP 800-90A Rev. 1 Hash_DRBG, SHA-256), `HmacDrbg` (HMAC_DRBG,
   HMAC-SHA-256) and `FastKeyErasure` (fast-key-erasure ChaCha20), moved here
   from `rng-entropy` so the cryptographic generator mechanisms have one owner;

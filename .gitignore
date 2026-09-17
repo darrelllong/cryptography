@@ -17,3 +17,4 @@
 __pycache__/
 /scripts/null_calibration/pvalues.csv
 /scripts/null_calibration/held_out-*.csv
+/scripts/ct_probe/Cargo.lock

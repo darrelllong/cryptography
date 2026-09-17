@@ -1,0 +1,19 @@
+[package]
+name = "ct-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Kept out of the workspace: scripts/ct_codegen.sh builds it on demand to read
+# the machine code of the crate's tag comparison.
+[workspace]
+
+[lib]
+name = "ct_probe"
+crate-type = ["lib"]
+
+[dependencies]
+cryptography-rs = { path = "../.." }
+
+[profile.release]
+debug = false

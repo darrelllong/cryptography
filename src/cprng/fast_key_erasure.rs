@@ -194,6 +194,92 @@ mod tests {
         assert_eq!(rng.next_u64(), expected.next_u64());
     }
 
+    /// A served byte is in no buffer the generator keeps: not the pool it
+    /// came from, not the key, and not the next refill's pool.
+    #[test]
+    fn served_bytes_survive_nowhere_in_the_state() {
+        const SERVED: usize = REFILL - KEY + 7;
+        let mut rng = FastKeyErasure::new([0x33; KEY]);
+        let mut out = [0u8; SERVED];
+        rng.fill(&mut out);
+        let window = 8;
+        for start in 0..=out.len() - window {
+            let served = &out[start..start + window];
+            assert!(!rng.buffer.windows(window).any(|w| w == served));
+            assert!(!rng.key.windows(window).any(|w| w == served));
+        }
+    }
+
+    /// A caller that panics part way through a fill leaves the served bytes
+    /// erased from the buffer: `fill` erases each byte as it copies it, so an
+    /// unwind cannot expose bytes the caller already holds.
+    #[test]
+    fn an_interrupted_fill_leaves_no_served_bytes_behind() {
+        let mut rng = FastKeyErasure::new([0x44; KEY]);
+        let mut first = [0u8; 64];
+        rng.fill(&mut first);
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut out = [0u8; 64];
+            rng.fill(&mut out);
+            panic!("caller unwinds holding {out:?}");
+        }));
+        assert!(unwound.is_err());
+        assert_eq!(rng.buffer[KEY..KEY + 128], [0; 128]);
+    }
+
+    /// After a compromise that reads the whole state, reseeding with key
+    /// material the attacker does not have puts the stream beyond what the
+    /// captured state predicts.
+    #[test]
+    fn reseed_after_a_compromise_leaves_the_captured_state_behind() {
+        let mut rng = FastKeyErasure::new([0x55; KEY]);
+        let mut discard = [0u8; 16];
+        rng.fill(&mut discard);
+        let captured_key = rng.key;
+        let captured_buffer = rng.buffer;
+        rng.reseed(&[0x9e; KEY]);
+        let mut after = [0u8; 64];
+        rng.fill(&mut after);
+
+        let mut attacker = FastKeyErasure::new(captured_key);
+        attacker.buffer = captured_buffer;
+        attacker.position = KEY + discard.len();
+        let mut predicted = [0u8; 64];
+        attacker.fill(&mut predicted);
+        assert_ne!(after, predicted);
+    }
+
+    /// The core keeps no process identity: a second process running this same
+    /// test binary, with the same key, produces the same bytes. Reseeding on
+    /// a fork is the caller's policy, not the construction's.
+    #[test]
+    fn a_second_process_with_the_same_key_produces_the_same_stream() {
+        const CHILD: &str = "CRYPTOGRAPHY_FAST_KEY_ERASURE_CHILD";
+        let mut ours = [0u8; 32];
+        FastKeyErasure::new([0x77; KEY]).fill(&mut ours);
+        let hex = crate::test_utils::encode_hex(&ours);
+        if std::env::var_os(CHILD).is_some() {
+            println!("{hex}");
+            return;
+        }
+        let exe = std::env::current_exe().expect("this test binary");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "cprng::fast_key_erasure::tests::a_second_process_with_the_same_key_produces_the_same_stream",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .expect("run this test binary again");
+        assert!(output.status.success(), "child: {output:?}");
+        let child = String::from_utf8(output.stdout).expect("test output is text");
+        assert!(
+            child.lines().any(|line| line.trim() == hex),
+            "child printed {child}, expected {hex}"
+        );
+    }
+
     /// Words are little-endian and follow on from each other across a refill.
     #[test]
     fn words_are_little_endian_across_refills() {
