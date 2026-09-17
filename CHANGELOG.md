@@ -44,19 +44,19 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   is written from, the source of its known answers, and the tests that refuse
   malformed input, keeping conformance, interoperability and refusal apart.
 - `scripts/ct_codegen.sh`, which extracts the release assembly behind each
-  constant-time claim for a target and classifies every conditional branch in
-  it as a loop the source bounds, a guard on an index or an allocation, or
-  unclassified, with `scripts/ct_probe` giving each claim a symbol of its own.
-  Under rustc 1.93.1 on `aarch64-apple-darwin` and rustc 1.95.0 on
-  `x86_64-unknown-linux-gnu` the tag comparison, `Aes128Ct::encrypt_block` and
-  the X25519 and X448 ladders leave only public-length and loop-counter
-  comparisons unclassified, and `src/ct.rs`, `src/ciphers/aes.rs` and the two
-  ladder modules record the reading. Each claim carries the number of
-  unclassified branches that reading covers and CI runs the script on both
-  platforms, so a compiler that introduces another one fails the build. The
-  claims now cover every `Ct` block cipher, the ChaCha20 keystream, the
-  Poly1305 MAC, a complete AEAD open and a complete X25519 key agreement, and
-  each claim's report includes the functions it calls.
+  constant-time claim the crate makes — the tag comparison, every `Ct` block
+  cipher, the ChaCha20 keystream, the Poly1305 MAC, the X25519 and X448
+  ladders, a complete key agreement, a complete AEAD open, and ML-KEM and NTRU
+  decapsulation — together with the functions each one calls, and classifies
+  every conditional branch as a loop the source bounds, a guard that ends in a
+  panic or the allocator, or unclassified. `scripts/ct_probe` gives each claim
+  a symbol of its own, the build is pinned to one codegen unit so the reading
+  is the same everywhere, and `scripts/ct_budgets/<triple>.txt` records how
+  many unclassified branches a reading accounted for, which `--accept`
+  rewrites and CI enforces on both platforms. What those readings found is in
+  the claims table at the top of the script: round counts, encoding widths,
+  message lengths, loop bounds and path selectors, and nothing that tests a
+  key, a scalar, a tag or a plaintext byte.
 - Fast-key-erasure tests for the evidence the review asks of the
   construction: served bytes appear in no buffer it keeps, an interrupted
   fill leaves none behind, reseeding after a simulated state compromise
