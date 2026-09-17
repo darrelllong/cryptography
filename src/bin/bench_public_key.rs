@@ -512,8 +512,14 @@ fn bench_ec_elgamal(rng: &mut CtrDrbgAes256) -> EcElGamalTimings {
 
 fn main() {
     let (bits, skip_elgamal, skip_dsa) = parse_args();
-    if bits < 528 {
-        eprintln!("RSAES-OAEP with SHA-256 requires at least a 528-bit modulus.");
+    // RFC 8017 §7.1.1 step 1b: OAEP needs k >= 2 hLen + 2 octets, so with
+    // SHA-256 (hLen = 32) the modulus needs 66 octets, and one more bit to
+    // make the top octet nonzero.
+    const MIN_OAEP_SHA256_BITS: usize = 8 * (2 * 32 + 2) + 1;
+    if bits < MIN_OAEP_SHA256_BITS {
+        eprintln!(
+            "RSAES-OAEP with SHA-256 requires at least a {MIN_OAEP_SHA256_BITS}-bit modulus."
+        );
         std::process::exit(2);
     }
     let mut rng = CtrDrbgAes256::new(&[0x5a; 48]);

@@ -10,7 +10,18 @@
 //! fast, portable, and naturally closer to constant-time than table-driven
 //! stream ciphers.
 
+/// The block constant of RFC 8439 §2.3, "expand 32-byte k", as words 0-3.
 const CONSTANTS: [u8; 16] = *b"expand 32-byte k";
+
+/// Keystream bytes per block: sixteen 32-bit state words (RFC 8439 §2.3).
+const BLOCK_BYTES: usize = 64;
+/// Key bytes (RFC 8439 §2.3: eight words).
+const KEY_BYTES: usize = 32;
+/// Nonce bytes of the IETF layout (RFC 8439 §2.3: three words).
+const NONCE_BYTES: usize = 12;
+/// Nonce bytes of the XChaCha20 layout: sixteen for `HChaCha20` and eight
+/// carried into the inner `ChaCha20` nonce.
+const XNONCE_BYTES: usize = 24;
 
 #[inline]
 fn load_u32_le(bytes: &[u8]) -> u32 {
@@ -64,7 +75,7 @@ fn chacha20_rounds(x: &mut [u32; 16]) {
 /// keystream block by exactly the input state, so the two together would
 /// reveal the key.
 #[inline]
-fn chacha20_block_into(state: &[u32; 16], out: &mut [u8; 64]) {
+fn chacha20_block_into(state: &[u32; 16], out: &mut [u8; BLOCK_BYTES]) {
     let mut x = *state;
     chacha20_rounds(&mut x);
     for i in 0..16 {
@@ -100,7 +111,11 @@ fn chacha20_block_combine(state: &[u32; 16], out: &mut [u8], xor: bool) {
 }
 
 #[inline]
-fn state_from_key_nonce(key: &[u8; 32], nonce: &[u8; 12], counter: u32) -> [u32; 16] {
+fn state_from_key_nonce(
+    key: &[u8; KEY_BYTES],
+    nonce: &[u8; NONCE_BYTES],
+    counter: u32,
+) -> [u32; 16] {
     [
         load_u32_le(&CONSTANTS[0..4]),
         load_u32_le(&CONSTANTS[4..8]),
@@ -122,7 +137,7 @@ fn state_from_key_nonce(key: &[u8; 32], nonce: &[u8; 12], counter: u32) -> [u32;
 }
 
 #[inline]
-fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
+fn hchacha20(key: &[u8; KEY_BYTES], nonce: &[u8; 16]) -> [u8; KEY_BYTES] {
     let mut state = [
         load_u32_le(&CONSTANTS[0..4]),
         load_u32_le(&CONSTANTS[4..8]),
@@ -171,7 +186,7 @@ fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
 #[repr(C)]
 pub struct ChaCha20 {
     state: [u32; 16],
-    block: [u8; 64],
+    block: [u8; BLOCK_BYTES],
     offset: usize,
     // Set once the block for counter `u32::MAX` has been generated: the
     // counter has no further value to take.
@@ -181,23 +196,23 @@ pub struct ChaCha20 {
 impl ChaCha20 {
     /// Create a `ChaCha20` instance with a 32-byte key, 12-byte nonce, and counter 0.
     #[must_use]
-    pub fn new(key: &[u8; 32], nonce: &[u8; 12]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], nonce: &[u8; NONCE_BYTES]) -> Self {
         Self::with_counter(key, nonce, 0)
     }
 
     /// Create a `ChaCha20` instance at an arbitrary 64-byte block counter.
     #[must_use]
-    pub fn with_counter(key: &[u8; 32], nonce: &[u8; 12], counter: u32) -> Self {
+    pub fn with_counter(key: &[u8; KEY_BYTES], nonce: &[u8; NONCE_BYTES], counter: u32) -> Self {
         Self {
             state: state_from_key_nonce(key, nonce, counter),
             block: [0u8; 64],
-            offset: 64,
+            offset: BLOCK_BYTES,
             exhausted: false,
         }
     }
 
     /// Create and wipe the caller's key and nonce buffers.
-    pub fn new_wiping(key: &mut [u8; 32], nonce: &mut [u8; 12]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], nonce: &mut [u8; NONCE_BYTES]) -> Self {
         let out = Self::new(key, nonce);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(nonce.as_mut_slice());
@@ -208,13 +223,14 @@ impl ChaCha20 {
     /// the unread rest of the current block, plus one block for every counter
     /// value from the next one through `u32::MAX`.
     fn keystream_remaining(&self) -> u64 {
-        let buffered = u64::try_from(64 - self.offset).expect("offset is at most 64");
+        let buffered =
+            u64::try_from(BLOCK_BYTES - self.offset).expect("offset is at most one block");
         let blocks = if self.exhausted {
             0
         } else {
             (1u64 << 32) - u64::from(self.state[12])
         };
-        buffered + blocks * 64
+        buffered + blocks * BLOCK_BYTES as u64
     }
 
     #[inline]
@@ -252,8 +268,8 @@ impl ChaCha20 {
     /// across calls.
     fn stream(&mut self, buf: &mut [u8], xor: bool) {
         let mut done = 0usize;
-        if self.offset < 64 && !buf.is_empty() {
-            let take = core::cmp::min(64 - self.offset, buf.len());
+        if self.offset < BLOCK_BYTES && !buf.is_empty() {
+            let take = core::cmp::min(BLOCK_BYTES - self.offset, buf.len());
             let buffered = &self.block[self.offset..self.offset + take];
             for (o, b) in buf[..take].iter_mut().zip(buffered) {
                 *o = if xor { *o ^ b } else { *b };
@@ -261,10 +277,10 @@ impl ChaCha20 {
             self.offset += take;
             done = take;
         }
-        while buf.len() - done >= 64 {
-            chacha20_block_combine(&self.state, &mut buf[done..done + 64], xor);
+        while buf.len() - done >= BLOCK_BYTES {
+            chacha20_block_combine(&self.state, &mut buf[done..done + BLOCK_BYTES], xor);
             self.advance(1);
-            done += 64;
+            done += BLOCK_BYTES;
         }
         if done < buf.len() {
             self.refill();
@@ -317,7 +333,7 @@ impl ChaCha20 {
     ///
     /// Panics if fewer than 64 bytes of keystream remain under the 32-bit
     /// block counter.
-    pub fn keystream_block(&mut self) -> [u8; 64] {
+    pub fn keystream_block(&mut self) -> [u8; BLOCK_BYTES] {
         let mut out = [0u8; 64];
         self.keystream(&mut out);
         out
@@ -328,7 +344,7 @@ impl ChaCha20 {
     pub fn set_counter(&mut self, counter: u32) {
         self.state[12] = counter;
         crate::ct::zeroize_slice(self.block.as_mut_slice());
-        self.offset = 64;
+        self.offset = BLOCK_BYTES;
         self.exhausted = false;
     }
 }
@@ -349,13 +365,13 @@ pub struct XChaCha20 {
 impl XChaCha20 {
     /// Create an `XChaCha20` instance with a 32-byte key and 24-byte nonce.
     #[must_use]
-    pub fn new(key: &[u8; 32], nonce: &[u8; 24]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], nonce: &[u8; XNONCE_BYTES]) -> Self {
         Self::with_counter(key, nonce, 0)
     }
 
     /// Create an `XChaCha20` instance at an arbitrary 64-byte block counter.
     #[must_use]
-    pub fn with_counter(key: &[u8; 32], nonce: &[u8; 24], counter: u32) -> Self {
+    pub fn with_counter(key: &[u8; KEY_BYTES], nonce: &[u8; XNONCE_BYTES], counter: u32) -> Self {
         let mut prefix = [0u8; 16];
         prefix.copy_from_slice(&nonce[..16]);
         let mut subkey = hchacha20(key, &prefix);
@@ -369,7 +385,7 @@ impl XChaCha20 {
     }
 
     /// Create and wipe the caller's key and nonce buffers.
-    pub fn new_wiping(key: &mut [u8; 32], nonce: &mut [u8; 24]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], nonce: &mut [u8; XNONCE_BYTES]) -> Self {
         let out = Self::new(key, nonce);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(nonce.as_mut_slice());
@@ -402,7 +418,7 @@ impl XChaCha20 {
     ///
     /// Panics if fewer than 64 bytes of keystream remain under the 32-bit
     /// block counter.
-    pub fn keystream_block(&mut self) -> [u8; 64] {
+    pub fn keystream_block(&mut self) -> [u8; BLOCK_BYTES] {
         self.inner.keystream_block()
     }
 
@@ -502,7 +518,12 @@ mod tests {
     /// counter addresses, and it is produced normally.
     /// The keystream from `counter` onward, one `chacha20_block_into` block at
     /// a time: the oracle the bulk path is checked against.
-    fn oracle(key: &[u8; 32], nonce: &[u8; 12], counter: u32, len: usize) -> Vec<u8> {
+    fn oracle(
+        key: &[u8; KEY_BYTES],
+        nonce: &[u8; NONCE_BYTES],
+        counter: u32,
+        len: usize,
+    ) -> Vec<u8> {
         let mut state = state_from_key_nonce(key, nonce, counter);
         let mut out = Vec::with_capacity(len);
         let mut block = [0u8; 64];
@@ -640,8 +661,9 @@ mod tests {
     /// same stream as `new`.
     #[test]
     fn chacha20_new_wiping_zeroes_inputs_and_matches_new() {
-        let key: [u8; 32] = core::array::from_fn(|i| u8::try_from(i).expect("i < 32"));
-        let nonce: [u8; 12] = core::array::from_fn(|i| u8::try_from(i * 5).expect("i < 12"));
+        let key: [u8; KEY_BYTES] = core::array::from_fn(|i| u8::try_from(i).expect("i < 32"));
+        let nonce: [u8; NONCE_BYTES] =
+            core::array::from_fn(|i| u8::try_from(i * 5).expect("i < 12"));
         let mut expected = [0u8; 100];
         ChaCha20::new(&key, &nonce).fill(&mut expected);
 
@@ -659,8 +681,9 @@ mod tests {
     /// yields the same stream as `new`.
     #[test]
     fn xchacha20_new_wiping_zeroes_inputs_and_matches_new() {
-        let key: [u8; 32] = core::array::from_fn(|i| u8::try_from(i * 7).expect("i < 32"));
-        let nonce: [u8; 24] = core::array::from_fn(|i| u8::try_from(i * 11).expect("i < 24"));
+        let key: [u8; KEY_BYTES] = core::array::from_fn(|i| u8::try_from(i * 7).expect("i < 32"));
+        let nonce: [u8; XNONCE_BYTES] =
+            core::array::from_fn(|i| u8::try_from(i * 11).expect("i < 24"));
         let mut expected = [0u8; 100];
         XChaCha20::new(&key, &nonce).fill(&mut expected);
 

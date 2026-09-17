@@ -250,9 +250,14 @@ impl Drop for Subkeys {
     }
 }
 
+/// Shortest key RFC 2144 §2.5 admits, in bytes (40 bits).
+const MIN_KEY_BYTES: usize = 5;
+/// Longest key RFC 2144 §2.5 admits, in bytes (128 bits).
+const MAX_KEY_BYTES: usize = 16;
+
 /// RFC 2144 §2.5 admits key sizes of 40 to 128 bits in 8-bit steps.
 const fn key_len_is_valid(len: usize) -> bool {
-    len >= 5 && len <= 16
+    len >= MIN_KEY_BYTES && len <= MAX_KEY_BYTES
 }
 
 fn check_key_len(len: usize) {

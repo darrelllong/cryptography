@@ -16,7 +16,6 @@ use super::{DrbgError, MAX_REQUEST_BYTES, MIN_ENTROPY_BYTES, MIN_NONCE_BYTES, RE
 use crate::ct::zeroize_slice;
 use crate::hash::Digest;
 use crate::{Csprng, Sha256};
-use rump::BigUint;
 
 /// `seedlen` for SHA-256, in bytes (440 bits).
 pub const SEEDLEN: usize = 55;
@@ -82,14 +81,24 @@ fn hash_df(input: &[&[u8]]) -> [u8; SEEDLEN] {
 
 /// `acc = (acc + Σ addends) mod 2^seedlen`, each addend big-endian, so a
 /// shorter one is aligned to the least significant end.
+///
+/// The addition runs over the fixed 55 bytes from the least significant end:
+/// each column adds one byte of every addend that reaches that far, plus the
+/// carry, in a `u16`, and the carry out of the top column is the multiple of
+/// 2^seedlen the reduction drops. An addend longer than `SEEDLEN` is
+/// truncated to its low `SEEDLEN` bytes, which is that reduction again.
 fn add_mod_seedlen(acc: &mut [u8; SEEDLEN], addends: &[&[u8]]) {
-    let mut sum = BigUint::from_be_bytes(acc);
-    for addend in addends {
-        sum += &BigUint::from_be_bytes(addend);
+    let mut carry = 0u16;
+    for column in 0..SEEDLEN {
+        let mut sum = carry + u16::from(acc[SEEDLEN - 1 - column]);
+        for addend in addends {
+            if let Some(byte) = addend.len().checked_sub(column + 1) {
+                sum += u16::from(addend[byte]);
+            }
+        }
+        acc[SEEDLEN - 1 - column] = sum as u8;
+        carry = sum >> 8;
     }
-    let mut bytes = sum.low_bits(SEEDLEN_BITS).to_be_bytes_padded(SEEDLEN);
-    acc.copy_from_slice(&bytes);
-    zeroize_slice(bytes.as_mut_slice());
 }
 
 impl HashDrbg {
@@ -232,6 +241,101 @@ impl Drop for HashDrbg {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rump::BigUint;
+
+    /// `acc = (acc + Σ addends) mod 2^seedlen` through rump's big integers:
+    /// the independent statement of the same arithmetic that
+    /// [`add_mod_seedlen`]'s carry loop is checked against.
+    fn add_mod_seedlen_bigint(acc: &mut [u8; SEEDLEN], addends: &[&[u8]]) {
+        let mut sum = BigUint::from_be_bytes(acc);
+        for addend in addends {
+            sum += &BigUint::from_be_bytes(addend);
+        }
+        let mut bytes = sum.low_bits(SEEDLEN_BITS).to_be_bytes_padded(SEEDLEN);
+        acc.copy_from_slice(&bytes);
+        zeroize_slice(bytes.as_mut_slice());
+    }
+
+    /// The carry loop and the big-integer statement agree on the boundary
+    /// cases and on pseudorandom inputs of every addend width the mechanism
+    /// uses: the 32-byte hash, the 55-byte `C`, the 8-byte counter and the
+    /// one-byte Hashgen increment.
+    #[test]
+    fn carry_loop_matches_the_big_integer_statement() {
+        let mut drbg = HashDrbg::instantiate(&[0x11; 32], &[0x22; 16], &[]).expect("inputs");
+        let mut cases: Vec<([u8; SEEDLEN], Vec<Vec<u8>>)> = vec![
+            ([0xff; SEEDLEN], vec![vec![1]]),
+            ([0xff; SEEDLEN], vec![vec![0xff; SEEDLEN]]),
+            ([0x00; SEEDLEN], vec![vec![0x00; SEEDLEN]]),
+            ([0x00; SEEDLEN], vec![vec![0xff; SEEDLEN + 9]]),
+        ];
+        for widths in [
+            vec![OUTLEN],
+            vec![1],
+            vec![8],
+            vec![OUTLEN, SEEDLEN, 8],
+            vec![SEEDLEN, SEEDLEN],
+        ] {
+            for _ in 0..64 {
+                let mut start = [0u8; SEEDLEN];
+                drbg.fill_bytes(&mut start);
+                let addends = widths
+                    .iter()
+                    .map(|&w| {
+                        let mut a = vec![0u8; w];
+                        drbg.fill_bytes(&mut a);
+                        a
+                    })
+                    .collect();
+                cases.push((start, addends));
+            }
+        }
+        for (start, addends) in cases {
+            let refs: Vec<&[u8]> = addends.iter().map(Vec::as_slice).collect();
+            let (mut fast, mut oracle) = (start, start);
+            add_mod_seedlen(&mut fast, &refs);
+            add_mod_seedlen_bigint(&mut oracle, &refs);
+            assert_eq!(fast, oracle, "start {start:?} addends {addends:?}");
+        }
+    }
+
+    /// Cost of the two statements of the §10.1.1.4 update's addition, as the
+    /// fastest of 101 alternating samples of 10,000 additions each (the same
+    /// instrument as `ct::tests`). Release-only: a debug build measures the
+    /// compiler.
+    #[test]
+    #[ignore = "release-only timing experiment"]
+    fn carry_loop_is_priced_against_the_big_integer_statement() {
+        use std::time::Instant;
+        const ADDITIONS: usize = 10_000;
+        const SAMPLES: usize = 101;
+        let h = [0x5a; OUTLEN];
+        let c = [0xa5; SEEDLEN];
+        let counter = 12_345u64.to_be_bytes();
+        let addends: [&[u8]; 3] = [&h, &c, &counter];
+        let seconds_per_addition = |add: &mut dyn FnMut(&mut [u8; SEEDLEN])| {
+            let mut fastest = f64::INFINITY;
+            for _ in 0..SAMPLES {
+                let mut acc = [0x11u8; SEEDLEN];
+                let start = Instant::now();
+                for _ in 0..ADDITIONS {
+                    add(&mut acc);
+                }
+                fastest = fastest.min(start.elapsed().as_secs_f64() / ADDITIONS as f64);
+                assert_ne!(acc, [0x11u8; SEEDLEN]);
+            }
+            fastest
+        };
+        let nanoseconds = 1e9;
+        let loop_ns = seconds_per_addition(&mut |acc| add_mod_seedlen(acc, &addends)) * nanoseconds;
+        let bigint_ns =
+            seconds_per_addition(&mut |acc| add_mod_seedlen_bigint(acc, &addends)) * nanoseconds;
+        eprintln!(
+            "add mod 2^440: carry loop {loop_ns:.1} ns, big integers {bigint_ns:.1} ns, \
+             ratio {:.2}",
+            bigint_ns / loop_ns
+        );
+    }
 
     /// (2^440 − 1) + 1 ≡ 0, a carry across rump's 64-bit limbs, and the top
     /// limb holding only 56 of the 440 bits.

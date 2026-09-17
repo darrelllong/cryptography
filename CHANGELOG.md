@@ -164,6 +164,15 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   bound 10⁻³), and the Spearman correlations between tests.
 
 ### Changed
+- Hash_DRBG's additions modulo 2^440 are a carry loop over the fixed 55
+  bytes instead of big integers: 30.6 ns against 122.5 ns per §10.1.1.4
+  update on an Apple M4 Pro (fastest of 101 samples of 10,000 additions),
+  with no allocation. The big-integer statement remains in the tests as the
+  oracle the loop is checked against, on boundary cases and pseudorandom
+  inputs of every addend width the mechanism uses.
+- ChaCha20's block, key and nonce sizes, CAST-128's key-length bounds and the
+  public-key benchmark's OAEP modulus floor are named constants deriving
+  their values from RFC 8439 §2.3, RFC 2144 §2.5 and RFC 8017 §7.1.1.
 - **NTRUEncrypt dense sets: precomputation counts are derived.** `minCallsR`
   and `minCallsMask` change no output, only how often a draw needs a further
   hash call. For the eight dense sets they are now the least block counts
