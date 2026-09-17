@@ -78,6 +78,11 @@ const THRESHOLD: f64 = 4.5;
 /// would be a difference in the data, not in the code under test.
 const FIXED_KEY: [u8; 32] = *b"ct_timing fixed class key bytes.";
 const FIXED_BLOCK: [u8; 16] = *b"fixed block 0123";
+/// A second fixed input, for the pairs that hold both classes fixed. A class
+/// that repeats one value sees caches and predictors in the same state every
+/// time, which a class of fresh random values does not; comparing two fixed
+/// values removes that difference and leaves only the values themselves.
+const OTHER_KEY: [u8; 32] = *b"ct_timing other fixed class key.";
 
 /// A point of small order on Curve25519: `u = 1`, whose ladder output is the
 /// all-zero shared secret RFC 7748 §6.1 names.
@@ -399,6 +404,28 @@ fn main() {
     );
     if ladder > THRESHOLD {
         failures.push("X25519::scalar_mult separated the two scalar classes");
+    }
+
+    // Two fixed scalars against each other: neither class draws fresh values,
+    // so a difference here is in the scalars and not in how often the machine
+    // sees the same input.
+    let (two_fixed, _) = experiment(
+        "X25519::scalar_mult (two fixed)",
+        ["fixed scalar A", "fixed scalar B"],
+        &mut coin,
+        |class, coin| {
+            let mut drawn = [0u8; 32];
+            coin.fill(&mut drawn);
+            let mut scalar = [0u8; 32];
+            scalar.copy_from_slice(if class == 0 { &FIXED_KEY } else { &OTHER_KEY });
+            scalar
+        },
+        |scalar| {
+            black_box(X25519::scalar_mult(scalar, &base));
+        },
+    );
+    if two_fixed > THRESHOLD {
+        failures.push("X25519::scalar_mult separated two fixed scalars");
     }
 
     // The peer's point rather than the scalar: a low-order point, whose ladder
