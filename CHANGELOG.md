@@ -13,12 +13,15 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 - `SPECIFICATIONS.md`: for every algorithm, the specification and section it
   is written from, the source of its known answers, and the tests that refuse
   malformed input, keeping conformance, interoperability and refusal apart.
-- `scripts/ct_codegen.sh`, which extracts the release assembly of the crate's
-  tag comparison for a target and lists its conditional branches, with
-  `scripts/ct_probe` giving that comparison a symbol of its own. Under rustc
-  1.93.1 on `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu` the
-  comparison is straight-line vector code and every conditional branch tests
-  a public length or the allocation.
+- `scripts/ct_codegen.sh`, which extracts the release assembly behind each
+  constant-time claim for a target and classifies every conditional branch in
+  it as a loop the source bounds, a guard on an index or an allocation, or
+  unclassified, with `scripts/ct_probe` giving each claim a symbol of its own.
+  Under rustc 1.93.1 on `aarch64-apple-darwin` and rustc 1.95.0 on
+  `x86_64-unknown-linux-gnu` the tag comparison, `Aes128Ct::encrypt_block` and
+  the X25519 and X448 ladders leave only public-length and loop-counter
+  comparisons unclassified, and `src/ct.rs`, `src/ciphers/aes.rs` and the two
+  ladder modules record the reading.
 - Fast-key-erasure tests for the evidence the review asks of the
   construction: served bytes appear in no buffer it keeps, an interrupted
   fill leaves none behind, reseeding after a simulated state compromise

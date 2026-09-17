@@ -338,14 +338,15 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
 /// `compiler_fence` only orders memory operations as seen by the compiler;
 /// neither is a promise that no early exit can be synthesised. The guarantee
 /// rests on the emitted code, which `scripts/ct_codegen.sh` extracts for a
-/// target: it reports every conditional branch in the release assembly of
-/// `Hmac::<Sha256>::verify`, the shortest public path here. Under rustc
-/// 1.93.1 on `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu` the
-/// comparison of two 32-byte tags is straight-line vector code (`eor`/`orr`,
-/// `pxor`/`por`), and the only conditional branches in the function test the
-/// allocation, the key length against the 64-byte block and the tag length
-/// against the digest length, all public. Other targets and compilers are
-/// not inspected until that script is run on them.
+/// target: it classifies every conditional branch in the release assembly of
+/// `Hmac::<Sha256>::verify`, the shortest public path here. The comparison of
+/// two 32-byte tags is straight-line vector code (`eor`/`orr`, `pxor`/`por`),
+/// and the function holds seven branches: five guard an allocation, one
+/// compares the key length against the 64-byte block and one the tag length
+/// against the 32-byte digest. All public. That is the reading under rustc
+/// 1.93.1 on `aarch64-apple-darwin` and rustc 1.95.0 on
+/// `x86_64-unknown-linux-gnu`; other targets and compilers are not inspected
+/// until that script is run on them.
 /// `constant_time_eq_mask_has_no_gross_early_exit` (an ignored, release-only
 /// experiment in this module's tests) checks one consequence on the running
 /// machine, and no more than that.

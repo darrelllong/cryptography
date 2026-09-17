@@ -487,6 +487,13 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
 // wires are packed back into a byte. Every gate is an XOR, XNOR or AND of
 // single bits, so the evaluation has no secret-dependent memory access or
 // branch.
+//
+// What holds that in place is the emitted code: `scripts/ct_codegen.sh`
+// classifies every conditional branch in the release assembly of
+// `Aes128Ct::encrypt_block`. Under rustc 1.93.1 on `aarch64-apple-darwin` and
+// rustc 1.95.0 on `x86_64-unknown-linux-gnu` it holds three: the round loop,
+// and two index checks on the round-key slice. Neither the key nor the block
+// reaches a branch or a table index.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[inline]

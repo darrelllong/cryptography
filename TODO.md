@@ -42,13 +42,17 @@ Items are marked **owner** when only the repository owner can do them.
    (for example RFC 9180 HPKE over a DH-KEM the crate already has) from its
    specification and vectors, with corrupted-encapsulation, AAD/context and
    invalid-key tests.
-6. **Timing qualification beyond the tag comparison.** `scripts/ct_codegen.sh`
-   now reads the machine code of `Hmac::<Sha256>::verify` and finds only
-   public-length branches on aarch64-apple-darwin and x86_64-unknown-linux-gnu.
-   The `Ct` ciphers, the X25519/X448 ladders and complete AEAD, signature and
-   key-agreement operations have no such evidence: extend the probe to them,
-   run it on every supported target, and add predeclared interleaved
-   input-class timing experiments with reported distributions.
+6. **Timing qualification beyond the primitives.** `scripts/ct_codegen.sh`
+   classifies every conditional branch in the machine code of
+   `Hmac::<Sha256>::verify`, `Aes128Ct::encrypt_block` and the X25519 and
+   X448 ladders. On aarch64-apple-darwin (rustc 1.93.1) and
+   x86_64-unknown-linux-gnu (rustc 1.95.0) each branch is a loop the source
+   bounds, a guard on an index or an allocation, or a comparison of public
+   lengths; `src/ct.rs`, `src/ciphers/aes.rs` and the two ladder modules
+   record the reading. Still missing: the other `Ct` ciphers, complete AEAD,
+   signature and key-agreement operations, the remaining supported targets,
+   and predeclared interleaved input-class timing experiments with reported
+   distributions.
 7. **Targeted fuzzing.** Campaigns aimed at parser length and count fields,
     explicit domain parameters, key-pair consistency, nonce and counter
     exhaustion, authentication failure and failure-buffer contents, with the
