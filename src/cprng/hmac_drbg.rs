@@ -20,6 +20,10 @@ const INITIAL_V_BYTE: u8 = 0x01;
 /// The separator byte of each `HMAC_DRBG_Update` round (§10.1.2.2 steps 1
 /// and 4: `V ‖ 0x00 ‖ provided_data`, then `V ‖ 0x01 ‖ provided_data`).
 const UPDATE_SEPARATORS: [u8; 2] = [0x00, 0x01];
+/// The parts one `HMAC_DRBG_Update` hashes: `V`, the round separator, and the
+/// provided data, which is at most the three inputs §10.1.2.3 concatenates —
+/// entropy input, nonce and personalization string.
+const MAX_UPDATE_PARTS: usize = 2 + 3;
 
 /// `HMAC_DRBG` instantiated with HMAC-SHA-256.
 pub struct HmacDrbg {
@@ -44,13 +48,17 @@ impl HmacDrbg {
     /// provided_data)`, `V = HMAC(Key, V)`, and, when `provided_data` is not
     /// empty, the same again with `0x01`.
     fn update(&mut self, provided_data: &[&[u8]]) {
+        debug_assert!(provided_data.len() <= MAX_UPDATE_PARTS - 2);
         for (round, separator) in UPDATE_SEPARATORS.into_iter().enumerate() {
             if round == 1 && provided_data.iter().all(|part| part.is_empty()) {
                 break;
             }
-            let mut parts: Vec<&[u8]> = vec![&self.v, core::slice::from_ref(&separator)];
-            parts.extend_from_slice(provided_data);
-            let mut key = hmac(&self.key, &parts);
+            let mut parts = [&[][..]; MAX_UPDATE_PARTS];
+            parts[0] = &self.v;
+            parts[1] = core::slice::from_ref(&separator);
+            let used = 2 + provided_data.len();
+            parts[2..used].copy_from_slice(provided_data);
+            let mut key = hmac(&self.key, &parts[..used]);
             self.key = key;
             zeroize_slice(key.as_mut_slice());
             let mut v = hmac(&self.key, &[&self.v]);

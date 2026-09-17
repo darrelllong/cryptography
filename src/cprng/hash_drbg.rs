@@ -101,6 +101,18 @@ fn add_mod_seedlen(acc: &mut [u8; SEEDLEN], addends: &[&[u8]]) {
     }
 }
 
+/// `V = (V + 1) mod 2^seedlen`, the step Hashgen takes between blocks
+/// (§10.1.1.4 step 3). Every column is visited whatever the carry does, so
+/// the time this takes says nothing about `V`.
+fn increment_mod_seedlen(acc: &mut [u8; SEEDLEN]) {
+    let mut carry = 1u16;
+    for byte in acc.iter_mut().rev() {
+        let sum = u16::from(*byte) + carry;
+        *byte = sum as u8;
+        carry = sum >> 8;
+    }
+}
+
 impl HashDrbg {
     /// `Hash_DRBG_Instantiate_algorithm` (§10.1.1.2): `seed_material =
     /// entropy_input ‖ nonce ‖ personalization_string`, `V = Hash_df(seed_material)`,
@@ -184,12 +196,11 @@ impl HashDrbg {
             zeroize_slice(w.as_mut_slice());
         }
         let mut data = self.v;
-        let one = [1u8];
         for chunk in out.chunks_mut(OUTLEN) {
             let mut block = sha256(&[&data]);
             chunk.copy_from_slice(&block[..chunk.len()]);
             zeroize_slice(block.as_mut_slice());
-            add_mod_seedlen(&mut data, &[&one]);
+            increment_mod_seedlen(&mut data);
         }
         zeroize_slice(data.as_mut_slice());
         let mut h = sha256(&[&[UPDATE_PREFIX], &self.v]);
