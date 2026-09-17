@@ -1,0 +1,19 @@
+[package]
+name = "ct-timing"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Kept out of the workspace: it is run on demand, on a quiet machine, and its
+# results are recorded rather than checked by CI.
+[workspace]
+
+[[bin]]
+name = "ct_timing"
+path = "src/main.rs"
+
+[dependencies]
+cryptography-rs = { path = "../.." }
+
+[profile.release]
+debug = false

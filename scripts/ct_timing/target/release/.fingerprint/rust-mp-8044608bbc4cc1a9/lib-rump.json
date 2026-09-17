@@ -1,0 +1,1 @@
+{"rustc":13850170861107434965,"features":"[\"wipe\"]","declared_features":"[\"wipe\"]","target":7620458094539942264,"profile":2040997289075261528,"path":17697128561648547592,"deps":[],"local":[{"CheckDepInfo":{"dep_info":"release/.fingerprint/rust-mp-8044608bbc4cc1a9/dep-lib-rump","checksum":false}}],"rustflags":[],"config":2069994364910194474,"compile_kind":0}

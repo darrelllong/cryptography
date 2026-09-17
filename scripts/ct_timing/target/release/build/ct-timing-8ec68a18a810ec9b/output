@@ -1,0 +1,2 @@
+cargo:rustc-env=CT_TIMING_RUSTC=rustc 1.93.1 (01f6ddf75 2026-02-11)
+cargo:rerun-if-changed=build.rs
