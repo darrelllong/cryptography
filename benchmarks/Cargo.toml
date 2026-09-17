@@ -18,9 +18,14 @@ harness = false
 name = "drbg_bench"
 harness = false
 
+[features]
+# The libsodium comparison in aes_bench. Off by default so the benchmarks
+# build and run on a machine without libsodium.
+libsodium = ["dep:sodiumoxide"]
+
 [dependencies]
 cryptography = { package = "cryptography-rs", path = ".." }
+sodiumoxide = { version = "0.2", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-sodiumoxide = "0.2"

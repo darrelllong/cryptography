@@ -18,7 +18,10 @@
 //! Run:
 //!   cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench
 //!
-//! Requires libsodium (brew install libsodium on macOS).
+//! The libsodium group is behind the `libsodium` feature, which needs that
+//! library installed (brew install libsodium on macOS):
+//!   cargo bench --manifest-path benchmarks/Cargo.toml --bench aes_bench \
+//!       --features libsodium
 //! HTML reports land in target/criterion/.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -126,6 +129,7 @@ fn bench_our_aes(c: &mut Criterion) {
 // secretbox's output carries a 16-byte Poly1305 tag and is freshly
 // allocated per call; the AES groups above time the block permutation alone.
 
+#[cfg(feature = "libsodium")]
 fn bench_nacl(c: &mut Criterion) {
     sodiumoxide::init().expect("sodiumoxide init failed — is libsodium installed?");
 
@@ -152,6 +156,10 @@ fn bench_nacl(c: &mut Criterion) {
         group.finish();
     }
 }
+
+/// Without the `libsodium` feature the comparison group is simply absent.
+#[cfg(not(feature = "libsodium"))]
+fn bench_nacl(_: &mut Criterion) {}
 
 criterion_group!(benches, bench_our_aes, bench_nacl);
 criterion_main!(benches);
