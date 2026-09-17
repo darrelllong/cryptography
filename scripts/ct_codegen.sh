@@ -6,9 +6,11 @@
 #
 # The probe crate wraps each claim in an `#[inline(never)]` function, so each
 # keeps a symbol of its own: the tag comparison behind every MAC and AEAD
-# check, the bitsliced AES-128, and the X25519 and X448 ladders. The release
-# assembly of each symbol is extracted and every conditional branch in it is
-# listed under one of three kinds:
+# check, every constant-time block cipher, the ChaCha20 keystream, the
+# Poly1305 MAC, the X25519 and X448 ladders, a complete key agreement, a
+# complete AEAD open, and the two constant-time KEM decapsulations. The release
+# assembly of each symbol is extracted, along with that of the functions it
+# calls, and every conditional branch in it is listed under one of three kinds:
 #
 #   loop back-edge  branches to a label above it, so it closes a loop whose
 #                   trip count the source fixes;
@@ -22,12 +24,14 @@
 # tests a key, a secret scalar, a tag or a plaintext byte is a secret-dependent
 # branch, and the claim for that function no longer holds on that target and
 # compiler. The first two kinds are public by construction; the unclassified
-# ones are the reading list, and `src/ct.rs`, `src/ciphers/aes.rs` and the two
-# ladder modules record what they turned out to be.
+# ones are the reading list: the claims table below says what each one turned
+# out to be, and `src/ct.rs`, `src/ciphers/aes.rs`, the two ladder modules and
+# `src/modes/chacha20_poly1305.rs` say the same where the claim is made.
 #
-# Each claim carries the number of unclassified branches that reading covers,
-# and the script fails when a target or a compiler produces more than that, so
-# a new branch is read before the claim is repeated.
+# `scripts/ct_budgets/<triple>.txt` records how many unclassified branches a
+# reading accounted for, and the script fails when a run produces more, so a
+# new branch is read before the claim is repeated. `--accept` rewrites that
+# file once a person has read the listing.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
