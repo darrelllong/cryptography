@@ -48,7 +48,13 @@
 //! and the fixed class by not drawing them, and flagged both AES-128 and the
 //! X25519 ladder; what it had measured was its own preparation. Both classes
 //! now draw the same bytes and copy the same buffers, and a key schedule is
-//! built outside the timed span.
+//! built outside the timed span. A later version flipped one byte of a tag
+//! per iteration, at a different offset in each class, which stored to that
+//! offset immediately before the comparison read the array: the pair
+//! differing at bytes 0 and 31 then came out marginally over the threshold on
+//! two hosts while the pair differing at bytes 15 and 31 stayed quiet, which
+//! is not how an early exit behaves. Every fixture is now built once, and an
+//! iteration copies one of them whole.
 //!
 //! Both classes are also *fixed* values, not one fixed value against fresh
 //! random ones. A class that repeats one input leaves the machine in the same
