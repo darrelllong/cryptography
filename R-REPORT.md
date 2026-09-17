@@ -1,9 +1,19 @@
 # Symmetric-Cipher Randomness Report
 
-Generated 2026-09-15 21:41:05 PDT by `scripts/cipher_randomness.R` (battery version 4).
+Rendered 2026-09-17 07:09:43 PDT by `scripts/cipher_randomness.R` (battery version 4).
 Toolchain: R version 4.2.0 (2022-04-22), base packages only.
 
-**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (5,638,480 bytes; MD5 `662d6a49b9f224dc5dae2d885733e70d`; byte-entropy 4.888696 bits/byte).
+**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (5,638,480 bytes; SHA-256 `3cf4b3d44ee14cff4e14e78e2ad3318eff76f3f7f2afc3cee6bb925879110a37`; byte-entropy 4.888696 bits/byte).
+
+**Experiment identity.** Every ciphertext below was produced by the executable and plaintext named here and analysed by this script; the Ciphertexts section gives each one's digest and when it was encrypted and analysed.
+
+| item | identity |
+|------|----------|
+| cryptography | commit `12506e375eaced530a366f4886a881df8de29baa`; uncommitted changes: none |
+| rump | commit `ba318de957c8c7e3c0a098ea39fbc9ef07d6e3b6`; uncommitted changes: none |
+| compiler | rustc 1.93.1 (01f6ddf75 2026-02-11); features: default |
+| `cipher_encrypt` | SHA-256 `65be36f9f6c7f6b08efc97cb24a8bdb7f385fe26f8f1dd9b128c137e46113120` |
+| script | SHA-256 `b8bcc491c7d398cc41a9434a0570f5b5bdfa1ca94ebb9d691aa8eb164b11d797` |
 
 **Caveat.** Passing this battery is **necessary** for a usable symmetric primitive but is **not sufficient** for cryptographic security; the battery rules out gross statistical defects in the keystream, not key-recovery, distinguishing-attack, or related-key resistance.
 
@@ -53,1164 +63,1203 @@ $u_j = \sum_{i=0}^{7} b_{8j+i} \, 256^{-(i+1)}$ the chunk values; under $H_0$ th
 
 | cipher | token | $H$ (bits) | $8 - H$ (bits) | Fisher's $g$ | `p < α` | min p | verdict |
 |--------|-------|------------|----------------|--------------|---------|-------|---------|
-| AES-128 | `aes128` | 7.999967 | $3.30 \times 10^{-5}$ | 12.9 | 0 | 0.156 | PASS |
-| AES-192 | `aes192` | 7.999969 | $3.12 \times 10^{-5}$ | 11.6 | 0 | 0.031 | PASS |
-| AES-256 | `aes256` | 7.999973 | $2.67 \times 10^{-5}$ | 13.5 | 0 | 0.184 | PASS |
-| Camellia-128 | `camellia128` | 7.999969 | $3.08 \times 10^{-5}$ | 12.6 | 0 | 0.212 | PASS |
-| Camellia-192 | `camellia192` | 7.999964 | $3.61 \times 10^{-5}$ | 12.0 | 0 | 0.039 | PASS |
-| Camellia-256 | `camellia256` | 7.999963 | $3.72 \times 10^{-5}$ | 12.9 | 0 | 0.060 | PASS |
-| CAST-128 | `cast128` | 7.999968 | $3.23 \times 10^{-5}$ | 13.8 | 0 | 0.286 | PASS |
-| DES | `des` | 7.999964 | $3.58 \times 10^{-5}$ | 11.9 | 0 | 0.140 | PASS |
-| 3DES | `3des` | 7.999972 | $2.78 \times 10^{-5}$ | 14.8 | 0 | 0.074 | PASS |
-| Kuznyechik | `grasshopper` | 7.999971 | $2.91 \times 10^{-5}$ | 12.6 | 0 | 0.434 | PASS |
-| Magma | `magma` | 7.999964 | $3.59 \times 10^{-5}$ | 15.1 | 0 | 0.133 | PASS |
-| PRESENT-80 | `present80` | 7.999971 | $2.93 \times 10^{-5}$ | 13.7 | 0 | 0.012 | PASS |
-| PRESENT-128 | `present128` | 7.999965 | $3.49 \times 10^{-5}$ | 13.0 | 0 | 0.190 | PASS |
-| SEED | `seed` | 7.999964 | $3.62 \times 10^{-5}$ | 15.9 | 0 | 0.037 | PASS |
-| Serpent-128 | `serpent128` | 7.999966 | $3.35 \times 10^{-5}$ | 13.1 | 0 | 0.115 | PASS |
-| Serpent-192 | `serpent192` | 7.999970 | $3.03 \times 10^{-5}$ | 11.6 | 0 | 0.253 | PASS |
-| Serpent-256 | `serpent256` | 7.999974 | $2.63 \times 10^{-5}$ | 12.7 | 0 | 0.087 | PASS |
-| SM4 | `sm4` | 7.999970 | $3.01 \times 10^{-5}$ | 14.1 | 0 | 0.036 | PASS |
-| Twofish-128 | `twofish128` | 7.999967 | $3.28 \times 10^{-5}$ | 13.6 | 0 | 0.366 | PASS |
-| Twofish-256 | `twofish256` | 7.999971 | $2.86 \times 10^{-5}$ | 14.7 | 0 | 0.062 | PASS |
-| Simon32/64 | `simon32_64` | 7.999966 | $3.35 \times 10^{-5}$ | 13.7 | 0 | 0.004 | PASS |
-| Simon64/128 | `simon64_128` | 7.999966 | $3.38 \times 10^{-5}$ | 15.6 | 0 | 0.270 | PASS |
-| Simon128/128 | `simon128_128` | 7.999970 | $3.04 \times 10^{-5}$ | 15.9 | 0 | 0.253 | PASS |
-| Simon128/256 | `simon128_256` | 7.999970 | $3.03 \times 10^{-5}$ | 13.4 | 0 | 0.042 | PASS |
-| Speck32/64 | `speck32_64` | 7.999967 | $3.26 \times 10^{-5}$ | 12.2 | 0 | 0.067 | PASS |
-| Speck64/128 | `speck64_128` | 7.999961 | $3.93 \times 10^{-5}$ | 12.3 | 0 | 0.014 | PASS |
-| Speck128/128 | `speck128_128` | 7.999971 | $2.95 \times 10^{-5}$ | 12.8 | 0 | 0.224 | PASS |
-| Speck128/256 | `speck128_256` | 7.999971 | $2.87 \times 10^{-5}$ | 14.0 | 0 | 0.358 | PASS |
-| ChaCha20 | `chacha20` | 7.999967 | $3.28 \times 10^{-5}$ | 13.8 | 0 | 0.059 | PASS |
-| XChaCha20 | `xchacha20` | 7.999967 | $3.28 \times 10^{-5}$ | 13.9 | 0 | 0.031 | PASS |
-| Salsa20 | `salsa20` | 7.999963 | $3.70 \times 10^{-5}$ | 11.6 | 0 | 0.068 | PASS |
-| Rabbit | `rabbit` | 7.999970 | $3.02 \times 10^{-5}$ | 11.9 | 0 | 0.243 | PASS |
-| ZUC-128 | `zuc128` | 7.999968 | $3.18 \times 10^{-5}$ | 16.0 | 0 | 0.314 | PASS |
-| SNOW 3G | `snow3g` | 7.999963 | $3.67 \times 10^{-5}$ | 14.5 | 0 | 0.082 | PASS |
+| AES-128 | `aes128` | 7.999968 | $3.22 \times 10^{-5}$ | 12.7 | 0 | 0.050 | PASS |
+| AES-192 | `aes192` | 7.999965 | $3.50 \times 10^{-5}$ | 11.1 | 0 | 0.103 | PASS |
+| AES-256 | `aes256` | 7.999969 | $3.11 \times 10^{-5}$ | 13.8 | 0 | 0.552 | PASS |
+| Camellia-128 | `camellia128` | 7.999967 | $3.34 \times 10^{-5}$ | 14.6 | 0 | 0.013 | PASS |
+| Camellia-192 | `camellia192` | 7.999963 | $3.67 \times 10^{-5}$ | 12.3 | 0 | 0.084 | PASS |
+| Camellia-256 | `camellia256` | 7.999962 | $3.78 \times 10^{-5}$ | 13.8 | 0 | 0.019 | PASS |
+| CAST-128 | `cast128` | 7.999967 | $3.33 \times 10^{-5}$ | 12.0 | 0 | 0.144 | PASS |
+| DES | `des` | 7.999966 | $3.43 \times 10^{-5}$ | 13.7 | 0 | 0.041 | PASS |
+| 3DES | `3des` | 7.999965 | $3.50 \times 10^{-5}$ | 13.1 | 0 | 0.058 | PASS |
+| Kuznyechik | `grasshopper` | 7.999966 | $3.41 \times 10^{-5}$ | 13.5 | 0 | 0.066 | PASS |
+| Magma | `magma` | 7.999969 | $3.14 \times 10^{-5}$ | 12.8 | 0 | 0.018 | PASS |
+| PRESENT-80 | `present80` | 7.999970 | $3.03 \times 10^{-5}$ | 15.0 | 0 | 0.461 | PASS |
+| PRESENT-128 | `present128` | 7.999968 | $3.21 \times 10^{-5}$ | 13.8 | 0 | 0.063 | PASS |
+| SEED | `seed` | 7.999969 | $3.09 \times 10^{-5}$ | 12.4 | 0 | 0.123 | PASS |
+| Serpent-128 | `serpent128` | 7.999966 | $3.38 \times 10^{-5}$ | 11.7 | 0 | 0.163 | PASS |
+| Serpent-192 | `serpent192` | 7.999964 | $3.61 \times 10^{-5}$ | 12.4 | 0 | 0.118 | PASS |
+| Serpent-256 | `serpent256` | 7.999971 | $2.86 \times 10^{-5}$ | 13.6 | 0 | 0.021 | PASS |
+| SM4 | `sm4` | 7.999971 | $2.94 \times 10^{-5}$ | 12.4 | 0 | 0.014 | PASS |
+| Twofish-128 | `twofish128` | 7.999967 | $3.30 \times 10^{-5}$ | 12.8 | 0 | 0.183 | PASS |
+| Twofish-256 | `twofish256` | 7.999967 | $3.26 \times 10^{-5}$ | 12.4 | 0 | 0.215 | PASS |
+| Simon32/64 | `simon32_64` | 7.999964 | $3.61 \times 10^{-5}$ | 12.8 | 0 | 0.119 | PASS |
+| Simon64/128 | `simon64_128` | 7.999966 | $3.43 \times 10^{-5}$ | 12.2 | 0 | 0.095 | PASS |
+| Simon128/128 | `simon128_128` | 7.999968 | $3.17 \times 10^{-5}$ | 12.5 | 0 | 0.062 | PASS |
+| Simon128/256 | `simon128_256` | 7.999963 | $3.66 \times 10^{-5}$ | 12.1 | 0 | 0.087 | PASS |
+| Speck32/64 | `speck32_64` | 7.999968 | $3.20 \times 10^{-5}$ | 14.6 | 0 | 0.195 | PASS |
+| Speck64/128 | `speck64_128` | 7.999965 | $3.52 \times 10^{-5}$ | 17.7 | 0 | 0.119 | PASS |
+| Speck128/128 | `speck128_128` | 7.999968 | $3.24 \times 10^{-5}$ | 13.6 | 0 | 0.023 | PASS |
+| Speck128/256 | `speck128_256` | 7.999968 | $3.15 \times 10^{-5}$ | 11.7 | 0 | 0.639 | PASS |
+| ChaCha20 | `chacha20` | 7.999968 | $3.21 \times 10^{-5}$ | 12.2 | 0 | 0.073 | PASS |
+| XChaCha20 | `xchacha20` | 7.999968 | $3.20 \times 10^{-5}$ | 13.9 | 0 | 0.001 | PASS |
+| Salsa20 | `salsa20` | 7.999965 | $3.52 \times 10^{-5}$ | 14.6 | 0 | 0.181 | PASS |
+| Rabbit | `rabbit` | 7.999971 | $2.87 \times 10^{-5}$ | 12.4 | 0 | 0.206 | PASS |
+| ZUC-128 | `zuc128` | 7.999964 | $3.61 \times 10^{-5}$ | 13.5 | 0 | 0.114 | PASS |
+| SNOW 3G | `snow3g` | 7.999966 | $3.41 \times 10^{-5}$ | 12.7 | 0 | 0.137 | PASS |
 
 **All 34 ciphers pass the battery.**
+
+## Ciphertexts
+
+| cipher | ciphertext SHA-256 | bytes | encrypted | analysed |
+|--------|--------------------|-------|-----------|----------|
+| AES-128 | `bd046ebfb3b154b7b78ec41d7e4a2b18dbb74553618cdcea035b0a1162730f07` | 5,638,480 | 2026-09-16 23:51:34 PDT | 2026-09-17 07:08:52 PDT |
+| AES-192 | `80cea69667d4c01d98221d359ce9dd28d07aaec7c46b0f3d75789f430737b81e` | 5,638,480 | 2026-09-16 23:48:52 PDT | 2026-09-17 07:08:53 PDT |
+| AES-256 | `9b5808189078ab941a36094951883774a8fb41a496f07796b9a9ff3265c22bdd` | 5,638,480 | 2026-09-16 23:48:52 PDT | 2026-09-17 07:08:54 PDT |
+| Camellia-128 | `921ae37f9e0fb2f2f775c39217e0f91014b46672a5e32d6eda5177d2209ca44b` | 5,638,480 | 2026-09-16 23:48:53 PDT | 2026-09-17 07:08:55 PDT |
+| Camellia-192 | `fd1c4081a00c78bb2db9230063d91a97eecb3b8f19350afd5f41e22faf0c713e` | 5,638,480 | 2026-09-16 23:48:54 PDT | 2026-09-17 07:08:56 PDT |
+| Camellia-256 | `4173ec8733eeb30901904681f375cf80b1788cd993ca072acb1f08b326368772` | 5,638,480 | 2026-09-16 23:48:54 PDT | 2026-09-17 07:08:57 PDT |
+| CAST-128 | `a9d0ddd6e06bb6ee977219706e13b9b53baebc788a2420f77a5891b5a10603da` | 5,638,480 | 2026-09-16 23:48:56 PDT | 2026-09-17 07:08:59 PDT |
+| DES | `d7ef01b3086d008f76323fd212ed49e3cacf8f46f4e9ea8bfd74dbff62a9bd59` | 5,638,480 | 2026-09-16 23:48:57 PDT | 2026-09-17 07:09:00 PDT |
+| 3DES | `2cba7b1789089a765dcc2d9c1979c2b865ac986e1dc14d2463cc1a8be9f8c17a` | 5,638,480 | 2026-09-16 23:48:58 PDT | 2026-09-17 07:09:01 PDT |
+| Kuznyechik | `31fb6a83964e15e8c575440d5f7df1605c71329cb3eedebfeb16b98511a64660` | 5,638,480 | 2026-09-16 23:48:58 PDT | 2026-09-17 07:09:02 PDT |
+| Magma | `15d95d271dac78319bcb2633ee26fa21a4cd2497761bd780d5bb0d137fbfe0bb` | 5,638,480 | 2026-09-16 23:48:59 PDT | 2026-09-17 07:09:03 PDT |
+| PRESENT-80 | `f966232f4f174270c0043e6b719a1ad74b88cda7883093dee29faf2dccaadc0b` | 5,638,480 | 2026-09-16 23:49:01 PDT | 2026-09-17 07:09:04 PDT |
+| PRESENT-128 | `5f097f3a01c1082ad646fd3fe19fabebc1e286e471f07f1f0bbe637ede4f58af` | 5,638,480 | 2026-09-16 23:49:03 PDT | 2026-09-17 07:09:05 PDT |
+| SEED | `4ae7920aa61552c016d3f8eb7ada229f7598a51ca86ca04fcf64b9a47973d6ef` | 5,638,480 | 2026-09-16 23:49:04 PDT | 2026-09-17 07:09:07 PDT |
+| Serpent-128 | `209cb842e81fa1e18ec584c597a5590887444c6220988e97b0ba07f162e49f34` | 5,638,480 | 2026-09-16 23:49:05 PDT | 2026-09-17 07:09:09 PDT |
+| Serpent-192 | `6cec841aaa96b7b2e0d895966bab1c7822f0adb3ced915c9f31611ee4ca4acb7` | 5,638,480 | 2026-09-16 23:49:06 PDT | 2026-09-17 07:09:10 PDT |
+| Serpent-256 | `f1ec46d094397032a83b165e144974bbdac5cdbce2711ee58750cbe7a4634ee4` | 5,638,480 | 2026-09-16 23:49:07 PDT | 2026-09-17 07:09:12 PDT |
+| SM4 | `6f64ca3a60c828285150acf40b2804f4e64414c58429ae3244faa6f64870597e` | 5,638,480 | 2026-09-16 23:49:08 PDT | 2026-09-17 07:09:14 PDT |
+| Twofish-128 | `596750289de3e08a7280c6c52704fef09efead1736aaaa31873e4adb1955ec31` | 5,638,480 | 2026-09-16 23:49:10 PDT | 2026-09-17 07:09:16 PDT |
+| Twofish-256 | `29b1443635f48eb08cfa7af09b8896cb075c810e5a0335bb8a8551efa746df5a` | 5,638,480 | 2026-09-16 23:49:11 PDT | 2026-09-17 07:09:17 PDT |
+| Simon32/64 | `816f7d55ee2fd2facf83c9144f9a5f3a4075799e7768379767150ca2683755d7` | 5,638,480 | 2026-09-16 23:49:12 PDT | 2026-09-17 07:09:19 PDT |
+| Simon64/128 | `bbb8b7aa216a8f847dd9d0cef5670b0c7e90cc594107959c5534487cb4cac281` | 5,638,480 | 2026-09-16 23:49:13 PDT | 2026-09-17 07:09:21 PDT |
+| Simon128/128 | `d1884ff82a2c102378e3fd093f489ae3ab20681bfe0fc51e2b8424a77d6ceed9` | 5,638,480 | 2026-09-16 23:49:14 PDT | 2026-09-17 07:09:22 PDT |
+| Simon128/256 | `d506fca142b62cea6071a196337b5d1ca44e3f31e1e51158e50f6e1947d9a881` | 5,638,480 | 2026-09-16 23:49:14 PDT | 2026-09-17 07:09:23 PDT |
+| Speck32/64 | `34baf44f75e05f5938b2fc92038f43ca881fd7b96ee94259049dff763e09e2d4` | 5,638,480 | 2026-09-16 23:49:15 PDT | 2026-09-17 07:09:25 PDT |
+| Speck64/128 | `1f5beb654dc3459a51987cfb7178f7792c68ffcefcf96b99328f803d26372ac9` | 5,638,480 | 2026-09-16 23:49:16 PDT | 2026-09-17 07:09:26 PDT |
+| Speck128/128 | `77e665b75cac90e362c3305efbf189b7a35763eb9a818af2e4dbed14279c1dbb` | 5,638,480 | 2026-09-16 23:49:17 PDT | 2026-09-17 07:09:28 PDT |
+| Speck128/256 | `15c1ce8dc43e1b8fa12ac21621cb08131f63e815565bba3585a6d22592c7fb5e` | 5,638,480 | 2026-09-16 23:49:18 PDT | 2026-09-17 07:09:29 PDT |
+| ChaCha20 | `3e69382d947854b633cb35c25b108a77c1870eada3767817f7c4b016142d1d74` | 5,638,480 | 2026-09-16 23:49:19 PDT | 2026-09-17 07:09:30 PDT |
+| XChaCha20 | `bc0248a947ce9dcf13cf43ce82da2cf41d84a5b7507154d51130d1f504069bc7` | 5,638,480 | 2026-09-16 23:49:20 PDT | 2026-09-17 07:09:32 PDT |
+| Salsa20 | `93fe45a86b990dc87d78954e80c1cc22939945bae058a678fd72d6966c0cfc24` | 5,638,480 | 2026-09-16 23:49:22 PDT | 2026-09-17 07:09:33 PDT |
+| Rabbit | `9c9ce2cd792fcee008c25dfcdf54741fe8612b3100d6ca31f529f7263c7ae36e` | 5,638,480 | 2026-09-16 23:49:24 PDT | 2026-09-17 07:09:34 PDT |
+| ZUC-128 | `4d5ddabf60d11066b4be95e8ef597560a3a8bfe97633220d4aaff74792a5e880` | 5,638,480 | 2026-09-16 23:49:25 PDT | 2026-09-17 07:09:35 PDT |
+| SNOW 3G | `a251a3118863856cd2e94509a62248fb949c74c5c6aa3e3be0e7d4e557bf5724` | 5,638,480 | 2026-09-16 23:49:26 PDT | 2026-09-17 07:09:37 PDT |
 
 ## Per-cipher detail
 
 ### AES-128 (`aes128`)
 
-Verdict: PASS &mdash; min p = 0.156 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.050 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999967$ bits ($8 - H = 3.30 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.94$.
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.22 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.71$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.434 |
-| KS vs Uniform(0,1) | 0.267 |
-| serial test (pairs, $16 \times 16$ cells) | 0.256 |
-| gap test (Knuth, $[0, 1/2)$) | 0.231 |
-| permutation test ($d = 4$) | 0.420 |
-| cumulative periodogram (Bartlett) | 0.366 |
-| runs test (bit stream) | 0.156 |
+| byte frequency $\chi^2$ (256 cells) | 0.543 |
+| KS vs Uniform(0,1) | 0.853 |
+| serial test (pairs, $16 \times 16$ cells) | 0.794 |
+| gap test (Knuth, $[0, 1/2)$) | 0.050 |
+| permutation test ($d = 4$) | 0.080 |
+| cumulative periodogram (Bartlett) | 0.594 |
+| runs test (bit stream) | 0.952 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.500335 | 0.500000 | 3.35e-04 |
-| 2 | 0.333685 | 0.333333 | 3.51e-04 |
-| 3 | 0.250314 | 0.250000 | 3.14e-04 |
-| 4 | 0.200265 | 0.200000 | 2.65e-04 |
-| 5 | 0.166885 | 0.166667 | 2.18e-04 |
-| 6 | 0.143036 | 0.142857 | 1.79e-04 |
-| 7 | 0.125146 | 0.125000 | 1.46e-04 |
-| 8 | 0.111230 | 0.111111 | 1.19e-04 |
-| 9 | 0.100097 | 0.100000 | 9.66e-05 |
-| 10 | 0.090987 | 0.090909 | 7.76e-05 |
+| 1 | 0.500005 | 0.500000 | 4.67e-06 |
+| 2 | 0.333260 | 0.333333 | 7.31e-05 |
+| 3 | 0.249910 | 0.250000 | 8.98e-05 |
+| 4 | 0.199920 | 0.200000 | 7.98e-05 |
+| 5 | 0.166606 | 0.166667 | 6.06e-05 |
+| 6 | 0.142818 | 0.142857 | 3.87e-05 |
+| 7 | 0.124983 | 0.125000 | 1.68e-05 |
+| 8 | 0.111115 | 0.111111 | 4.34e-06 |
+| 9 | 0.100024 | 0.100000 | 2.41e-05 |
+| 10 | 0.090951 | 0.090909 | 4.23e-05 |
 
 ![spectrum](scripts/cipher_plots/aes128.png)
 
 ### AES-192 (`aes192`)
 
-Verdict: PASS &mdash; min p = 0.031 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.103 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999969$ bits ($8 - H = 3.12 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.56$.
+Byte entropy $H = 7.999965$ bits ($8 - H = 3.50 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.13$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.681 |
-| KS vs Uniform(0,1) | 0.808 |
-| serial test (pairs, $16 \times 16$ cells) | 0.257 |
-| gap test (Knuth, $[0, 1/2)$) | 0.485 |
-| permutation test ($d = 4$) | 0.031 |
-| cumulative periodogram (Bartlett) | 0.204 |
-| runs test (bit stream) | 0.408 |
+| byte frequency $\chi^2$ (256 cells) | 0.204 |
+| KS vs Uniform(0,1) | 0.103 |
+| serial test (pairs, $16 \times 16$ cells) | 0.907 |
+| gap test (Knuth, $[0, 1/2)$) | 0.413 |
+| permutation test ($d = 4$) | 0.288 |
+| cumulative periodogram (Bartlett) | 0.199 |
+| runs test (bit stream) | 0.223 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.499802 | 0.500000 | 1.98e-04 |
-| 2 | 0.333024 | 0.333333 | 3.10e-04 |
-| 3 | 0.249644 | 0.250000 | 3.56e-04 |
-| 4 | 0.199626 | 0.200000 | 3.74e-04 |
-| 5 | 0.166284 | 0.166667 | 3.82e-04 |
-| 6 | 0.142471 | 0.142857 | 3.86e-04 |
-| 7 | 0.124611 | 0.125000 | 3.89e-04 |
-| 8 | 0.110721 | 0.111111 | 3.90e-04 |
-| 9 | 0.099609 | 0.100000 | 3.91e-04 |
-| 10 | 0.090518 | 0.090909 | 3.91e-04 |
+| 1 | 0.500543 | 0.500000 | 5.43e-04 |
+| 2 | 0.333943 | 0.333333 | 6.09e-04 |
+| 3 | 0.250569 | 0.250000 | 5.69e-04 |
+| 4 | 0.200512 | 0.200000 | 5.12e-04 |
+| 5 | 0.167126 | 0.166667 | 4.59e-04 |
+| 6 | 0.143272 | 0.142857 | 4.15e-04 |
+| 7 | 0.125378 | 0.125000 | 3.78e-04 |
+| 8 | 0.111458 | 0.111111 | 3.47e-04 |
+| 9 | 0.100321 | 0.100000 | 3.21e-04 |
+| 10 | 0.091209 | 0.090909 | 3.00e-04 |
 
 ![spectrum](scripts/cipher_plots/aes192.png)
 
 ### AES-256 (`aes256`)
 
-Verdict: PASS &mdash; min p = 0.184 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.552 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999973$ bits ($8 - H = 2.67 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.49$.
+Byte entropy $H = 7.999969$ bits ($8 - H = 3.11 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.78$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.984 |
-| KS vs Uniform(0,1) | 0.941 |
-| serial test (pairs, $16 \times 16$ cells) | 0.839 |
-| gap test (Knuth, $[0, 1/2)$) | 0.286 |
-| permutation test ($d = 4$) | 0.433 |
-| cumulative periodogram (Bartlett) | 0.184 |
-| runs test (bit stream) | 0.997 |
+| byte frequency $\chi^2$ (256 cells) | 0.697 |
+| KS vs Uniform(0,1) | 0.644 |
+| serial test (pairs, $16 \times 16$ cells) | 0.552 |
+| gap test (Knuth, $[0, 1/2)$) | 0.821 |
+| permutation test ($d = 4$) | 0.986 |
+| cumulative periodogram (Bartlett) | 0.663 |
+| runs test (bit stream) | 0.984 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.499913 | 0.500000 | 8.74e-05 |
-| 2 | 0.333268 | 0.333333 | 6.56e-05 |
-| 3 | 0.249960 | 0.250000 | 3.98e-05 |
-| 4 | 0.199982 | 0.200000 | 1.82e-05 |
-| 5 | 0.166666 | 0.166667 | 9.33e-07 |
-| 6 | 0.142870 | 0.142857 | 1.31e-05 |
-| 7 | 0.125025 | 0.125000 | 2.46e-05 |
-| 8 | 0.111145 | 0.111111 | 3.41e-05 |
-| 9 | 0.100042 | 0.100000 | 4.18e-05 |
-| 10 | 0.090957 | 0.090909 | 4.79e-05 |
+| 1 | 0.500256 | 0.500000 | 2.56e-04 |
+| 2 | 0.333460 | 0.333333 | 1.26e-04 |
+| 3 | 0.250031 | 0.250000 | 3.12e-05 |
+| 4 | 0.199971 | 0.200000 | 2.93e-05 |
+| 5 | 0.166599 | 0.166667 | 6.73e-05 |
+| 6 | 0.142766 | 0.142857 | 9.10e-05 |
+| 7 | 0.124895 | 0.125000 | 1.05e-04 |
+| 8 | 0.110997 | 0.111111 | 1.14e-04 |
+| 9 | 0.099881 | 0.100000 | 1.19e-04 |
+| 10 | 0.090788 | 0.090909 | 1.21e-04 |
 
 ![spectrum](scripts/cipher_plots/aes256.png)
 
 ### Camellia-128 (`camellia128`)
 
-Verdict: PASS &mdash; min p = 0.212 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.013 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999969$ bits ($8 - H = 3.08 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.64$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.727 |
-| KS vs Uniform(0,1) | 0.808 |
-| serial test (pairs, $16 \times 16$ cells) | 0.717 |
-| gap test (Knuth, $[0, 1/2)$) | 0.982 |
-| permutation test ($d = 4$) | 0.246 |
-| cumulative periodogram (Bartlett) | 0.288 |
-| runs test (bit stream) | 0.212 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500170 | 0.500000 | 1.70e-04 |
-| 2 | 0.333528 | 0.333333 | 1.95e-04 |
-| 3 | 0.250238 | 0.250000 | 2.38e-04 |
-| 4 | 0.200277 | 0.200000 | 2.77e-04 |
-| 5 | 0.166973 | 0.166667 | 3.07e-04 |
-| 6 | 0.143184 | 0.142857 | 3.27e-04 |
-| 7 | 0.125340 | 0.125000 | 3.40e-04 |
-| 8 | 0.111459 | 0.111111 | 3.48e-04 |
-| 9 | 0.100353 | 0.100000 | 3.53e-04 |
-| 10 | 0.091265 | 0.090909 | 3.56e-04 |
-
-![spectrum](scripts/cipher_plots/camellia128.png)
-
-### Camellia-192 (`camellia192`)
-
-Verdict: PASS &mdash; min p = 0.039 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999964$ bits ($8 - H = 3.61 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.00$.
+Byte entropy $H = 7.999967$ bits ($8 - H = 3.34 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 14.64$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.117 |
-| KS vs Uniform(0,1) | 0.102 |
-| serial test (pairs, $16 \times 16$ cells) | 0.423 |
-| gap test (Knuth, $[0, 1/2)$) | 0.627 |
-| permutation test ($d = 4$) | 0.039 |
-| cumulative periodogram (Bartlett) | 0.435 |
-| runs test (bit stream) | 0.349 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499267 | 0.500000 | 7.33e-04 |
-| 2 | 0.332572 | 0.333333 | 7.61e-04 |
-| 3 | 0.249292 | 0.250000 | 7.08e-04 |
-| 4 | 0.199354 | 0.200000 | 6.46e-04 |
-| 5 | 0.166078 | 0.166667 | 5.89e-04 |
-| 6 | 0.142317 | 0.142857 | 5.40e-04 |
-| 7 | 0.124502 | 0.125000 | 4.98e-04 |
-| 8 | 0.110649 | 0.111111 | 4.62e-04 |
-| 9 | 0.099569 | 0.100000 | 4.31e-04 |
-| 10 | 0.090505 | 0.090909 | 4.04e-04 |
-
-![spectrum](scripts/cipher_plots/camellia192.png)
-
-### Camellia-256 (`camellia256`)
-
-Verdict: PASS &mdash; min p = 0.060 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999963$ bits ($8 - H = 3.72 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.93$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.060 |
-| KS vs Uniform(0,1) | 0.197 |
-| serial test (pairs, $16 \times 16$ cells) | 0.615 |
-| gap test (Knuth, $[0, 1/2)$) | 0.730 |
-| permutation test ($d = 4$) | 0.806 |
-| cumulative periodogram (Bartlett) | 0.117 |
+| byte frequency $\chi^2$ (256 cells) | 0.386 |
+| KS vs Uniform(0,1) | 0.013 |
+| serial test (pairs, $16 \times 16$ cells) | 0.116 |
+| gap test (Knuth, $[0, 1/2)$) | 0.065 |
+| permutation test ($d = 4$) | 0.264 |
+| cumulative periodogram (Bartlett) | 0.741 |
 | runs test (bit stream) | 0.569 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.499474 | 0.500000 | 5.26e-04 |
-| 2 | 0.332800 | 0.333333 | 5.33e-04 |
-| 3 | 0.249461 | 0.250000 | 5.39e-04 |
-| 4 | 0.199442 | 0.200000 | 5.58e-04 |
-| 5 | 0.166089 | 0.166667 | 5.77e-04 |
-| 6 | 0.142265 | 0.142857 | 5.92e-04 |
-| 7 | 0.124398 | 0.125000 | 6.02e-04 |
-| 8 | 0.110504 | 0.111111 | 6.07e-04 |
-| 9 | 0.099392 | 0.100000 | 6.08e-04 |
-| 10 | 0.090304 | 0.090909 | 6.05e-04 |
+| 1 | 0.499174 | 0.500000 | 8.26e-04 |
+| 2 | 0.332508 | 0.333333 | 8.25e-04 |
+| 3 | 0.249273 | 0.250000 | 7.27e-04 |
+| 4 | 0.199370 | 0.200000 | 6.30e-04 |
+| 5 | 0.166118 | 0.166667 | 5.49e-04 |
+| 6 | 0.142375 | 0.142857 | 4.83e-04 |
+| 7 | 0.124572 | 0.125000 | 4.28e-04 |
+| 8 | 0.110728 | 0.111111 | 3.83e-04 |
+| 9 | 0.099655 | 0.100000 | 3.45e-04 |
+| 10 | 0.090598 | 0.090909 | 3.11e-04 |
+
+![spectrum](scripts/cipher_plots/camellia128.png)
+
+### Camellia-192 (`camellia192`)
+
+Verdict: PASS &mdash; min p = 0.084 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999963$ bits ($8 - H = 3.67 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.27$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.084 |
+| KS vs Uniform(0,1) | 0.412 |
+| serial test (pairs, $16 \times 16$ cells) | 0.703 |
+| gap test (Knuth, $[0, 1/2)$) | 0.728 |
+| permutation test ($d = 4$) | 0.933 |
+| cumulative periodogram (Bartlett) | 0.614 |
+| runs test (bit stream) | 0.184 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500256 | 0.500000 | 2.56e-04 |
+| 2 | 0.333600 | 0.333333 | 2.67e-04 |
+| 3 | 0.250232 | 0.250000 | 2.32e-04 |
+| 4 | 0.200204 | 0.200000 | 2.04e-04 |
+| 5 | 0.166853 | 0.166667 | 1.87e-04 |
+| 6 | 0.143034 | 0.142857 | 1.77e-04 |
+| 7 | 0.125171 | 0.125000 | 1.71e-04 |
+| 8 | 0.111279 | 0.111111 | 1.67e-04 |
+| 9 | 0.100164 | 0.100000 | 1.64e-04 |
+| 10 | 0.091070 | 0.090909 | 1.61e-04 |
+
+![spectrum](scripts/cipher_plots/camellia192.png)
+
+### Camellia-256 (`camellia256`)
+
+Verdict: PASS &mdash; min p = 0.019 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999962$ bits ($8 - H = 3.78 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.77$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.042 |
+| KS vs Uniform(0,1) | 0.541 |
+| serial test (pairs, $16 \times 16$ cells) | 0.860 |
+| gap test (Knuth, $[0, 1/2)$) | 0.583 |
+| permutation test ($d = 4$) | 0.311 |
+| cumulative periodogram (Bartlett) | 0.622 |
+| runs test (bit stream) | 0.019 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500205 | 0.500000 | 2.05e-04 |
+| 2 | 0.333605 | 0.333333 | 2.71e-04 |
+| 3 | 0.250315 | 0.250000 | 3.15e-04 |
+| 4 | 0.200346 | 0.200000 | 3.46e-04 |
+| 5 | 0.167032 | 0.166667 | 3.66e-04 |
+| 6 | 0.143235 | 0.142857 | 3.78e-04 |
+| 7 | 0.125385 | 0.125000 | 3.85e-04 |
+| 8 | 0.111500 | 0.111111 | 3.89e-04 |
+| 9 | 0.100391 | 0.100000 | 3.91e-04 |
+| 10 | 0.091300 | 0.090909 | 3.91e-04 |
 
 ![spectrum](scripts/cipher_plots/camellia256.png)
 
 ### CAST-128 (`cast128`)
 
-Verdict: PASS &mdash; min p = 0.286 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.144 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999968$ bits ($8 - H = 3.23 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.77$.
+Byte entropy $H = 7.999967$ bits ($8 - H = 3.33 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.02$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.533 |
-| KS vs Uniform(0,1) | 0.286 |
-| serial test (pairs, $16 \times 16$ cells) | 0.577 |
-| gap test (Knuth, $[0, 1/2)$) | 0.922 |
-| permutation test ($d = 4$) | 0.464 |
-| cumulative periodogram (Bartlett) | 0.504 |
-| runs test (bit stream) | 0.356 |
+| byte frequency $\chi^2$ (256 cells) | 0.399 |
+| KS vs Uniform(0,1) | 0.144 |
+| serial test (pairs, $16 \times 16$ cells) | 0.302 |
+| gap test (Knuth, $[0, 1/2)$) | 0.607 |
+| permutation test ($d = 4$) | 0.373 |
+| cumulative periodogram (Bartlett) | 0.382 |
+| runs test (bit stream) | 0.531 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.499761 | 0.500000 | 2.39e-04 |
-| 2 | 0.333080 | 0.333333 | 2.54e-04 |
-| 3 | 0.249794 | 0.250000 | 2.06e-04 |
-| 4 | 0.199851 | 0.200000 | 1.49e-04 |
-| 5 | 0.166569 | 0.166667 | 9.74e-05 |
-| 6 | 0.142802 | 0.142857 | 5.48e-05 |
-| 7 | 0.124979 | 0.125000 | 2.10e-05 |
-| 8 | 0.111116 | 0.111111 | 5.36e-06 |
-| 9 | 0.100026 | 0.100000 | 2.57e-05 |
-| 10 | 0.090950 | 0.090909 | 4.14e-05 |
+| 1 | 0.499797 | 0.500000 | 2.03e-04 |
+| 2 | 0.333229 | 0.333333 | 1.04e-04 |
+| 3 | 0.250025 | 0.250000 | 2.48e-05 |
+| 4 | 0.200122 | 0.200000 | 1.22e-04 |
+| 5 | 0.166852 | 0.166667 | 1.86e-04 |
+| 6 | 0.143083 | 0.142857 | 2.26e-04 |
+| 7 | 0.125250 | 0.125000 | 2.50e-04 |
+| 8 | 0.111374 | 0.111111 | 2.63e-04 |
+| 9 | 0.100270 | 0.100000 | 2.70e-04 |
+| 10 | 0.091182 | 0.090909 | 2.73e-04 |
 
 ![spectrum](scripts/cipher_plots/cast128.png)
 
 ### DES (`des`)
 
-Verdict: PASS &mdash; min p = 0.140 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.041 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999964$ bits ($8 - H = 3.58 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.95$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.140 |
-| KS vs Uniform(0,1) | 0.500 |
-| serial test (pairs, $16 \times 16$ cells) | 0.513 |
-| gap test (Knuth, $[0, 1/2)$) | 0.197 |
-| permutation test ($d = 4$) | 0.312 |
-| cumulative periodogram (Bartlett) | 0.667 |
-| runs test (bit stream) | 0.758 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500218 | 0.500000 | 2.18e-04 |
-| 2 | 0.333503 | 0.333333 | 1.70e-04 |
-| 3 | 0.250134 | 0.250000 | 1.34e-04 |
-| 4 | 0.200119 | 0.200000 | 1.19e-04 |
-| 5 | 0.166782 | 0.166667 | 1.15e-04 |
-| 6 | 0.142972 | 0.142857 | 1.15e-04 |
-| 7 | 0.125116 | 0.125000 | 1.16e-04 |
-| 8 | 0.111229 | 0.111111 | 1.17e-04 |
-| 9 | 0.100118 | 0.100000 | 1.18e-04 |
-| 10 | 0.091028 | 0.090909 | 1.19e-04 |
-
-![spectrum](scripts/cipher_plots/des.png)
-
-### 3DES (`3des`)
-
-Verdict: PASS &mdash; min p = 0.074 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999972$ bits ($8 - H = 2.78 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 14.79$.
+Byte entropy $H = 7.999966$ bits ($8 - H = 3.43 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.72$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.959 |
-| KS vs Uniform(0,1) | 0.561 |
-| serial test (pairs, $16 \times 16$ cells) | 0.572 |
-| gap test (Knuth, $[0, 1/2)$) | 0.697 |
-| permutation test ($d = 4$) | 0.338 |
-| cumulative periodogram (Bartlett) | 0.421 |
-| runs test (bit stream) | 0.074 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499580 | 0.500000 | 4.20e-04 |
-| 2 | 0.332866 | 0.333333 | 4.67e-04 |
-| 3 | 0.249544 | 0.250000 | 4.56e-04 |
-| 4 | 0.199569 | 0.200000 | 4.31e-04 |
-| 5 | 0.166262 | 0.166667 | 4.05e-04 |
-| 6 | 0.142477 | 0.142857 | 3.80e-04 |
-| 7 | 0.124643 | 0.125000 | 3.57e-04 |
-| 8 | 0.110774 | 0.111111 | 3.37e-04 |
-| 9 | 0.099680 | 0.100000 | 3.20e-04 |
-| 10 | 0.090605 | 0.090909 | 3.04e-04 |
-
-![spectrum](scripts/cipher_plots/3des.png)
-
-### Kuznyechik (`grasshopper`)
-
-Verdict: PASS &mdash; min p = 0.434 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999971$ bits ($8 - H = 2.91 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.63$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.891 |
-| KS vs Uniform(0,1) | 0.487 |
-| serial test (pairs, $16 \times 16$ cells) | 0.434 |
-| gap test (Knuth, $[0, 1/2)$) | 0.939 |
-| permutation test ($d = 4$) | 0.739 |
-| cumulative periodogram (Bartlett) | 0.758 |
-| runs test (bit stream) | 0.436 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499547 | 0.500000 | 4.53e-04 |
-| 2 | 0.332914 | 0.333333 | 4.19e-04 |
-| 3 | 0.249637 | 0.250000 | 3.63e-04 |
-| 4 | 0.199685 | 0.200000 | 3.15e-04 |
-| 5 | 0.166389 | 0.166667 | 2.77e-04 |
-| 6 | 0.142610 | 0.142857 | 2.47e-04 |
-| 7 | 0.124777 | 0.125000 | 2.23e-04 |
-| 8 | 0.110907 | 0.111111 | 2.04e-04 |
-| 9 | 0.099812 | 0.100000 | 1.88e-04 |
-| 10 | 0.090734 | 0.090909 | 1.75e-04 |
-
-![spectrum](scripts/cipher_plots/grasshopper.png)
-
-### Magma (`magma`)
-
-Verdict: PASS &mdash; min p = 0.133 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999964$ bits ($8 - H = 3.59 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 15.11$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.133 |
-| KS vs Uniform(0,1) | 0.631 |
-| serial test (pairs, $16 \times 16$ cells) | 0.891 |
-| gap test (Knuth, $[0, 1/2)$) | 0.876 |
-| permutation test ($d = 4$) | 0.463 |
-| cumulative periodogram (Bartlett) | 0.529 |
-| runs test (bit stream) | 0.565 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499908 | 0.500000 | 9.21e-05 |
-| 2 | 0.333243 | 0.333333 | 9.05e-05 |
-| 3 | 0.249944 | 0.250000 | 5.65e-05 |
-| 4 | 0.199980 | 0.200000 | 1.99e-05 |
-| 5 | 0.166677 | 0.166667 | 1.03e-05 |
-| 6 | 0.142890 | 0.142857 | 3.30e-05 |
-| 7 | 0.125049 | 0.125000 | 4.92e-05 |
-| 8 | 0.111172 | 0.111111 | 6.06e-05 |
-| 9 | 0.100069 | 0.100000 | 6.85e-05 |
-| 10 | 0.090983 | 0.090909 | 7.40e-05 |
-
-![spectrum](scripts/cipher_plots/magma.png)
-
-### PRESENT-80 (`present80`)
-
-Verdict: PASS &mdash; min p = 0.012 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999971$ bits ($8 - H = 2.93 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.66$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.875 |
-| KS vs Uniform(0,1) | 0.511 |
-| serial test (pairs, $16 \times 16$ cells) | 0.819 |
-| gap test (Knuth, $[0, 1/2)$) | 0.316 |
-| permutation test ($d = 4$) | 0.012 |
-| cumulative periodogram (Bartlett) | 0.778 |
-| runs test (bit stream) | 0.276 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500473 | 0.500000 | 4.73e-04 |
-| 2 | 0.333795 | 0.333333 | 4.62e-04 |
-| 3 | 0.250407 | 0.250000 | 4.07e-04 |
-| 4 | 0.200354 | 0.200000 | 3.54e-04 |
-| 5 | 0.166976 | 0.166667 | 3.10e-04 |
-| 6 | 0.143129 | 0.142857 | 2.72e-04 |
-| 7 | 0.125240 | 0.125000 | 2.40e-04 |
-| 8 | 0.111324 | 0.111111 | 2.13e-04 |
-| 9 | 0.100190 | 0.100000 | 1.90e-04 |
-| 10 | 0.091080 | 0.090909 | 1.71e-04 |
-
-![spectrum](scripts/cipher_plots/present80.png)
-
-### PRESENT-128 (`present128`)
-
-Verdict: PASS &mdash; min p = 0.190 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999965$ bits ($8 - H = 3.49 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.95$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.215 |
-| KS vs Uniform(0,1) | 0.190 |
-| serial test (pairs, $16 \times 16$ cells) | 0.662 |
-| gap test (Knuth, $[0, 1/2)$) | 0.801 |
-| permutation test ($d = 4$) | 0.992 |
-| cumulative periodogram (Bartlett) | 0.647 |
-| runs test (bit stream) | 0.819 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499692 | 0.500000 | 3.08e-04 |
-| 2 | 0.333193 | 0.333333 | 1.40e-04 |
-| 3 | 0.249983 | 0.250000 | 1.71e-05 |
-| 4 | 0.200064 | 0.200000 | 6.40e-05 |
-| 5 | 0.166789 | 0.166667 | 1.22e-04 |
-| 6 | 0.143024 | 0.142857 | 1.67e-04 |
-| 7 | 0.125203 | 0.125000 | 2.03e-04 |
-| 8 | 0.111343 | 0.111111 | 2.32e-04 |
-| 9 | 0.100255 | 0.100000 | 2.55e-04 |
-| 10 | 0.091183 | 0.090909 | 2.74e-04 |
-
-![spectrum](scripts/cipher_plots/present128.png)
-
-### SEED (`seed`)
-
-Verdict: PASS &mdash; min p = 0.037 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999964$ bits ($8 - H = 3.62 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 15.86$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.111 |
-| KS vs Uniform(0,1) | 0.624 |
-| serial test (pairs, $16 \times 16$ cells) | 0.454 |
-| gap test (Knuth, $[0, 1/2)$) | 0.920 |
-| permutation test ($d = 4$) | 0.721 |
-| cumulative periodogram (Bartlett) | 0.258 |
-| runs test (bit stream) | 0.037 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500146 | 0.500000 | 1.46e-04 |
-| 2 | 0.333513 | 0.333333 | 1.80e-04 |
-| 3 | 0.250172 | 0.250000 | 1.72e-04 |
-| 4 | 0.200145 | 0.200000 | 1.45e-04 |
-| 5 | 0.166777 | 0.166667 | 1.10e-04 |
-| 6 | 0.142933 | 0.142857 | 7.56e-05 |
-| 7 | 0.125043 | 0.125000 | 4.32e-05 |
-| 8 | 0.111125 | 0.111111 | 1.42e-05 |
-| 9 | 0.099989 | 0.100000 | 1.12e-05 |
-| 10 | 0.090876 | 0.090909 | 3.32e-05 |
-
-![spectrum](scripts/cipher_plots/seed.png)
-
-### Serpent-128 (`serpent128`)
-
-Verdict: PASS &mdash; min p = 0.115 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999966$ bits ($8 - H = 3.35 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.09$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.371 |
-| KS vs Uniform(0,1) | 0.323 |
-| serial test (pairs, $16 \times 16$ cells) | 0.302 |
-| gap test (Knuth, $[0, 1/2)$) | 0.904 |
-| permutation test ($d = 4$) | 0.836 |
-| cumulative periodogram (Bartlett) | 0.386 |
-| runs test (bit stream) | 0.115 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500146 | 0.500000 | 1.46e-04 |
-| 2 | 0.333354 | 0.333333 | 2.03e-05 |
-| 3 | 0.249957 | 0.250000 | 4.32e-05 |
-| 4 | 0.199936 | 0.200000 | 6.40e-05 |
-| 5 | 0.166601 | 0.166667 | 6.58e-05 |
-| 6 | 0.142797 | 0.142857 | 6.01e-05 |
-| 7 | 0.124948 | 0.125000 | 5.21e-05 |
-| 8 | 0.111067 | 0.111111 | 4.40e-05 |
-| 9 | 0.099963 | 0.100000 | 3.67e-05 |
-| 10 | 0.090879 | 0.090909 | 3.05e-05 |
-
-![spectrum](scripts/cipher_plots/serpent128.png)
-
-### Serpent-192 (`serpent192`)
-
-Verdict: PASS &mdash; min p = 0.253 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999970$ bits ($8 - H = 3.03 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.59$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.791 |
-| KS vs Uniform(0,1) | 0.253 |
-| serial test (pairs, $16 \times 16$ cells) | 0.292 |
-| gap test (Knuth, $[0, 1/2)$) | 0.777 |
-| permutation test ($d = 4$) | 0.798 |
-| cumulative periodogram (Bartlett) | 0.705 |
-| runs test (bit stream) | 0.400 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500472 | 0.500000 | 4.72e-04 |
-| 2 | 0.333798 | 0.333333 | 4.64e-04 |
-| 3 | 0.250383 | 0.250000 | 3.83e-04 |
-| 4 | 0.200304 | 0.200000 | 3.04e-04 |
-| 5 | 0.166907 | 0.166667 | 2.40e-04 |
-| 6 | 0.143047 | 0.142857 | 1.90e-04 |
-| 7 | 0.125149 | 0.125000 | 1.49e-04 |
-| 8 | 0.111228 | 0.111111 | 1.17e-04 |
-| 9 | 0.100091 | 0.100000 | 9.12e-05 |
-| 10 | 0.090979 | 0.090909 | 6.97e-05 |
-
-![spectrum](scripts/cipher_plots/serpent192.png)
-
-### Serpent-256 (`serpent256`)
-
-Verdict: PASS &mdash; min p = 0.087 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999974$ bits ($8 - H = 2.63 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.66$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.989 |
-| KS vs Uniform(0,1) | 0.346 |
-| serial test (pairs, $16 \times 16$ cells) | 0.087 |
-| gap test (Knuth, $[0, 1/2)$) | 0.209 |
-| permutation test ($d = 4$) | 0.226 |
-| cumulative periodogram (Bartlett) | 0.697 |
-| runs test (bit stream) | 0.452 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499558 | 0.500000 | 4.42e-04 |
-| 2 | 0.332893 | 0.333333 | 4.40e-04 |
-| 3 | 0.249614 | 0.250000 | 3.86e-04 |
-| 4 | 0.199667 | 0.200000 | 3.33e-04 |
-| 5 | 0.166377 | 0.166667 | 2.89e-04 |
-| 6 | 0.142601 | 0.142857 | 2.56e-04 |
-| 7 | 0.124769 | 0.125000 | 2.31e-04 |
-| 8 | 0.110899 | 0.111111 | 2.12e-04 |
-| 9 | 0.099801 | 0.100000 | 1.99e-04 |
-| 10 | 0.090721 | 0.090909 | 1.88e-04 |
-
-![spectrum](scripts/cipher_plots/serpent256.png)
-
-### SM4 (`sm4`)
-
-Verdict: PASS &mdash; min p = 0.036 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999970$ bits ($8 - H = 3.01 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 14.12$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.805 |
-| KS vs Uniform(0,1) | 0.533 |
-| serial test (pairs, $16 \times 16$ cells) | 0.608 |
-| gap test (Knuth, $[0, 1/2)$) | 0.221 |
-| permutation test ($d = 4$) | 0.435 |
-| cumulative periodogram (Bartlett) | 0.036 |
-| runs test (bit stream) | 0.413 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499564 | 0.500000 | 4.36e-04 |
-| 2 | 0.332910 | 0.333333 | 4.24e-04 |
-| 3 | 0.249628 | 0.250000 | 3.72e-04 |
-| 4 | 0.199673 | 0.200000 | 3.27e-04 |
-| 5 | 0.166373 | 0.166667 | 2.94e-04 |
-| 6 | 0.142589 | 0.142857 | 2.68e-04 |
-| 7 | 0.124752 | 0.125000 | 2.48e-04 |
-| 8 | 0.110880 | 0.111111 | 2.31e-04 |
-| 9 | 0.099783 | 0.100000 | 2.17e-04 |
-| 10 | 0.090705 | 0.090909 | 2.04e-04 |
-
-![spectrum](scripts/cipher_plots/sm4.png)
-
-### Twofish-128 (`twofish128`)
-
-Verdict: PASS &mdash; min p = 0.366 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999967$ bits ($8 - H = 3.28 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.61$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.467 |
-| KS vs Uniform(0,1) | 0.546 |
-| serial test (pairs, $16 \times 16$ cells) | 0.836 |
-| gap test (Knuth, $[0, 1/2)$) | 0.374 |
-| permutation test ($d = 4$) | 0.638 |
-| cumulative periodogram (Bartlett) | 0.863 |
-| runs test (bit stream) | 0.366 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500168 | 0.500000 | 1.68e-04 |
-| 2 | 0.333428 | 0.333333 | 9.48e-05 |
-| 3 | 0.250007 | 0.250000 | 7.43e-06 |
-| 4 | 0.199937 | 0.200000 | 6.35e-05 |
-| 5 | 0.166553 | 0.166667 | 1.14e-04 |
-| 6 | 0.142711 | 0.142857 | 1.46e-04 |
-| 7 | 0.124835 | 0.125000 | 1.65e-04 |
-| 8 | 0.110937 | 0.111111 | 1.74e-04 |
-| 9 | 0.099823 | 0.100000 | 1.77e-04 |
-| 10 | 0.090735 | 0.090909 | 1.74e-04 |
-
-![spectrum](scripts/cipher_plots/twofish128.png)
-
-### Twofish-256 (`twofish256`)
-
-Verdict: PASS &mdash; min p = 0.062 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999971$ bits ($8 - H = 2.86 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 14.73$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.924 |
-| KS vs Uniform(0,1) | 0.292 |
-| serial test (pairs, $16 \times 16$ cells) | 0.274 |
-| gap test (Knuth, $[0, 1/2)$) | 0.363 |
-| permutation test ($d = 4$) | 0.593 |
-| cumulative periodogram (Bartlett) | 0.943 |
-| runs test (bit stream) | 0.062 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500630 | 0.500000 | 6.30e-04 |
-| 2 | 0.334000 | 0.333333 | 6.66e-04 |
-| 3 | 0.250645 | 0.250000 | 6.45e-04 |
-| 4 | 0.200611 | 0.200000 | 6.11e-04 |
-| 5 | 0.167242 | 0.166667 | 5.76e-04 |
-| 6 | 0.143399 | 0.142857 | 5.42e-04 |
-| 7 | 0.125512 | 0.125000 | 5.12e-04 |
-| 8 | 0.111596 | 0.111111 | 4.85e-04 |
-| 9 | 0.100460 | 0.100000 | 4.60e-04 |
-| 10 | 0.091348 | 0.090909 | 4.39e-04 |
-
-![spectrum](scripts/cipher_plots/twofish256.png)
-
-### Simon32/64 (`simon32_64`)
-
-Verdict: PASS &mdash; min p = 0.004 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999966$ bits ($8 - H = 3.35 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.74$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.368 |
-| KS vs Uniform(0,1) | 0.410 |
-| serial test (pairs, $16 \times 16$ cells) | 0.204 |
-| gap test (Knuth, $[0, 1/2)$) | 0.166 |
-| permutation test ($d = 4$) | 0.004 |
-| cumulative periodogram (Bartlett) | 0.240 |
-| runs test (bit stream) | 0.295 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499684 | 0.500000 | 3.16e-04 |
-| 2 | 0.332969 | 0.333333 | 3.64e-04 |
-| 3 | 0.249648 | 0.250000 | 3.52e-04 |
-| 4 | 0.199679 | 0.200000 | 3.21e-04 |
-| 5 | 0.166378 | 0.166667 | 2.88e-04 |
-| 6 | 0.142599 | 0.142857 | 2.59e-04 |
-| 7 | 0.124767 | 0.125000 | 2.33e-04 |
-| 8 | 0.110900 | 0.111111 | 2.11e-04 |
-| 9 | 0.099808 | 0.100000 | 1.92e-04 |
-| 10 | 0.090733 | 0.090909 | 1.76e-04 |
-
-![spectrum](scripts/cipher_plots/simon32_64.png)
-
-### Simon64/128 (`simon64_128`)
-
-Verdict: PASS &mdash; min p = 0.270 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999966$ bits ($8 - H = 3.38 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 15.59$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.337 |
-| KS vs Uniform(0,1) | 0.881 |
-| serial test (pairs, $16 \times 16$ cells) | 0.285 |
-| gap test (Knuth, $[0, 1/2)$) | 0.270 |
-| permutation test ($d = 4$) | 0.522 |
-| cumulative periodogram (Bartlett) | 0.979 |
-| runs test (bit stream) | 0.388 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500103 | 0.500000 | 1.03e-04 |
-| 2 | 0.333358 | 0.333333 | 2.46e-05 |
-| 3 | 0.249989 | 0.250000 | 1.06e-05 |
-| 4 | 0.199980 | 0.200000 | 2.04e-05 |
-| 5 | 0.166648 | 0.166667 | 1.85e-05 |
-| 6 | 0.142845 | 0.142857 | 1.18e-05 |
-| 7 | 0.124996 | 0.125000 | 4.05e-06 |
-| 8 | 0.111114 | 0.111111 | 3.27e-06 |
-| 9 | 0.100009 | 0.100000 | 9.47e-06 |
-| 10 | 0.090923 | 0.090909 | 1.44e-05 |
-
-![spectrum](scripts/cipher_plots/simon64_128.png)
-
-### Simon128/128 (`simon128_128`)
-
-Verdict: PASS &mdash; min p = 0.253 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999970$ bits ($8 - H = 3.04 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 15.93$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.771 |
-| KS vs Uniform(0,1) | 0.921 |
-| serial test (pairs, $16 \times 16$ cells) | 0.808 |
-| gap test (Knuth, $[0, 1/2)$) | 0.567 |
-| permutation test ($d = 4$) | 0.768 |
-| cumulative periodogram (Bartlett) | 0.253 |
-| runs test (bit stream) | 0.386 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499788 | 0.500000 | 2.12e-04 |
-| 2 | 0.333169 | 0.333333 | 1.64e-04 |
-| 3 | 0.249894 | 0.250000 | 1.06e-04 |
-| 4 | 0.199941 | 0.200000 | 5.85e-05 |
-| 5 | 0.166645 | 0.166667 | 2.16e-05 |
-| 6 | 0.142864 | 0.142857 | 6.68e-06 |
-| 7 | 0.125028 | 0.125000 | 2.82e-05 |
-| 8 | 0.111156 | 0.111111 | 4.46e-05 |
-| 9 | 0.100057 | 0.100000 | 5.68e-05 |
-| 10 | 0.090975 | 0.090909 | 6.59e-05 |
-
-![spectrum](scripts/cipher_plots/simon128_128.png)
-
-### Simon128/256 (`simon128_256`)
-
-Verdict: PASS &mdash; min p = 0.042 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999970$ bits ($8 - H = 3.03 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.40$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.785 |
-| KS vs Uniform(0,1) | 0.825 |
-| serial test (pairs, $16 \times 16$ cells) | 0.964 |
-| gap test (Knuth, $[0, 1/2)$) | 0.042 |
-| permutation test ($d = 4$) | 0.116 |
-| cumulative periodogram (Bartlett) | 0.367 |
-| runs test (bit stream) | 0.530 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500182 | 0.500000 | 1.82e-04 |
-| 2 | 0.333545 | 0.333333 | 2.11e-04 |
-| 3 | 0.250198 | 0.250000 | 1.98e-04 |
-| 4 | 0.200172 | 0.200000 | 1.72e-04 |
-| 5 | 0.166808 | 0.166667 | 1.42e-04 |
-| 6 | 0.142968 | 0.142857 | 1.11e-04 |
-| 7 | 0.125082 | 0.125000 | 8.24e-05 |
-| 8 | 0.111167 | 0.111111 | 5.62e-05 |
-| 9 | 0.100033 | 0.100000 | 3.29e-05 |
-| 10 | 0.090921 | 0.090909 | 1.23e-05 |
-
-![spectrum](scripts/cipher_plots/simon128_256.png)
-
-### Speck32/64 (`speck32_64`)
-
-Verdict: PASS &mdash; min p = 0.067 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999967$ bits ($8 - H = 3.26 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.15$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.496 |
-| KS vs Uniform(0,1) | 0.733 |
-| serial test (pairs, $16 \times 16$ cells) | 0.618 |
-| gap test (Knuth, $[0, 1/2)$) | 0.067 |
-| permutation test ($d = 4$) | 0.728 |
-| cumulative periodogram (Bartlett) | 0.496 |
-| runs test (bit stream) | 0.893 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499859 | 0.500000 | 1.41e-04 |
-| 2 | 0.333235 | 0.333333 | 9.79e-05 |
-| 3 | 0.249893 | 0.250000 | 1.07e-04 |
-| 4 | 0.199875 | 0.200000 | 1.25e-04 |
-| 5 | 0.166527 | 0.166667 | 1.40e-04 |
-| 6 | 0.142708 | 0.142857 | 1.50e-04 |
-| 7 | 0.124845 | 0.125000 | 1.55e-04 |
-| 8 | 0.110955 | 0.111111 | 1.57e-04 |
-| 9 | 0.099844 | 0.100000 | 1.56e-04 |
-| 10 | 0.090754 | 0.090909 | 1.55e-04 |
-
-![spectrum](scripts/cipher_plots/speck32_64.png)
-
-### Speck64/128 (`speck64_128`)
-
-Verdict: PASS &mdash; min p = 0.014 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999961$ bits ($8 - H = 3.93 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.26$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.014 |
-| KS vs Uniform(0,1) | 0.134 |
-| serial test (pairs, $16 \times 16$ cells) | 0.165 |
-| gap test (Knuth, $[0, 1/2)$) | 0.726 |
-| permutation test ($d = 4$) | 0.018 |
-| cumulative periodogram (Bartlett) | 0.697 |
-| runs test (bit stream) | 0.253 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499499 | 0.500000 | 5.01e-04 |
-| 2 | 0.332770 | 0.333333 | 5.63e-04 |
-| 3 | 0.249466 | 0.250000 | 5.34e-04 |
-| 4 | 0.199509 | 0.200000 | 4.91e-04 |
-| 5 | 0.166215 | 0.166667 | 4.52e-04 |
-| 6 | 0.142440 | 0.142857 | 4.18e-04 |
-| 7 | 0.124612 | 0.125000 | 3.88e-04 |
-| 8 | 0.110748 | 0.111111 | 3.63e-04 |
-| 9 | 0.099660 | 0.100000 | 3.40e-04 |
-| 10 | 0.090590 | 0.090909 | 3.19e-04 |
-
-![spectrum](scripts/cipher_plots/speck64_128.png)
-
-### Speck128/128 (`speck128_128`)
-
-Verdict: PASS &mdash; min p = 0.224 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999971$ bits ($8 - H = 2.95 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.84$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.867 |
-| KS vs Uniform(0,1) | 0.803 |
-| serial test (pairs, $16 \times 16$ cells) | 0.939 |
-| gap test (Knuth, $[0, 1/2)$) | 0.602 |
-| permutation test ($d = 4$) | 0.224 |
-| cumulative periodogram (Bartlett) | 0.873 |
-| runs test (bit stream) | 0.911 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500119 | 0.500000 | 1.19e-04 |
-| 2 | 0.333525 | 0.333333 | 1.91e-04 |
-| 3 | 0.250220 | 0.250000 | 2.20e-04 |
-| 4 | 0.200226 | 0.200000 | 2.26e-04 |
-| 5 | 0.166887 | 0.166667 | 2.20e-04 |
-| 6 | 0.143066 | 0.142857 | 2.09e-04 |
-| 7 | 0.125195 | 0.125000 | 1.95e-04 |
-| 8 | 0.111290 | 0.111111 | 1.79e-04 |
-| 9 | 0.100163 | 0.100000 | 1.63e-04 |
-| 10 | 0.091056 | 0.090909 | 1.47e-04 |
-
-![spectrum](scripts/cipher_plots/speck128_128.png)
-
-### Speck128/256 (`speck128_256`)
-
-Verdict: PASS &mdash; min p = 0.358 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999971$ bits ($8 - H = 2.87 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.98$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.915 |
-| KS vs Uniform(0,1) | 0.538 |
-| serial test (pairs, $16 \times 16$ cells) | 0.399 |
-| gap test (Knuth, $[0, 1/2)$) | 0.358 |
-| permutation test ($d = 4$) | 0.621 |
-| cumulative periodogram (Bartlett) | 0.395 |
-| runs test (bit stream) | 0.414 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500332 | 0.500000 | 3.32e-04 |
-| 2 | 0.333685 | 0.333333 | 3.51e-04 |
-| 3 | 0.250362 | 0.250000 | 3.62e-04 |
-| 4 | 0.200373 | 0.200000 | 3.73e-04 |
-| 5 | 0.167047 | 0.166667 | 3.80e-04 |
-| 6 | 0.143242 | 0.142857 | 3.85e-04 |
-| 7 | 0.125386 | 0.125000 | 3.86e-04 |
-| 8 | 0.111495 | 0.111111 | 3.84e-04 |
-| 9 | 0.100380 | 0.100000 | 3.80e-04 |
-| 10 | 0.091284 | 0.090909 | 3.75e-04 |
-
-![spectrum](scripts/cipher_plots/speck128_256.png)
-
-### ChaCha20 (`chacha20`)
-
-Verdict: PASS &mdash; min p = 0.059 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999967$ bits ($8 - H = 3.28 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.81$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.466 |
-| KS vs Uniform(0,1) | 0.059 |
-| serial test (pairs, $16 \times 16$ cells) | 0.772 |
-| gap test (Knuth, $[0, 1/2)$) | 0.457 |
-| permutation test ($d = 4$) | 0.762 |
-| cumulative periodogram (Bartlett) | 0.601 |
-| runs test (bit stream) | 0.919 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499403 | 0.500000 | 5.97e-04 |
-| 2 | 0.332601 | 0.333333 | 7.32e-04 |
-| 3 | 0.249262 | 0.250000 | 7.38e-04 |
-| 4 | 0.199304 | 0.200000 | 6.96e-04 |
-| 5 | 0.166027 | 0.166667 | 6.40e-04 |
-| 6 | 0.142275 | 0.142857 | 5.82e-04 |
-| 7 | 0.124472 | 0.125000 | 5.28e-04 |
-| 8 | 0.110633 | 0.111111 | 4.78e-04 |
-| 9 | 0.099566 | 0.100000 | 4.34e-04 |
-| 10 | 0.090514 | 0.090909 | 3.95e-04 |
-
-![spectrum](scripts/cipher_plots/chacha20.png)
-
-### XChaCha20 (`xchacha20`)
-
-Verdict: PASS &mdash; min p = 0.031 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999967$ bits ($8 - H = 3.28 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.88$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.460 |
-| KS vs Uniform(0,1) | 0.272 |
-| serial test (pairs, $16 \times 16$ cells) | 0.031 |
-| gap test (Knuth, $[0, 1/2)$) | 0.455 |
-| permutation test ($d = 4$) | 0.458 |
-| cumulative periodogram (Bartlett) | 0.913 |
-| runs test (bit stream) | 0.042 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.500418 | 0.500000 | 4.18e-04 |
-| 2 | 0.333710 | 0.333333 | 3.77e-04 |
-| 3 | 0.250311 | 0.250000 | 3.11e-04 |
-| 4 | 0.200255 | 0.200000 | 2.55e-04 |
-| 5 | 0.166880 | 0.166667 | 2.13e-04 |
-| 6 | 0.143041 | 0.142857 | 1.84e-04 |
-| 7 | 0.125163 | 0.125000 | 1.63e-04 |
-| 8 | 0.111259 | 0.111111 | 1.48e-04 |
-| 9 | 0.100137 | 0.100000 | 1.37e-04 |
-| 10 | 0.091038 | 0.090909 | 1.29e-04 |
-
-![spectrum](scripts/cipher_plots/xchacha20.png)
-
-### Salsa20 (`salsa20`)
-
-Verdict: PASS &mdash; min p = 0.068 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999963$ bits ($8 - H = 3.70 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.59$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.068 |
-| KS vs Uniform(0,1) | 0.124 |
-| serial test (pairs, $16 \times 16$ cells) | 0.304 |
-| gap test (Knuth, $[0, 1/2)$) | 0.541 |
-| permutation test ($d = 4$) | 0.325 |
-| cumulative periodogram (Bartlett) | 0.389 |
-| runs test (bit stream) | 0.554 |
-
-Moments of $u$ (sample, ideal, deviation):
-
-| $k$ | $m_k$ | $1/(k+1)$ | dev |
-|-----|-------|-----------|-----|
-| 1 | 0.499687 | 0.500000 | 3.13e-04 |
-| 2 | 0.332816 | 0.333333 | 5.17e-04 |
-| 3 | 0.249427 | 0.250000 | 5.73e-04 |
-| 4 | 0.199431 | 0.200000 | 5.69e-04 |
-| 5 | 0.166124 | 0.166667 | 5.42e-04 |
-| 6 | 0.142347 | 0.142857 | 5.10e-04 |
-| 7 | 0.124522 | 0.125000 | 4.78e-04 |
-| 8 | 0.110662 | 0.111111 | 4.49e-04 |
-| 9 | 0.099578 | 0.100000 | 4.22e-04 |
-| 10 | 0.090510 | 0.090909 | 3.99e-04 |
-
-![spectrum](scripts/cipher_plots/salsa20.png)
-
-### Rabbit (`rabbit`)
-
-Verdict: PASS &mdash; min p = 0.243 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
-
-Byte entropy $H = 7.999970$ bits ($8 - H = 3.02 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.93$.
-
-| test | p |
-|------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.792 |
-| KS vs Uniform(0,1) | 0.638 |
-| serial test (pairs, $16 \times 16$ cells) | 0.243 |
-| gap test (Knuth, $[0, 1/2)$) | 0.325 |
-| permutation test ($d = 4$) | 0.970 |
-| cumulative periodogram (Bartlett) | 0.657 |
+| byte frequency $\chi^2$ (256 cells) | 0.270 |
+| KS vs Uniform(0,1) | 0.913 |
+| serial test (pairs, $16 \times 16$ cells) | 0.398 |
+| gap test (Knuth, $[0, 1/2)$) | 0.628 |
+| permutation test ($d = 4$) | 0.041 |
+| cumulative periodogram (Bartlett) | 0.365 |
 | runs test (bit stream) | 0.613 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.500257 | 0.500000 | 2.57e-04 |
-| 2 | 0.333593 | 0.333333 | 2.60e-04 |
-| 3 | 0.250241 | 0.250000 | 2.41e-04 |
-| 4 | 0.200216 | 0.200000 | 2.16e-04 |
-| 5 | 0.166860 | 0.166667 | 1.93e-04 |
-| 6 | 0.143031 | 0.142857 | 1.73e-04 |
-| 7 | 0.125156 | 0.125000 | 1.56e-04 |
-| 8 | 0.111253 | 0.111111 | 1.42e-04 |
-| 9 | 0.100129 | 0.100000 | 1.29e-04 |
-| 10 | 0.091026 | 0.090909 | 1.17e-04 |
+| 1 | 0.500040 | 0.500000 | 4.02e-05 |
+| 2 | 0.333320 | 0.333333 | 1.32e-05 |
+| 3 | 0.249931 | 0.250000 | 6.92e-05 |
+| 4 | 0.199895 | 0.200000 | 1.05e-04 |
+| 5 | 0.166541 | 0.166667 | 1.25e-04 |
+| 6 | 0.142722 | 0.142857 | 1.35e-04 |
+| 7 | 0.124861 | 0.125000 | 1.39e-04 |
+| 8 | 0.110973 | 0.111111 | 1.39e-04 |
+| 9 | 0.099864 | 0.100000 | 1.36e-04 |
+| 10 | 0.090777 | 0.090909 | 1.32e-04 |
+
+![spectrum](scripts/cipher_plots/des.png)
+
+### 3DES (`3des`)
+
+Verdict: PASS &mdash; min p = 0.058 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999965$ bits ($8 - H = 3.50 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.06$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.203 |
+| KS vs Uniform(0,1) | 0.058 |
+| serial test (pairs, $16 \times 16$ cells) | 0.146 |
+| gap test (Knuth, $[0, 1/2)$) | 0.128 |
+| permutation test ($d = 4$) | 0.402 |
+| cumulative periodogram (Bartlett) | 0.212 |
+| runs test (bit stream) | 0.504 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499318 | 0.500000 | 6.82e-04 |
+| 2 | 0.332549 | 0.333333 | 7.84e-04 |
+| 3 | 0.249280 | 0.250000 | 7.20e-04 |
+| 4 | 0.199369 | 0.200000 | 6.31e-04 |
+| 5 | 0.166119 | 0.166667 | 5.48e-04 |
+| 6 | 0.142381 | 0.142857 | 4.76e-04 |
+| 7 | 0.124584 | 0.125000 | 4.16e-04 |
+| 8 | 0.110746 | 0.111111 | 3.65e-04 |
+| 9 | 0.099678 | 0.100000 | 3.22e-04 |
+| 10 | 0.090623 | 0.090909 | 2.86e-04 |
+
+![spectrum](scripts/cipher_plots/3des.png)
+
+### Kuznyechik (`grasshopper`)
+
+Verdict: PASS &mdash; min p = 0.066 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999966$ bits ($8 - H = 3.41 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.45$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.295 |
+| KS vs Uniform(0,1) | 0.536 |
+| serial test (pairs, $16 \times 16$ cells) | 0.896 |
+| gap test (Knuth, $[0, 1/2)$) | 0.222 |
+| permutation test ($d = 4$) | 0.530 |
+| cumulative periodogram (Bartlett) | 0.804 |
+| runs test (bit stream) | 0.066 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500308 | 0.500000 | 3.08e-04 |
+| 2 | 0.333573 | 0.333333 | 2.40e-04 |
+| 3 | 0.250194 | 0.250000 | 1.94e-04 |
+| 4 | 0.200168 | 0.200000 | 1.68e-04 |
+| 5 | 0.166821 | 0.166667 | 1.54e-04 |
+| 6 | 0.143004 | 0.142857 | 1.47e-04 |
+| 7 | 0.125143 | 0.125000 | 1.43e-04 |
+| 8 | 0.111251 | 0.111111 | 1.40e-04 |
+| 9 | 0.100138 | 0.100000 | 1.38e-04 |
+| 10 | 0.091045 | 0.090909 | 1.36e-04 |
+
+![spectrum](scripts/cipher_plots/grasshopper.png)
+
+### Magma (`magma`)
+
+Verdict: PASS &mdash; min p = 0.018 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999969$ bits ($8 - H = 3.14 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.76$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.660 |
+| KS vs Uniform(0,1) | 0.162 |
+| serial test (pairs, $16 \times 16$ cells) | 0.278 |
+| gap test (Knuth, $[0, 1/2)$) | 0.133 |
+| permutation test ($d = 4$) | 0.018 |
+| cumulative periodogram (Bartlett) | 0.323 |
+| runs test (bit stream) | 0.495 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500612 | 0.500000 | 6.12e-04 |
+| 2 | 0.333934 | 0.333333 | 6.00e-04 |
+| 3 | 0.250531 | 0.250000 | 5.31e-04 |
+| 4 | 0.200464 | 0.200000 | 4.64e-04 |
+| 5 | 0.167076 | 0.166667 | 4.09e-04 |
+| 6 | 0.143221 | 0.142857 | 3.64e-04 |
+| 7 | 0.125328 | 0.125000 | 3.28e-04 |
+| 8 | 0.111410 | 0.111111 | 2.99e-04 |
+| 9 | 0.100275 | 0.100000 | 2.75e-04 |
+| 10 | 0.091163 | 0.090909 | 2.54e-04 |
+
+![spectrum](scripts/cipher_plots/magma.png)
+
+### PRESENT-80 (`present80`)
+
+Verdict: PASS &mdash; min p = 0.461 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999970$ bits ($8 - H = 3.03 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 15.04$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.785 |
+| KS vs Uniform(0,1) | 0.923 |
+| serial test (pairs, $16 \times 16$ cells) | 0.475 |
+| gap test (Knuth, $[0, 1/2)$) | 0.742 |
+| permutation test ($d = 4$) | 0.577 |
+| cumulative periodogram (Bartlett) | 0.909 |
+| runs test (bit stream) | 0.461 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500107 | 0.500000 | 1.07e-04 |
+| 2 | 0.333506 | 0.333333 | 1.73e-04 |
+| 3 | 0.250191 | 0.250000 | 1.91e-04 |
+| 4 | 0.200192 | 0.200000 | 1.92e-04 |
+| 5 | 0.166852 | 0.166667 | 1.85e-04 |
+| 6 | 0.143034 | 0.142857 | 1.77e-04 |
+| 7 | 0.125168 | 0.125000 | 1.68e-04 |
+| 8 | 0.111272 | 0.111111 | 1.60e-04 |
+| 9 | 0.100154 | 0.100000 | 1.54e-04 |
+| 10 | 0.091057 | 0.090909 | 1.48e-04 |
+
+![spectrum](scripts/cipher_plots/present80.png)
+
+### PRESENT-128 (`present128`)
+
+Verdict: PASS &mdash; min p = 0.063 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.21 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.82$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.561 |
+| KS vs Uniform(0,1) | 0.704 |
+| serial test (pairs, $16 \times 16$ cells) | 0.063 |
+| gap test (Knuth, $[0, 1/2)$) | 0.567 |
+| permutation test ($d = 4$) | 0.904 |
+| cumulative periodogram (Bartlett) | 0.605 |
+| runs test (bit stream) | 0.958 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500083 | 0.500000 | 8.33e-05 |
+| 2 | 0.333496 | 0.333333 | 1.63e-04 |
+| 3 | 0.250187 | 0.250000 | 1.87e-04 |
+| 4 | 0.200186 | 0.200000 | 1.86e-04 |
+| 5 | 0.166843 | 0.166667 | 1.76e-04 |
+| 6 | 0.143021 | 0.142857 | 1.64e-04 |
+| 7 | 0.125152 | 0.125000 | 1.52e-04 |
+| 8 | 0.111254 | 0.111111 | 1.43e-04 |
+| 9 | 0.100135 | 0.100000 | 1.35e-04 |
+| 10 | 0.091038 | 0.090909 | 1.29e-04 |
+
+![spectrum](scripts/cipher_plots/present128.png)
+
+### SEED (`seed`)
+
+Verdict: PASS &mdash; min p = 0.123 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999969$ bits ($8 - H = 3.09 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.39$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.717 |
+| KS vs Uniform(0,1) | 0.355 |
+| serial test (pairs, $16 \times 16$ cells) | 0.833 |
+| gap test (Knuth, $[0, 1/2)$) | 0.173 |
+| permutation test ($d = 4$) | 0.176 |
+| cumulative periodogram (Bartlett) | 0.123 |
+| runs test (bit stream) | 0.780 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500264 | 0.500000 | 2.64e-04 |
+| 2 | 0.333620 | 0.333333 | 2.87e-04 |
+| 3 | 0.250249 | 0.250000 | 2.49e-04 |
+| 4 | 0.200196 | 0.200000 | 1.96e-04 |
+| 5 | 0.166811 | 0.166667 | 1.44e-04 |
+| 6 | 0.142955 | 0.142857 | 9.82e-05 |
+| 7 | 0.125059 | 0.125000 | 5.95e-05 |
+| 8 | 0.111139 | 0.111111 | 2.74e-05 |
+| 9 | 0.100001 | 0.100000 | 9.61e-07 |
+| 10 | 0.090888 | 0.090909 | 2.08e-05 |
+
+![spectrum](scripts/cipher_plots/seed.png)
+
+### Serpent-128 (`serpent128`)
+
+Verdict: PASS &mdash; min p = 0.163 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999966$ bits ($8 - H = 3.38 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.70$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.335 |
+| KS vs Uniform(0,1) | 0.896 |
+| serial test (pairs, $16 \times 16$ cells) | 0.320 |
+| gap test (Knuth, $[0, 1/2)$) | 0.326 |
+| permutation test ($d = 4$) | 0.163 |
+| cumulative periodogram (Bartlett) | 0.944 |
+| runs test (bit stream) | 0.691 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499805 | 0.500000 | 1.95e-04 |
+| 2 | 0.333174 | 0.333333 | 1.60e-04 |
+| 3 | 0.249865 | 0.250000 | 1.35e-04 |
+| 4 | 0.199886 | 0.200000 | 1.14e-04 |
+| 5 | 0.166573 | 0.166667 | 9.42e-05 |
+| 6 | 0.142780 | 0.142857 | 7.73e-05 |
+| 7 | 0.124936 | 0.125000 | 6.40e-05 |
+| 8 | 0.111057 | 0.111111 | 5.40e-05 |
+| 9 | 0.099953 | 0.100000 | 4.69e-05 |
+| 10 | 0.090867 | 0.090909 | 4.24e-05 |
+
+![spectrum](scripts/cipher_plots/serpent128.png)
+
+### Serpent-192 (`serpent192`)
+
+Verdict: PASS &mdash; min p = 0.118 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999964$ bits ($8 - H = 3.61 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.39$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.118 |
+| KS vs Uniform(0,1) | 0.751 |
+| serial test (pairs, $16 \times 16$ cells) | 0.968 |
+| gap test (Knuth, $[0, 1/2)$) | 0.349 |
+| permutation test ($d = 4$) | 0.223 |
+| cumulative periodogram (Bartlett) | 0.462 |
+| runs test (bit stream) | 0.203 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499773 | 0.500000 | 2.27e-04 |
+| 2 | 0.333140 | 0.333333 | 1.93e-04 |
+| 3 | 0.249865 | 0.250000 | 1.35e-04 |
+| 4 | 0.199916 | 0.200000 | 8.38e-05 |
+| 5 | 0.166626 | 0.166667 | 4.09e-05 |
+| 6 | 0.142852 | 0.142857 | 5.56e-06 |
+| 7 | 0.125023 | 0.125000 | 2.34e-05 |
+| 8 | 0.111159 | 0.111111 | 4.74e-05 |
+| 9 | 0.100067 | 0.100000 | 6.73e-05 |
+| 10 | 0.090993 | 0.090909 | 8.39e-05 |
+
+![spectrum](scripts/cipher_plots/serpent192.png)
+
+### Serpent-256 (`serpent256`)
+
+Verdict: PASS &mdash; min p = 0.021 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999971$ bits ($8 - H = 2.86 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.59$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.921 |
+| KS vs Uniform(0,1) | 0.985 |
+| serial test (pairs, $16 \times 16$ cells) | 0.463 |
+| gap test (Knuth, $[0, 1/2)$) | 0.431 |
+| permutation test ($d = 4$) | 0.716 |
+| cumulative periodogram (Bartlett) | 0.021 |
+| runs test (bit stream) | 0.221 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499805 | 0.500000 | 1.95e-04 |
+| 2 | 0.333156 | 0.333333 | 1.77e-04 |
+| 3 | 0.249835 | 0.250000 | 1.65e-04 |
+| 4 | 0.199849 | 0.200000 | 1.51e-04 |
+| 5 | 0.166530 | 0.166667 | 1.37e-04 |
+| 6 | 0.142734 | 0.142857 | 1.23e-04 |
+| 7 | 0.124889 | 0.125000 | 1.11e-04 |
+| 8 | 0.111011 | 0.111111 | 9.99e-05 |
+| 9 | 0.099910 | 0.100000 | 8.99e-05 |
+| 10 | 0.090828 | 0.090909 | 8.10e-05 |
+
+![spectrum](scripts/cipher_plots/serpent256.png)
+
+### SM4 (`sm4`)
+
+Verdict: PASS &mdash; min p = 0.014 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999971$ bits ($8 - H = 2.94 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.38$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.867 |
+| KS vs Uniform(0,1) | 0.014 |
+| serial test (pairs, $16 \times 16$ cells) | 0.213 |
+| gap test (Knuth, $[0, 1/2)$) | 0.207 |
+| permutation test ($d = 4$) | 0.134 |
+| cumulative periodogram (Bartlett) | 0.701 |
+| runs test (bit stream) | 0.389 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499274 | 0.500000 | 7.26e-04 |
+| 2 | 0.332607 | 0.333333 | 7.27e-04 |
+| 3 | 0.249353 | 0.250000 | 6.47e-04 |
+| 4 | 0.199442 | 0.200000 | 5.58e-04 |
+| 5 | 0.166189 | 0.166667 | 4.78e-04 |
+| 6 | 0.142446 | 0.142857 | 4.11e-04 |
+| 7 | 0.124643 | 0.125000 | 3.57e-04 |
+| 8 | 0.110797 | 0.111111 | 3.14e-04 |
+| 9 | 0.099719 | 0.100000 | 2.81e-04 |
+| 10 | 0.090655 | 0.090909 | 2.54e-04 |
+
+![spectrum](scripts/cipher_plots/sm4.png)
+
+### Twofish-128 (`twofish128`)
+
+Verdict: PASS &mdash; min p = 0.183 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999967$ bits ($8 - H = 3.30 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.78$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.433 |
+| KS vs Uniform(0,1) | 0.536 |
+| serial test (pairs, $16 \times 16$ cells) | 0.518 |
+| gap test (Knuth, $[0, 1/2)$) | 0.183 |
+| permutation test ($d = 4$) | 0.521 |
+| cumulative periodogram (Bartlett) | 0.887 |
+| runs test (bit stream) | 0.456 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500194 | 0.500000 | 1.94e-04 |
+| 2 | 0.333536 | 0.333333 | 2.03e-04 |
+| 3 | 0.250203 | 0.250000 | 2.03e-04 |
+| 4 | 0.200190 | 0.200000 | 1.90e-04 |
+| 5 | 0.166838 | 0.166667 | 1.71e-04 |
+| 6 | 0.143009 | 0.142857 | 1.52e-04 |
+| 7 | 0.125134 | 0.125000 | 1.34e-04 |
+| 8 | 0.111230 | 0.111111 | 1.19e-04 |
+| 9 | 0.100106 | 0.100000 | 1.06e-04 |
+| 10 | 0.091005 | 0.090909 | 9.63e-05 |
+
+![spectrum](scripts/cipher_plots/twofish128.png)
+
+### Twofish-256 (`twofish256`)
+
+Verdict: PASS &mdash; min p = 0.215 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999967$ bits ($8 - H = 3.26 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.42$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.492 |
+| KS vs Uniform(0,1) | 0.477 |
+| serial test (pairs, $16 \times 16$ cells) | 0.324 |
+| gap test (Knuth, $[0, 1/2)$) | 0.527 |
+| permutation test ($d = 4$) | 0.451 |
+| cumulative periodogram (Bartlett) | 0.934 |
+| runs test (bit stream) | 0.215 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499881 | 0.500000 | 1.19e-04 |
+| 2 | 0.333409 | 0.333333 | 7.60e-05 |
+| 3 | 0.250214 | 0.250000 | 2.14e-04 |
+| 4 | 0.200293 | 0.200000 | 2.93e-04 |
+| 5 | 0.167003 | 0.166667 | 3.36e-04 |
+| 6 | 0.143213 | 0.142857 | 3.56e-04 |
+| 7 | 0.125363 | 0.125000 | 3.63e-04 |
+| 8 | 0.111473 | 0.111111 | 3.62e-04 |
+| 9 | 0.100356 | 0.100000 | 3.56e-04 |
+| 10 | 0.091256 | 0.090909 | 3.47e-04 |
+
+![spectrum](scripts/cipher_plots/twofish256.png)
+
+### Simon32/64 (`simon32_64`)
+
+Verdict: PASS &mdash; min p = 0.119 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999964$ bits ($8 - H = 3.61 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.82$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.119 |
+| KS vs Uniform(0,1) | 0.290 |
+| serial test (pairs, $16 \times 16$ cells) | 0.650 |
+| gap test (Knuth, $[0, 1/2)$) | 0.808 |
+| permutation test ($d = 4$) | 0.646 |
+| cumulative periodogram (Bartlett) | 0.851 |
+| runs test (bit stream) | 0.636 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500066 | 0.500000 | 6.63e-05 |
+| 2 | 0.333433 | 0.333333 | 9.96e-05 |
+| 3 | 0.250088 | 0.250000 | 8.76e-05 |
+| 4 | 0.200052 | 0.200000 | 5.19e-05 |
+| 5 | 0.166673 | 0.166667 | 6.60e-06 |
+| 6 | 0.142817 | 0.142857 | 4.04e-05 |
+| 7 | 0.124915 | 0.125000 | 8.49e-05 |
+| 8 | 0.110986 | 0.111111 | 1.25e-04 |
+| 9 | 0.099840 | 0.100000 | 1.60e-04 |
+| 10 | 0.090719 | 0.090909 | 1.90e-04 |
+
+![spectrum](scripts/cipher_plots/simon32_64.png)
+
+### Simon64/128 (`simon64_128`)
+
+Verdict: PASS &mdash; min p = 0.095 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999966$ bits ($8 - H = 3.43 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.15$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.278 |
+| KS vs Uniform(0,1) | 0.342 |
+| serial test (pairs, $16 \times 16$ cells) | 0.095 |
+| gap test (Knuth, $[0, 1/2)$) | 0.281 |
+| permutation test ($d = 4$) | 0.375 |
+| cumulative periodogram (Bartlett) | 0.652 |
+| runs test (bit stream) | 0.331 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500134 | 0.500000 | 1.34e-04 |
+| 2 | 0.333339 | 0.333333 | 5.39e-06 |
+| 3 | 0.249914 | 0.250000 | 8.61e-05 |
+| 4 | 0.199863 | 0.200000 | 1.37e-04 |
+| 5 | 0.166502 | 0.166667 | 1.65e-04 |
+| 6 | 0.142678 | 0.142857 | 1.79e-04 |
+| 7 | 0.124814 | 0.125000 | 1.86e-04 |
+| 8 | 0.110923 | 0.111111 | 1.89e-04 |
+| 9 | 0.099812 | 0.100000 | 1.88e-04 |
+| 10 | 0.090722 | 0.090909 | 1.87e-04 |
+
+![spectrum](scripts/cipher_plots/simon64_128.png)
+
+### Simon128/128 (`simon128_128`)
+
+Verdict: PASS &mdash; min p = 0.062 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.17 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.49$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.616 |
+| KS vs Uniform(0,1) | 0.088 |
+| serial test (pairs, $16 \times 16$ cells) | 0.468 |
+| gap test (Knuth, $[0, 1/2)$) | 0.109 |
+| permutation test ($d = 4$) | 0.413 |
+| cumulative periodogram (Bartlett) | 0.714 |
+| runs test (bit stream) | 0.062 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499413 | 0.500000 | 5.87e-04 |
+| 2 | 0.332645 | 0.333333 | 6.88e-04 |
+| 3 | 0.249343 | 0.250000 | 6.57e-04 |
+| 4 | 0.199406 | 0.200000 | 5.94e-04 |
+| 5 | 0.166138 | 0.166667 | 5.29e-04 |
+| 6 | 0.142388 | 0.142857 | 4.69e-04 |
+| 7 | 0.124583 | 0.125000 | 4.17e-04 |
+| 8 | 0.110740 | 0.111111 | 3.71e-04 |
+| 9 | 0.099669 | 0.100000 | 3.31e-04 |
+| 10 | 0.090613 | 0.090909 | 2.96e-04 |
+
+![spectrum](scripts/cipher_plots/simon128_128.png)
+
+### Simon128/256 (`simon128_256`)
+
+Verdict: PASS &mdash; min p = 0.087 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999963$ bits ($8 - H = 3.66 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.14$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.087 |
+| KS vs Uniform(0,1) | 0.207 |
+| serial test (pairs, $16 \times 16$ cells) | 0.331 |
+| gap test (Knuth, $[0, 1/2)$) | 0.320 |
+| permutation test ($d = 4$) | 0.786 |
+| cumulative periodogram (Bartlett) | 0.443 |
+| runs test (bit stream) | 0.982 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500630 | 0.500000 | 6.30e-04 |
+| 2 | 0.333933 | 0.333333 | 6.00e-04 |
+| 3 | 0.250518 | 0.250000 | 5.18e-04 |
+| 4 | 0.200437 | 0.200000 | 4.37e-04 |
+| 5 | 0.167031 | 0.166667 | 3.65e-04 |
+| 6 | 0.143160 | 0.142857 | 3.03e-04 |
+| 7 | 0.125251 | 0.125000 | 2.51e-04 |
+| 8 | 0.111318 | 0.111111 | 2.06e-04 |
+| 9 | 0.100169 | 0.100000 | 1.69e-04 |
+| 10 | 0.091045 | 0.090909 | 1.36e-04 |
+
+![spectrum](scripts/cipher_plots/simon128_256.png)
+
+### Speck32/64 (`speck32_64`)
+
+Verdict: PASS &mdash; min p = 0.195 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.20 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 14.60$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.578 |
+| KS vs Uniform(0,1) | 0.418 |
+| serial test (pairs, $16 \times 16$ cells) | 0.272 |
+| gap test (Knuth, $[0, 1/2)$) | 0.917 |
+| permutation test ($d = 4$) | 0.358 |
+| cumulative periodogram (Bartlett) | 0.195 |
+| runs test (bit stream) | 0.370 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499643 | 0.500000 | 3.57e-04 |
+| 2 | 0.332859 | 0.333333 | 4.74e-04 |
+| 3 | 0.249498 | 0.250000 | 5.02e-04 |
+| 4 | 0.199503 | 0.200000 | 4.97e-04 |
+| 5 | 0.166186 | 0.166667 | 4.80e-04 |
+| 6 | 0.142397 | 0.142857 | 4.60e-04 |
+| 7 | 0.124562 | 0.125000 | 4.38e-04 |
+| 8 | 0.110694 | 0.111111 | 4.17e-04 |
+| 9 | 0.099603 | 0.100000 | 3.97e-04 |
+| 10 | 0.090531 | 0.090909 | 3.78e-04 |
+
+![spectrum](scripts/cipher_plots/speck32_64.png)
+
+### Speck64/128 (`speck64_128`)
+
+Verdict: PASS &mdash; min p = 0.119 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999965$ bits ($8 - H = 3.52 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 17.73$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.181 |
+| KS vs Uniform(0,1) | 0.635 |
+| serial test (pairs, $16 \times 16$ cells) | 0.188 |
+| gap test (Knuth, $[0, 1/2)$) | 0.947 |
+| permutation test ($d = 4$) | 0.780 |
+| cumulative periodogram (Bartlett) | 0.119 |
+| runs test (bit stream) | 0.871 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499865 | 0.500000 | 1.35e-04 |
+| 2 | 0.333180 | 0.333333 | 1.54e-04 |
+| 3 | 0.249844 | 0.250000 | 1.56e-04 |
+| 4 | 0.199851 | 0.200000 | 1.49e-04 |
+| 5 | 0.166530 | 0.166667 | 1.36e-04 |
+| 6 | 0.142735 | 0.142857 | 1.22e-04 |
+| 7 | 0.124892 | 0.125000 | 1.08e-04 |
+| 8 | 0.111017 | 0.111111 | 9.42e-05 |
+| 9 | 0.099918 | 0.100000 | 8.18e-05 |
+| 10 | 0.090838 | 0.090909 | 7.06e-05 |
+
+![spectrum](scripts/cipher_plots/speck64_128.png)
+
+### Speck128/128 (`speck128_128`)
+
+Verdict: PASS &mdash; min p = 0.023 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.24 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.58$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.522 |
+| KS vs Uniform(0,1) | 0.971 |
+| serial test (pairs, $16 \times 16$ cells) | 0.611 |
+| gap test (Knuth, $[0, 1/2)$) | 0.025 |
+| permutation test ($d = 4$) | 0.805 |
+| cumulative periodogram (Bartlett) | 0.023 |
+| runs test (bit stream) | 0.984 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.500099 | 0.500000 | 9.94e-05 |
+| 2 | 0.333409 | 0.333333 | 7.58e-05 |
+| 3 | 0.250029 | 0.250000 | 2.95e-05 |
+| 4 | 0.199987 | 0.200000 | 1.25e-05 |
+| 5 | 0.166621 | 0.166667 | 4.53e-05 |
+| 6 | 0.142788 | 0.142857 | 6.93e-05 |
+| 7 | 0.124914 | 0.125000 | 8.62e-05 |
+| 8 | 0.111013 | 0.111111 | 9.77e-05 |
+| 9 | 0.099895 | 0.100000 | 1.05e-04 |
+| 10 | 0.090800 | 0.090909 | 1.09e-04 |
+
+![spectrum](scripts/cipher_plots/speck128_128.png)
+
+### Speck128/256 (`speck128_256`)
+
+Verdict: PASS &mdash; min p = 0.639 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.15 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 11.74$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.639 |
+| KS vs Uniform(0,1) | 0.899 |
+| serial test (pairs, $16 \times 16$ cells) | 0.828 |
+| gap test (Knuth, $[0, 1/2)$) | 0.814 |
+| permutation test ($d = 4$) | 0.737 |
+| cumulative periodogram (Bartlett) | 0.805 |
+| runs test (bit stream) | 0.784 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499996 | 0.500000 | 4.25e-06 |
+| 2 | 0.333411 | 0.333333 | 7.81e-05 |
+| 3 | 0.250131 | 0.250000 | 1.31e-04 |
+| 4 | 0.200165 | 0.200000 | 1.65e-04 |
+| 5 | 0.166858 | 0.166667 | 1.92e-04 |
+| 6 | 0.143071 | 0.142857 | 2.14e-04 |
+| 7 | 0.125233 | 0.125000 | 2.33e-04 |
+| 8 | 0.111360 | 0.111111 | 2.49e-04 |
+| 9 | 0.100263 | 0.100000 | 2.63e-04 |
+| 10 | 0.091183 | 0.090909 | 2.74e-04 |
+
+![spectrum](scripts/cipher_plots/speck128_256.png)
+
+### ChaCha20 (`chacha20`)
+
+Verdict: PASS &mdash; min p = 0.073 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.21 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.17$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.555 |
+| KS vs Uniform(0,1) | 0.073 |
+| serial test (pairs, $16 \times 16$ cells) | 0.631 |
+| gap test (Knuth, $[0, 1/2)$) | 0.751 |
+| permutation test ($d = 4$) | 0.572 |
+| cumulative periodogram (Bartlett) | 0.886 |
+| runs test (bit stream) | 0.473 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499556 | 0.500000 | 4.44e-04 |
+| 2 | 0.332894 | 0.333333 | 4.39e-04 |
+| 3 | 0.249625 | 0.250000 | 3.75e-04 |
+| 4 | 0.199690 | 0.200000 | 3.10e-04 |
+| 5 | 0.166409 | 0.166667 | 2.58e-04 |
+| 6 | 0.142642 | 0.142857 | 2.16e-04 |
+| 7 | 0.124819 | 0.125000 | 1.81e-04 |
+| 8 | 0.110958 | 0.111111 | 1.53e-04 |
+| 9 | 0.099871 | 0.100000 | 1.29e-04 |
+| 10 | 0.090800 | 0.090909 | 1.09e-04 |
+
+![spectrum](scripts/cipher_plots/chacha20.png)
+
+### XChaCha20 (`xchacha20`)
+
+Verdict: PASS &mdash; min p = 0.001 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999968$ bits ($8 - H = 3.20 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.91$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.568 |
+| KS vs Uniform(0,1) | 0.550 |
+| serial test (pairs, $16 \times 16$ cells) | 0.020 |
+| gap test (Knuth, $[0, 1/2)$) | 0.924 |
+| permutation test ($d = 4$) | 0.001 |
+| cumulative periodogram (Bartlett) | 0.901 |
+| runs test (bit stream) | 0.791 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499443 | 0.500000 | 5.57e-04 |
+| 2 | 0.332775 | 0.333333 | 5.59e-04 |
+| 3 | 0.249458 | 0.250000 | 5.42e-04 |
+| 4 | 0.199476 | 0.200000 | 5.24e-04 |
+| 5 | 0.166161 | 0.166667 | 5.05e-04 |
+| 6 | 0.142371 | 0.142857 | 4.86e-04 |
+| 7 | 0.124533 | 0.125000 | 4.67e-04 |
+| 8 | 0.110663 | 0.111111 | 4.48e-04 |
+| 9 | 0.099571 | 0.100000 | 4.29e-04 |
+| 10 | 0.090497 | 0.090909 | 4.12e-04 |
+
+![spectrum](scripts/cipher_plots/xchacha20.png)
+
+### Salsa20 (`salsa20`)
+
+Verdict: PASS &mdash; min p = 0.181 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999965$ bits ($8 - H = 3.52 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 14.58$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.181 |
+| KS vs Uniform(0,1) | 0.315 |
+| serial test (pairs, $16 \times 16$ cells) | 0.703 |
+| gap test (Knuth, $[0, 1/2)$) | 0.270 |
+| permutation test ($d = 4$) | 0.517 |
+| cumulative periodogram (Bartlett) | 0.224 |
+| runs test (bit stream) | 0.603 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499635 | 0.500000 | 3.65e-04 |
+| 2 | 0.332892 | 0.333333 | 4.41e-04 |
+| 3 | 0.249559 | 0.250000 | 4.41e-04 |
+| 4 | 0.199587 | 0.200000 | 4.13e-04 |
+| 5 | 0.166292 | 0.166667 | 3.74e-04 |
+| 6 | 0.142524 | 0.142857 | 3.33e-04 |
+| 7 | 0.124707 | 0.125000 | 2.93e-04 |
+| 8 | 0.110855 | 0.111111 | 2.56e-04 |
+| 9 | 0.099778 | 0.100000 | 2.22e-04 |
+| 10 | 0.090718 | 0.090909 | 1.92e-04 |
+
+![spectrum](scripts/cipher_plots/salsa20.png)
+
+### Rabbit (`rabbit`)
+
+Verdict: PASS &mdash; min p = 0.206 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+
+Byte entropy $H = 7.999971$ bits ($8 - H = 2.87 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.42$.
+
+| test | p |
+|------|---|
+| byte frequency $\chi^2$ (256 cells) | 0.918 |
+| KS vs Uniform(0,1) | 0.275 |
+| serial test (pairs, $16 \times 16$ cells) | 0.206 |
+| gap test (Knuth, $[0, 1/2)$) | 0.306 |
+| permutation test ($d = 4$) | 0.425 |
+| cumulative periodogram (Bartlett) | 0.238 |
+| runs test (bit stream) | 0.926 |
+
+Moments of $u$ (sample, ideal, deviation):
+
+| $k$ | $m_k$ | $1/(k+1)$ | dev |
+|-----|-------|-----------|-----|
+| 1 | 0.499579 | 0.500000 | 4.21e-04 |
+| 2 | 0.332973 | 0.333333 | 3.60e-04 |
+| 3 | 0.249673 | 0.250000 | 3.27e-04 |
+| 4 | 0.199699 | 0.200000 | 3.01e-04 |
+| 5 | 0.166391 | 0.166667 | 2.75e-04 |
+| 6 | 0.142605 | 0.142857 | 2.52e-04 |
+| 7 | 0.124767 | 0.125000 | 2.33e-04 |
+| 8 | 0.110895 | 0.111111 | 2.16e-04 |
+| 9 | 0.099797 | 0.100000 | 2.03e-04 |
+| 10 | 0.090716 | 0.090909 | 1.93e-04 |
 
 ![spectrum](scripts/cipher_plots/rabbit.png)
 
 ### ZUC-128 (`zuc128`)
 
-Verdict: PASS &mdash; min p = 0.314 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.114 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999968$ bits ($8 - H = 3.18 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 15.99$.
+Byte entropy $H = 7.999964$ bits ($8 - H = 3.61 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 13.54$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.606 |
-| KS vs Uniform(0,1) | 0.585 |
-| serial test (pairs, $16 \times 16$ cells) | 0.314 |
-| gap test (Knuth, $[0, 1/2)$) | 0.534 |
-| permutation test ($d = 4$) | 0.515 |
-| cumulative periodogram (Bartlett) | 0.967 |
-| runs test (bit stream) | 0.584 |
+| byte frequency $\chi^2$ (256 cells) | 0.114 |
+| KS vs Uniform(0,1) | 0.552 |
+| serial test (pairs, $16 \times 16$ cells) | 0.227 |
+| gap test (Knuth, $[0, 1/2)$) | 0.265 |
+| permutation test ($d = 4$) | 0.551 |
+| cumulative periodogram (Bartlett) | 0.623 |
+| runs test (bit stream) | 0.166 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.499997 | 0.500000 | 3.19e-06 |
-| 2 | 0.333175 | 0.333333 | 1.58e-04 |
-| 3 | 0.249734 | 0.250000 | 2.66e-04 |
-| 4 | 0.199666 | 0.200000 | 3.34e-04 |
-| 5 | 0.166293 | 0.166667 | 3.73e-04 |
-| 6 | 0.142463 | 0.142857 | 3.95e-04 |
-| 7 | 0.124596 | 0.125000 | 4.04e-04 |
-| 8 | 0.110706 | 0.111111 | 4.05e-04 |
-| 9 | 0.099599 | 0.100000 | 4.01e-04 |
-| 10 | 0.090515 | 0.090909 | 3.94e-04 |
+| 1 | 0.500236 | 0.500000 | 2.36e-04 |
+| 2 | 0.333560 | 0.333333 | 2.26e-04 |
+| 3 | 0.250191 | 0.250000 | 1.91e-04 |
+| 4 | 0.200157 | 0.200000 | 1.57e-04 |
+| 5 | 0.166798 | 0.166667 | 1.31e-04 |
+| 6 | 0.142969 | 0.142857 | 1.12e-04 |
+| 7 | 0.125099 | 0.125000 | 9.87e-05 |
+| 8 | 0.111200 | 0.111111 | 8.85e-05 |
+| 9 | 0.100081 | 0.100000 | 8.06e-05 |
+| 10 | 0.090983 | 0.090909 | 7.40e-05 |
 
 ![spectrum](scripts/cipher_plots/zuc128.png)
 
 ### SNOW 3G (`snow3g`)
 
-Verdict: PASS &mdash; min p = 0.082 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
+Verdict: PASS &mdash; min p = 0.137 against $\alpha / m = 1.43 \times 10^{-4}$; 0 of 7 p-values below $\alpha = 0.001$.
 
-Byte entropy $H = 7.999963$ bits ($8 - H = 3.67 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 14.51$.
+Byte entropy $H = 7.999966$ bits ($8 - H = 3.41 \times 10^{-5}$); 704,810 chunk values; Fisher's $g = 12.74$.
 
 | test | p |
 |------|---|
-| byte frequency $\chi^2$ (256 cells) | 0.082 |
-| KS vs Uniform(0,1) | 0.158 |
-| serial test (pairs, $16 \times 16$ cells) | 0.275 |
-| gap test (Knuth, $[0, 1/2)$) | 0.305 |
-| permutation test ($d = 4$) | 0.736 |
-| cumulative periodogram (Bartlett) | 0.727 |
-| runs test (bit stream) | 0.547 |
+| byte frequency $\chi^2$ (256 cells) | 0.300 |
+| KS vs Uniform(0,1) | 0.805 |
+| serial test (pairs, $16 \times 16$ cells) | 0.484 |
+| gap test (Knuth, $[0, 1/2)$) | 0.423 |
+| permutation test ($d = 4$) | 0.597 |
+| cumulative periodogram (Bartlett) | 0.165 |
+| runs test (bit stream) | 0.137 |
 
 Moments of $u$ (sample, ideal, deviation):
 
 | $k$ | $m_k$ | $1/(k+1)$ | dev |
 |-----|-------|-----------|-----|
-| 1 | 0.499392 | 0.500000 | 6.08e-04 |
-| 2 | 0.332707 | 0.333333 | 6.27e-04 |
-| 3 | 0.249412 | 0.250000 | 5.88e-04 |
-| 4 | 0.199454 | 0.200000 | 5.46e-04 |
-| 5 | 0.166156 | 0.166667 | 5.10e-04 |
-| 6 | 0.142376 | 0.142857 | 4.81e-04 |
-| 7 | 0.124542 | 0.125000 | 4.58e-04 |
-| 8 | 0.110673 | 0.111111 | 4.38e-04 |
-| 9 | 0.099578 | 0.100000 | 4.22e-04 |
-| 10 | 0.090502 | 0.090909 | 4.07e-04 |
+| 1 | 0.500182 | 0.500000 | 1.82e-04 |
+| 2 | 0.333563 | 0.333333 | 2.30e-04 |
+| 3 | 0.250236 | 0.250000 | 2.36e-04 |
+| 4 | 0.200232 | 0.200000 | 2.32e-04 |
+| 5 | 0.166888 | 0.166667 | 2.22e-04 |
+| 6 | 0.143065 | 0.142857 | 2.08e-04 |
+| 7 | 0.125193 | 0.125000 | 1.93e-04 |
+| 8 | 0.111290 | 0.111111 | 1.79e-04 |
+| 9 | 0.100165 | 0.100000 | 1.65e-04 |
+| 10 | 0.091062 | 0.090909 | 1.53e-04 |
 
 ![spectrum](scripts/cipher_plots/snow3g.png)
 
@@ -1246,4 +1295,22 @@ Spearman correlation of the p-values across streams (dependence makes the Bonfer
 Byte entropy over the null streams: mean $8 - H = 3.20 \times 10^{-5}$ bits, sd $4.05 \times 10^{-6}$ bits; the second-order prediction is mean $(K-1)/(2 L \ln 2) = 3.26 \times 10^{-5}$ and sd $\sqrt{2(K-1)}/(2 L \ln 2) = 2.89 \times 10^{-6}$ with $K = 256$.
 
 ![calibration](scripts/cipher_plots/calibration.png)
+
+## Held-out calibration at the decision threshold
+
+Predeclared before any held-out stream was drawn (the protocol at `HELD_OUT_STREAMS` in `scripts/cipher_randomness.R`; scripts `17533b1f59585350`): 400,000 fresh streams of 5,638,480 bytes from `/dev/urandom` (hosts dennard, moore), battery version 4 frozen.  At $t = \alpha / m = 1.43 \times 10^{-4}$ a valid p-value has $\Pr(p \le t) \le t$, so each test passes when the one-sided exact binomial test for an excess of rejections over rate $t$ gives at least 0.05 / 7, and the battery passes when the same test of the streams with some $p < t$ against rate $\alpha$ gives at least 0.05.
+
+| test | rejections at $t$ (rate, 95% CI) | expected | excess p | verdict |
+|------|------|------|------|------|
+| byte frequency $\chi^2$ (256 cells) | 51 / 400,000 = 1.28e-04 [9.5e-05, 1.7e-04] | 57.1 | 0.809 | calibrated |
+| KS vs Uniform(0,1) | 62 / 400,000 = 1.55e-04 [1.2e-04, 2.0e-04] | 57.1 | 0.277 | calibrated |
+| serial test (pairs, $16 \times 16$ cells) | 56 / 400,000 = 1.40e-04 [1.1e-04, 1.8e-04] | 57.1 | 0.578 | calibrated |
+| gap test (Knuth, $[0, 1/2)$) | 57 / 400,000 = 1.42e-04 [1.1e-04, 1.8e-04] | 57.1 | 0.525 | calibrated |
+| permutation test ($d = 4$) | 61 / 400,000 = 1.52e-04 [1.2e-04, 2.0e-04] | 57.1 | 0.322 | calibrated |
+| cumulative periodogram (Bartlett) | 53 / 400,000 = 1.32e-04 [9.9e-05, 1.7e-04] | 57.1 | 0.726 | calibrated |
+| runs test (bit stream) | 60 / 400,000 = 1.50e-04 [1.1e-04, 1.9e-04] | 57.1 | 0.370 | calibrated |
+
+At 400,000 streams the per-test rule flags a count of 77 or more, so a test whose true rejection rate at $t$ is 1.34 times $t$ is flagged only half the time: "calibrated" excludes gross excesses, not small ones.
+
+Battery failures (some $p < t$): 397 / 400,000 = 9.92e-04 [9.0e-04, 1.1e-03] against rate $\alpha = 0.001$ (expected 400.0); excess p 0.566: within the nominal rate.
 
