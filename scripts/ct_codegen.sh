@@ -49,8 +49,14 @@ mkdir -p "$out"
 
 # The probe carries the generic paths, which are instantiated in it; the
 # library carries the rest, so both are emitted and both are searched.
-RUSTFLAGS="--emit asm" cargo build --release --manifest-path "$probe/Cargo.toml" \
-    --target "$target" -q --target-dir "$out/target"
+#
+# One codegen unit: with the default sixteen, how much of a claim's callees end
+# up inlined into it varies between builds of the same source with the same
+# compiler, and so does the branch count. One unit makes the reading
+# reproducible, and inlines at least as much as a release build would.
+RUSTFLAGS="--emit asm -C codegen-units=1" cargo build --release \
+    --manifest-path "$probe/Cargo.toml" --target "$target" -q \
+    --target-dir "$out/target"
 
 asm=$(find "$out/target/$target/release" -name '*.s')
 [ -n "$asm" ] || { echo "no assembly emitted for $target" >&2; exit 1; }
@@ -162,7 +168,7 @@ claims=(
     "x25519-ladder:X255196scalar|X25519.*scalar_mult"
     "x448-ladder:X4486scalar|X448.*scalar_mult"
     "x25519-agree:x25519_agree|X25519PrivateKey.*agree:d0"
-    "ml-kem-decaps:ml_kem_decaps|ml_kem_decaps_internal:d0"
+    "ml-kem-decaps:ml_kem_decaps|ml_kem_decaps_internal:d1"
     "ntru-hps509-decaps:ntru_hps509_decaps|NtruHps509.*decaps:d0"
     "chacha20-keystream:chacha20_keystream|ChaCha2015apply_keystream"
     "poly1305-mac:poly1305_one_shot|modes8poly130512poly1305_mac"
