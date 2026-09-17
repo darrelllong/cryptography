@@ -77,12 +77,22 @@ pub(super) trait HashSubkey {
     fn multiply(&self, x: u128) -> u128;
 }
 
+/// Bits in a GHASH field element, and so entries in the table of multiples
+/// (SP 800-38D §6.3: the field is GF(2^128)).
+const FIELD_BITS: usize = 128;
+
+/// Bytes in a field element.
+const BLOCK_BYTES: usize = FIELD_BITS / 8;
+
+/// Bits in each half of the `u128` the table walks.
+const HALF_BITS: usize = FIELD_BITS / 2;
+
 /// A hash subkey `H` prepared for SP 800-38D §6.3 products `X • H`: Algorithm
 /// 1's blocks `V_i = H·u^i` for `i = 0..128`, each as `[high, low]` halves.
 ///
 /// The table is key material and is wiped on drop.
 pub(super) struct SubkeyTable {
-    multiples: [[u64; 2]; 128],
+    multiples: [[u64; 2]; FIELD_BITS],
 }
 
 impl HashSubkey for SubkeyTable {
@@ -93,7 +103,7 @@ impl HashSubkey for SubkeyTable {
     /// unwiped copy of the multiples is left in a constructor local.
     fn new(h: u128) -> Self {
         let mut table = Self {
-            multiples: [[0u64; 2]; 128],
+            multiples: [[0u64; 2]; FIELD_BITS],
         };
         let mut v = h;
         for entry in &mut table.multiples {
@@ -106,7 +116,7 @@ impl HashSubkey for SubkeyTable {
 
     /// `X • H` (SP 800-38D §6.3): the XOR of the `V_i` whose bit `x_i` is 1.
     fn multiply(&self, x: u128) -> u128 {
-        let (first_half, second_half) = self.multiples.split_at(64);
+        let (first_half, second_half) = self.multiples.split_at(HALF_BITS);
         let mut z_high = 0u64;
         let mut z_low = 0u64;
         // x0 … x63 are the high half of x from its top bit down; x64 … x127
@@ -151,7 +161,7 @@ impl HashSubkey for VariableTimeSubkey {
         let mut z = 0u128;
         let mut v = self.h;
         // Step 3, for x0 (bit 127) down to x127 (bit 0).
-        for i in 0..128 {
+        for i in 0..FIELD_BITS {
             if (x >> (127 - i)) & 1 == 1 {
                 z ^= v;
             }
@@ -173,13 +183,13 @@ impl Drop for VariableTimeSubkey {
 /// `input` is read as consecutive 16-byte field elements. A shorter final chunk
 /// is zero-padded, which GCM-SIV never relies on because it pads its input to a
 /// multiple of 16 bytes (RFC 8452 §4) before calling POLYVAL.
-pub(super) fn polyval(h: &[u8; 16], input: &[u8]) -> [u8; 16] {
+pub(super) fn polyval(h: &[u8; BLOCK_BYTES], input: &[u8]) -> [u8; BLOCK_BYTES] {
     let mut ghash_key = times_u(u128::from_le_bytes(*h));
     let table = SubkeyTable::new(ghash_key);
     super::wipe_u128(&mut ghash_key);
     let mut acc = 0u128;
-    let mut element = [0u8; 16];
-    for chunk in input.chunks(16) {
+    let mut element = [0u8; BLOCK_BYTES];
+    for chunk in input.chunks(BLOCK_BYTES) {
         element.fill(0);
         element[..chunk.len()].copy_from_slice(chunk);
         acc = table.multiply(acc ^ u128::from_le_bytes(element));

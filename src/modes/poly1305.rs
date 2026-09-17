@@ -69,6 +69,13 @@ const R_CLAMP: u128 = 0x0fff_fffc_0fff_fffc_0fff_fffc_0fff_ffff;
 /// The low 64 bits of a `u128`.
 const LOW64: u128 = u64::MAX as u128;
 
+/// Message block and tag length, in bytes (RFC 8439 §2.5: 16-octet blocks and
+/// a 16-octet tag).
+const BLOCK_BYTES: usize = 16;
+
+/// One-time key length, in bytes: `r ‖ s`, one block each (§2.5).
+const KEY_BYTES: usize = 2 * BLOCK_BYTES;
+
 /// Wipe one `u64` that held key-derived data.
 #[inline]
 fn wipe_u64(word: &mut u64) {
@@ -95,7 +102,7 @@ impl TagState {
     ///
     /// The clamped `r` and its halves exist only as locals of this function
     /// on the way into the multiplier, and are wiped before it returns.
-    fn new(r_bytes: &[u8; 16]) -> Self {
+    fn new(r_bytes: &[u8; BLOCK_BYTES]) -> Self {
         let mut r = u128::from_le_bytes(*r_bytes) & R_CLAMP;
         let mut r_lo = r as u64;
         let mut r_hi = (r >> 64) as u64;
@@ -135,7 +142,7 @@ impl TagState {
     /// The selection between `Acc` and `Acc − p` is a mask made opaque with
     /// `black_box` (see the module documentation). `s`, both candidates and
     /// the selected value `tag − s` are wiped before the tag is returned.
-    fn finish(&self, s_bytes: &[u8; 16]) -> [u8; 16] {
+    fn finish(&self, s_bytes: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let [acc0, acc1, acc2] = self.accumulator.map(u128::from);
         let plus5_0 = acc0 + 5;
         let plus5_1 = acc1 + (plus5_0 >> 64);
@@ -169,23 +176,23 @@ impl Drop for TagState {
 /// little-endian with a 1 appended one octet past its end, are absorbed in
 /// order, then `s` is added. The schedule depends only on `msg.len()`.
 #[must_use]
-pub fn poly1305_mac(msg: &[u8], key: &[u8; 32]) -> [u8; 16] {
-    let mut r_bytes = [0u8; 16];
-    let mut s_bytes = [0u8; 16];
-    r_bytes.copy_from_slice(&key[..16]);
-    s_bytes.copy_from_slice(&key[16..]);
+pub fn poly1305_mac(msg: &[u8], key: &[u8; KEY_BYTES]) -> [u8; BLOCK_BYTES] {
+    let mut r_bytes = [0u8; BLOCK_BYTES];
+    let mut s_bytes = [0u8; BLOCK_BYTES];
+    r_bytes.copy_from_slice(&key[..BLOCK_BYTES]);
+    s_bytes.copy_from_slice(&key[BLOCK_BYTES..]);
     let mut state = TagState::new(&r_bytes);
 
-    let mut blocks = msg.chunks_exact(16);
+    let mut blocks = msg.chunks_exact(BLOCK_BYTES);
     for block in &mut blocks {
-        let mut word = [0u8; 16];
+        let mut word = [0u8; BLOCK_BYTES];
         word.copy_from_slice(block);
         // A full block's appended 1 sits at 2^128, above the word.
         state.absorb(u128::from_le_bytes(word), 1);
     }
 
     let tail = blocks.remainder();
-    let mut padded = [0u8; 16];
+    let mut padded = [0u8; BLOCK_BYTES];
     if !tail.is_empty() {
         // A short block's appended 1 is the octet after its last one.
         padded[..tail.len()].copy_from_slice(tail);
@@ -208,18 +215,18 @@ pub fn poly1305_mac(msg: &[u8], key: &[u8; 32]) -> [u8; 16] {
 /// its nonce. Verifying candidate tags reveals only accept or reject and does
 /// not use up the key. The key is wiped on drop.
 pub struct Poly1305 {
-    key: [u8; 32],
+    key: [u8; KEY_BYTES],
 }
 
 impl Poly1305 {
     /// Construct a Poly1305 context from a one-time key.
     #[must_use]
-    pub fn new(key: &[u8; 32]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         Self { key: *key }
     }
 
     /// Construct a Poly1305 context and wipe the caller-provided key bytes.
-    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -227,13 +234,13 @@ impl Poly1305 {
 
     /// Compute the Poly1305 tag over `msg`, the one message this key may tag.
     #[must_use]
-    pub fn compute(&self, msg: &[u8]) -> [u8; 16] {
+    pub fn compute(&self, msg: &[u8]) -> [u8; BLOCK_BYTES] {
         poly1305_mac(msg, &self.key)
     }
 
     /// Verify a Poly1305 tag in constant time.
     #[must_use]
-    pub fn verify(&self, msg: &[u8], tag: &[u8; 16]) -> bool {
+    pub fn verify(&self, msg: &[u8], tag: &[u8; BLOCK_BYTES]) -> bool {
         // The genuine tag is wiped: for an attacker-chosen `msg` it is a forgery.
         let mut expected = self.compute(msg);
         let authentic = crate::ct::constant_time_eq_mask(&expected, tag) == u8::MAX;

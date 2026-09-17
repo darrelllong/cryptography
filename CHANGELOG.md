@@ -195,6 +195,11 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `ees443ep1` keeps EESS #1 v3.1 Table 5's (5, 8). The module documents each
   dense-set field's source and checking experiment in a table, and tests
   recompute the rule and show ciphertexts independent of the counts.
+- The AEAD and MAC modes name their sizes and bounds: block, tag and key
+  lengths, CMAC's reduction polynomials, GCM's counter field and short IV,
+  CCM's nonce and tag ranges, key wrap's minimum lengths, OCB's offset table
+  and nonce bound, and the padding rules of GCM-SIV and ChaCha20-Poly1305,
+  each citing the section that fixes it.
 - Constants in the new generators and the NTRU code are named with their
   sources: SP 800-90A's domain-separation and initial-state bytes, the fixed
   fast-key-erasure nonce, 3⁵ = 243 trits per octet, and test thresholds with

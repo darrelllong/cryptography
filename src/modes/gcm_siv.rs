@@ -73,12 +73,23 @@ impl_gcm_siv_block_cipher!(Aes256, 32);
 impl_gcm_siv_block_cipher!(Aes128Ct, 16);
 impl_gcm_siv_block_cipher!(Aes256Ct, 32);
 
+/// POLYVAL block length, in bytes (RFC 8452 §3: 16-octet field elements).
+const BLOCK_BYTES: usize = 16;
+
+/// The two little-endian 64-bit bit-lengths that close the POLYVAL input
+/// (RFC 8452 §4).
+const LENGTH_FIELD_BYTES: usize = 2 * 8;
+
+/// Zeros to the next multiple of a block, and none when the length already is
+/// one (RFC 8452 §4's `pad`).
+const fn padding(len: usize) -> usize {
+    (BLOCK_BYTES - (len % BLOCK_BYTES)) % BLOCK_BYTES
+}
+
 #[inline]
 fn pad16(input: &[u8], out: &mut Vec<u8>) {
     out.extend_from_slice(input);
-    if !input.len().is_multiple_of(16) {
-        out.resize(out.len() + (16 - (input.len() % 16)), 0);
-    }
+    out.resize(out.len() + padding(input.len()), 0);
 }
 
 /// The POLYVAL input `pad(AAD) || pad(plaintext) || len(AAD) || len(plaintext)`
@@ -89,10 +100,10 @@ fn pad16(input: &[u8], out: &mut Vec<u8>) {
 fn gcm_siv_s_input(aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(
         aad.len()
-            + ((16 - (aad.len() % 16)) % 16)
+            + padding(aad.len())
             + plaintext.len()
-            + ((16 - (plaintext.len() % 16)) % 16)
-            + 16,
+            + padding(plaintext.len())
+            + LENGTH_FIELD_BYTES,
     );
     pad16(aad, &mut out);
     pad16(plaintext, &mut out);

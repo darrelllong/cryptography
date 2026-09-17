@@ -42,17 +42,29 @@ Items are marked **owner** when only the repository owner can do them.
    (for example RFC 9180 HPKE over a DH-KEM the crate already has) from its
    specification and vectors, with corrupted-encapsulation, AAD/context and
    invalid-key tests.
-6. **Timing qualification.** `Ct` types and the X25519/X448 ladders follow a
-   source-level discipline only. Qualify generated code per compiler and
-   target, and measure complete operations with predeclared, interleaved,
-   distributional input-class experiments.
+6. **Timing qualification beyond the tag comparison.** `scripts/ct_codegen.sh`
+   now reads the machine code of `Hmac::<Sha256>::verify` and finds only
+   public-length branches on aarch64-apple-darwin and x86_64-unknown-linux-gnu.
+   The `Ct` ciphers, the X25519/X448 ladders and complete AEAD, signature and
+   key-agreement operations have no such evidence: extend the probe to them,
+   run it on every supported target, and add predeclared interleaved
+   input-class timing experiments with reported distributions.
 7. **Targeted fuzzing.** Campaigns aimed at parser length and count fields,
     explicit domain parameters, key-pair consistency, nonce and counter
     exhaustion, authentication failure and failure-buffer contents, with the
-    corpus, duration, features and revisions recorded.
+   corpus, duration, features and revisions recorded.
+
+8. **Named constants across the tree.** Today's generator, ChaCha20, NTRU and
+   benchmark constants carry their derivations. The rest of the tree still
+   holds bare literals for spec-fixed widths, round counts and table sizes;
+   sweep each module and name them or cite the section that fixes them.
+9. **A specification-to-test map.** For each scheme, a table from
+    specification version and section to the operation, its accepted inputs
+    and the test that checks it, separating valid-vector conformance from
+    refusal of malformed input.
 
 ## Statistical residuals to decide on
 
-8. **Calibration covers one stream length.** The gap test's pooling depth
+10. **Calibration covers one stream length.** The gap test's pooling depth
    depends on the stream length, so a battery run at any other `--bytes` needs
    its own calibration campaign.

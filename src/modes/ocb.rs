@@ -20,6 +20,22 @@
 use super::{dbl_block, xor_block16_in_place};
 use crate::BlockCipher;
 
+/// Block length of the 128-bit block ciphers OCB uses, in bytes (RFC 7253
+/// §2: "OCB is defined for a blockcipher with a 128-bit blocksize").
+const BLOCK_BYTES: usize = 16;
+
+/// Bits in a block: the modulus of the tag length in the nonce block
+/// (RFC 7253 §4.2).
+const BLOCK_BITS: usize = 8 * BLOCK_BYTES;
+
+/// `L_i` entries the offset table holds. A block index below 2^64 has at most
+/// 63 trailing zeros, so this covers every addressable block.
+const OFFSET_TABLE: usize = 64;
+
+/// Longest nonce RFC 7253 §4.2 admits, in bytes: the nonce block leaves
+/// 120 bits for `zeros(120-bitlen(N)) || 1 || N`.
+const MAX_NONCE_BYTES: usize = 15;
+
 /// The key-only OCB offsets of RFC 7253 §4.1: `L_*`, `L_$`, and the lazily
 /// extended `L_i = dbl(L_{i-1})` from `L_0 = dbl(L_$)`.
 ///
@@ -28,11 +44,10 @@ use crate::BlockCipher;
 /// reallocates and abandons a copy on the heap, and the whole table is wiped
 /// on drop.
 struct OcbOffsets {
-    l_star: [u8; 16],
-    l_dollar: [u8; 16],
-    // `L_i` for `i < filled`. A block index below 2^64 has at most 63 trailing
-    // zeros, so 64 entries cover every addressable block.
-    l: [[u8; 16]; 64],
+    l_star: [u8; BLOCK_BYTES],
+    l_dollar: [u8; BLOCK_BYTES],
+    // `L_i` for `i < filled`.
+    l: [[u8; BLOCK_BYTES]; OFFSET_TABLE],
     filled: usize,
 }
 
@@ -41,16 +56,16 @@ impl OcbOffsets {
     /// values are never moved out of a constructor's stack frame.
     const fn empty() -> Self {
         Self {
-            l_star: [0; 16],
-            l_dollar: [0; 16],
-            l: [[0; 16]; 64],
+            l_star: [0; BLOCK_BYTES],
+            l_dollar: [0; BLOCK_BYTES],
+            l: [[0; BLOCK_BYTES]; OFFSET_TABLE],
             filled: 0,
         }
     }
 
     /// Fill `L_* = E_K(0^128)`, `L_$ = dbl(L_*)`, and `L_0 = dbl(L_$)`.
     fn derive<C: BlockCipher>(&mut self, cipher: &C) {
-        self.l_star = [0u8; 16];
+        self.l_star = [0u8; BLOCK_BYTES];
         cipher.encrypt(&mut self.l_star);
         self.l_dollar = dbl_block(self.l_star);
         self.l[0] = dbl_block(self.l_dollar);
@@ -58,7 +73,7 @@ impl OcbOffsets {
     }
 
     /// `L_{ntz(i)}` for the 1-based block index `i`.
-    fn for_block(&mut self, i: usize) -> &[u8; 16] {
+    fn for_block(&mut self, i: usize) -> &[u8; BLOCK_BYTES] {
         let tz = i.trailing_zeros() as usize;
         while self.filled <= tz {
             self.l[self.filled] = dbl_block(self.l[self.filled - 1]);
@@ -78,26 +93,29 @@ impl Drop for OcbOffsets {
 
 #[inline]
 fn split_blocks(data: &[u8]) -> (&[u8], &[u8]) {
-    let full = data.len() / 16 * 16;
+    let full = data.len() / BLOCK_BYTES * BLOCK_BYTES;
     (&data[..full], &data[full..])
 }
 
 /// `Nonce = num2str(TAGLEN mod 128,7) || zeros(120-bitlen(N)) || 1 || N` of
 /// RFC 7253 section 4.2, for a byte-string nonce `N` of at most 15 bytes.
-fn nonce_block_from_bytes(tag_len_bits: usize, nonce: &[u8]) -> [u8; 16] {
-    assert!(nonce.len() <= 15, "OCB nonce must be at most 120 bits");
+fn nonce_block_from_bytes(tag_len_bits: usize, nonce: &[u8]) -> [u8; BLOCK_BYTES] {
+    assert!(
+        nonce.len() <= MAX_NONCE_BYTES,
+        "OCB nonce must be at most 120 bits"
+    );
     let n_bits = nonce.len() * 8;
-    let tag_mod = tag_len_bits % 128;
+    let tag_mod = tag_len_bits % BLOCK_BITS;
 
-    let mut n_aligned = [0u8; 16];
-    n_aligned[16 - nonce.len()..].copy_from_slice(nonce);
+    let mut n_aligned = [0u8; BLOCK_BYTES];
+    n_aligned[BLOCK_BYTES - nonce.len()..].copy_from_slice(nonce);
     let n_val = u128::from_be_bytes(n_aligned);
 
     let nonce_val = ((tag_mod as u128) << 121) | (1u128 << n_bits) | n_val;
     nonce_val.to_be_bytes()
 }
 
-fn stretch_from_ktop(ktop: [u8; 16]) -> [u8; 24] {
+fn stretch_from_ktop(ktop: [u8; BLOCK_BYTES]) -> [u8; 24] {
     let mut stretch = [0u8; 24];
     stretch[..16].copy_from_slice(&ktop);
     for i in 0..8 {
@@ -114,11 +132,11 @@ fn stretch_from_ktop(ktop: [u8; 16]) -> [u8; 24] {
 /// its last bits come from byte `7 + 15 + 1 = 23`, the final byte of
 /// `Stretch`. Every index below is therefore in bounds, and the `bit_off == 0`
 /// case needs at most bytes `7..23`.
-fn offset_from_stretch(stretch: &[u8; 24], bottom: u8) -> [u8; 16] {
+fn offset_from_stretch(stretch: &[u8; 24], bottom: u8) -> [u8; BLOCK_BYTES] {
     debug_assert!(bottom < 64, "bottom is a six-bit value");
     let byte_off = usize::from(bottom / 8);
     let bit_off = usize::from(bottom % 8);
-    let mut out = [0u8; 16];
+    let mut out = [0u8; BLOCK_BYTES];
 
     if bit_off == 0 {
         out.copy_from_slice(&stretch[byte_off..byte_off + 16]);
@@ -139,10 +157,10 @@ fn hash_associated_data<C: BlockCipher>(
     cipher: &C,
     offsets: &mut OcbOffsets,
     aad: &[u8],
-) -> [u8; 16] {
-    let mut sum = [0u8; 16];
-    let mut offset = [0u8; 16];
-    let mut x = [0u8; 16];
+) -> [u8; BLOCK_BYTES] {
+    let mut sum = [0u8; BLOCK_BYTES];
+    let mut offset = [0u8; BLOCK_BYTES];
+    let mut x = [0u8; BLOCK_BYTES];
 
     let (full, partial) = split_blocks(aad);
     for (idx, block) in full.chunks_exact(16).enumerate() {
@@ -157,7 +175,7 @@ fn hash_associated_data<C: BlockCipher>(
     if !partial.is_empty() {
         // Final partial AD block uses Offset xor L_* and 10* padding.
         xor_block16_in_place(&mut offset, &offsets.l_star);
-        x = [0u8; 16];
+        x = [0u8; BLOCK_BYTES];
         x[..partial.len()].copy_from_slice(partial);
         x[partial.len()] = 0x80;
         xor_block16_in_place(&mut x, &offset);
@@ -253,7 +271,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
     /// Nonce-dependent `Offset_0` (RFC 7253 §4.2) from `Ktop || Stretch` and
     /// the bottom six nonce bits. `Ktop` and `Stretch` are key-derived and are
     /// wiped here; the caller wipes the returned offset.
-    fn initial_offset(&self, nonce: &[u8]) -> [u8; 16] {
+    fn initial_offset(&self, nonce: &[u8]) -> [u8; BLOCK_BYTES] {
         let nonce_block = nonce_block_from_bytes(TAG_LEN * 8, nonce);
         let bottom = nonce_block[15] & 0x3f;
         let mut ktop = nonce_block;
@@ -280,9 +298,9 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
         let mut offset = self.initial_offset(nonce);
         let mut aad_hash = hash_associated_data(&self.cipher, &mut offsets, aad);
 
-        let (full_len, partial_len) = (data.len() / 16 * 16, data.len() % 16);
-        let mut checksum = [0u8; 16];
-        let mut p = [0u8; 16];
+        let (full_len, partial_len) = (data.len() / BLOCK_BYTES * BLOCK_BYTES, data.len() % 16);
+        let mut checksum = [0u8; BLOCK_BYTES];
+        let mut p = [0u8; BLOCK_BYTES];
 
         for (idx, block) in data[..full_len].chunks_exact_mut(16).enumerate() {
             // RFC 7253 §4.2: Offset_i = Offset_{i-1} xor L_{ntz(i)}.
@@ -295,7 +313,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
             block.copy_from_slice(&p);
         }
 
-        let mut pad = [0u8; 16];
+        let mut pad = [0u8; BLOCK_BYTES];
         if partial_len != 0 {
             // RFC 7253 §4.2 final partial block: Offset_* = Offset_m xor L_*.
             xor_block16_in_place(&mut offset, &offsets.l_star);
@@ -303,7 +321,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
             self.cipher.encrypt(&mut pad);
 
             let partial = &mut data[full_len..];
-            p = [0u8; 16];
+            p = [0u8; BLOCK_BYTES];
             p[..partial.len()].copy_from_slice(partial);
             p[partial.len()] = 0x80;
             xor_block16_in_place(&mut checksum, &p);
@@ -356,9 +374,9 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
         let mut offset = self.initial_offset(nonce);
         let mut aad_hash = hash_associated_data(&self.cipher, &mut offsets, aad);
 
-        let (full_len, partial_len) = (data.len() / 16 * 16, data.len() % 16);
-        let mut checksum = [0u8; 16];
-        let mut c = [0u8; 16];
+        let (full_len, partial_len) = (data.len() / BLOCK_BYTES * BLOCK_BYTES, data.len() % 16);
+        let mut checksum = [0u8; BLOCK_BYTES];
+        let mut c = [0u8; BLOCK_BYTES];
 
         // Decrypt into a heap copy and commit only if the tag verifies.
         let mut plaintext = data.to_vec();
@@ -373,7 +391,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
             block.copy_from_slice(&c);
         }
 
-        let mut pad = [0u8; 16];
+        let mut pad = [0u8; BLOCK_BYTES];
         if partial_len != 0 {
             // RFC 7253 §4.3 final partial block: Offset_* = Offset_m xor L_*.
             xor_block16_in_place(&mut offset, &offsets.l_star);
@@ -383,7 +401,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
             for (byte, key) in partial.iter_mut().zip(pad.iter()) {
                 *byte ^= key;
             }
-            c = [0u8; 16];
+            c = [0u8; BLOCK_BYTES];
             c[..partial.len()].copy_from_slice(partial);
             c[partial.len()] = 0x80;
             xor_block16_in_place(&mut checksum, &c);

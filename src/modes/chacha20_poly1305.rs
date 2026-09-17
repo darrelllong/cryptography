@@ -11,7 +11,24 @@ use crate::ChaCha20;
 /// RFC 8439 §2.8 plaintext bound, 2^38 − 64 bytes: the payload keystream runs
 /// from block 1 through block `u32::MAX`, 64 bytes each. One more byte would
 /// need block 0 again, which is the Poly1305 one-time-key block.
-const MAX_PLAINTEXT_BYTES: u64 = ((1u64 << 32) - 1) * 64;
+const MAX_PLAINTEXT_BYTES: u64 = ((1u64 << 32) - 1) * CHACHA20_BLOCK_BYTES as u64;
+
+/// ChaCha20 keystream bytes per block (RFC 8439 §2.3).
+const CHACHA20_BLOCK_BYTES: usize = 64;
+
+/// Poly1305 block length, in bytes, and so the width `pad16` pads to
+/// (RFC 8439 §2.5 and §2.8).
+const POLY1305_BLOCK_BYTES: usize = 16;
+
+/// The two little-endian 64-bit lengths that close the MAC input
+/// (RFC 8439 §2.8).
+const LENGTH_FIELD_BYTES: usize = 2 * 8;
+
+/// `pad16(data)` of RFC 8439 §2.8: zeros to the next multiple of the Poly1305
+/// block, and none when the length is already a multiple.
+const fn padding(len: usize) -> usize {
+    (POLY1305_BLOCK_BYTES - (len % POLY1305_BLOCK_BYTES)) % POLY1305_BLOCK_BYTES
+}
 
 #[inline]
 fn plaintext_len_allowed(len: usize) -> bool {
@@ -21,19 +38,15 @@ fn plaintext_len_allowed(len: usize) -> bool {
 fn build_poly1305_input(aad: &[u8], ciphertext: &[u8]) -> Vec<u8> {
     let mut data = Vec::with_capacity(
         aad.len()
-            + ((16 - (aad.len() % 16)) % 16)
+            + padding(aad.len())
             + ciphertext.len()
-            + ((16 - (ciphertext.len() % 16)) % 16)
-            + 16,
+            + padding(ciphertext.len())
+            + LENGTH_FIELD_BYTES,
     );
     data.extend_from_slice(aad);
-    if !aad.len().is_multiple_of(16) {
-        data.resize(data.len() + (16 - (aad.len() % 16)), 0);
-    }
+    data.resize(data.len() + padding(aad.len()), 0);
     data.extend_from_slice(ciphertext);
-    if !ciphertext.len().is_multiple_of(16) {
-        data.resize(data.len() + (16 - (ciphertext.len() % 16)), 0);
-    }
+    data.resize(data.len() + padding(ciphertext.len()), 0);
     data.extend_from_slice(&(aad.len() as u64).to_le_bytes());
     data.extend_from_slice(&(ciphertext.len() as u64).to_le_bytes());
     data

@@ -17,6 +17,10 @@ use super::{
 };
 use crate::BlockCipher;
 
+/// Block length of the 128-bit block ciphers SIV uses, in bytes
+/// (RFC 5297 §1: AES with 128-bit blocks).
+const BLOCK_BYTES: usize = 16;
+
 /// The longest plaintext SIV-AES protects when the counter is advanced by
 /// 32-bit addition, in bytes: 2^36 − 16 (`68_719_476_720`).
 ///
@@ -46,29 +50,29 @@ fn plaintext_len_allowed(len: usize) -> bool {
 /// On the decrypt path `plaintext` is not authenticated yet, so the padded or
 /// xor-ended copy S2V builds from it is wiped, together with the chaining value
 /// `D` and the per-component MAC block.
-fn s2v<C: BlockCipher>(mac: &Cmac<C>, components: &[&[u8]], plaintext: &[u8]) -> [u8; 16] {
+fn s2v<C: BlockCipher>(mac: &Cmac<C>, components: &[&[u8]], plaintext: &[u8]) -> [u8; BLOCK_BYTES] {
     assert_block_128::<C>();
     debug_assert!(components.len() <= MAX_AD_COMPONENTS);
-    let mut d = [0u8; 16];
-    mac.compute_into(&[0u8; 16], &mut d);
-    let mut component_mac = [0u8; 16];
+    let mut d = [0u8; BLOCK_BYTES];
+    mac.compute_into(&[0u8; BLOCK_BYTES], &mut d);
+    let mut component_mac = [0u8; BLOCK_BYTES];
     for component in components {
         mac.compute_into(component, &mut component_mac);
         d = dbl_block(d);
         xor_block16_in_place(&mut d, &component_mac);
     }
 
-    let mut v = [0u8; 16];
-    if plaintext.len() >= 16 {
+    let mut v = [0u8; BLOCK_BYTES];
+    if plaintext.len() >= BLOCK_BYTES {
         // T = S_n xorend D.
         let mut t = plaintext.to_vec();
-        let start = t.len() - 16;
+        let start = t.len() - BLOCK_BYTES;
         xor_in_place(&mut t[start..], &d);
         mac.compute_into(&t, &mut v);
         crate::ct::zeroize_slice(t.as_mut_slice());
     } else {
         // T = dbl(D) xor pad(S_n).
-        let mut t = [0u8; 16];
+        let mut t = [0u8; BLOCK_BYTES];
         t[..plaintext.len()].copy_from_slice(plaintext);
         t[plaintext.len()] = 0x80;
         xor_block16_in_place(&mut t, &dbl_block(d));
@@ -81,7 +85,7 @@ fn s2v<C: BlockCipher>(mac: &Cmac<C>, components: &[&[u8]], plaintext: &[u8]) ->
 }
 
 #[inline]
-fn clear_siv_ctr_bits(counter: &mut [u8; 16]) {
+fn clear_siv_ctr_bits(counter: &mut [u8; BLOCK_BYTES]) {
     // RFC 5297 §2.6: Q = V bitand (1^64 || 0^1 || 1^31 || 0^1 || 1^31), that
     // is bits 63 and 31 (the rightmost bit being bit 0) are cleared.
     counter[8] &= 0x7f;
@@ -91,11 +95,11 @@ fn clear_siv_ctr_bits(counter: &mut [u8; 16]) {
 /// CTR over `data` from the S2V-derived counter, incrementing its rightmost
 /// 32 bits (RFC 5297 §2.5, "X+i = SALT || (n + i mod 2^32)"). The keystream
 /// and counter blocks are wiped afterwards.
-fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; 16], data: &mut [u8]) {
+fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; BLOCK_BYTES], data: &mut [u8]) {
     debug_assert!(plaintext_len_allowed(data.len()));
     let mut counter = *initial_counter;
-    let mut stream = [0u8; 16];
-    for chunk in data.chunks_mut(16) {
+    let mut stream = [0u8; BLOCK_BYTES];
+    for chunk in data.chunks_mut(BLOCK_BYTES) {
         stream = counter;
         cipher.encrypt(&mut stream);
         xor_in_place(chunk, &stream[..chunk.len()]);
@@ -162,7 +166,7 @@ impl<C: BlockCipher> Siv<C> {
         &self,
         components: &[&[u8]],
         plaintext: &[u8],
-    ) -> (Vec<u8>, [u8; 16]) {
+    ) -> (Vec<u8>, [u8; BLOCK_BYTES]) {
         assert!(
             components.len() <= MAX_AD_COMPONENTS,
             "SIV accepts at most {MAX_AD_COMPONENTS} associated-data components (RFC 5297 section 7)"
@@ -196,7 +200,7 @@ impl<C: BlockCipher> Siv<C> {
         &self,
         components: &[&[u8]],
         ciphertext: &mut [u8],
-        tag: &[u8; 16],
+        tag: &[u8; BLOCK_BYTES],
     ) -> bool {
         if components.len() > MAX_AD_COMPONENTS || !plaintext_len_allowed(ciphertext.len()) {
             return false;
@@ -236,7 +240,12 @@ impl<C: BlockCipher> Siv<C> {
     ///
     /// Panics if the cipher block is not 128 bits or if `plaintext` is longer
     /// than [`MAX_PLAINTEXT_BYTES`].
-    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> (Vec<u8>, [u8; 16]) {
+    pub fn encrypt(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> (Vec<u8>, [u8; BLOCK_BYTES]) {
         if nonce.is_empty() {
             self.encrypt_with_components(&[aad], plaintext)
         } else {
@@ -249,7 +258,13 @@ impl<C: BlockCipher> Siv<C> {
     ///
     /// Returns `false` and leaves `ciphertext` unchanged when the tag does not
     /// verify or when `ciphertext` is longer than [`MAX_PLAINTEXT_BYTES`].
-    pub fn decrypt(&self, nonce: &[u8], aad: &[u8], ciphertext: &mut [u8], tag: &[u8; 16]) -> bool {
+    pub fn decrypt(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext: &mut [u8],
+        tag: &[u8; BLOCK_BYTES],
+    ) -> bool {
         if nonce.is_empty() {
             self.decrypt_with_components(&[aad], ciphertext, tag)
         } else {

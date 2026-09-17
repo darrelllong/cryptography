@@ -80,11 +80,44 @@ fn increment_be(counter: &mut [u8]) {
     }
 }
 
+/// Block length of a 128-bit block cipher, in bytes.
+const BLOCK_128_BYTES: usize = 16;
+
+/// GCM's short IV length, in bytes: an IV of exactly 96 bits becomes `J_0`
+/// directly (SP 800-38D §7.1 step 2).
+const GCM_SHORT_IV_BYTES: usize = 12;
+
+/// CCM nonce bounds, in bytes (SP 800-38C Appendix A.1: `7 <= n <= 13`).
+const CCM_MIN_NONCE_BYTES: usize = 7;
+/// Longest CCM nonce, in bytes.
+const CCM_MAX_NONCE_BYTES: usize = 13;
+/// CCM tag bounds, in bytes (Appendix A.1: `t` in {4, 6, 8, 10, 12, 14, 16}).
+const CCM_MIN_TAG_BYTES: usize = 4;
+/// Longest CCM tag, in bytes.
+const CCM_MAX_TAG_BYTES: usize = 16;
+
+/// Shortest key AES key wrap accepts, in bytes (RFC 3394 §2: two 64-bit
+/// blocks), and so the shortest wrapped output is one block longer.
+const KEY_WRAP_MIN_KEY_BYTES: usize = 16;
+/// Shortest wrapped key, in bytes: the integrity block and two data blocks.
+const KEY_WRAP_MIN_WRAPPED_BYTES: usize = 24;
+
+/// Block length of a 64-bit block cipher, in bytes.
+const BLOCK_64_BYTES: usize = 8;
+
+/// The low coefficients of `u^64 + u^4 + u^3 + u + 1`, CMAC's reduction
+/// polynomial for 64-bit blocks (SP 800-38B §5.3).
+const RB_64: u8 = 0x1b;
+
+/// The low coefficients of `u^128 + u^7 + u^2 + u + 1`, CMAC's reduction
+/// polynomial for 128-bit blocks (SP 800-38B §5.3).
+const RB_128: u8 = 0x87;
+
 #[inline]
 fn rb_for(block_len: usize) -> u8 {
     match block_len {
-        8 => 0x1b,
-        16 => 0x87,
+        BLOCK_64_BYTES => RB_64,
+        BLOCK_128_BYTES => RB_128,
         _ => panic!("CMAC only supports 64-bit or 128-bit block ciphers"),
     }
 }
@@ -109,15 +142,15 @@ fn dbl_into(block: &[u8], out: &mut [u8]) {
 
 /// The fixed-size 16-byte twin of [`dbl_into`]: double in GF(2^128) with the constant
 /// reduction polynomial `0x87`. Used by the 128-bit-only SIV and OCB offsets.
-fn dbl_block(block: [u8; 16]) -> [u8; 16] {
-    let mut out = [0u8; 16];
+fn dbl_block(block: [u8; BLOCK_128_BYTES]) -> [u8; BLOCK_128_BYTES] {
+    let mut out = [0u8; BLOCK_128_BYTES];
     let mut carry = 0u8;
-    for i in (0..16).rev() {
+    for i in (0..BLOCK_128_BYTES).rev() {
         out[i] = (block[i] << 1) | carry;
         carry = block[i] >> 7;
     }
     let mask = 0u8.wrapping_sub(carry);
-    out[15] ^= 0x87 & mask;
+    out[BLOCK_128_BYTES - 1] ^= RB_128 & mask;
     out
 }
 
@@ -125,23 +158,26 @@ fn dbl_block(block: [u8; 16]) -> [u8; 16] {
 fn assert_block_128<C: BlockCipher>() {
     assert_eq!(
         C::BLOCK_LEN,
-        16,
+        BLOCK_128_BYTES,
         "this mode requires a 128-bit block cipher"
     );
 }
 
 #[inline]
-fn xor_block16_in_place(dst: &mut [u8; 16], src: &[u8; 16]) {
-    for i in 0..16 {
+fn xor_block16_in_place(dst: &mut [u8; BLOCK_128_BYTES], src: &[u8; BLOCK_128_BYTES]) {
+    for i in 0..BLOCK_128_BYTES {
         dst[i] ^= src[i];
     }
 }
 
 #[inline]
-fn increment_be32(counter: &mut [u8; 16]) {
+fn increment_be32(counter: &mut [u8; BLOCK_128_BYTES]) {
     // GCM's fast path reserves the low 32 bits of the pre-counter block as the
     // incremented invocation field, so only the final four bytes advance here.
-    for b in counter[12..].iter_mut().rev() {
+    for b in counter[BLOCK_128_BYTES - GCM_COUNTER_FIELD_BYTES..]
+        .iter_mut()
+        .rev()
+    {
         let (next, carry) = b.overflowing_add(1);
         *b = next;
         if !carry {
@@ -150,13 +186,21 @@ fn increment_be32(counter: &mut [u8; 16]) {
     }
 }
 
+/// Bytes of the pre-counter block that GCM advances: the 32-bit invocation
+/// field (SP 800-38D §7.1, GCTR's `inc_32`).
+const GCM_COUNTER_FIELD_BYTES: usize = 4;
+
+/// Block invocations GCTR allows per key and nonce, 2^32 − 2 (SP 800-38D §5.2.1.1).
 const GCM_MAX_COUNTER_BLOCKS: u64 = (u32::MAX as u64) - 1;
-const GCM_MAX_PAYLOAD_BYTES: u64 = GCM_MAX_COUNTER_BLOCKS * 16;
+
+/// Payload bytes that many blocks carry.
+const GCM_MAX_PAYLOAD_BYTES: u64 = GCM_MAX_COUNTER_BLOCKS * BLOCK_128_BYTES as u64;
 
 #[inline]
 fn gcm_payload_len_allowed_u64(len_bytes: u64) -> bool {
     // SP 800-38D bounds GCTR to at most 2^32 - 2 block invocations per key/nonce.
-    len_bytes.saturating_add(15) / 16 <= GCM_MAX_COUNTER_BLOCKS
+    len_bytes.saturating_add(BLOCK_128_BYTES as u64 - 1) / BLOCK_128_BYTES as u64
+        <= GCM_MAX_COUNTER_BLOCKS
 }
 
 #[inline]
@@ -194,7 +238,7 @@ fn assert_gcm_aad_and_iv_len(aad: &[u8], iv: &[u8]) {
 }
 
 #[inline]
-fn gf_mul_x_xts(tweak: &mut [u8; 16]) {
+fn gf_mul_x_xts(tweak: &mut [u8; BLOCK_128_BYTES]) {
     // SP 800-38E treats tweaks as elements of GF(2^128) encoded little-endian.
     // Multiplication by x is a one-bit left shift across bytes; when a carry
     // leaves the top bit, reduce by x^128 + x^7 + x^2 + x + 1, which is `0x87`
@@ -211,14 +255,22 @@ fn gf_mul_x_xts(tweak: &mut [u8; 16]) {
 }
 
 #[inline]
-fn xex_encrypt_block<C: BlockCipher>(cipher: &C, tweak: &[u8; 16], block: &mut [u8; 16]) {
+fn xex_encrypt_block<C: BlockCipher>(
+    cipher: &C,
+    tweak: &[u8; BLOCK_128_BYTES],
+    block: &mut [u8; BLOCK_128_BYTES],
+) {
     xor_block16_in_place(block, tweak);
     cipher.encrypt(block);
     xor_block16_in_place(block, tweak);
 }
 
 #[inline]
-fn xex_decrypt_block<C: BlockCipher>(cipher: &C, tweak: &[u8; 16], block: &mut [u8; 16]) {
+fn xex_decrypt_block<C: BlockCipher>(
+    cipher: &C,
+    tweak: &[u8; BLOCK_128_BYTES],
+    block: &mut [u8; BLOCK_128_BYTES],
+) {
     xor_block16_in_place(block, tweak);
     cipher.decrypt(block);
     xor_block16_in_place(block, tweak);
@@ -227,8 +279,8 @@ fn xex_decrypt_block<C: BlockCipher>(cipher: &C, tweak: &[u8; 16], block: &mut [
 /// SP 800-38D §6.4 GHASH steps 1 and 3 over `data`, zero-padded to whole
 /// blocks, continuing from the running value `y`.
 fn ghash_update<K: HashSubkey>(y: &mut u128, key: &K, data: &[u8]) {
-    let mut block = [0u8; 16];
-    for chunk in data.chunks(16) {
+    let mut block = [0u8; BLOCK_128_BYTES];
+    for chunk in data.chunks(BLOCK_128_BYTES) {
         block.fill(0);
         block[..chunk.len()].copy_from_slice(chunk);
         *y ^= u128::from_be_bytes(block);
@@ -243,7 +295,7 @@ fn ghash<K: HashSubkey>(key: &K, aad: &[u8], ciphertext: &[u8]) -> u128 {
     ghash_update(&mut y, key, aad);
     ghash_update(&mut y, key, ciphertext);
 
-    let mut len_block = [0u8; 16];
+    let mut len_block = [0u8; BLOCK_128_BYTES];
     // SP 800-38D GHASH appends bit lengths, not byte lengths.
     len_block[..8].copy_from_slice(&((aad.len() as u64) << 3).to_be_bytes());
     len_block[8..].copy_from_slice(&((ciphertext.len() as u64) << 3).to_be_bytes());
@@ -252,17 +304,17 @@ fn ghash<K: HashSubkey>(key: &K, aad: &[u8], ciphertext: &[u8]) -> u128 {
 }
 
 #[inline]
-fn ghash_iv<K: HashSubkey>(key: &K, iv: &[u8]) -> [u8; 16] {
+fn ghash_iv<K: HashSubkey>(key: &K, iv: &[u8]) -> [u8; BLOCK_128_BYTES] {
     // SP 800-38D requires 1 ≤ len(IV). An empty IV would take the GHASH path
     // below and reduce to J0 = 0^128 for every key, silently reusing the same
     // counter sequence and tag mask across all empty-IV messages under a key.
     // Reject it rather than emit an insecure, nonce-independent keystream.
     assert!(!iv.is_empty(), "GCM IV must be non-empty (SP 800-38D)");
     // SP 800-38D §7.1 fast path: for 96-bit IVs, J0 = IV || 0^31 || 1.
-    if iv.len() == 12 {
-        let mut j0 = [0u8; 16];
+    if iv.len() == GCM_SHORT_IV_BYTES {
+        let mut j0 = [0u8; BLOCK_128_BYTES];
         j0[..12].copy_from_slice(iv);
-        j0[15] = 1;
+        j0[BLOCK_128_BYTES - 1] = 1;
         return j0;
     }
     // Non-96-bit IVs are GHASHed with the standard length block.
@@ -272,7 +324,7 @@ fn ghash_iv<K: HashSubkey>(key: &K, iv: &[u8]) -> [u8; 16] {
 #[inline]
 fn gcm_hash_subkey<C: BlockCipher>(cipher: &C) -> u128 {
     // GCM hash subkey H = E_K(0^128) per SP 800-38D.
-    let mut h = [0u8; 16];
+    let mut h = [0u8; BLOCK_128_BYTES];
     cipher.encrypt(&mut h);
     let subkey = u128::from_be_bytes(h);
     crate::ct::zeroize_slice(h.as_mut_slice());
@@ -280,7 +332,10 @@ fn gcm_hash_subkey<C: BlockCipher>(cipher: &C) -> u128 {
 }
 
 #[inline]
-fn counter_keystream<C: BlockCipher>(cipher: &C, counter: &[u8; 16]) -> [u8; 16] {
+fn counter_keystream<C: BlockCipher>(
+    cipher: &C,
+    counter: &[u8; BLOCK_128_BYTES],
+) -> [u8; BLOCK_128_BYTES] {
     let mut out = *counter;
     cipher.encrypt(&mut out);
     out
@@ -290,11 +345,11 @@ fn counter_keystream<C: BlockCipher>(cipher: &C, counter: &[u8; 16]) -> [u8; 16]
 ///
 /// The counter and keystream blocks are wiped before returning: the keystream
 /// is what turns the ciphertext back into plaintext.
-fn gcm_ctr<C: BlockCipher>(cipher: &C, j0: &[u8; 16], data: &mut [u8]) {
+fn gcm_ctr<C: BlockCipher>(cipher: &C, j0: &[u8; BLOCK_128_BYTES], data: &mut [u8]) {
     let mut counter = *j0;
     increment_be32(&mut counter);
-    let mut stream = [0u8; 16];
-    for chunk in data.chunks_mut(16) {
+    let mut stream = [0u8; BLOCK_128_BYTES];
+    for chunk in data.chunks_mut(BLOCK_128_BYTES) {
         stream = counter;
         cipher.encrypt(&mut stream);
         xor_in_place(chunk, &stream[..chunk.len()]);
@@ -312,10 +367,10 @@ fn gcm_ctr<C: BlockCipher>(cipher: &C, j0: &[u8; 16], data: &mut [u8]) {
 fn gcm_tag<C: BlockCipher, K: HashSubkey>(
     cipher: &C,
     key: &K,
-    j0: &[u8; 16],
+    j0: &[u8; BLOCK_128_BYTES],
     aad: &[u8],
     ciphertext: &[u8],
-) -> [u8; 16] {
+) -> [u8; BLOCK_128_BYTES] {
     let mut s = ghash(key, aad, ciphertext);
     let mut mask_block = counter_keystream(cipher, j0);
     let mut tag_mask = u128::from_be_bytes(mask_block);
@@ -340,7 +395,7 @@ fn gcm_compute_tag<C: BlockCipher, K: HashSubkey>(
     nonce: &[u8],
     aad: &[u8],
     ciphertext: &[u8],
-) -> [u8; 16] {
+) -> [u8; BLOCK_128_BYTES] {
     assert_block_128::<C>();
     assert_gcm_payload_len(ciphertext.len());
     assert_gcm_aad_and_iv_len(aad, nonce);
@@ -358,7 +413,7 @@ fn gcm_encrypt<C: BlockCipher, K: HashSubkey>(
     nonce: &[u8],
     aad: &[u8],
     data: &mut [u8],
-) -> [u8; 16] {
+) -> [u8; BLOCK_128_BYTES] {
     assert_block_128::<C>();
     assert_gcm_payload_len(data.len());
     assert_gcm_aad_and_iv_len(aad, nonce);
@@ -407,39 +462,40 @@ fn gcm_decrypt<C: BlockCipher, K: HashSubkey>(
 #[inline]
 fn ccm_l_from_nonce(nonce: &[u8]) -> usize {
     assert!(
-        (7..=13).contains(&nonce.len()),
+        (CCM_MIN_NONCE_BYTES..=CCM_MAX_NONCE_BYTES).contains(&nonce.len()),
         "CCM nonce length must be in 7..=13 bytes"
     );
-    15 - nonce.len()
+    BLOCK_128_BYTES - 1 - nonce.len()
 }
 
 #[inline]
 fn assert_ccm_tag_len(tag_len: usize) {
     assert!(
-        (4..=16).contains(&tag_len) && tag_len.is_multiple_of(2),
+        (CCM_MIN_TAG_BYTES..=CCM_MAX_TAG_BYTES).contains(&tag_len) && tag_len.is_multiple_of(2),
         "CCM tag length must be one of {{4,6,8,10,12,14,16}}"
     );
 }
 
 #[inline]
-fn ccm_pack_len(block: &mut [u8; 16], l: usize, value: u64) {
+fn ccm_pack_len(block: &mut [u8; BLOCK_128_BYTES], l: usize, value: u64) {
     let needed_bits = l * 8;
     assert!(
         needed_bits >= 64 || value < (1u64 << needed_bits),
         "CCM length/counter does not fit in L bytes"
     );
     for i in 0..l {
-        block[15 - i] = u8::try_from((value >> (8 * i)) & 0xff).expect("single byte");
+        block[BLOCK_128_BYTES - 1 - i] =
+            u8::try_from((value >> (8 * i)) & 0xff).expect("single byte");
     }
 }
 
 #[inline]
-fn ccm_b0(nonce: &[u8], msg_len: usize, aad_len: usize, tag_len: usize) -> [u8; 16] {
+fn ccm_b0(nonce: &[u8], msg_len: usize, aad_len: usize, tag_len: usize) -> [u8; BLOCK_128_BYTES] {
     let l = ccm_l_from_nonce(nonce);
     assert_ccm_tag_len(tag_len);
     let msg_len_u64 = u64::try_from(msg_len).expect("message length fits u64");
 
-    let mut b0 = [0u8; 16];
+    let mut b0 = [0u8; BLOCK_128_BYTES];
     let aad_flag = u8::from(aad_len != 0) << 6;
     let t_field = u8::try_from((tag_len - 2) / 2).expect("CCM tag field fits u8") << 3;
     let l_field = u8::try_from(l - 1).expect("CCM L field fits u8");
@@ -450,9 +506,9 @@ fn ccm_b0(nonce: &[u8], msg_len: usize, aad_len: usize, tag_len: usize) -> [u8; 
 }
 
 #[inline]
-fn ccm_counter_block(nonce: &[u8], counter: u64) -> [u8; 16] {
+fn ccm_counter_block(nonce: &[u8], counter: u64) -> [u8; BLOCK_128_BYTES] {
     let l = ccm_l_from_nonce(nonce);
-    let mut ctr = [0u8; 16];
+    let mut ctr = [0u8; BLOCK_128_BYTES];
     ctr[0] = u8::try_from(l - 1).expect("CCM L field fits u8");
     ctr[1..1 + nonce.len()].copy_from_slice(nonce);
     ccm_pack_len(&mut ctr, l, counter);
@@ -464,7 +520,7 @@ fn ccm_encode_aad(aad: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
-    let mut out = Vec::with_capacity(aad.len() + 16);
+    let mut out = Vec::with_capacity(aad.len() + BLOCK_128_BYTES);
     let aad_len = aad.len() as u64;
     if aad_len < ((1u64 << 16) - (1u64 << 8)) {
         out.extend_from_slice(
@@ -480,8 +536,8 @@ fn ccm_encode_aad(aad: &[u8]) -> Vec<u8> {
         out.extend_from_slice(&aad_len.to_be_bytes());
     }
     out.extend_from_slice(aad);
-    if !out.len().is_multiple_of(16) {
-        out.resize(out.len().next_multiple_of(16), 0);
+    if !out.len().is_multiple_of(BLOCK_128_BYTES) {
+        out.resize(out.len().next_multiple_of(BLOCK_128_BYTES), 0);
     }
     out
 }
@@ -492,17 +548,17 @@ fn ccm_cbc_mac<C: BlockCipher>(
     aad: &[u8],
     plaintext: &[u8],
     tag_len: usize,
-) -> [u8; 16] {
+) -> [u8; BLOCK_128_BYTES] {
     assert_block_128::<C>();
-    let mut y = [0u8; 16];
+    let mut y = [0u8; BLOCK_128_BYTES];
 
     let b0 = ccm_b0(nonce, plaintext.len(), aad.len(), tag_len);
     xor_block16_in_place(&mut y, &b0);
     cipher.encrypt(&mut y);
 
     let aad_encoded = ccm_encode_aad(aad);
-    let mut block = [0u8; 16];
-    for chunk in aad_encoded.chunks(16) {
+    let mut block = [0u8; BLOCK_128_BYTES];
+    for chunk in aad_encoded.chunks(BLOCK_128_BYTES) {
         block.copy_from_slice(chunk);
         xor_block16_in_place(&mut y, &block);
         cipher.encrypt(&mut y);
@@ -510,8 +566,8 @@ fn ccm_cbc_mac<C: BlockCipher>(
 
     // CBC-MAC runs over the plaintext, which on the decrypt path is not yet
     // authenticated: the block buffer is wiped once the chain is done.
-    for chunk in plaintext.chunks(16) {
-        block = [0u8; 16];
+    for chunk in plaintext.chunks(BLOCK_128_BYTES) {
+        block = [0u8; BLOCK_128_BYTES];
         block[..chunk.len()].copy_from_slice(chunk);
         xor_block16_in_place(&mut y, &block);
         cipher.encrypt(&mut y);
@@ -522,8 +578,8 @@ fn ccm_cbc_mac<C: BlockCipher>(
 }
 
 fn ccm_apply_ctr<C: BlockCipher>(cipher: &C, nonce: &[u8], data: &mut [u8]) {
-    let mut stream = [0u8; 16];
-    for (i, chunk) in data.chunks_mut(16).enumerate() {
+    let mut stream = [0u8; BLOCK_128_BYTES];
+    for (i, chunk) in data.chunks_mut(BLOCK_128_BYTES).enumerate() {
         stream = ccm_counter_block(nonce, u64::try_from(i + 1).expect("counter fits u64"));
         cipher.encrypt(&mut stream);
         xor_in_place(chunk, &stream[..chunk.len()]);
@@ -576,7 +632,7 @@ impl<C: BlockCipher> AesKeyWrap<C> {
     /// shorter than 16 bytes.
     pub fn wrap_key_with_iv(&self, key_data: &[u8], iv: &[u8; 8]) -> Option<Vec<u8>> {
         assert_block_128::<C>();
-        if !key_data.len().is_multiple_of(8) || key_data.len() < 16 {
+        if !key_data.len().is_multiple_of(8) || key_data.len() < KEY_WRAP_MIN_KEY_BYTES {
             return None;
         }
 
@@ -590,7 +646,7 @@ impl<C: BlockCipher> AesKeyWrap<C> {
         wrapped[..8].copy_from_slice(iv);
         wrapped[8..].copy_from_slice(key_data);
 
-        let mut b = [0u8; 16];
+        let mut b = [0u8; BLOCK_128_BYTES];
         for j in 0..6usize {
             for i in 0..n {
                 let (a, rest) = wrapped.split_at_mut(8);
@@ -627,7 +683,7 @@ impl<C: BlockCipher> AesKeyWrap<C> {
     /// fails.
     pub fn unwrap_key_with_iv(&self, wrapped: &[u8], iv: &[u8; 8]) -> Option<Vec<u8>> {
         assert_block_128::<C>();
-        if !wrapped.len().is_multiple_of(8) || wrapped.len() < 24 {
+        if !wrapped.len().is_multiple_of(8) || wrapped.len() < KEY_WRAP_MIN_WRAPPED_BYTES {
             return None;
         }
 
@@ -654,7 +710,7 @@ impl<C: BlockCipher> AesKeyWrap<C> {
         a.copy_from_slice(&wrapped[..8]);
         out.copy_from_slice(&wrapped[8..]);
 
-        let mut b = [0u8; 16];
+        let mut b = [0u8; BLOCK_128_BYTES];
         for j in (0..6usize).rev() {
             for i in (0..n).rev() {
                 let t =
@@ -980,13 +1036,13 @@ pub const XTS_MAX_DATA_UNIT_BLOCKS: usize = 1 << 20;
 
 #[inline]
 fn xts_data_unit_len_allowed(len_bytes: usize) -> bool {
-    len_bytes <= XTS_MAX_DATA_UNIT_BLOCKS * 16
+    len_bytes <= XTS_MAX_DATA_UNIT_BLOCKS * BLOCK_128_BYTES
 }
 
 #[inline]
 fn assert_xts_data_unit_len(len_bytes: usize) {
     assert!(
-        len_bytes >= 16,
+        len_bytes >= BLOCK_128_BYTES,
         "XTS requires at least one complete block in each data unit"
     );
     assert!(
@@ -1039,25 +1095,25 @@ impl<C: BlockCipher> Xts<C> {
     /// Panics if the wrapped cipher does not have a 128-bit block size, if
     /// `data` is shorter than one complete block, or if it is longer than
     /// [`XTS_MAX_DATA_UNIT_BLOCKS`] blocks (SP 800-38E §4).
-    pub fn encrypt_sector(&self, tweak_value: &[u8; 16], data: &mut [u8]) {
+    pub fn encrypt_sector(&self, tweak_value: &[u8; BLOCK_128_BYTES], data: &mut [u8]) {
         assert_block_128::<C>();
         assert_xts_data_unit_len(data.len());
 
-        let full_blocks = data.len() / 16;
-        let rem = data.len() % 16;
+        let full_blocks = data.len() / BLOCK_128_BYTES;
+        let rem = data.len() % BLOCK_128_BYTES;
 
         // `tweak` is the key-derived XEX mask `E_K2(i)·α^j` and `tmp` carries
         // each block through the cipher; both are wiped before returning.
         let mut tweak = *tweak_value;
         self.tweak_cipher.encrypt(&mut tweak);
-        let mut tmp = [0u8; 16];
+        let mut tmp = [0u8; BLOCK_128_BYTES];
 
         let whole_blocks = if rem == 0 {
             full_blocks
         } else {
             full_blocks - 1
         };
-        for block in data[..whole_blocks * 16].chunks_exact_mut(16) {
+        for block in data[..whole_blocks * BLOCK_128_BYTES].chunks_exact_mut(BLOCK_128_BYTES) {
             tmp.copy_from_slice(block);
             xex_encrypt_block(&self.data_cipher, &tweak, &mut tmp);
             block.copy_from_slice(&tmp);
@@ -1066,19 +1122,19 @@ impl<C: BlockCipher> Xts<C> {
 
         if rem != 0 {
             // Ciphertext stealing over the last full block and the tail.
-            let last_full_start = whole_blocks * 16;
-            let mut cc = [0u8; 16];
-            cc.copy_from_slice(&data[last_full_start..last_full_start + 16]);
+            let last_full_start = whole_blocks * BLOCK_128_BYTES;
+            let mut cc = [0u8; BLOCK_128_BYTES];
+            cc.copy_from_slice(&data[last_full_start..last_full_start + BLOCK_128_BYTES]);
             xex_encrypt_block(&self.data_cipher, &tweak, &mut cc);
 
             // `tmp` becomes PP: the plaintext tail padded with CC's tail.
-            tmp[..rem].copy_from_slice(&data[last_full_start + 16..]);
+            tmp[..rem].copy_from_slice(&data[last_full_start + BLOCK_128_BYTES..]);
             tmp[rem..].copy_from_slice(&cc[rem..]);
-            data[last_full_start + 16..].copy_from_slice(&cc[..rem]);
+            data[last_full_start + BLOCK_128_BYTES..].copy_from_slice(&cc[..rem]);
 
             gf_mul_x_xts(&mut tweak);
             xex_encrypt_block(&self.data_cipher, &tweak, &mut tmp);
-            data[last_full_start..last_full_start + 16].copy_from_slice(&tmp);
+            data[last_full_start..last_full_start + BLOCK_128_BYTES].copy_from_slice(&tmp);
             crate::ct::zeroize_slice(cc.as_mut_slice());
         }
         crate::ct::zeroize_slice(tmp.as_mut_slice());
@@ -1090,25 +1146,25 @@ impl<C: BlockCipher> Xts<C> {
     /// Panics if the wrapped cipher does not have a 128-bit block size, if
     /// `data` is shorter than one complete block, or if it is longer than
     /// [`XTS_MAX_DATA_UNIT_BLOCKS`] blocks (SP 800-38E §4).
-    pub fn decrypt_sector(&self, tweak_value: &[u8; 16], data: &mut [u8]) {
+    pub fn decrypt_sector(&self, tweak_value: &[u8; BLOCK_128_BYTES], data: &mut [u8]) {
         assert_block_128::<C>();
         assert_xts_data_unit_len(data.len());
 
-        let full_blocks = data.len() / 16;
-        let rem = data.len() % 16;
+        let full_blocks = data.len() / BLOCK_128_BYTES;
+        let rem = data.len() % BLOCK_128_BYTES;
 
         // `tweak` is the key-derived XEX mask and `tmp` carries each block
         // (plaintext on the way out) through the cipher; both are wiped.
         let mut tweak = *tweak_value;
         self.tweak_cipher.encrypt(&mut tweak);
-        let mut tmp = [0u8; 16];
+        let mut tmp = [0u8; BLOCK_128_BYTES];
 
         let whole_blocks = if rem == 0 {
             full_blocks
         } else {
             full_blocks - 1
         };
-        for block in data[..whole_blocks * 16].chunks_exact_mut(16) {
+        for block in data[..whole_blocks * BLOCK_128_BYTES].chunks_exact_mut(BLOCK_128_BYTES) {
             tmp.copy_from_slice(block);
             xex_decrypt_block(&self.data_cipher, &tweak, &mut tmp);
             block.copy_from_slice(&tmp);
@@ -1116,22 +1172,22 @@ impl<C: BlockCipher> Xts<C> {
         }
 
         if rem != 0 {
-            let last_full_start = whole_blocks * 16;
+            let last_full_start = whole_blocks * BLOCK_128_BYTES;
             let mut next_tweak = tweak;
             gf_mul_x_xts(&mut next_tweak);
 
             // PP: the last full ciphertext block decrypted under the next tweak.
-            let mut pp = [0u8; 16];
-            pp.copy_from_slice(&data[last_full_start..last_full_start + 16]);
+            let mut pp = [0u8; BLOCK_128_BYTES];
+            pp.copy_from_slice(&data[last_full_start..last_full_start + BLOCK_128_BYTES]);
             xex_decrypt_block(&self.data_cipher, &next_tweak, &mut pp);
 
             // `tmp` becomes CC: the ciphertext tail padded with PP's tail.
-            tmp[..rem].copy_from_slice(&data[last_full_start + 16..]);
+            tmp[..rem].copy_from_slice(&data[last_full_start + BLOCK_128_BYTES..]);
             tmp[rem..].copy_from_slice(&pp[rem..]);
             xex_decrypt_block(&self.data_cipher, &tweak, &mut tmp);
 
-            data[last_full_start..last_full_start + 16].copy_from_slice(&tmp);
-            data[last_full_start + 16..].copy_from_slice(&pp[..rem]);
+            data[last_full_start..last_full_start + BLOCK_128_BYTES].copy_from_slice(&tmp);
+            data[last_full_start + BLOCK_128_BYTES..].copy_from_slice(&pp[..rem]);
             crate::ct::zeroize_slice(pp.as_mut_slice());
             crate::ct::zeroize_slice(next_tweak.as_mut_slice());
         }
@@ -1149,8 +1205,8 @@ impl<C: BlockCipher> Xts<C> {
 pub struct Cmac<C> {
     cipher: C,
     // One block each; only the first `C::BLOCK_LEN` bytes (8 or 16) are live.
-    k1: [u8; 16],
-    k2: [u8; 16],
+    k1: [u8; BLOCK_128_BYTES],
+    k2: [u8; BLOCK_128_BYTES],
 }
 
 impl<C: BlockCipher> Cmac<C> {
@@ -1166,16 +1222,16 @@ impl<C: BlockCipher> Cmac<C> {
     pub fn new(cipher: C) -> Self {
         let blk = C::BLOCK_LEN;
         assert!(
-            matches!(blk, 8 | 16),
+            matches!(blk, BLOCK_64_BYTES | BLOCK_128_BYTES),
             "CMAC only supports 64-bit or 128-bit block ciphers"
         );
         let mut mac = Self {
             cipher,
-            k1: [0u8; 16],
-            k2: [0u8; 16],
+            k1: [0u8; BLOCK_128_BYTES],
+            k2: [0u8; BLOCK_128_BYTES],
         };
         // L = E_K(0^b) is the root of both subkeys.
-        let mut l = [0u8; 16];
+        let mut l = [0u8; BLOCK_128_BYTES];
         mac.cipher.encrypt(&mut l[..blk]);
         dbl_into(&l[..blk], &mut mac.k1[..blk]);
         dbl_into(&mac.k1[..blk], &mut mac.k2[..blk]);
@@ -1210,7 +1266,7 @@ impl<C> Drop for Cmac<C> {
 /// Reusing a nonce under the same key breaks both confidentiality and
 /// authenticity: the CTR keystream repeats and the CBC-MAC values become
 /// related. Never reuse a `(key, nonce)` pair.
-pub struct Ccm<C, const TAG_LEN: usize = 16> {
+pub struct Ccm<C, const TAG_LEN: usize = CCM_MAX_TAG_BYTES> {
     cipher: C,
 }
 
@@ -1243,7 +1299,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     ///
     /// Panics if the cipher block size is not 128 bits, if `nonce.len()` is
     /// outside `7..=13`, or if `plaintext.len()` does not fit in the
-    /// `L = 15 - nonce.len()` byte length field.
+    /// `L = BLOCK_128_BYTES - 1 - nonce.len()` byte length field.
     #[must_use]
     pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], plaintext: &[u8]) -> [u8; TAG_LEN] {
         let mut t = ccm_cbc_mac(&self.cipher, nonce, aad, plaintext, TAG_LEN);
@@ -1265,7 +1321,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     ///
     /// Panics if the cipher block size is not 128 bits, if `nonce.len()` is
     /// outside `7..=13`, or if `data.len()` does not fit in the
-    /// `L = 15 - nonce.len()` byte length field.
+    /// `L = BLOCK_128_BYTES - 1 - nonce.len()` byte length field.
     #[must_use]
     pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; TAG_LEN] {
         assert_block_128::<C>();
@@ -1277,7 +1333,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ccm<C, TAG_LEN> {
     /// Verify `tag` and decrypt in place on success.
     ///
     /// Returns `false` and leaves `data` unchanged when verification fails,
-    /// or when `data.len()` does not fit in the `L = 15 - nonce.len()` byte
+    /// or when `data.len()` does not fit in the `L = BLOCK_128_BYTES - 1 - nonce.len()` byte
     /// length field (no valid ciphertext of that length exists under this
     /// nonce, and the length is attacker-controlled on a decrypt path).
     ///
@@ -1403,7 +1459,12 @@ impl<C: BlockCipher> Gcm<C> {
     /// `68_719_476_704` bytes, or if the bit length of `aad` or `nonce` does
     /// not fit 64 bits (§5.2.1.1).
     #[must_use]
-    pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
+    pub fn compute_tag(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext: &[u8],
+    ) -> [u8; BLOCK_128_BYTES] {
         gcm_compute_tag::<_, SubkeyTable>(&self.cipher, nonce, aad, ciphertext)
     }
 
@@ -1416,7 +1477,7 @@ impl<C: BlockCipher> Gcm<C> {
     /// `68_719_476_704` bytes, or if the bit length of `aad` or `nonce` does
     /// not fit 64 bits (§5.2.1.1).
     #[must_use]
-    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
+    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; BLOCK_128_BYTES] {
         gcm_encrypt::<_, SubkeyTable>(&self.cipher, nonce, aad, data)
     }
 
@@ -1449,7 +1510,12 @@ impl<C: BlockCipher> GcmVt<C> {
     /// Panics as [`Gcm::compute_tag`] does: non-128-bit block, empty
     /// `nonce`, or an over-long `ciphertext`, `aad` or `nonce`.
     #[must_use]
-    pub fn compute_tag(&self, nonce: &[u8], aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
+    pub fn compute_tag(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext: &[u8],
+    ) -> [u8; BLOCK_128_BYTES] {
         gcm_compute_tag::<_, VariableTimeSubkey>(&self.cipher, nonce, aad, ciphertext)
     }
 
@@ -1460,7 +1526,7 @@ impl<C: BlockCipher> GcmVt<C> {
     /// Panics as [`Gcm::encrypt`] does: non-128-bit block, empty `nonce`, or
     /// an over-long `data`, `aad` or `nonce`.
     #[must_use]
-    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
+    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; BLOCK_128_BYTES] {
         gcm_encrypt::<_, VariableTimeSubkey>(&self.cipher, nonce, aad, data)
     }
 
@@ -1530,7 +1596,7 @@ impl<C: BlockCipher> Gmac<C> {
     /// or if the bit length of `aad` or `nonce` does not fit 64 bits
     /// (SP 800-38D §5.2.1.1).
     #[must_use]
-    pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; 16] {
+    pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; BLOCK_128_BYTES] {
         gcm_compute_tag::<_, SubkeyTable>(&self.cipher, nonce, aad, &[])
     }
 
@@ -1556,7 +1622,7 @@ impl<C: BlockCipher> Gmac<C> {
 impl<C: BlockCipher> GmacVt<C> {
     /// Compute a GMAC tag over associated data only.
     #[must_use]
-    pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; 16] {
+    pub fn compute(&self, nonce: &[u8], aad: &[u8]) -> [u8; BLOCK_128_BYTES] {
         gcm_compute_tag::<_, VariableTimeSubkey>(&self.cipher, nonce, aad, &[])
     }
 
@@ -1593,7 +1659,7 @@ impl<C: BlockCipher> Cmac<C> {
         };
         let last_complete = !data.is_empty() && data.len().is_multiple_of(blk);
 
-        let mut chain = [0u8; 16];
+        let mut chain = [0u8; BLOCK_128_BYTES];
         let x = &mut chain[..blk];
         for block in data.chunks(blk).take(n - 1) {
             xor_in_place(x, block);
@@ -1626,7 +1692,7 @@ impl<C: BlockCipher> Cmac<C> {
     /// prefix match.
     pub fn verify(&self, data: &[u8], tag: &[u8]) -> bool {
         let blk = C::BLOCK_LEN;
-        let mut expected = [0u8; 16];
+        let mut expected = [0u8; BLOCK_128_BYTES];
         self.compute_into(data, &mut expected[..blk]);
         let authentic = crate::ct::constant_time_eq_mask(&expected[..blk], tag) == u8::MAX;
         crate::ct::zeroize_slice(expected.as_mut_slice());

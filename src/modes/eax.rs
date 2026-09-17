@@ -6,23 +6,26 @@
 use super::{increment_be, xor_in_place, Cmac};
 use crate::BlockCipher;
 
+/// Block length of the 128-bit block ciphers EAX uses here, in bytes.
+const BLOCK_BYTES: usize = 16;
+
 /// `OMAC^t_K(data)`: CMAC over the one-block domain prefix `[t]_16 || data`.
-fn eax_omac<C: BlockCipher>(cmac: &Cmac<C>, domain: u8, data: &[u8]) -> [u8; 16] {
-    let mut prefixed = Vec::with_capacity(16 + data.len());
-    prefixed.extend_from_slice(&[0u8; 15]);
+fn eax_omac<C: BlockCipher>(cmac: &Cmac<C>, domain: u8, data: &[u8]) -> [u8; BLOCK_BYTES] {
+    let mut prefixed = Vec::with_capacity(BLOCK_BYTES + data.len());
+    prefixed.extend_from_slice(&[0u8; BLOCK_BYTES - 1]);
     prefixed.push(domain);
     prefixed.extend_from_slice(data);
-    let mut omac = [0u8; 16];
+    let mut omac = [0u8; BLOCK_BYTES];
     cmac.compute_into(&prefixed, &mut omac);
     omac
 }
 
 /// CTR over `data` from `initial_counter` (the OMAC of the nonce), counting
 /// over the whole block. The keystream and counter blocks are wiped after.
-fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; 16], data: &mut [u8]) {
+fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; BLOCK_BYTES], data: &mut [u8]) {
     let mut counter = *initial_counter;
-    let mut stream = [0u8; 16];
-    for chunk in data.chunks_mut(16) {
+    let mut stream = [0u8; BLOCK_BYTES];
+    for chunk in data.chunks_mut(BLOCK_BYTES) {
         stream = counter;
         cipher.encrypt(&mut stream);
         xor_in_place(chunk, &stream[..chunk.len()]);
@@ -33,8 +36,8 @@ fn ctr_apply<C: BlockCipher>(cipher: &C, initial_counter: &[u8; 16], data: &mut 
 }
 
 #[inline]
-fn xor3(a: &[u8; 16], b: &[u8; 16], c: &[u8; 16]) -> [u8; 16] {
-    let mut out = [0u8; 16];
+fn xor3(a: &[u8; BLOCK_BYTES], b: &[u8; BLOCK_BYTES], c: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
+    let mut out = [0u8; BLOCK_BYTES];
     for i in 0..16 {
         out[i] = a[i] ^ b[i] ^ c[i];
     }
@@ -74,8 +77,12 @@ impl<C: BlockCipher> Eax<C> {
 
     /// Encrypt `data` in place and return a detached 16-byte tag.
     #[must_use]
-    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
-        assert_eq!(C::BLOCK_LEN, 16, "EAX requires a 128-bit block cipher");
+    pub fn encrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8]) -> [u8; BLOCK_BYTES] {
+        assert_eq!(
+            C::BLOCK_LEN,
+            BLOCK_BYTES,
+            "EAX requires a 128-bit block cipher"
+        );
 
         let mut n_tag = eax_omac(&self.cmac, 0, nonce);
         let mut h_tag = eax_omac(&self.cmac, 1, aad);
@@ -94,8 +101,18 @@ impl<C: BlockCipher> Eax<C> {
     /// Verify and decrypt `data` in place.
     ///
     /// Returns `false` and leaves `data` unchanged on authentication failure.
-    pub fn decrypt(&self, nonce: &[u8], aad: &[u8], data: &mut [u8], tag: &[u8; 16]) -> bool {
-        assert_eq!(C::BLOCK_LEN, 16, "EAX requires a 128-bit block cipher");
+    pub fn decrypt(
+        &self,
+        nonce: &[u8],
+        aad: &[u8],
+        data: &mut [u8],
+        tag: &[u8; BLOCK_BYTES],
+    ) -> bool {
+        assert_eq!(
+            C::BLOCK_LEN,
+            BLOCK_BYTES,
+            "EAX requires a 128-bit block cipher"
+        );
 
         let mut n_tag = eax_omac(&self.cmac, 0, nonce);
         let mut h_tag = eax_omac(&self.cmac, 1, aad);
