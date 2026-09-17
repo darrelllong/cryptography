@@ -242,6 +242,34 @@ const TD3: [u32; 256] = {
     t
 };
 
+/// Block size in bytes: AES is a 128-bit block cipher (FIPS 197 §3.4).
+const BLOCK_BYTES: usize = 16;
+
+/// `Nb`: the state is four 32-bit columns (FIPS 197 §3.4).
+const NB: usize = 4;
+
+/// Bytes in a state column, and so in a key-schedule word.
+const WORD_BYTES: usize = BLOCK_BYTES / NB;
+
+/// FIPS 197 Table 5: key length and round count per variant. The expanded key
+/// holds `Nb * (Nr + 1)` words (§5.2).
+const AES128_KEY_BYTES: usize = 16;
+const AES192_KEY_BYTES: usize = 24;
+const AES256_KEY_BYTES: usize = 32;
+const AES128_ROUNDS: usize = 10;
+const AES192_ROUNDS: usize = 12;
+const AES256_ROUNDS: usize = 14;
+const fn expanded_words(rounds: usize) -> usize {
+    NB * (rounds + 1)
+}
+
+/// Signals in the Boyar-Peralta S-box circuit (ePrint 2011/332): the top
+/// linear transform's `T1..T27`, the shared nonlinear part's `M1..M63`, and
+/// the eight wires of a byte.
+const BYTE_BITS: usize = 8;
+const TOP_LINEAR_SIGNALS: usize = 27;
+const NONLINEAR_SIGNALS: usize = 63;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Key expansion — FIPS 197, § 5.2
 //
@@ -275,10 +303,10 @@ fn sub_word(w: u32) -> u32 {
 /// setup performs no secret-indexed reads either. The extra `SubWord` at
 /// `i mod Nk = 4` applies when `Nk > 6`, i.e. to AES-256 only.
 fn expand_key(key: &[u8], w: &mut [u32], sub_word: fn(u32) -> u32) {
-    let nk = key.len() / 4;
-    debug_assert!(matches!(nk, 4 | 6 | 8) && key.len() == 4 * nk);
-    debug_assert_eq!(w.len(), 4 * (nk + 7));
-    for (word, bytes) in w.iter_mut().zip(key.chunks_exact(4)) {
+    let nk = key.len() / WORD_BYTES;
+    debug_assert!(matches!(nk, 4 | 6 | 8) && key.len() == WORD_BYTES * nk);
+    debug_assert_eq!(w.len(), NB * (nk + 7));
+    for (word, bytes) in w.iter_mut().zip(key.chunks_exact(WORD_BYTES)) {
         *word = u32::from_be_bytes(bytes.try_into().expect("four key bytes"));
     }
     let mut t = 0u32;
@@ -312,13 +340,13 @@ fn inv_mix_col(w: u32) -> u32 {
 /// Build the decryption round-key schedule from the forward expanded key.
 /// `enc_rk` and `dec_rk` must have the same length (NR+1)*4.
 fn make_dec_rk(enc_rk: &[u32], dec_rk: &mut [u32], nr: usize) {
-    dec_rk[0..4].copy_from_slice(&enc_rk[nr * 4..nr * 4 + 4]);
+    dec_rk[..NB].copy_from_slice(&enc_rk[nr * NB..nr * NB + NB]);
     for r in 1..nr {
-        for j in 0..4 {
-            dec_rk[r * 4 + j] = inv_mix_col(enc_rk[(nr - r) * 4 + j]);
+        for j in 0..NB {
+            dec_rk[r * NB + j] = inv_mix_col(enc_rk[(nr - r) * NB + j]);
         }
     }
-    dec_rk[nr * 4..nr * 4 + 4].copy_from_slice(&enc_rk[0..4]);
+    dec_rk[nr * NB..nr * NB + NB].copy_from_slice(&enc_rk[..NB]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -332,14 +360,14 @@ fn make_dec_rk(enc_rk: &[u32], dec_rk: &mut [u32], nr: usize) {
 // `nr`  — number of rounds (10 / 12 / 14).
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn aes_encrypt(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
+fn aes_encrypt(block: &[u8; BLOCK_BYTES], rk: &[u32], nr: usize) -> [u8; BLOCK_BYTES] {
     let mut s0 = u32::from_be_bytes(block[0..4].try_into().unwrap()) ^ rk[0];
     let mut s1 = u32::from_be_bytes(block[4..8].try_into().unwrap()) ^ rk[1];
     let mut s2 = u32::from_be_bytes(block[8..12].try_into().unwrap()) ^ rk[2];
     let mut s3 = u32::from_be_bytes(block[12..16].try_into().unwrap()) ^ rk[3];
 
     for r in 1..nr {
-        let k = 4 * r;
+        let k = NB * r;
         let t0 = TE0[(s0 >> 24) as usize]
             ^ TE1[((s1 >> 16) & 0xff) as usize]
             ^ TE2[((s2 >> 8) & 0xff) as usize]
@@ -366,7 +394,7 @@ fn aes_encrypt(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
         s3 = t3;
     }
 
-    let k = 4 * nr;
+    let k = NB * nr;
     let c0 = u32::from(SBOX[(s0 >> 24) as usize]) << 24
         | u32::from(SBOX[((s1 >> 16) & 0xff) as usize]) << 16
         | u32::from(SBOX[((s2 >> 8) & 0xff) as usize]) << 8
@@ -384,7 +412,7 @@ fn aes_encrypt(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
         | u32::from(SBOX[((s1 >> 8) & 0xff) as usize]) << 8
         | u32::from(SBOX[(s2 & 0xff) as usize]);
 
-    let mut out = [0u8; 16];
+    let mut out = [0u8; BLOCK_BYTES];
     out[0..4].copy_from_slice(&(c0 ^ rk[k]).to_be_bytes());
     out[4..8].copy_from_slice(&(c1 ^ rk[k + 1]).to_be_bytes());
     out[8..12].copy_from_slice(&(c2 ^ rk[k + 2]).to_be_bytes());
@@ -392,14 +420,14 @@ fn aes_encrypt(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
     out
 }
 
-fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
+fn aes_decrypt(block: &[u8; BLOCK_BYTES], dk: &[u32], nr: usize) -> [u8; BLOCK_BYTES] {
     let mut s0 = u32::from_be_bytes(block[0..4].try_into().unwrap()) ^ dk[0];
     let mut s1 = u32::from_be_bytes(block[4..8].try_into().unwrap()) ^ dk[1];
     let mut s2 = u32::from_be_bytes(block[8..12].try_into().unwrap()) ^ dk[2];
     let mut s3 = u32::from_be_bytes(block[12..16].try_into().unwrap()) ^ dk[3];
 
     for r in 1..nr {
-        let k = 4 * r;
+        let k = NB * r;
         let t0 = TD0[(s0 >> 24) as usize]
             ^ TD1[((s3 >> 16) & 0xff) as usize]
             ^ TD2[((s2 >> 8) & 0xff) as usize]
@@ -426,7 +454,7 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
         s3 = t3;
     }
 
-    let k = 4 * nr;
+    let k = NB * nr;
     let p0 = u32::from(INV_SBOX[(s0 >> 24) as usize]) << 24
         | u32::from(INV_SBOX[((s3 >> 16) & 0xff) as usize]) << 16
         | u32::from(INV_SBOX[((s2 >> 8) & 0xff) as usize]) << 8
@@ -444,7 +472,7 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
         | u32::from(INV_SBOX[((s1 >> 8) & 0xff) as usize]) << 8
         | u32::from(INV_SBOX[(s0 & 0xff) as usize]);
 
-    let mut out = [0u8; 16];
+    let mut out = [0u8; BLOCK_BYTES];
     out[0..4].copy_from_slice(&(p0 ^ dk[k]).to_be_bytes());
     out[4..8].copy_from_slice(&(p1 ^ dk[k + 1]).to_be_bytes());
     out[8..12].copy_from_slice(&(p2 ^ dk[k + 2]).to_be_bytes());
@@ -538,7 +566,7 @@ fn sbox_bool(input: u8) -> u8 {
 }
 
 /// Figure 5: `t[k]` is the paper's `T(k+1)`.
-fn sbox_bool_linear(input: u8) -> ([u8; 8], [u8; 27]) {
+fn sbox_bool_linear(input: u8) -> ([u8; BYTE_BITS], [u8; TOP_LINEAR_SIGNALS]) {
     let bits = [
         bit(input, 0),
         bit(input, 1),
@@ -551,7 +579,7 @@ fn sbox_bool_linear(input: u8) -> ([u8; 8], [u8; 27]) {
     ];
     let [u0, u1, u2, u3, u4, u5, u6, u7] = bits;
 
-    let mut t = [0u8; 27];
+    let mut t = [0u8; TOP_LINEAR_SIGNALS];
     t[0] = u0 ^ u3;
     t[1] = u0 ^ u5;
     t[2] = u0 ^ u6;
@@ -584,9 +612,12 @@ fn sbox_bool_linear(input: u8) -> ([u8; 8], [u8; 27]) {
 }
 
 /// Figure 7 with `D = U7`: `m[k]` is the paper's `M(k+1)`.
-fn sbox_bool_nonlinear(bits: [u8; 8], t: [u8; 27]) -> [u8; 63] {
+fn sbox_bool_nonlinear(
+    bits: [u8; BYTE_BITS],
+    t: [u8; TOP_LINEAR_SIGNALS],
+) -> [u8; NONLINEAR_SIGNALS] {
     let u7 = bits[7];
-    let mut m = [0u8; 63];
+    let mut m = [0u8; NONLINEAR_SIGNALS];
     m[0] = t[12] & t[5];
     m[1] = t[22] & t[7];
     m[2] = t[13] ^ m[0];
@@ -654,7 +685,7 @@ fn sbox_bool_nonlinear(bits: [u8; 8], t: [u8; 27]) -> [u8; 63] {
 }
 
 /// Figure 8: `l*` keep the paper's numbers; the packed bits are S0..S7.
-fn sbox_bool_output(m: [u8; 63]) -> u8 {
+fn sbox_bool_output(m: [u8; NONLINEAR_SIGNALS]) -> u8 {
     let l0 = m[60] ^ m[61];
     let l1 = m[49] ^ m[55];
     let l2 = m[45] ^ m[47];
@@ -721,7 +752,7 @@ fn inv_sbox_bool(input: u8) -> u8 {
 /// ```
 ///
 /// `t[20]` is `Y5`, the reverse direction's `D` input to Figure 7.
-fn inv_sbox_bool_linear(input: u8) -> [u8; 27] {
+fn inv_sbox_bool_linear(input: u8) -> [u8; TOP_LINEAR_SIGNALS] {
     let u0 = bit(input, 0);
     let u1 = bit(input, 1);
     let u2 = bit(input, 2);
@@ -731,7 +762,7 @@ fn inv_sbox_bool_linear(input: u8) -> [u8; 27] {
     let u6 = bit(input, 6);
     let u7 = bit(input, 7);
 
-    let mut t = [0u8; 27];
+    let mut t = [0u8; TOP_LINEAR_SIGNALS];
     t[0] = u0 ^ u3;
     t[1] = xnor(u1, u3);
     t[2] = xnor(u0, u1);
@@ -764,8 +795,8 @@ fn inv_sbox_bool_linear(input: u8) -> [u8; 27] {
 
 /// Figure 7 with `D = Y5` (`t[20]`): `m[k]` is the paper's `M(k+1)`, and the
 /// `T` operands are read through the slot table on `inv_sbox_bool_linear`.
-fn inv_sbox_bool_nonlinear(t: [u8; 27]) -> [u8; 63] {
-    let mut m = [0u8; 63];
+fn inv_sbox_bool_nonlinear(t: [u8; TOP_LINEAR_SIGNALS]) -> [u8; NONLINEAR_SIGNALS] {
+    let mut m = [0u8; NONLINEAR_SIGNALS];
     m[0] = t[10] & t[21];
     m[1] = t[0] & t[6];
     m[2] = t[25] ^ m[0];
@@ -834,7 +865,7 @@ fn inv_sbox_bool_nonlinear(t: [u8; 27]) -> [u8; 63] {
 
 /// Figure 9: `p*` keep the paper's numbers (which skip P21); the packed bits
 /// are W0..W7.
-fn inv_sbox_bool_output(m: [u8; 63]) -> u8 {
+fn inv_sbox_bool_output(m: [u8; NONLINEAR_SIGNALS]) -> u8 {
     let p0 = m[51] ^ m[60];
     let p1 = m[57] ^ m[58];
     let p2 = m[53] ^ m[61];
@@ -898,31 +929,31 @@ fn make_dec_rk_ct(enc_rk: &[u32], dec_rk: &mut [u32], nr: usize) {
 }
 
 #[inline]
-fn add_round_key_ct(state: &mut [u8; 16], rk: &[u32]) {
-    for c in 0..4 {
+fn add_round_key_ct(state: &mut [u8; BLOCK_BYTES], rk: &[u32]) {
+    for c in 0..NB {
         let word = rk[c].to_be_bytes();
-        for r in 0..4 {
-            state[4 * c + r] ^= word[r];
+        for r in 0..WORD_BYTES {
+            state[WORD_BYTES * c + r] ^= word[r];
         }
     }
 }
 
 #[inline]
-fn sub_bytes_ct(state: &mut [u8; 16]) {
+fn sub_bytes_ct(state: &mut [u8; BLOCK_BYTES]) {
     for b in state.iter_mut() {
         *b = sbox_bool(*b);
     }
 }
 
 #[inline]
-fn inv_sub_bytes_ct(state: &mut [u8; 16]) {
+fn inv_sub_bytes_ct(state: &mut [u8; BLOCK_BYTES]) {
     for b in state.iter_mut() {
         *b = inv_sbox_bool(*b);
     }
 }
 
 #[inline]
-fn shift_rows_ct(state: &mut [u8; 16]) {
+fn shift_rows_ct(state: &mut [u8; BLOCK_BYTES]) {
     let t = *state;
     state[0] = t[0];
     state[1] = t[5];
@@ -943,7 +974,7 @@ fn shift_rows_ct(state: &mut [u8; 16]) {
 }
 
 #[inline]
-fn inv_shift_rows_ct(state: &mut [u8; 16]) {
+fn inv_shift_rows_ct(state: &mut [u8; BLOCK_BYTES]) {
     let t = *state;
     state[0] = t[0];
     state[1] = t[13];
@@ -964,9 +995,9 @@ fn inv_shift_rows_ct(state: &mut [u8; 16]) {
 }
 
 #[inline]
-fn mix_columns_ct(state: &mut [u8; 16]) {
-    for c in 0..4 {
-        let i = 4 * c;
+fn mix_columns_ct(state: &mut [u8; BLOCK_BYTES]) {
+    for c in 0..NB {
+        let i = WORD_BYTES * c;
         let a0 = state[i];
         let a1 = state[i + 1];
         let a2 = state[i + 2];
@@ -981,9 +1012,9 @@ fn mix_columns_ct(state: &mut [u8; 16]) {
 }
 
 #[inline]
-fn inv_mix_columns_ct(state: &mut [u8; 16]) {
-    for c in 0..4 {
-        let i = 4 * c;
+fn inv_mix_columns_ct(state: &mut [u8; BLOCK_BYTES]) {
+    for c in 0..NB {
+        let i = WORD_BYTES * c;
         let a0 = state[i];
         let a1 = state[i + 1];
         let a2 = state[i + 2];
@@ -995,37 +1026,37 @@ fn inv_mix_columns_ct(state: &mut [u8; 16]) {
     }
 }
 
-fn aes_encrypt_ct(block: &[u8; 16], rk: &[u32], nr: usize) -> [u8; 16] {
+fn aes_encrypt_ct(block: &[u8; BLOCK_BYTES], rk: &[u32], nr: usize) -> [u8; BLOCK_BYTES] {
     let mut state = *block;
-    add_round_key_ct(&mut state, &rk[0..4]);
+    add_round_key_ct(&mut state, &rk[..NB]);
 
     for r in 1..nr {
         sub_bytes_ct(&mut state);
         shift_rows_ct(&mut state);
         mix_columns_ct(&mut state);
-        add_round_key_ct(&mut state, &rk[4 * r..4 * r + 4]);
+        add_round_key_ct(&mut state, &rk[NB * r..NB * r + NB]);
     }
 
     sub_bytes_ct(&mut state);
     shift_rows_ct(&mut state);
-    add_round_key_ct(&mut state, &rk[4 * nr..4 * nr + 4]);
+    add_round_key_ct(&mut state, &rk[NB * nr..NB * nr + NB]);
     state
 }
 
-fn aes_decrypt_ct(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
+fn aes_decrypt_ct(block: &[u8; BLOCK_BYTES], dk: &[u32], nr: usize) -> [u8; BLOCK_BYTES] {
     let mut state = *block;
-    add_round_key_ct(&mut state, &dk[0..4]);
+    add_round_key_ct(&mut state, &dk[..NB]);
 
     for r in 1..nr {
         inv_shift_rows_ct(&mut state);
         inv_sub_bytes_ct(&mut state);
-        add_round_key_ct(&mut state, &dk[4 * r..4 * r + 4]);
+        add_round_key_ct(&mut state, &dk[NB * r..NB * r + NB]);
         inv_mix_columns_ct(&mut state);
     }
 
     inv_shift_rows_ct(&mut state);
     inv_sub_bytes_ct(&mut state);
-    add_round_key_ct(&mut state, &dk[4 * nr..4 * nr + 4]);
+    add_round_key_ct(&mut state, &dk[NB * nr..NB * nr + NB]);
     state
 }
 
@@ -1045,7 +1076,7 @@ fn aes_decrypt_ct(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
 macro_rules! define_aes {
     (
         $(#[$meta:meta])*
-        $Name:ident, $key_len:literal, $words:literal, $nr:literal,
+        $Name:ident, $key_len:expr, $words:expr, $nr:expr,
         $expand_sub:ident, $make_dec:ident, $enc:ident, $dec:ident,
         $timing:literal
     ) => {
@@ -1079,15 +1110,15 @@ macro_rules! define_aes {
                 out
             }
 
-            #[doc = concat!("Encrypt one 16-byte block through the ", stringify!($nr), " rounds. ", $timing)]
+            #[doc = concat!("Encrypt one 16-byte block through the full round schedule. ", $timing)]
             #[must_use]
-            pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 $enc(block, &self.enc_rk, $nr)
             }
 
-            #[doc = concat!("Decrypt one 16-byte block through the ", stringify!($nr), " inverse rounds. ", $timing)]
+            #[doc = concat!("Decrypt one 16-byte block through the inverse round schedule. ", $timing)]
             #[must_use]
-            pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+            pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
                 $dec(block, &self.dec_rk, $nr)
             }
         }
@@ -1099,7 +1130,7 @@ define_aes!(
     ///
     /// Variable-time: the T-table indices are the secret state. Use
     /// [`Aes128Ct`] when timing matters.
-    Aes128, 16, 44, 10, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
+    Aes128, AES128_KEY_BYTES, expanded_words(AES128_ROUNDS), AES128_ROUNDS, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
     "T-table path: variable-time in key and data; the `Ct` sibling type is the constant-time choice."
 );
 define_aes!(
@@ -1107,7 +1138,7 @@ define_aes!(
     ///
     /// Variable-time: the T-table indices are the secret state. Use
     /// [`Aes192Ct`] when timing matters.
-    Aes192, 24, 52, 12, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
+    Aes192, AES192_KEY_BYTES, expanded_words(AES192_ROUNDS), AES192_ROUNDS, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
     "T-table path: variable-time in key and data; the `Ct` sibling type is the constant-time choice."
 );
 define_aes!(
@@ -1115,7 +1146,7 @@ define_aes!(
     ///
     /// Variable-time: the T-table indices are the secret state. Use
     /// [`Aes256Ct`] when timing matters.
-    Aes256, 32, 60, 14, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
+    Aes256, AES256_KEY_BYTES, expanded_words(AES256_ROUNDS), AES256_ROUNDS, sub_word, make_dec_rk, aes_encrypt, aes_decrypt,
     "T-table path: variable-time in key and data; the `Ct` sibling type is the constant-time choice."
 );
 define_aes!(
@@ -1126,19 +1157,19 @@ define_aes!(
     /// circuit (ePrint 2011/332); `SubWord` in key setup goes through the
     /// same circuit, so neither key setup nor the block functions perform a
     /// secret-indexed table read.
-    Aes128Ct, 16, 44, 10, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
+    Aes128Ct, AES128_KEY_BYTES, expanded_words(AES128_ROUNDS), AES128_ROUNDS, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
     "Bytewise path with the Boyar-Peralta S-box circuit: no secret-dependent memory access or branch, at a throughput cost versus the T-table type."
 );
 define_aes!(
     /// AES-192 constant-time software path: the counterpart of [`Aes192`]
     /// built like [`Aes128Ct`].
-    Aes192Ct, 24, 52, 12, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
+    Aes192Ct, AES192_KEY_BYTES, expanded_words(AES192_ROUNDS), AES192_ROUNDS, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
     "Bytewise path with the Boyar-Peralta S-box circuit: no secret-dependent memory access or branch, at a throughput cost versus the T-table type."
 );
 define_aes!(
     /// AES-256 constant-time software path: the counterpart of [`Aes256`]
     /// built like [`Aes128Ct`].
-    Aes256Ct, 32, 60, 14, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
+    Aes256Ct, AES256_KEY_BYTES, expanded_words(AES256_ROUNDS), AES256_ROUNDS, sub_word_bool, make_dec_rk_ct, aes_encrypt_ct, aes_decrypt_ct,
     "Bytewise path with the Boyar-Peralta S-box circuit: no secret-dependent memory access or branch, at a throughput cost versus the T-table type."
 );
 
@@ -1152,27 +1183,32 @@ define_aes!(
 /// is crate-visible only; the types are nominally `pub` so the DRBG's sealed
 /// cipher trait may name them.
 pub(crate) mod encrypt_only {
-    use super::{aes_encrypt, aes_encrypt_ct, expand_key, sub_word, sub_word_bool};
+    use super::{
+        aes_encrypt, aes_encrypt_ct, expand_key, sub_word, sub_word_bool, AES256_KEY_BYTES,
+        AES256_ROUNDS, BLOCK_BYTES,
+    };
 
     macro_rules! define_aes256_encryptor {
         ($(#[$meta:meta])* $Name:ident, $expand_sub:ident, $enc:ident) => {
             $(#[$meta])*
             pub struct $Name {
-                rk: [u32; 60],
+                rk: [u32; super::expanded_words(AES256_ROUNDS)],
             }
 
             impl $Name {
                 /// Expand the forward schedule (FIPS 197 § 5.2) into the new
                 /// instance's own array.
-                pub(crate) fn new(key: &[u8; 32]) -> Self {
-                    let mut out = Self { rk: [0u32; 60] };
+                pub(crate) fn new(key: &[u8; AES256_KEY_BYTES]) -> Self {
+                    let mut out = Self {
+                        rk: [0u32; super::expanded_words(AES256_ROUNDS)],
+                    };
                     expand_key(key, &mut out.rk, $expand_sub);
                     out
                 }
 
                 /// Encrypt one block through the 14 rounds.
-                pub(crate) fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
-                    $enc(block, &self.rk, 14)
+                pub(crate) fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
+                    $enc(block, &self.rk, AES256_ROUNDS)
                 }
             }
 

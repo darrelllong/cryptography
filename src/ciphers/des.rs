@@ -41,20 +41,57 @@
 //! tests are differential (fast against `Ct`) or check the key screens.
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Widths FIPS 46-3 and SP 800-67 Rev. 2 fix
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// DES enciphers a 64-bit block under a 64-bit key, eight of whose bits are
+/// parity (FIPS 46-3 §1 and Appendix A).
+const BLOCK_BYTES: usize = 8;
+const KEY_BYTES: usize = BLOCK_BYTES;
+const BYTE_BITS: usize = 8;
+const BLOCK_BITS: usize = BYTE_BITS * BLOCK_BYTES;
+
+/// The Feistel halves L and R (FIPS 46-3 §"Enciphering").
+const HALF_BITS: usize = BLOCK_BITS / 2;
+
+/// E expands R to 48 bits, which PC-2 also selects for a subkey; PC-1 keeps
+/// the 56 key bits that carry no parity.
+const EXPANDED_BITS: usize = 48;
+const SUBKEY_BITS: usize = EXPANDED_BITS;
+const KEY_BITS_AFTER_PC1: usize = 56;
+
+/// C and D, the halves of the PC-1 output that the schedule rotates.
+const CD_HALF_BITS: usize = KEY_BITS_AFTER_PC1 / 2;
+
+/// Sixteen rounds, each with its own subkey (FIPS 46-3 §"Enciphering").
+const ROUNDS: usize = 16;
+
+/// The eight S-boxes take six bits and give four (FIPS 46-3 Appendix 1).
+const SBOX_COUNT: usize = 8;
+const SBOX_INPUT_BITS: usize = 6;
+const SBOX_OUTPUT_BITS: usize = 4;
+const SBOX_INPUTS: usize = 1 << SBOX_INPUT_BITS;
+
+/// The keying options of SP 800-67 Rev. 2 §3.1: a three-key and a two-key
+/// bundle of DES keys.
+const TDEA3_KEY_BYTES: usize = 3 * KEY_BYTES;
+const TDEA2_KEY_BYTES: usize = 2 * KEY_BYTES;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FIPS 46-3 Tables (1-indexed positions, converted to 0-indexed in code)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Initial Permutation (IP) — FIPS 46-3, Table "Initial Permutation IP"
 /// Entry i gives the 1-indexed bit position in the 64-bit input whose value
 /// becomes bit i of the output (MSB = bit 1).
-const IP: [u8; 64] = [
+const IP: [u8; BLOCK_BITS] = [
     58, 50, 42, 34, 26, 18, 10, 2, 60, 52, 44, 36, 28, 20, 12, 4, 62, 54, 46, 38, 30, 22, 14, 6,
     64, 56, 48, 40, 32, 24, 16, 8, 57, 49, 41, 33, 25, 17, 9, 1, 59, 51, 43, 35, 27, 19, 11, 3, 61,
     53, 45, 37, 29, 21, 13, 5, 63, 55, 47, 39, 31, 23, 15, 7,
 ];
 
 /// Final Permutation (IP⁻¹) — FIPS 46-3, Table "Inverse Initial Permutation IP⁻¹"
-const FP: [u8; 64] = [
+const FP: [u8; BLOCK_BITS] = [
     40, 8, 48, 16, 56, 24, 64, 32, 39, 7, 47, 15, 55, 23, 63, 31, 38, 6, 46, 14, 54, 22, 62, 30,
     37, 5, 45, 13, 53, 21, 61, 29, 36, 4, 44, 12, 52, 20, 60, 28, 35, 3, 43, 11, 51, 19, 59, 27,
     34, 2, 42, 10, 50, 18, 58, 26, 33, 1, 41, 9, 49, 17, 57, 25,
@@ -62,14 +99,14 @@ const FP: [u8; 64] = [
 
 /// Expansion function E — FIPS 46-3, Table "Expansion Permutation E"
 /// Maps the 32-bit right half to 48 bits.
-const E: [u8; 48] = [
+const E: [u8; EXPANDED_BITS] = [
     32, 1, 2, 3, 4, 5, 4, 5, 6, 7, 8, 9, 8, 9, 10, 11, 12, 13, 12, 13, 14, 15, 16, 17, 16, 17, 18,
     19, 20, 21, 20, 21, 22, 23, 24, 25, 24, 25, 26, 27, 28, 29, 28, 29, 30, 31, 32, 1,
 ];
 
 /// Permutation P — FIPS 46-3, Table "Permutation Function P"
 /// Applied to the 32-bit output of the 8 S-boxes.
-const P: [u8; 32] = [
+const P: [u8; HALF_BITS] = [
     16, 7, 20, 21, 29, 12, 28, 17, 1, 15, 23, 26, 5, 18, 31, 10, 2, 8, 24, 14, 32, 27, 3, 9, 19,
     13, 30, 6, 22, 11, 4, 25,
 ];
@@ -77,7 +114,7 @@ const P: [u8; 32] = [
 /// Permuted Choice 1 (PC-1) — FIPS 46-3, Table "Permuted Choice 1 (PC-1)"
 /// Selects and permutes 56 bits of the 64-bit key (discards parity bits).
 /// First 28 entries select bits for C0, next 28 for D0.
-const PC1: [u8; 56] = [
+const PC1: [u8; KEY_BITS_AFTER_PC1] = [
     57, 49, 41, 33, 25, 17, 9, 1, 58, 50, 42, 34, 26, 18, 10, 2, 59, 51, 43, 35, 27, 19, 11, 3, 60,
     52, 44, 36, 63, 55, 47, 39, 31, 23, 15, 7, 62, 54, 46, 38, 30, 22, 14, 6, 61, 53, 45, 37, 29,
     21, 13, 5, 28, 20, 12, 4,
@@ -85,21 +122,21 @@ const PC1: [u8; 56] = [
 
 /// Permuted Choice 2 (PC-2) — FIPS 46-3, Table "Permuted Choice 2 (PC-2)"
 /// Selects 48 bits from the 56-bit shifted key halves to form each round key.
-const PC2: [u8; 48] = [
+const PC2: [u8; SUBKEY_BITS] = [
     14, 17, 11, 24, 1, 5, 3, 28, 15, 6, 21, 10, 23, 19, 12, 4, 26, 8, 16, 7, 27, 20, 13, 2, 41, 52,
     31, 37, 47, 55, 30, 40, 51, 45, 33, 48, 44, 49, 39, 56, 34, 53, 46, 42, 50, 36, 29, 32,
 ];
 
 /// Key schedule rotation amounts — FIPS 46-3, Table "Number of Bit Rotations"
 /// Number of left-circular shifts applied to each key half in rounds 1–16.
-const SHIFTS: [u8; 16] = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
+const SHIFTS: [u8; ROUNDS] = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
 
 /// S-boxes S1–S8 — FIPS 46-3, Tables "Selection Functions S1–S8"
 ///
 /// Each S-box maps a 6-bit input to a 4-bit output.  The 6 input bits b1..b6
 /// (where b1 is MSB of the 6-bit value) select row r = (b1<<1)|b6 and
 /// column c = b2..b5.
-const SBOXES: [[u8; 64]; 8] = [
+const SBOXES: [[u8; SBOX_INPUTS]; SBOX_COUNT] = [
     // S1
     [
         14, 4, 13, 1, 2, 15, 11, 8, 3, 10, 6, 12, 5, 9, 0, 7, 0, 15, 7, 4, 14, 2, 13, 1, 10, 6, 12,
@@ -153,15 +190,15 @@ const SBOXES: [[u8; 64]; 8] = [
 /// Build packed ANF coefficients for `DesCt`: 64-bit monomial masks per output
 /// bit, one mask per S-box.  Runtime evaluates via subset-mask intersection and
 /// parity, avoiding secret-indexed S-box lookups entirely.
-const fn build_sbox_anf() -> [[u64; 4]; 8] {
-    let mut out = [[0u64; 4]; 8];
+const fn build_sbox_anf() -> [[u64; SBOX_OUTPUT_BITS]; SBOX_COUNT] {
+    let mut out = [[0u64; SBOX_OUTPUT_BITS]; SBOX_COUNT];
     let mut sbox_idx = 0usize;
-    while sbox_idx < 8 {
+    while sbox_idx < SBOX_COUNT {
         let mut bit_idx = 0usize;
-        while bit_idx < 4 {
-            let mut coeffs = [0u8; 64];
+        while bit_idx < SBOX_OUTPUT_BITS {
+            let mut coeffs = [0u8; SBOX_INPUTS];
             let mut x = 0usize;
-            while x < 64 {
+            while x < SBOX_INPUTS {
                 let row = ((x & 0x20) >> 4) | (x & 0x01);
                 let col = (x >> 1) & 0x0f;
                 coeffs[x] = (SBOXES[sbox_idx][row * 16 + col] >> bit_idx) & 1;
@@ -169,10 +206,10 @@ const fn build_sbox_anf() -> [[u64; 4]; 8] {
             }
 
             let mut var = 0usize;
-            while var < 6 {
+            while var < SBOX_INPUT_BITS {
                 let stride = 1usize << var;
                 let mut mask = 0usize;
-                while mask < 64 {
+                while mask < SBOX_INPUTS {
                     if mask & stride != 0 {
                         coeffs[mask] ^= coeffs[mask ^ stride];
                     }
@@ -195,7 +232,7 @@ const fn build_sbox_anf() -> [[u64; 4]; 8] {
     out
 }
 
-const SBOX_ANF: [[u64; 4]; 8] = build_sbox_anf();
+const SBOX_ANF: [[u64; SBOX_OUTPUT_BITS]; SBOX_COUNT] = build_sbox_anf();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Byte-level precomputed permutation tables (used by `Des`, not `DesCt`)
@@ -204,14 +241,14 @@ const SBOX_ANF: [[u64; 4]; 8] = build_sbox_anf();
 // OR-ing all eight byte contributions gives the full result.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
-    let mut table = [[0u64; 256]; 8];
+const fn build_perm64(perm: &[u8; BLOCK_BITS]) -> [[u64; 256]; BLOCK_BYTES] {
+    let mut table = [[0u64; 256]; BLOCK_BYTES];
     let mut i = 0usize;
-    while i < 64 {
+    while i < BLOCK_BITS {
         let src = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of u64)
-        let src_byte = src / 8;
-        let src_bit = src % 8; // 0 = MSB of that byte
-        let out_bit = 63 - i;
+        let src_byte = src / BYTE_BITS;
+        let src_bit = src % BYTE_BITS; // 0 = MSB of that byte
+        let out_bit = BLOCK_BITS - 1 - i;
         let mut v = 0usize;
         while v < 256 {
             if (v >> (7 - src_bit)) & 1 == 1 {
@@ -224,14 +261,14 @@ const fn build_perm64(perm: &[u8; 64]) -> [[u64; 256]; 8] {
     table
 }
 
-const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
-    let mut table = [[0u64; 256]; 4];
+const fn build_perm_e(perm: &[u8; EXPANDED_BITS]) -> [[u64; 256]; HALF_BITS / BYTE_BITS] {
+    let mut table = [[0u64; 256]; HALF_BITS / BYTE_BITS];
     let mut i = 0usize;
-    while i < 48 {
+    while i < EXPANDED_BITS {
         let src = (perm[i] - 1) as usize; // 0-indexed (0 = MSB of 32-bit R)
-        let src_byte = src / 8;
-        let src_bit = src % 8;
-        let out_bit = 47 - i;
+        let src_byte = src / BYTE_BITS;
+        let src_bit = src % BYTE_BITS;
+        let out_bit = EXPANDED_BITS - 1 - i;
         let mut v = 0usize;
         while v < 256 {
             if (v >> (7 - src_bit)) & 1 == 1 {
@@ -253,11 +290,11 @@ const fn build_perm_e(perm: &[u8; 48]) -> [[u64; 256]; 4] {
 const fn apply_p_to_partial(s: u32) -> u32 {
     let mut out = 0u32;
     let mut i = 0u32;
-    while i < 32 {
+    while i < HALF_BITS as u32 {
         // P[i] is the 1-indexed FIPS source bit for output FIPS bit (i+1).
         // FIPS bit k ↔ u32 bit (32−k).
-        let src_bit = 32u32 - P[i as usize] as u32; // 0 = LSB
-        let dst_bit = 31u32 - i;
+        let src_bit = HALF_BITS as u32 - P[i as usize] as u32; // 0 = LSB
+        let dst_bit = HALF_BITS as u32 - 1 - i;
         out |= ((s >> src_bit) & 1) << dst_bit;
         i += 1;
     }
@@ -295,7 +332,7 @@ static E_TABLE: [[u64; 256]; 4] = build_perm_e(&E);
 static SP_TABLE: [[u32; 64]; 8] = build_sp();
 
 #[inline]
-fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
+fn fast_perm64(x: u64, t: &[[u64; 256]; BLOCK_BYTES]) -> u64 {
     t[0][(x >> 56) as usize]
         | t[1][((x >> 48) & 0xff) as usize]
         | t[2][((x >> 40) & 0xff) as usize]
@@ -307,7 +344,7 @@ fn fast_perm64(x: u64, t: &[[u64; 256]; 8]) -> u64 {
 }
 
 #[inline]
-fn fast_expand(r: u32, t: &[[u64; 256]; 4]) -> u64 {
+fn fast_expand(r: u32, t: &[[u64; 256]; HALF_BITS / BYTE_BITS]) -> u64 {
     t[0][(r >> 24) as usize]
         | t[1][((r >> 16) & 0xff) as usize]
         | t[2][((r >> 8) & 0xff) as usize]
@@ -345,7 +382,7 @@ fn rotate_left(val: u32, n: u8, bits: u8) -> u32 {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A 16-round DES key schedule: 16 × 48-bit subkeys.
-pub type KeySchedule = [u64; 16];
+pub type KeySchedule = [u64; ROUNDS];
 
 /// Generate the key schedule from a 64-bit key (including parity bits).
 /// Returns 16 subkeys, each 48 bits (stored in the low 48 bits of u64).
@@ -358,16 +395,16 @@ pub fn key_schedule(mut key: u64) -> KeySchedule {
     // The first 28 bits of pc1_out form C0, the next 28 bits form D0.
     let mut pc1_out = permute64(key, &PC1);
 
-    let mut c_bytes = ((pc1_out >> 28) & 0x0FFF_FFFF).to_be_bytes();
+    let mut c_bytes = ((pc1_out >> CD_HALF_BITS) & 0x0FFF_FFFF).to_be_bytes();
     let mut d_bytes = (pc1_out & 0x0FFF_FFFF).to_be_bytes();
     let mut c = u32::from_be_bytes([c_bytes[4], c_bytes[5], c_bytes[6], c_bytes[7]]); // bits 1-28 → C0
     let mut d = u32::from_be_bytes([d_bytes[4], d_bytes[5], d_bytes[6], d_bytes[7]]); // bits 29-56 → D0
 
-    let mut schedule = [0u64; 16];
+    let mut schedule = [0u64; ROUNDS];
     let mut cd_shifted = 0u64;
-    for i in 0..16 {
-        c = rotate_left(c, SHIFTS[i], 28);
-        d = rotate_left(d, SHIFTS[i], 28);
+    for i in 0..ROUNDS {
+        c = rotate_left(c, SHIFTS[i], CD_HALF_BITS as u8);
+        d = rotate_left(d, SHIFTS[i], CD_HALF_BITS as u8);
 
         // Merge C and D into a 56-bit value for PC-2 selection.
         // C occupies the upper 28 bits; D the lower 28.
@@ -376,7 +413,7 @@ pub fn key_schedule(mut key: u64) -> KeySchedule {
         // We represent CD as a 64-bit value with the 56 bits in the MSBs
         // (i.e., shifted left by 8 so that position 1 in the FIPS table
         //  corresponds to bit 63 of our u64).
-        cd_shifted = ((u64::from(c) << 28) | u64::from(d)) << 8;
+        cd_shifted = ((u64::from(c) << CD_HALF_BITS) | u64::from(d)) << BYTE_BITS;
         schedule[i] = permute64(cd_shifted, &PC2);
     }
 
@@ -404,7 +441,7 @@ fn f(r: u32, subkey: u64) -> u32 {
 
     let mut result = 0u32;
     for (i, sp_row) in SP_TABLE.iter().enumerate() {
-        let shift = 42 - 6 * i;
+        let shift = EXPANDED_BITS - SBOX_INPUT_BITS * (i + 1);
         let b6 = ((xored >> shift) & 0x3F) as usize;
         result |= sp_row[b6];
     }
@@ -480,7 +517,7 @@ fn f_ct(r: u32, subkey: u64) -> u32 {
 
     let mut pre_p = 0u32;
     for i in 0..8usize {
-        let shift = 42 - 6 * i;
+        let shift = EXPANDED_BITS - SBOX_INPUT_BITS * (i + 1);
         let b6 = ((xored >> shift) & 0x3f) as u8;
         let sval = u32::from(sbox_ct(i, b6));
         pre_p |= sval << (28 - 4 * i);
@@ -564,7 +601,7 @@ pub enum DesKeyError {
 
 /// The four weak DES keys (SP 800-67 Rev. 2 § 3.3.2, first table), written
 /// with odd parity as the standard prints them.
-const WEAK_KEYS: [[u8; 8]; 4] = [
+const WEAK_KEYS: [[u8; KEY_BYTES]; 4] = [
     [0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01],
     [0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE, 0xFE],
     [0xE0, 0xE0, 0xE0, 0xE0, 0xF1, 0xF1, 0xF1, 0xF1],
@@ -573,7 +610,7 @@ const WEAK_KEYS: [[u8; 8]; 4] = [
 
 /// The six semi-weak DES key pairs (SP 800-67 Rev. 2 § 3.3.2, second table),
 /// written with odd parity as the standard prints them.
-const SEMI_WEAK_KEY_PAIRS: [([u8; 8], [u8; 8]); 6] = [
+const SEMI_WEAK_KEY_PAIRS: [([u8; KEY_BYTES], [u8; KEY_BYTES]); 6] = [
     (
         [0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE],
         [0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01, 0xFE, 0x01],
@@ -601,7 +638,7 @@ const SEMI_WEAK_KEY_PAIRS: [([u8; 8], [u8; 8]); 6] = [
 ];
 
 #[inline]
-fn strip_parity_bits(key: &[u8; 8]) -> [u8; 8] {
+fn strip_parity_bits(key: &[u8; KEY_BYTES]) -> [u8; KEY_BYTES] {
     let mut out = [0u8; 8];
     for i in 0..8 {
         out[i] = key[i] & 0xFE;
@@ -622,7 +659,7 @@ fn strip_parity_bits(key: &[u8; 8]) -> [u8; 8] {
 /// short-circuiting, so the running time does not depend on how many leading
 /// bytes of the secret key match a pattern.
 #[must_use]
-pub fn is_weak_or_semi_weak_key(key: &[u8; 8]) -> bool {
+pub fn is_weak_or_semi_weak_key(key: &[u8; KEY_BYTES]) -> bool {
     let mut normalized = strip_parity_bits(key);
     let mut hit = 0u8;
     for wk in WEAK_KEYS.iter() {
@@ -639,7 +676,7 @@ pub fn is_weak_or_semi_weak_key(key: &[u8; 8]) -> bool {
 
 impl Des {
     /// Create a new DES instance from an 8-byte key.
-    pub fn new(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Result<Self, DesKeyError> {
         if is_weak_or_semi_weak_key(key) {
             return Err(DesKeyError::WeakOrSemiWeakKey);
         }
@@ -652,7 +689,7 @@ impl Des {
     /// CAVP tables (whose keys include the weak key `01..01`) are run through
     /// it in this module's tests.
     #[must_use]
-    pub(crate) fn new_unchecked(key: &[u8; 8]) -> Self {
+    pub(crate) fn new_unchecked(key: &[u8; KEY_BYTES]) -> Self {
         // Both schedules are written straight into the struct, and the key's
         // integer form is wiped once they exist.
         let mut k = u64::from_be_bytes(*key);
@@ -667,7 +704,7 @@ impl Des {
     }
 
     /// Create a new DES instance and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 8]) -> Result<Self, DesKeyError> {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Result<Self, DesKeyError> {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -675,14 +712,14 @@ impl Des {
 
     /// Encrypt a single 64-bit block (ECB mode).
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let b = u64::from_be_bytes(*block);
         des_block(b, &self.enc_schedule).to_be_bytes()
     }
 
     /// Decrypt a single 64-bit block (ECB mode).
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let b = u64::from_be_bytes(*block);
         des_block(b, &self.dec_schedule).to_be_bytes()
     }
@@ -690,7 +727,7 @@ impl Des {
 
 impl DesCt {
     /// Create a new constant-time DES instance from an 8-byte key.
-    pub fn new(key: &[u8; 8]) -> Result<Self, DesKeyError> {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Result<Self, DesKeyError> {
         if is_weak_or_semi_weak_key(key) {
             return Err(DesKeyError::WeakOrSemiWeakKey);
         }
@@ -700,7 +737,7 @@ impl DesCt {
     /// Create constant-time DES from an 8-byte key without the weak-key
     /// screen; crate-internal, as [`Des::new_unchecked`] is.
     #[must_use]
-    pub(crate) fn new_unchecked(key: &[u8; 8]) -> Self {
+    pub(crate) fn new_unchecked(key: &[u8; KEY_BYTES]) -> Self {
         let mut k = u64::from_be_bytes(*key);
         let mut cipher = DesCt {
             enc_schedule: key_schedule(k),
@@ -713,7 +750,7 @@ impl DesCt {
     }
 
     /// Create a new constant-time DES instance and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 8]) -> Result<Self, DesKeyError> {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Result<Self, DesKeyError> {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -721,14 +758,14 @@ impl DesCt {
 
     /// Encrypt a single 64-bit block (ECB mode).
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let b = u64::from_be_bytes(*block);
         des_block_ct(b, &self.enc_schedule).to_be_bytes()
     }
 
     /// Decrypt a single 64-bit block (ECB mode).
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 8]) -> [u8; 8] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let b = u64::from_be_bytes(*block);
         des_block_ct(b, &self.dec_schedule).to_be_bytes()
     }
@@ -783,7 +820,7 @@ pub enum TDesMode {
 /// Evaluated without short-circuiting, like [`is_weak_or_semi_weak_key`], so
 /// the running time does not depend on where the secret components differ.
 #[inline]
-fn same_des_key(a: &[u8; 8], b: &[u8; 8]) -> bool {
+fn same_des_key(a: &[u8; KEY_BYTES], b: &[u8; KEY_BYTES]) -> bool {
     let mut a_bits = strip_parity_bits(a);
     let mut b_bits = strip_parity_bits(b);
     let same = crate::ct::constant_time_eq_mask(&a_bits, &b_bits) != 0;
@@ -817,10 +854,14 @@ impl TdeaSchedules {
     /// then any pair of equal components (SP 800-67 requires the three keys
     /// to be independent; a repeated component silently collapses 3TDEA to
     /// 2TDEA or to single DES).
-    fn three_key(key: &[u8; 24]) -> Result<Self, DesKeyError> {
-        let k1: &[u8; 8] = key[0..8].try_into().expect("first DES key split");
-        let k2: &[u8; 8] = key[8..16].try_into().expect("second DES key split");
-        let k3: &[u8; 8] = key[16..24].try_into().expect("third DES key split");
+    fn three_key(key: &[u8; TDEA3_KEY_BYTES]) -> Result<Self, DesKeyError> {
+        let k1: &[u8; KEY_BYTES] = key[..KEY_BYTES].try_into().expect("first DES key split");
+        let k2: &[u8; KEY_BYTES] = key[KEY_BYTES..2 * KEY_BYTES]
+            .try_into()
+            .expect("second DES key split");
+        let k3: &[u8; KEY_BYTES] = key[2 * KEY_BYTES..]
+            .try_into()
+            .expect("third DES key split");
         if is_weak_or_semi_weak_key(k1)
             | is_weak_or_semi_weak_key(k2)
             | is_weak_or_semi_weak_key(k3)
@@ -840,9 +881,11 @@ impl TdeaSchedules {
 
     /// Keying option 2 from K1 ∥ K2 with K3 = K1, rejecting weak components
     /// and K1 = K2 (which would collapse 2TDEA to single DES).
-    fn two_key(key: &[u8; 16]) -> Result<Self, DesKeyError> {
-        let k1: &[u8; 8] = key[0..8].try_into().expect("first DES key split");
-        let k2: &[u8; 8] = key[8..16].try_into().expect("second DES key split");
+    fn two_key(key: &[u8; TDEA2_KEY_BYTES]) -> Result<Self, DesKeyError> {
+        let k1: &[u8; KEY_BYTES] = key[..KEY_BYTES].try_into().expect("first DES key split");
+        let k2: &[u8; KEY_BYTES] = key[KEY_BYTES..2 * KEY_BYTES]
+            .try_into()
+            .expect("second DES key split");
         if is_weak_or_semi_weak_key(k1) | is_weak_or_semi_weak_key(k2) {
             return Err(DesKeyError::WeakOrSemiWeakKey);
         }
