@@ -24,6 +24,11 @@ pub const REFILL: usize = 512;
 /// Bytes of each refill that become the next key.
 pub const KEY: usize = 32;
 
+/// The ChaCha20 nonce of every refill. Each key is used for exactly one
+/// refill and then replaced, so a fixed nonce never repeats a (key, nonce)
+/// pair; the construction needs no nonce state.
+const NONCE: [u8; 12] = [0; 12];
+
 /// ChaCha20 with fast key erasure.
 pub struct FastKeyErasure {
     key: [u8; KEY],
@@ -47,7 +52,7 @@ impl FastKeyErasure {
     /// rest to serve.
     fn refill(&mut self) {
         let mut stream = [0u8; REFILL];
-        ChaCha20::new(&self.key, &[0u8; 12]).keystream(&mut stream);
+        ChaCha20::new(&self.key, &NONCE).keystream(&mut stream);
         self.key.copy_from_slice(&stream[..KEY]);
         self.buffer[KEY..].copy_from_slice(&stream[KEY..]);
         zeroize_slice(stream.as_mut_slice());

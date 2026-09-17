@@ -13,6 +13,13 @@ use crate::{Csprng, Hmac, Sha256};
 
 /// HMAC-SHA-256 output length, in bytes.
 const OUTLEN: usize = 32;
+/// Every byte of the initial `Key` (§10.1.2.3 step 2: `Key = 0x00 00...00`).
+const INITIAL_KEY_BYTE: u8 = 0x00;
+/// Every byte of the initial `V` (§10.1.2.3 step 3: `V = 0x01 01...01`).
+const INITIAL_V_BYTE: u8 = 0x01;
+/// The separator byte of each `HMAC_DRBG_Update` round (§10.1.2.2 steps 1
+/// and 4: `V ‖ 0x00 ‖ provided_data`, then `V ‖ 0x01 ‖ provided_data`).
+const UPDATE_SEPARATORS: [u8; 2] = [0x00, 0x01];
 
 /// `HMAC_DRBG` instantiated with HMAC-SHA-256.
 pub struct HmacDrbg {
@@ -37,7 +44,7 @@ impl HmacDrbg {
     /// provided_data)`, `V = HMAC(Key, V)`, and, when `provided_data` is not
     /// empty, the same again with `0x01`.
     fn update(&mut self, provided_data: &[&[u8]]) {
-        for (round, separator) in [0x00u8, 0x01].into_iter().enumerate() {
+        for (round, separator) in UPDATE_SEPARATORS.into_iter().enumerate() {
             if round == 1 && provided_data.iter().all(|part| part.is_empty()) {
                 break;
             }
@@ -69,8 +76,8 @@ impl HmacDrbg {
             return Err(DrbgError::InputTooShort);
         }
         let mut drbg = Self {
-            key: [0x00; OUTLEN],
-            v: [0x01; OUTLEN],
+            key: [INITIAL_KEY_BYTE; OUTLEN],
+            v: [INITIAL_V_BYTE; OUTLEN],
             reseed_counter: 1,
         };
         drbg.update(&[entropy_input, nonce, personalization_string]);
@@ -224,7 +231,7 @@ mod tests {
         let v2 = hmac(&key, &[&v1]);
         assert_eq!(out[..32], v1);
         assert_eq!(out[32..], v2[..8]);
-        let key2 = hmac(&key, &[&v2, &[0x00]]);
+        let key2 = hmac(&key, &[&v2, &[UPDATE_SEPARATORS[0]]]);
         let v3 = hmac(&key2, &[&v2]);
         assert_eq!((d.key, d.v), (key2, v3));
     }

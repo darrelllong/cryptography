@@ -23,6 +23,21 @@ pub const SEEDLEN: usize = 55;
 const SEEDLEN_BITS: usize = SEEDLEN * 8;
 /// SHA-256 output length, in bytes.
 const OUTLEN: usize = 32;
+/// SHA-256 blocks `Hash_df` concatenates for a `seedlen` output (§10.3.1
+/// step 2: `len = ⌈no_of_bits_to_return / outlen⌉`).
+const HASH_DF_BLOCKS: usize = SEEDLEN.div_ceil(OUTLEN);
+
+/// Prefix of `Hash_df` when deriving `C` (§10.1.1.2 step 4, §10.1.1.3 step 4:
+/// `C = Hash_df(0x00 ‖ V)`).
+const C_PREFIX: u8 = 0x00;
+/// Prefix of the reseed seed material (§10.1.1.3 step 1: `0x01 ‖ V ‖
+/// entropy_input ‖ additional_input`).
+const RESEED_PREFIX: u8 = 0x01;
+/// Prefix of the additional-input hash (§10.1.1.4 step 2.1: `w = Hash(0x02 ‖
+/// V ‖ additional_input)`).
+const ADDITIONAL_INPUT_PREFIX: u8 = 0x02;
+/// Prefix of the state-update hash (§10.1.1.4 step 4: `H = Hash(0x03 ‖ V)`).
+const UPDATE_PREFIX: u8 = 0x03;
 
 /// `Hash_DRBG` instantiated with SHA-256.
 pub struct HashDrbg {
@@ -49,7 +64,7 @@ fn hash_df(input: &[&[u8]]) -> [u8; SEEDLEN] {
     let bits = u32::try_from(SEEDLEN_BITS)
         .expect("seedlen fits a u32")
         .to_be_bytes();
-    let mut temp = [0u8; 2 * OUTLEN];
+    let mut temp = [0u8; HASH_DF_BLOCKS * OUTLEN];
     for (counter, block) in (1u8..).zip(temp.chunks_exact_mut(OUTLEN)) {
         let mut hash = Sha256::new();
         hash.update(&[counter]);
@@ -95,7 +110,7 @@ impl HashDrbg {
             return Err(DrbgError::InputTooShort);
         }
         let v = hash_df(&[entropy_input, nonce, personalization_string]);
-        let c = hash_df(&[&[0x00], &v]);
+        let c = hash_df(&[&[C_PREFIX], &v]);
         Ok(Self {
             v,
             c,
@@ -119,10 +134,10 @@ impl HashDrbg {
         if entropy_input.len() < MIN_ENTROPY_BYTES {
             return Err(DrbgError::InputTooShort);
         }
-        let mut v = hash_df(&[&[0x01], &self.v, entropy_input, additional_input]);
+        let mut v = hash_df(&[&[RESEED_PREFIX], &self.v, entropy_input, additional_input]);
         self.v.copy_from_slice(&v);
         zeroize_slice(v.as_mut_slice());
-        let mut c = hash_df(&[&[0x00], &self.v]);
+        let mut c = hash_df(&[&[C_PREFIX], &self.v]);
         self.c.copy_from_slice(&c);
         zeroize_slice(c.as_mut_slice());
         self.reseed_counter = 1;
@@ -155,7 +170,7 @@ impl HashDrbg {
             return Err(DrbgError::RequestTooLarge);
         }
         if !additional_input.is_empty() {
-            let mut w = sha256(&[&[0x02], &self.v, additional_input]);
+            let mut w = sha256(&[&[ADDITIONAL_INPUT_PREFIX], &self.v, additional_input]);
             add_mod_seedlen(&mut self.v, &[&w]);
             zeroize_slice(w.as_mut_slice());
         }
@@ -168,7 +183,7 @@ impl HashDrbg {
             add_mod_seedlen(&mut data, &[&one]);
         }
         zeroize_slice(data.as_mut_slice());
-        let mut h = sha256(&[&[0x03], &self.v]);
+        let mut h = sha256(&[&[UPDATE_PREFIX], &self.v]);
         let counter = self.reseed_counter.to_be_bytes();
         let c = self.c;
         add_mod_seedlen(&mut self.v, &[&h, &c, &counter]);

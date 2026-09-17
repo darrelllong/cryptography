@@ -17,36 +17,37 @@
 //! names and numbers.
 //!
 //! EESS #1 v3.1 tabulates only product-form parameter sets (`ees443ep1` is
-//! its Table 5). The eight dense sets are the IEEE Std 1363.1-2008 sets,
-//! whose tables this module does not draw on; their values rest on the paper
-//! that derived them and on measurement:
-//! - `N` and `dF` are Table 1, "Standardized NTRU Parameters (conservative)",
-//!   of Hirschhorn, Hoffstein, Howgrave-Graham and Whyte, *Choosing
-//!   NTRUEncrypt Parameters in Light of Combined Lattice Reduction and MITM
-//!   Approaches*, ACNS 2009, LNCS 5536, pp. 437–455
-//!   (`pubs/hirschhorn-hoffstein-howgrave-graham-whyte-2009-…pdf`, below
-//!   "HHHW"): (401, 113), (541, 49), (449, 134), (677, 157), (1087, 63),
-//!   (1087, 120), (1171, 106) and (1499, 79).
-//! - `dr = dF` and `dg = ⌊N/3⌋` are HHHW §1.1 ("p = 3, dr = df, dg =
-//!   ⌊N/3⌋"; "the thickness of g does not affect efficiency"). One
-//!   [`TrapdoorKind`] therefore shapes both `F` and `r`, as EESS #1 v3.1's
-//!   own tables do for `ees443ep1` (`dr1, dr2, dr3` equal to `df1, df2,
-//!   df3`). `dg` is also confirmed by key pair validation of the reference
-//!   implementation's private keys, whose `g` has exactly `dg + 1` ones.
-//! - `dm0 = dF` is HHHW §6, Assumption 7: "An encrypter that re-encrypts
-//!   whenever the number of 1s or −1s in m′ falls below df does not make
-//!   message recovery fall below the required security level"; §10.2.2
-//!   step p applies the bound to the 0s as well. Every set's rate is
-//!   measured (see "Step p refusals" below).
-//! - `db`, `c`, pkLen, the OID, the hash and maxMsgLenBytes are pinned by
-//!   the interoperability vectors: `bLen` is the length of each recorded
-//!   `b`, maxMsgLenBytes is the recorded `MAX_MSG`, and the recorded
-//!   ciphertext reproduces only under the right IGF-2 width, hash, `hTrunc`
-//!   length and OID.
-//! - minCallsR and minCallsMask set how many hash blocks are computed up
-//!   front (convention 3) and change no output, so the vectors cannot tell
-//!   them apart; no available publication tabulates them for the dense
-//!   sets, and their values here are unconfirmed.
+//! its Table 5, from which every field of that set is taken). The eight dense
+//! sets are the IEEE Std 1363.1-2008 sets, whose tables this module does not
+//! draw on. Each of their fields rests on the source below; "HHHW" is
+//! Hirschhorn, Hoffstein, Howgrave-Graham and Whyte, *Choosing NTRUEncrypt
+//! Parameters in Light of Combined Lattice Reduction and MITM Approaches*,
+//! ACNS 2009, LNCS 5536, pp. 437–455
+//! (`pubs/hirschhorn-hoffstein-howgrave-graham-whyte-2009-…pdf`).
+//!
+//! | Field | Meaning | Source | Checked by |
+//! |---|---|---|---|
+//! | `N`, `dF` | ring degree; `F`'s ±1 count | HHHW Table 1, "Standardized NTRU Parameters (conservative)": (401, 113), (541, 49), (449, 134), (677, 157), (1087, 63), (1087, 120), (1171, 106), (1499, 79) | interoperability vectors |
+//! | `dr` | blinding ±1 count | HHHW §1.1, "dr = df"; one [`TrapdoorKind`] shapes `F` and `r`, as EESS #1 v3.1 Table 5 does for `ees443ep1` | interoperability vectors |
+//! | `dg` | `g` has `dg + 1` ones, `dg` minus ones | HHHW §1.1, "dg = ⌊N/3⌋" | key pair validation of the reference keys |
+//! | `dm0` | step p's minimum trit count | HHHW §6, Assumption 7 (re-encrypt below df); §10.2.2 step p applies it to all three values | measured refusal rates ("Step p refusals") |
+//! | `db`, `c`, pkLen, OID, hash, maxMsgLenBytes | seed length; IGF-2 width; `hTrunc`; key identifier; hash; message bound | no available publication for the dense sets | interoperability vectors: `bLen` is each recorded `b`'s length, maxMsgLenBytes the recorded `MAX_MSG`, and the recorded ciphertext reproduces only under the right width, hash, `hTrunc` length and OID |
+//! | `minCallsR`, `minCallsMask` | hash blocks computed before IGF-2 and MGF-TP-1 read them | this module's precomputation rule, below | `precomputation_counts_follow_the_rule`; `output_does_not_depend_on_precomputation` |
+//!
+//! **Precomputation rule.** Convention 3's stream extends itself when its
+//! blocks run out, so `minCallsR` and `minCallsMask` change no output; they
+//! decide how often a draw needs a further hash call, which is observable
+//! in time. For the dense sets each is the least block count `k` for which
+//! that probability is below 2⁻⁴⁰, computed exactly from the draw: MGF-TP-1
+//! needs ⌈N/5⌉ octets below 243 among `k·hLen` uniform octets (a binomial
+//! tail); IGF-2 needs `2·dr` distinct indices among ⌊8·k·hLen / c⌋ candidates,
+//! each accepted with probability `(2^c − 2^c mod N) / 2^c` and then uniform
+//! on `N` (a Markov chain over the number drawn). The values are 6/32
+//! (`ees401ep1`, mask/r), 6/36 (`ees449ep1`), 7/13 (`ees541ep1`), 6/23
+//! (`ees677ep1`), 9/10 (`ees1087ep1`), 9/19 (`ees1087ep2`), 9/17
+//! (`ees1171ep1`) and 12/12 (`ees1499ep1`). No complete normative table for
+//! these sets was available, so conformance is claimed to this profile, not
+//! to IEEE Std 1363.1-2008's tables.
 //!
 //! Where the text is silent or contradicts itself (noted below), the reading
 //! is the one the standard authors' reference implementation exhibits when
@@ -216,10 +217,9 @@
 //!   blocks, but the loops that read them skip discarded octets, rejected
 //!   candidates and repeated indices, so iteration counts follow the hash
 //!   output. A further hash call is needed only when the precomputed blocks
-//!   run out. For IGF-2 that probability is about 3.7 × 10⁻⁵ per blinding
-//!   polynomial for `ees449ep1` (31 SHA-1 blocks give 551 candidates for
-//!   268 distinct indices) and below 10⁻¹² for the other sets; for MGF-TP-1
-//!   it is below 10⁻⁴⁸.
+//!   run out: with probability below 2⁻⁴⁰ per draw for the dense sets, by the
+//!   precomputation rule, and 2⁻¹⁶¹ (MGF-TP-1) and 2⁻³⁵⁸ (IGF-2, all three
+//!   factors) for `ees443ep1`'s Table 5 counts.
 //! - Sparse convolutions by `F` and by the recovered `r`, and IGF-2's table
 //!   of already-drawn indices, touch memory at offsets set by secret indices.
 //! - Key-blob parsing and validation, key generation (rejection sampling,
@@ -257,6 +257,15 @@ const PUBLIC_KEY_TAG: u8 = 0x01;
 
 /// Key-blob tag of a private key (convention 12).
 const PRIVATE_KEY_TAG: u8 = 0x02;
+
+/// Trits in one octet under trit packing and MGF-TP-1: the most base-3 digits
+/// an octet holds, since 3^5 = 243 ≤ 256 < 729 = 3^6.
+const TRITS_PER_OCTET: usize = 5;
+
+/// 3^`TRITS_PER_OCTET`: octets below it carry `TRITS_PER_OCTET` digits, and
+/// MGF-TP-1 discards the rest (EESS #1 v3.1 §9.4.1.1 step i), so each
+/// accepted octet's digits are uniform.
+const TRIT_OCTET_LIMIT: u8 = 243;
 
 /// Hash function named by a parameter set (EESS #1 v3.1 §9.2); it
 /// instantiates both MGF-TP-1 and IGF-2.
@@ -758,11 +767,12 @@ impl Trapdoor {
 fn read_trits(bytes: &[u8], n: usize, df: usize) -> Option<TernaryPoly> {
     let mut poly = TernaryPoly::with_capacity(df, df);
     for (group, &octet) in bytes.iter().enumerate() {
-        if octet >= 243 {
+        if octet >= TRIT_OCTET_LIMIT {
             return None;
         }
         let mut rest = octet;
-        for position in group * 5..group * 5 + 5 {
+        let first = group * TRITS_PER_OCTET;
+        for position in first..first + TRITS_PER_OCTET {
             let digit = rest % 3;
             rest /= 3;
             if digit == 0 {
@@ -1050,11 +1060,11 @@ fn mgf_tp1<const N: usize>(seed: &[u8], params: &EesParams) -> [u8; N] {
     let mut filled = 0;
     while filled < N {
         let octet = stream.next_octet();
-        if octet >= 243 {
+        if octet >= TRIT_OCTET_LIMIT {
             continue;
         }
         let mut rest = octet;
-        for slot in out[filled..].iter_mut().take(5) {
+        for slot in out[filled..].iter_mut().take(TRITS_PER_OCTET) {
             *slot = rest % 3;
             rest /= 3;
             filled += 1;
@@ -2182,6 +2192,10 @@ macro_rules! define_ees_set {
             $crate::public_key::ntru_ees_core::tamper::survey::<N>(&PARAMS, trials)
         }
 
+        /// This set's parameters, for tests that recompute derived fields.
+        #[cfg(test)]
+        pub(crate) const TEST_PARAMS: EesParams = PARAMS;
+
         /// Step p attempts over `trials` honest encryptions of this set
         /// under the streams named by `seed`
         /// (`ntru_ees_core::refusals::attempts`).
@@ -2434,7 +2448,10 @@ pub(crate) use define_ees_set;
 /// interoperability.
 #[cfg(test)]
 pub(crate) mod test_vectors {
-    use super::{BitReader, BitWriter, EesParams, KeyPacking, TrapdoorKind, KEY_BLOB_HEADER_BYTES};
+    use super::{
+        BitReader, BitWriter, EesParams, KeyPacking, TrapdoorKind, KEY_BLOB_HEADER_BYTES,
+        TRIT_OCTET_LIMIT,
+    };
     use crate::test_utils::{decode_hex, encode_hex, vector_fields};
     use crate::Csprng;
     use std::fmt::Write as _;
@@ -2729,7 +2746,7 @@ pub(crate) mod test_vectors {
                     .position(|&o| o <= 12)
                     .expect("a trit octet no larger than 12");
                 let mut big_octet = blob.to_vec();
-                big_octet[start + small] += 243;
+                big_octet[start + small] += TRIT_OCTET_LIMIT;
                 cases.push(("a trit octet above 242 with valid digits", big_octet));
                 // Turn the first zero coefficient into +1: one too many.
                 let mut heavier = blob.to_vec();
@@ -3480,6 +3497,173 @@ mod tests {
         assert!(!padding_bits_clear(&[0x5a, 0x0a, 0x6e, 0x71, 0x41], 35));
     }
 
+    /// Probability that MGF-TP-1 needs more than `blocks` hash blocks:
+    /// fewer than ⌈N/5⌉ of `blocks · hLen` uniform octets fall below 243.
+    fn mask_overrun(params: &EesParams, blocks: usize) -> f64 {
+        let need = params.n.div_ceil(TRITS_PER_OCTET);
+        let accept = f64::from(TRIT_OCTET_LIMIT) / f64::from(u16::from(u8::MAX) + 1);
+        // dist[a]: probability of `a` accepted octets so far, `a < need`;
+        // `done` collects the mass that has reached `need`.
+        let mut dist = vec![0.0f64; need];
+        dist[0] = 1.0;
+        for _ in 0..blocks * params.hash.output_len() {
+            let mut next = vec![0.0f64; need];
+            for (a, p) in dist.iter().enumerate() {
+                if a + 1 < need {
+                    next[a + 1] += p * accept;
+                }
+                next[a] += p * (1.0 - accept);
+            }
+            dist = next;
+        }
+        dist.iter().sum()
+    }
+
+    /// Probability that IGF-2 needs more than `blocks` hash blocks for the
+    /// blinding value: the ⌊8 · blocks · hLen / c⌋ candidates, each accepted
+    /// with probability `limit / 2^c` and then uniform on `N`, fail to give
+    /// `2·d` distinct indices for every factor `d` in turn.
+    fn index_overrun(params: &EesParams, blocks: usize) -> f64 {
+        let factors: Vec<usize> = match params.trapdoor {
+            TrapdoorKind::Dense { df } => vec![df],
+            TrapdoorKind::ProductForm { df1, df2, df3 } => vec![df1, df2, df3],
+        };
+        let candidates = 8 * blocks * params.hash.output_len() / params.c_bits;
+        let accept = f64::from(params.index_limit()) / f64::from(1u32 << params.c_bits);
+        let n = params.n as f64;
+        // dist[f][d]: in factor `f` with `d` distinct indices drawn.
+        let mut dist: Vec<Vec<f64>> = factors.iter().map(|d| vec![0.0; 2 * d]).collect();
+        dist[0][0] = 1.0;
+        for _ in 0..candidates {
+            let mut next: Vec<Vec<f64>> = factors.iter().map(|d| vec![0.0; 2 * d]).collect();
+            for (f, row) in dist.iter().enumerate() {
+                for (d, p) in row.iter().enumerate() {
+                    let new_index = accept * (n - d as f64) / n;
+                    if d + 1 < row.len() {
+                        next[f][d + 1] += p * new_index;
+                    } else if f + 1 < factors.len() {
+                        next[f + 1][0] += p * new_index;
+                    }
+                    next[f][d] += p * (1.0 - new_index);
+                }
+            }
+            dist = next;
+        }
+        dist.iter().flatten().sum()
+    }
+
+    /// The precomputation rule's bound on the probability that a draw needs a
+    /// further hash call, as a power of two. At 2^−40 an observer timing
+    /// encryptions sees one extra call per 2^40 (about 10^12) draws, more
+    /// than a key is used for in practice; a smaller bound would add
+    /// precomputed hashing to every encryption.
+    const OVERRUN_BOUND_LOG2: i32 = -40;
+
+    /// Two independent computations of an overrun probability's logarithm,
+    /// this chain and a separate Python evaluation of the same model, agree
+    /// to within this many bits.
+    const LOG2_AGREEMENT: f64 = 0.1;
+
+    /// The least block count whose overrun probability is below the rule's
+    /// bound.
+    fn least_blocks(overrun: impl Fn(usize) -> f64) -> usize {
+        (1..)
+            .find(|&k| overrun(k) < 2f64.powi(OVERRUN_BOUND_LOG2))
+            .expect("the tail vanishes")
+    }
+
+    /// The dense sets' `minCallsMask` and `minCallsR` are the precomputation
+    /// rule's values, and `ees443ep1` keeps EESS #1 v3.1 Table 5's (5, 8)
+    /// with overrun probabilities far below the rule's bound. The chain gives
+    /// 2^−14.7 for `ees449ep1` at 31 blocks, the figure this module published
+    /// before the rule.
+    #[test]
+    fn precomputation_counts_follow_the_rule() {
+        use crate::public_key::{
+            ntru_ees1087ep1, ntru_ees1087ep2, ntru_ees1171ep1, ntru_ees1499ep1, ntru_ees401ep1,
+            ntru_ees443ep1, ntru_ees449ep1, ntru_ees541ep1, ntru_ees677ep1,
+        };
+        for params in [
+            ntru_ees401ep1::TEST_PARAMS,
+            ntru_ees449ep1::TEST_PARAMS,
+            ntru_ees541ep1::TEST_PARAMS,
+            ntru_ees677ep1::TEST_PARAMS,
+            ntru_ees1087ep1::TEST_PARAMS,
+            ntru_ees1087ep2::TEST_PARAMS,
+            ntru_ees1171ep1::TEST_PARAMS,
+            ntru_ees1499ep1::TEST_PARAMS,
+        ] {
+            assert_eq!(
+                params.min_calls_mask,
+                least_blocks(|k| mask_overrun(&params, k)),
+                "N = {} minCallsMask",
+                params.n
+            );
+            assert_eq!(
+                params.min_calls_r,
+                least_blocks(|k| index_overrun(&params, k)),
+                "N = {} minCallsR",
+                params.n
+            );
+        }
+        // EESS #1 v3.1 Table 5: minCallsMask = 5, minCallsR = 8 for ees443ep1.
+        const TABLE_5_MIN_CALLS_MASK: usize = 5;
+        const TABLE_5_MIN_CALLS_R: usize = 8;
+        // The block count `ees449ep1` used before the rule.
+        const EES449_BLOCKS_BEFORE_RULE: usize = 31;
+        let table5 = ntru_ees443ep1::TEST_PARAMS;
+        assert_eq!(
+            (table5.min_calls_mask, table5.min_calls_r),
+            (TABLE_5_MIN_CALLS_MASK, TABLE_5_MIN_CALLS_R)
+        );
+        // Overrun probabilities (log2) as the separate Python evaluation of the
+        // same model gives them: Table 5's counts are far below the bound, and
+        // the earlier `ees449ep1` count far above it.
+        let cases = [
+            (mask_overrun(&table5, TABLE_5_MIN_CALLS_MASK), -161.2),
+            (index_overrun(&table5, TABLE_5_MIN_CALLS_R), -358.3),
+            (
+                index_overrun(&ntru_ees449ep1::TEST_PARAMS, EES449_BLOCKS_BEFORE_RULE),
+                -14.7,
+            ),
+        ];
+        for (probability, expected_log2) in cases {
+            let log2 = probability.log2();
+            assert!(
+                (log2 - expected_log2).abs() < LOG2_AGREEMENT,
+                "{log2} against {expected_log2}"
+            );
+        }
+    }
+
+    /// Precomputing one block or many gives the same stream, and the same
+    /// ciphertext through the whole encryption.
+    #[test]
+    fn output_does_not_depend_on_precomputation() {
+        for k in [0usize, 1, 2, 7, 40] {
+            let mut stream = HashStream::new(HashKind::Sha256, b"seed", k);
+            let mut one = HashStream::new(HashKind::Sha256, b"seed", 1);
+            for _ in 0..500 {
+                assert_eq!(stream.next_octet(), one.next_octet(), "min_calls {k}");
+            }
+        }
+        use crate::public_key::ntru_ees401ep1;
+        let rule = ntru_ees401ep1::TEST_PARAMS;
+        let mut minimal = rule;
+        minimal.min_calls_r = 1;
+        minimal.min_calls_mask = 1;
+        let mut key_rng = crate::CtrDrbgAes256::new(&[0x61; 48]);
+        let (packed_h, _) = keygen::<401, _>(&rule, &mut key_rng);
+        for message in [&b""[..], b"precomputation", &[0xa5; 60]] {
+            let mut a = crate::CtrDrbgAes256::new(&[0x62; 48]);
+            let mut b = crate::CtrDrbgAes256::new(&[0x62; 48]);
+            assert_eq!(
+                encrypt::<401, _>(&packed_h, message, &mut a, &rule).expect("encrypt"),
+                encrypt::<401, _>(&packed_h, message, &mut b, &minimal).expect("encrypt")
+            );
+        }
+    }
+
     #[test]
     fn hash_stream_uses_hashed_seed_and_four_octet_big_endian_counter() {
         let seed = b"sData";
@@ -3551,9 +3735,9 @@ mod tests {
         let mut expected = Vec::new();
         while expected.len() < 11 {
             let octet = stream.next_octet();
-            if octet < 243 {
+            if octet < TRIT_OCTET_LIMIT {
                 let mut rest = octet;
-                for _ in 0..5 {
+                for _ in 0..TRITS_PER_OCTET {
                     expected.push(rest % 3);
                     rest /= 3;
                 }

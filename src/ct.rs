@@ -770,8 +770,18 @@ mod tests {
     fn constant_time_eq_mask_has_no_gross_early_exit() {
         use std::time::Instant;
         const LEN: usize = 4096;
+        // Compares per sample: at the measured 45 ns per 4096-byte compare
+        // (Apple M4 Pro, release) a sample lasts about 0.1 ms, far above
+        // `Instant`'s nanosecond resolution and far below a scheduler time
+        // slice of milliseconds, so most samples run uninterrupted.
         const ROUNDS: usize = 2_000;
+        // Samples per case: the fastest of 101 alternating samples stayed
+        // within 1.6 % of equal over ten runs at load 84 on ten cores, and 101
+        // samples of both cases keep the test near 0.02 s.
         const SAMPLES: usize = 101;
+        // Allowed departure of the ratio from 1: an early exit at byte 0 of a
+        // 4096-byte compare would make the ratio about 1/4096, and the load
+        // runs above stayed within 0.016 of 1.
         const TOLERANCE: f64 = 0.25;
 
         let reference = vec![0x5au8; LEN];

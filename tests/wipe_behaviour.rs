@@ -110,6 +110,11 @@ fn aes256ct_round_keys_are_zero_after_drop() {
 #[test]
 fn chacha20_state_and_keystream_block_are_zero_after_drop() {
     const SECRET_BYTES: usize = 16 * 4 + 64;
+    // Zero bytes the live value may hold: the block counter word is 1 after
+    // one block (three zero bytes, little-endian), the constants, `KEY_32`
+    // and the 0x24 nonce have none, and a 64-byte keystream block has more
+    // than five zero bytes with probability below 10^-6.
+    const LIVE_ZERO_BYTES_ALLOWED: usize = 3 + 5;
     let mut cipher = ChaCha20::new(&KEY_32, &[0x24; 12]);
     let mut buffer = [0u8; 10];
     cipher.apply_keystream(&mut buffer);
@@ -119,7 +124,7 @@ fn chacha20_state_and_keystream_block_are_zero_after_drop() {
         .filter(|byte| **byte != 0)
         .count();
     assert!(
-        live >= 100,
+        live >= SECRET_BYTES - LIVE_ZERO_BYTES_ALLOWED,
         "ChaCha20: only {live} nonzero secret bytes while live"
     );
     let leftover = after[..SECRET_BYTES]

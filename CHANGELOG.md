@@ -164,6 +164,20 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   bound 10⁻³), and the Spearman correlations between tests.
 
 ### Changed
+- **NTRUEncrypt dense sets: precomputation counts are derived.** `minCallsR`
+  and `minCallsMask` change no output, only how often a draw needs a further
+  hash call. For the eight dense sets they are now the least block counts
+  that keep that probability below 2⁻⁴⁰, computed exactly from MGF-TP-1's
+  binomial tail and IGF-2's distinct-index chain (6/32, 6/36, 7/13, 6/23,
+  9/10, 9/19, 9/17, 12/12 for mask/r), replacing values that came from a
+  reference release; `ees449ep1`'s old count left a 2⁻¹⁴·⁷ chance.
+  `ees443ep1` keeps EESS #1 v3.1 Table 5's (5, 8). The module documents each
+  dense-set field's source and checking experiment in a table, and tests
+  recompute the rule and show ciphertexts independent of the counts.
+- Constants in the new generators and the NTRU code are named with their
+  sources: SP 800-90A's domain-separation and initial-state bytes, the fixed
+  fast-key-erasure nonce, 3⁵ = 243 trits per octet, and test thresholds with
+  their derivations.
 - **Finite-field groups have a size policy**: `q ≥ 2^15`
   (`primes::MIN_SUBGROUP_ORDER_BITS`), `p ≤ 16 384` bits
   (`primes::MAX_MODULUS_BITS`) and `q ≤ 512` bits

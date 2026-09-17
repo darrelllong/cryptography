@@ -12,10 +12,9 @@
 //! against the reference implementation by
 //! `tests/vectors/ntru_ees_sves3_reference.txt`, and $dg$ by key pair
 //! validation of its keys; $dm_0$ is only constrained where a recorded
-//! encryption had to redraw $b$. minCallsR and minCallsMask match the 2013
-//! reference release and libntru; the 2015 reference release uses other
-//! values. They set how many hash blocks are computed up front, not the
-//! output, so the vectors cannot tell them apart. The algorithm and
+//! encryption had to redraw $b$. minCallsR and minCallsMask are the precomputation
+//! rule's values (see [`crate::public_key::ntru_ees_core`]); they set how many
+//! hash blocks are computed up front, not the output. The algorithm and
 //! encodings live in [`crate::public_key::ntru_ees_core`].
 
 crate::public_key::ntru_ees_core::define_ees_set! {
@@ -30,8 +29,8 @@ crate::public_key::ntru_ees_core::define_ees_set! {
     dm0 = 106,
     db_bits = 256,
     c_bits = 12,
-    min_calls_r = 20,
-    min_calls_mask = 15,
+    min_calls_r = 17,
+    min_calls_mask = 9,
     pklen_bits = 256,
     oid = [0x00, 0x06, 0x04],
     hash = HashKind::Sha256,
