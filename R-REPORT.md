@@ -21,7 +21,7 @@ The ciphertext is read three ways: as $L$ bytes, as $8L$ bits, and as $k = \lflo
 6. Bartlett's cumulative periodogram test for a flat spectrum, on the leading 703,125 values of $u$ (the largest 5-smooth length, so the FFT is $O(n \log n)$).
 7. Wald-Wolfowitz runs test on the full bit stream.
 
-**Decision rule.** A cipher fails when any of its $m = 7$ p-values falls below $\alpha / m = 1.43 \times 10^{-4}$ (Bonferroni), which bounds the probability that a good cipher fails at $\alpha = 0.001$.  The `p < α` column counts the p-values below $\alpha$, which a good cipher shows at a rate of about $m \alpha = 0.007$ per battery.  The calibration section reports the rates the battery attains on streams that are random by construction.
+**Decision rule.** A cipher fails when any of its $m = 7$ p-values falls below $\alpha / m = 1.43 \times 10^{-4}$ (Bonferroni).  That bounds the probability that a good cipher fails by $\alpha = 0.001$ under any dependence among the tests only if every p-value is valid under the null, $\Pr(p \le t) \le t$; several tests take their p-values from asymptotic laws, so $\alpha$ is a nominal rate, and the calibration section reports the rates the battery attains on streams that are random by construction.  The `p < α` column counts the p-values below $\alpha$, which a good cipher shows at a rate of about $m \alpha = 0.007$ per battery.  A pass means only that these statistics did not detect a departure from independent uniform bytes; it is not evidence of key secrecy, authentication security or unpredictability.
 
 **Entropy.** The plug-in byte entropy $H$ never exceeds $8$ bits; to second order $8 - H = \chi^2 / (2 L \ln 2)$ with $\chi^2$ the byte-frequency statistic, so under a uniform source $8 - H$ has mean $(K - 1) / (2 L \ln 2) = 3.26 \times 10^{-5}$ bits and standard deviation $\sqrt{2 (K - 1)} / (2 L \ln 2) = 2.89 \times 10^{-6}$ bits ($K = 256$, $L =$ 5,638,480).  Test 1 is therefore the calibrated form of the entropy check; $H$ is printed to six decimals as a description.
 
@@ -34,7 +34,7 @@ $u_j = \sum_{i=0}^{7} b_{8j+i} \, 256^{-(i+1)}$ the chunk values; under $H_0$ th
 |--------|------------|
 | $L$ | ciphertext length in bytes (equal to the plaintext length; CTR and keystream modes preserve length). |
 | $k$ | number of chunk values, $\lfloor L / 8 \rfloor$. |
-| $\alpha = 0.001$ | family-wise error bound per cipher; each test rejects at $\alpha / m = 1.43 \times 10^{-4}$. |
+| $\alpha = 0.001$ | nominal family-wise error rate per cipher; each test rejects at $\alpha / m = 1.43 \times 10^{-4}$. |
 | $p$ | classical p-value $\Pr(T \ge T_\mathrm{obs} \mid H_0)$; small $p$ rejects $H_0$. |
 | $H$ | plug-in Shannon entropy of the byte distribution, in bits. |
 | $m_k$ | the $k$-th raw sample moment of $u$; ideal $E[U^k] = 1/(k+1)$. |
@@ -1216,7 +1216,7 @@ Moments of $u$ (sample, ideal, deviation):
 
 ## Calibration on OS-random streams
 
-The battery ran on 400,000 streams of 5,638,480 bytes each read from `/dev/urandom` (hosts: dennard, twilight; 2026-09-16 01:49 to 2026-09-16 04:37 UTC; mean 4.0 s per stream).  A stream that is random by construction should reject each test with probability $\alpha = 0.001$ and fail the battery with probability at most $\alpha$; the table gives the observed counts with Clopper-Pearson 95% intervals, and the Kolmogorov-Smirnov p-value of each test's 400,000 p-values against Uniform(0,1), which is what a calibrated test produces under the null.
+The battery ran on 400,000 streams of 5,638,480 bytes each read from `/dev/urandom` (hosts: dennard, twilight; 2026-09-16 01:49 to 2026-09-16 04:37 UTC; mean 4.0 s per stream).  A stream that is random by construction should reject each test with probability $\alpha = 0.001$ and fail the battery with probability at most $\alpha$ if every p-value is valid; the table gives the observed counts with Clopper-Pearson 95% intervals, and the Kolmogorov-Smirnov p-value of each test's 400,000 p-values against Uniform(0,1), which is what a calibrated test produces under the null.
 
 | test | rejections at $\alpha = 0.001$ (rate, 95% CI) | rejections at $\alpha / m = 1.43 \times 10^{-4}$ | KS of p-values vs Uniform(0,1) |
 |------|------|------|------|
@@ -1231,7 +1231,7 @@ The battery ran on 400,000 streams of 5,638,480 bytes each read from `/dev/urand
 Battery failures (some $p < \alpha / m$): 419 / 400,000 = 1.05e-03 [9.5e-04, 1.2e-03]; nominal bound $0.001$.
 Streams with some $p < \alpha$: 2822 / 400,000 = 7.05e-03 [6.8e-03, 7.3e-03]; nominal bound $m \alpha = 0.007$.
 
-Spearman correlation of the p-values across streams (a dependent pair would make the Bonferroni bound loose, never unsafe):
+Spearman correlation of the p-values across streams (dependence makes the Bonferroni bound loose, never unsafe, when every p-value is valid):
 
 | | byte_chisq | ks | serial | gap | permutation | bartlett | runs |
 |---|---|---|---|---|---|---|---|

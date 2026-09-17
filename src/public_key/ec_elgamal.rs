@@ -369,11 +369,11 @@ impl EcElGamalPrivateKey {
 
     /// Decrypt a byte-level ciphertext (Koblitz embedding).
     ///
-    /// Returns the bytes originally passed to [`EcElGamalPublicKey::encrypt`],
-    /// or `None` if the ciphertext fails validation (see
-    /// [`Self::decrypt_point`]). Note that leading zero bytes are not
-    /// preserved: if you encrypted `b"\x00hello"`, you get back `b"hello"`.
-    /// This matches the behavior of `BigUint::to_be_bytes`.
+    /// Returns the bytes passed to [`EcElGamalPublicKey::encrypt`] without
+    /// their leading zero bytes, or `None` if the ciphertext fails validation
+    /// (see [`Self::decrypt_point`]). The embedding carries the message as an
+    /// integer, so `b"\x00hello"` decrypts to `b"hello"`, as
+    /// `BigUint::to_be_bytes` would give.
     #[must_use]
     pub fn decrypt(&self, ct: &EcElGamalCiphertext) -> Option<Vec<u8>> {
         let m_point = self.decrypt_point(ct)?;
@@ -1216,9 +1216,9 @@ mod tests {
     }
 
     /// Under `Q = ∞`, `C₂ = M + k·∞ = M`: the ciphertext carries the
-    /// plaintext. `from_wire_bytes` used to accept the identity `00`; now it,
-    /// a point off the curve, and points outside the subgroup of order `n`
-    /// are refused on every crate entry point. Honest keys pass.
+    /// plaintext. The identity `00`, a point off the curve, and points outside
+    /// the subgroup of order `n` are refused on every crate entry point.
+    /// Honest keys pass.
     #[test]
     fn public_key_imports_refuse_the_identity_and_every_invalid_point() {
         use crate::public_key::ec::{k163, AffinePoint};

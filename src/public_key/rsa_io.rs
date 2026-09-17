@@ -840,29 +840,41 @@ mod tests {
 
     /// OpenSSL reads the BER forms of the PKCS #8 key, the `RSAPrivateKey`
     /// inside in BER too, as the key the DER form encodes.
+    ///
+    /// OpenSSL 3.0 refuses one of them with `ASN1_get_object: header too
+    /// long`: the `rsaEncryption` NULL written with three length octets,
+    /// `05 83 00 00 00`, which X.690 §8.1.3.5 permits. It reads the NULL with
+    /// one length octet, and OpenSSL 3.6 reads both. On OpenSSL 3.0 that
+    /// refusal is reported and the other forms are checked.
     #[test]
     fn openssl_reads_the_ber_forms_as_the_same_key() {
         use crate::public_key::io::ber_forms::{reencode, STYLES};
         use crate::public_key::pkix::OneAsymmetricKey;
+        use crate::test_utils::{openssl3, openssl3_pkcs8_der, OpenSslOutcome};
         const TEST: &str = "rsa_io::openssl_reads_the_ber_forms_as_the_same_key";
         let (_, private) = toy_key();
-        let Some(expected) = crate::test_utils::openssl3(
-            &["pkey", "-inform", "DER", "-outform", "DER"],
-            &private.to_pkcs8_der(),
-        )
-        .or_skip(TEST) else {
+        let Some(expected) = openssl3_pkcs8_der("DER", &private.to_pkcs8_der()).or_skip(TEST)
+        else {
             return;
         };
+        let Some(version) = openssl3(&["version"], b"").or_skip(TEST) else {
+            return;
+        };
+        let openssl_3_0 = version.starts_with(b"OpenSSL 3.0.");
         for style in STYLES {
             let inner = reencode(&private.to_pkcs1_der(), style);
             let ber = reencode(
                 &OneAsymmetricKey::new(super::rsa_encryption(), &inner, None).to_der(),
                 style,
             );
-            let Some(read) =
-                crate::test_utils::openssl3(&["pkey", "-inform", "DER", "-outform", "DER"], &ber)
-                    .or_skip(TEST)
-            else {
+            let outcome = openssl3_pkcs8_der("DER", &ber);
+            if let (true, OpenSslOutcome::Unsupported(reason)) = (openssl_3_0, &outcome) {
+                if style.length_octets > 1 {
+                    eprintln!("{TEST}: OpenSSL 3.0 refuses {style:?}: {reason}");
+                    continue;
+                }
+            }
+            let Some(read) = outcome.or_skip(TEST) else {
                 return;
             };
             assert_eq!(read, expected, "{style:?}");

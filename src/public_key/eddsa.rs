@@ -689,11 +689,11 @@ mod tests {
         fields[3] = huge_n.add(&BigUint::one());
         let xml = public_xml(&fields);
         assert!(xml.len() > 100_000);
-        let start = std::time::Instant::now();
-        assert!(EdDsaPublicKey::from_xml(&xml).is_none());
-        let elapsed = start.elapsed();
+        let elapsed = crate::test_utils::fastest_of_three(|| {
+            assert!(EdDsaPublicKey::from_xml(&xml).is_none());
+        });
         assert!(
-            elapsed < std::time::Duration::from_millis(50),
+            elapsed < crate::test_utils::REFUSAL_BOUND,
             "refusal took {elapsed:?}"
         );
     }

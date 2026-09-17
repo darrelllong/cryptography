@@ -150,7 +150,7 @@ static L_TABLES: [[u8; 256]; 16] = build_l_tables();
 // Side-channel posture of the fast path: every lookup is indexed by a secret
 // state byte. The entries are 16 bytes, so a 64-byte cache line holds four of
 // them and a cache-line-granular observer learns the top six bits of each
-// index (with the 1-byte entries of `L_TABLES`, 64 per line, it was the top
+// index (for the 1-byte entries of `L_TABLES`, 64 per line, it is the top
 // two). The working set is 16 × 256 × 16 B = 64 KiB per direction, 128 KiB
 // for encryption and decryption together, which exceeds a typical L1 data
 // cache. `Grasshopper` is therefore variable-time in both time and memory

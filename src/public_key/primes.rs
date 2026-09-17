@@ -2048,26 +2048,27 @@ mod tests {
         wide_q.set_bit(MAX_SUBGROUP_ORDER_BITS);
         wide_q = wide_q.add(&BigUint::one());
         let (p, q, g, _) = cavp::fips186_4_1024_parts(1);
-        let started = std::time::Instant::now();
-        assert!(!within_group_size_bounds(&wide_p, &q));
-        assert!(!within_group_size_bounds(&p, &wide_q));
-        assert!(!validate_prime_order_group(
-            &wide_p,
-            &q,
-            &g,
-            PrimalityPolicy::Structural
-        ));
-        assert!(!validate_prime_order_group(
-            &p,
-            &wide_q,
-            &g,
-            PrimalityPolicy::Structural
-        ));
-        assert!(FfcDomain::new(wide_p, q.clone(), g.clone()).is_none());
-        assert!(FfcDomain::new(p.clone(), wide_q, g.clone()).is_none());
+        let elapsed = crate::test_utils::fastest_of_three(|| {
+            assert!(!within_group_size_bounds(&wide_p, &q));
+            assert!(!within_group_size_bounds(&p, &wide_q));
+            assert!(!validate_prime_order_group(
+                &wide_p,
+                &q,
+                &g,
+                PrimalityPolicy::Structural
+            ));
+            assert!(!validate_prime_order_group(
+                &p,
+                &wide_q,
+                &g,
+                PrimalityPolicy::Structural
+            ));
+            assert!(FfcDomain::new(wide_p.clone(), q.clone(), g.clone()).is_none());
+            assert!(FfcDomain::new(p.clone(), wide_q.clone(), g.clone()).is_none());
+        });
         assert!(
-            started.elapsed() < std::time::Duration::from_millis(50),
-            "an oversized group must be refused without a primality test"
+            elapsed < crate::test_utils::REFUSAL_BOUND,
+            "an oversized group must be refused without a primality test: {elapsed:?}"
         );
         assert!(within_group_size_bounds(&p, &q));
         // The largest sizes FIPS 186-4 defines sit inside the bounds.

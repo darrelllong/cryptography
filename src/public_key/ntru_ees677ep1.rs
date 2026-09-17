@@ -7,7 +7,7 @@
 //! Wire sizes: public-key blob 936, private-key blob 1072 (trit-packed $F$),
 //! ciphertext 931 octets; messages of at most 101 octets.
 //!
-//! The IEEE Std 1363.1-2008 parameter tables were not available. $N$, $df$,
+//! The IEEE Std 1363.1-2008 parameter tables are not drawn on. $N$, $df$,
 //! $db$, $c$, pkLen, the OID, the hash and maxMsgLenBytes are confirmed
 //! against the reference implementation by
 //! `tests/vectors/ntru_ees_sves3_reference.txt`, and $dg$ by key pair

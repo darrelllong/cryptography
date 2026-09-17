@@ -629,7 +629,7 @@ mod tests {
         SubjectPublicKeyInfo, EC_PRIVATE_KEY_LABEL, ID_EC_DH, ID_EC_PUBLIC_KEY, PRIVATE_KEY_LABEL,
         PUBLIC_KEY_LABEL, RSA_ENCRYPTION,
     };
-    use crate::test_utils::openssl3;
+    use crate::test_utils::{openssl3, openssl3_pkcs8_der};
     use rump::BigUint;
 
     /// One of RFC 9500 §2.3's publicly known ECDLP test keys: its encoded
@@ -1142,9 +1142,7 @@ mod tests {
             // Ours names the curve inside ECPrivateKey too (RFC 5915 §3);
             // OpenSSL reads it and writes back exactly its own form.
             let ours = private.to_pkcs8_der().expect("named curve");
-            let Some(reread) =
-                openssl3(&["pkey", "-inform", "DER", "-outform", "DER"], &ours).or_skip(TEST)
-            else {
+            let Some(reread) = openssl3_pkcs8_der("DER", &ours).or_skip(TEST) else {
                 return;
             };
             assert_eq!(reread, pkcs8, "{name}: PKCS #8");
@@ -1212,8 +1210,8 @@ mod tests {
         };
         assert_eq!(String::from_utf8_lossy(&sec1), RFC9500_KEYS[0].pem);
 
-        let Some(pkcs8) = openssl3(
-            &["pkey", "-inform", "PEM", "-outform", "DER"],
+        let Some(pkcs8) = openssl3_pkcs8_der(
+            "PEM",
             private.to_pkcs8_pem().expect("named curve").as_bytes(),
         )
         .or_skip(TEST) else {

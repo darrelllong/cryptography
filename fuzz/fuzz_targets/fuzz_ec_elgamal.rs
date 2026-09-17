@@ -1,8 +1,10 @@
 //! Fuzz EC-ElGamal: full encrypt/decrypt roundtrip on P-256.
 //!
 //! A keypair is generated from a corpus-seeded CSPRNG.  The bytes-based API
-//! (Koblitz point embedding) is exercised.  Invariant:
-//!   sk.decrypt(pk.encrypt(msg, rng)) == msg
+//! (Koblitz point embedding) is exercised.  Invariant, since the embedding
+//! carries the message as an integer and `decrypt` documents that leading
+//! zero bytes are not preserved:
+//!   sk.decrypt(pk.encrypt(msg, rng)) == msg without its leading zero bytes
 #![no_main]
 
 use cryptography::{
@@ -32,8 +34,9 @@ fuzz_target!(|data: &[u8]| {
     let recovered = sk
         .decrypt(&ct)
         .expect("freshly encrypted ciphertext is valid");
+    let significant = &message[message.iter().take_while(|&&b| b == 0).count()..];
     assert_eq!(
-        recovered, message,
-        "EC-ElGamal P-256: decrypt(encrypt(msg)) != msg"
+        recovered, significant,
+        "EC-ElGamal P-256: decrypt(encrypt(msg)) != msg without leading zeros"
     );
 });

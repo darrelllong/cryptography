@@ -385,6 +385,41 @@ pub(crate) fn openssl3(args: &[&str], stdin: &[u8]) -> OpenSslOutcome {
     }
 }
 
+/// Bound on a refusal that must come before any arithmetic on its oversized
+/// input. The arithmetic it rules out (a primality test, a Montgomery
+/// context or an irreducibility test at thousands of bits) takes seconds or
+/// more in a debug build, so the bound separates the two by an order of
+/// magnitude while leaving room for a shared, loaded host.
+pub(crate) const REFUSAL_BOUND: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The fastest of three wall-clock timings of `f`. Other load on the host
+/// only lengthens a run, so the fastest is the one closest to the work
+/// itself.
+pub(crate) fn fastest_of_three(mut f: impl FnMut()) -> std::time::Duration {
+    (0..3)
+        .map(|_| {
+            let started = std::time::Instant::now();
+            f();
+            started.elapsed()
+        })
+        .min()
+        .expect("three runs")
+}
+
+/// A private key read by OpenSSL 3 from `stdin` in the form `inform` (`DER`
+/// or `PEM`) and written back as PKCS #8 DER. `pkey -outform DER` is not
+/// used for this: OpenSSL 3.0 writes an EC, DSA or RSA key's traditional
+/// structure there, and later releases write PKCS #8. `pkcs8 -topk8
+/// -nocrypt` writes PKCS #8 on every OpenSSL 3 release.
+pub(crate) fn openssl3_pkcs8_der(inform: &str, stdin: &[u8]) -> OpenSslOutcome {
+    openssl3(
+        &[
+            "pkcs8", "-topk8", "-nocrypt", "-inform", inform, "-outform", "DER",
+        ],
+        stdin,
+    )
+}
+
 /// Ciphers OpenSSL 3 serves only from its `legacy` provider.
 fn needs_legacy_provider(cipher_flag: &str) -> bool {
     let name = cipher_flag.trim_start_matches('-');

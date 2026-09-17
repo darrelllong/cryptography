@@ -456,7 +456,7 @@ impl Magma {
 ///
 /// `MagmaCt` keeps Magma's original structure and key schedule, but replaces
 /// the nibble S-box lookups with the fixed boolean circuits above so the round
-/// function no longer indexes memory with secret-derived values.
+/// function does not index memory with secret-derived values.
 pub struct MagmaCt {
     enc_rk: [u32; 32],
     dec_rk: [u32; 32],

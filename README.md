@@ -372,6 +372,22 @@ keeps its limb wiping off by default because wiping costs speed. This crate
 turns it on, so every `BigUint` wipes its limbs on drop. Cargo unifies
 features, so any build that includes this crate wipes every rump value.
 
+## Building
+
+The multiprecision dependency, `rust-mp` (library `rump`), is taken from a
+sibling checkout until its 0.3 release is on crates.io, so clone both side by
+side:
+
+```text
+git clone https://github.com/darrelllong/cryptography
+git clone https://github.com/darrelllong/rump
+cd cryptography
+cargo build
+```
+
+This crate tracks the latest rump: CI checks out rump's `main`, so keep
+`../rump` on `main` as well.
+
 ## How To Verify Correctness
 
 Run the full suite:

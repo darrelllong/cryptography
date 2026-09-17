@@ -5,23 +5,23 @@ on:
     branches: [main]
   pull_request:
   # The release-only ignored tests run weekly and on request (see the
-  # release-ignored job); every other job runs on every push and PR.
+  # release-ignored job); every other job runs on every push, PR and weekly
+  # run.
   workflow_dispatch:
   schedule:
     - cron: "17 4 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
-  # rust-mp is taken from ../rump by path (it is not on crates.io). The
-  # sibling is pinned to one commit so a push to rump cannot change what
-  # this CI tests. To bump: `git -C ../rump rev-parse HEAD` after the
-  # cryptography tree builds and tests against that rump, and paste it here.
-  RUMP_REF: 799dd42a256fa9db42485122a2565455575a6e21
+  # rust-mp is taken from ../rump by path (it is not on crates.io). This
+  # crate works with the latest rump, so every job checks out rump's main;
+  # rump's own CI runs this crate's tests on every rump push, and the weekly
+  # run here catches a rump change between pushes to this repository.
 
 jobs:
   test:
     name: ${{ matrix.os }} / ${{ matrix.rust }}
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -46,7 +46,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: darrelllong/rump
-          ref: ${{ env.RUMP_REF }}
           path: rump
       # The cross-check tests compare against the `openssl` tool, and with
       # CRYPTOGRAPHY_OPENSSL_REQUIRED=1 a missing tool or an algorithm it
@@ -65,6 +64,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: cryptography
+      # Each result names what it was built from: this commit, rump's
+      # commit, the toolchain, the lockfile and the OpenSSL the cross-checks
+      # find.
+      - name: Build identity
+        shell: bash
+        run: |
+          echo "cryptography $(git rev-parse HEAD)"
+          echo "rump $(git -C ../rump rev-parse HEAD)"
+          rustc -Vv
+          cargo -V
+          shasum -a 256 Cargo.lock
+          for tool in openssl /opt/homebrew/opt/openssl@3/bin/openssl; do
+            command -v "$tool" >/dev/null && echo "$tool: $("$tool" version)"
+          done
+          true
       - name: fmt
         if: matrix.rust == 'stable'
         run: cargo fmt --all -- --check
@@ -115,7 +129,7 @@ jobs:
   # architecture; the intrinsics do not compile on the other.
   companions:
     name: companion crates (${{ matrix.os }})
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -135,7 +149,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: darrelllong/rump
-          ref: ${{ env.RUMP_REF }}
           path: rump
       - name: Install Rust stable
         run: rustup toolchain install stable --profile minimal && rustup default stable
@@ -159,7 +172,7 @@ jobs:
   # published crate instead, so the step checks the manifest first.
   downstream:
     name: downstream (entropy)
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -168,7 +181,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: darrelllong/rump
-          ref: ${{ env.RUMP_REF }}
           path: rump
       - uses: actions/checkout@v4
         with:
@@ -209,12 +221,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: darrelllong/rump
-          ref: ${{ env.RUMP_REF }}
           path: rump
       - name: Install Rust stable
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: cryptography
+      # Each result names what it was built from: this commit, rump's
+      # commit, the toolchain, the lockfile and the OpenSSL the cross-checks
+      # find.
+      - name: Build identity
+        shell: bash
+        run: |
+          echo "cryptography $(git rev-parse HEAD)"
+          echo "rump $(git -C ../rump rev-parse HEAD)"
+          rustc -Vv
+          cargo -V
+          shasum -a 256 Cargo.lock
+          for tool in openssl /opt/homebrew/opt/openssl@3/bin/openssl; do
+            command -v "$tool" >/dev/null && echo "$tool: $("$tool" version)"
+          done
+          true
       - name: Ignored tests (release)
         run: cargo test --release -- --ignored

@@ -140,10 +140,8 @@ impl Ed25519PublicKey {
     /// and the sign bit is set. Every other string is a key, whatever the
     /// order of its point.
     ///
-    /// This changed: the crate used to refuse the neutral point and every
-    /// point outside the subgroup of prime order `L`, which RFC 8032 does not.
-    /// Such keys are now accepted, and §5.1.7 decides what verifies under
-    /// them. Under a key `A'` of small order, `[8][k]A'` is the neutral point,
+    /// RFC 8032 does not restrict the order of a key's point, so neither does
+    /// this; §5.1.7 decides what verifies under such a key. Under a key `A'` of small order, `[8][k]A'` is the neutral point,
     /// so any `(R, S)` with `[8][S]B = [8]R` verifies for every message
     /// (`R` neutral, `S = 0`, for one): such a key binds no secret. A caller
     /// that needs the key to belong to someone should check it with
@@ -223,12 +221,11 @@ impl Ed25519PublicKey {
     /// (step 2), and the signature is valid exactly when the cofactored group
     /// equation `[8][S]B = [8]R + [8][k]A'` holds (step 3).
     ///
-    /// This changed: the crate used to check `[S]B = R + [k]A'` and to refuse
-    /// an `R` that was neutral or outside the subgroup of order `L`. RFC 8032
-    /// calls that equation "sufficient, but not required": whatever satisfies
-    /// it satisfies the cofactored one (§8.8), but not conversely. When `R` or
-    /// `A'` has a small-order component that `[k]` does not cancel, the old
-    /// check refused signatures RFC 8032 defines as valid. It no longer does.
+    /// RFC 8032 calls the uncofactored `[S]B = R + [k]A'` "sufficient, but
+    /// not required": whatever satisfies it satisfies the cofactored equation
+    /// (§8.8), but not conversely. When `R` or `A'` has a small-order
+    /// component that `[k]` does not cancel, the uncofactored equation refuses
+    /// signatures RFC 8032 defines as valid, so it is not used.
     #[must_use]
     pub fn verify_message(&self, message: &[u8], signature: &Ed25519Signature) -> bool {
         // Step 1. Every `Ed25519Signature` already has S < L; the check keeps
@@ -483,8 +480,8 @@ impl Ed25519Signature {
     /// This is the decoding of RFC 8032 §5.1.7 step 1: `R` is a point by
     /// §5.1.3 (see [`Ed25519PublicKey::from_key_blob`] for what that refuses)
     /// and `S` a little-endian integer in `0 ≤ S < L`. Any `R` that decodes is
-    /// accepted, the neutral point and small-order points included; the crate
-    /// used to refuse a neutral `R`, which RFC 8032 does not.
+    /// accepted, the neutral point and small-order points included, as RFC
+    /// 8032 requires.
     #[must_use]
     pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 64 {
@@ -804,7 +801,7 @@ mod tests {
     }
 
     /// RFC 8032 §5.1.3 decodes the neutral point's encoding, `y = 1` with the
-    /// sign bit clear; the crate used to refuse it.
+    /// sign bit clear, so every import accepts it.
     #[test]
     fn public_key_accepts_neutral_encoding() {
         let mut neutral = [0u8; 32];
@@ -814,8 +811,7 @@ mod tests {
         assert_eq!(key.to_raw_bytes(), neutral);
     }
 
-    /// §5.1.7 step 1 decodes `R = (0, 1)`, `S = 0`; the crate used to refuse
-    /// the neutral `R`.
+    /// §5.1.7 step 1 decodes `R = (0, 1)`, `S = 0`, so the signature parses.
     #[test]
     fn signature_accepts_neutral_r_encoding() {
         let mut signature = [0u8; 64];
@@ -976,8 +972,7 @@ mod tests {
 
     /// A key `A' = A + T` or a nonce point `R + T`, `T` of order 8, used with
     /// the honest scalar of `A`: §5.1.7's cofactored equation accepts the
-    /// signature. The uncofactored `[S]B = R + [k]A'` that this crate used to
-    /// check refuses it whenever `[k]T` is not neutral, which is always so for
+    /// signature. The uncofactored `[S]B = R + [k]A'` refuses it whenever `[k]T` is not neutral, which is always so for
     /// the nonce point.
     #[test]
     fn mixed_order_key_and_nonce_verify_by_the_cofactored_equation() {

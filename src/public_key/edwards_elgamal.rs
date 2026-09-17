@@ -509,8 +509,8 @@ mod tests {
     }
 
     /// `bound` is exclusive, as for EC-ElGamal: `bound − 1` is recovered and
-    /// `bound` is not. The old inclusive limit recovered `m = 16` under 16;
-    /// the bounds also cover grids that reach past the bound (17 → `0..20`,
+    /// `bound` is not, so `m = 16` is refused under 16. The bounds also cover
+    /// grids that reach past the bound (17 → `0..20`,
     /// 26 → `0..30`, where `m = bound` is found and must be refused) and the
     /// degenerate 1 and 0.
     #[test]

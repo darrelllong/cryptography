@@ -18,8 +18,8 @@
 //!
 //! EESS #1 v3.1 tabulates only product-form parameter sets (`ees443ep1` is
 //! its Table 5). The eight dense sets are the IEEE Std 1363.1-2008 sets,
-//! whose tables were not available here; their values rest on the paper that
-//! derived them and on measurement:
+//! whose tables this module does not draw on; their values rest on the paper
+//! that derived them and on measurement:
 //! - `N` and `dF` are Table 1, "Standardized NTRU Parameters (conservative)",
 //!   of Hirschhorn, Hoffstein, Howgrave-Graham and Whyte, *Choosing
 //!   NTRUEncrypt Parameters in Light of Combined Lattice Reduction and MITM
@@ -36,8 +36,8 @@
 //! - `dm0 = dF` is HHHW §6, Assumption 7: "An encrypter that re-encrypts
 //!   whenever the number of 1s or −1s in m′ falls below df does not make
 //!   message recovery fall below the required security level"; §10.2.2
-//!   step p applies the bound to the 0s as well. It was then measured for
-//!   every set (see "Step p refusals" below).
+//!   step p applies the bound to the 0s as well. Every set's rate is
+//!   measured (see "Step p refusals" below).
 //! - `db`, `c`, pkLen, the OID, the hash and maxMsgLenBytes are pinned by
 //!   the interoperability vectors: `bLen` is the length of each recorded
 //!   `b`, maxMsgLenBytes is the recorded `MAX_MSG`, and the recorded
@@ -48,10 +48,9 @@
 //!   them apart; no available publication tabulates them for the dense
 //!   sets, and their values here are unconfirmed.
 //!
-//! Where the text is silent or contradicts itself (noted below), the
-//! reading was settled by running the standard authors' reference
-//! implementation as a black-box oracle: only its inputs and outputs were
-//! used. The interoperability vectors in
+//! Where the text is silent or contradicts itself (noted below), the reading
+//! is the one the standard authors' reference implementation exhibits when
+//! run as a black-box oracle, inputs and outputs only. The interoperability vectors in
 //! `tests/vectors/ntru_ees_sves3_reference.txt` (`scripts/ees_ref_vectors/`)
 //! pin the result, and every parameter-set test module checks them.
 //!
@@ -168,9 +167,8 @@
 //!     decrypted message unchanged whenever the mask's coefficient there is 0
 //!     or −1, about two times in three, and subtracting 2 does so in the
 //!     remaining third, so those two sets are malleable. This module
-//!     therefore goes beyond the letter of §10.2.3, as the owner decided on
-//!     2026-09-11: decryption also fails unless every decoded bit past `p0`
-//!     is zero. No honest ciphertext fails this check. Those bits are the
+//!     therefore goes beyond the letter of §10.2.3: decryption also fails
+//!     unless every decoded bit past `p0` is zero. No honest ciphertext fails this check. Those bits are the
 //!     zeros that §10.2.2 step g appends; the final three-bit quantity lies
 //!     wholly within `p0` and those zeros, so its trits are `(0, 0)`; and
 //!     when the primitive recovers the encryptor's `m'`, every pair decodes
@@ -2185,10 +2183,11 @@ macro_rules! define_ees_set {
         }
 
         /// Step p attempts over `trials` honest encryptions of this set
+        /// under the streams named by `seed`
         /// (`ntru_ees_core::refusals::attempts`).
         #[cfg(test)]
-        pub(crate) fn encryption_attempts(trials: usize) -> usize {
-            $crate::public_key::ntru_ees_core::refusals::attempts::<N>(&PARAMS, trials)
+        pub(crate) fn encryption_attempts(trials: usize, seed: u8) -> usize {
+            $crate::public_key::ntru_ees_core::refusals::attempts::<N>(&PARAMS, trials, seed)
         }
 
         #[cfg(test)]
@@ -2767,11 +2766,12 @@ pub(crate) mod refusals {
     /// Step p attempts over `trials` encryptions, under one key, of random
     /// messages whose lengths cycle from 0 to `maxMsgLenBytes`: the random
     /// octets encryption drew, divided by `bLen`. Every refusal draws one
-    /// more `b`.
-    pub(crate) fn attempts<const N: usize>(params: &EesParams, trials: usize) -> usize {
-        let mut drbg = CtrDrbgAes256::new(&[0x11u8; 48]);
+    /// more `b`. The key-and-coin DRBG is seeded with 48 octets of `seed` and
+    /// the message DRBG with 48 octets of `seed ^ 0x33`.
+    pub(crate) fn attempts<const N: usize>(params: &EesParams, trials: usize, seed: u8) -> usize {
+        let mut drbg = CtrDrbgAes256::new(&[seed; 48]);
         let (packed_h, _) = keygen::<N, _>(params, &mut drbg);
-        let mut messages = CtrDrbgAes256::new(&[0x22u8; 48]);
+        let mut messages = CtrDrbgAes256::new(&[seed ^ 0x33; 48]);
         let mut rng = RecordingRng::new(drbg);
         let mut drawn = 0usize;
         for trial in 0..trials {
@@ -2988,8 +2988,9 @@ mod tests {
             ntru_ees1087ep1, ntru_ees1087ep2, ntru_ees1171ep1, ntru_ees1499ep1, ntru_ees401ep1,
             ntru_ees443ep1, ntru_ees449ep1, ntru_ees541ep1, ntru_ees677ep1,
         };
+        const FIXED_SEED: u8 = 0x11;
         /// (set, attempts over trials, trials, exact refusal probability)
-        type Row = (&'static str, fn(usize) -> usize, usize, f64);
+        type Row = (&'static str, fn(usize, u8) -> usize, usize, f64);
         let rows: [Row; 9] = [
             (
                 "ees401ep1",
@@ -3047,7 +3048,7 @@ mod tests {
             ),
         ];
         for (name, attempts_over, trials, p) in rows {
-            let attempts = attempts_over(trials);
+            let attempts = attempts_over(trials, FIXED_SEED);
             let refused = attempts - trials;
             let expected = p * attempts as f64;
             let sigma = (expected * (1.0 - p)).sqrt();
@@ -3080,8 +3081,9 @@ mod tests {
     #[ignore = "a million ees443ep1 encryptions; run with `cargo test --release -- --ignored`"]
     fn step_p_refusal_rates_separate_dm0_from_its_neighbours() {
         use crate::public_key::{ntru_ees401ep1, ntru_ees443ep1, ntru_ees449ep1};
+        const FIXED_SEED: u8 = 0x11;
         // (set, attempts over trials, trials, exact probability at dm0 − 1, dm0, dm0 + 1)
-        type Row = (&'static str, fn(usize) -> usize, usize, [f64; 3]);
+        type Row = (&'static str, fn(usize, u8) -> usize, usize, [f64; 3]);
         let rows: [Row; 3] = [
             (
                 "ees401ep1",
@@ -3103,7 +3105,7 @@ mod tests {
             ),
         ];
         for (name, attempts_over, trials, probabilities) in rows {
-            let attempts = attempts_over(trials);
+            let attempts = attempts_over(trials, FIXED_SEED);
             let refused = (attempts - trials) as f64;
             let n = attempts as f64;
             let log_likelihood = |p: f64| refused * p.ln() + (n - refused) * (1.0 - p).ln();
@@ -3126,6 +3128,64 @@ mod tests {
                 "{name}: {refused} refusals against {expected:.1} ± 4·{sigma:.1}"
             );
         }
+    }
+
+    /// The `ees443ep1` refusal rate under ten key, coin and message seeds
+    /// other than the fixed one, one thread per seed, so that no single seed
+    /// decides it. Ten million encryptions put the pooled count's standard
+    /// deviation near 1% of its expectation. Each seed's count is printed with
+    /// its z-score; the pooled count must lie within four standard deviations
+    /// of the table's rate and fit it better than either neighbouring `dm0`.
+    /// Run with `cargo test --release -- --ignored` on a host with ten cores.
+    #[test]
+    #[ignore = "ten million ees443ep1 encryptions; run with `cargo test --release -- --ignored`"]
+    fn step_p_ees443ep1_refusal_rate_under_independent_seeds() {
+        use crate::public_key::ntru_ees443ep1;
+        const TRIALS: usize = 1_000_000;
+        // Exact refusal probability at dm0 − 1, dm0, dm0 + 1.
+        const PROBABILITIES: [f64; 3] = [6.578e-4, 9.742e-4, 1.4267e-3];
+        // Seeds other than the fixed 0x11 (and its message seed 0x22).
+        const SEEDS: [u8; 10] = [0x41, 0x52, 0x63, 0x74, 0x85, 0x96, 0xa7, 0xb8, 0xc9, 0xda];
+        let attempts: Vec<usize> = std::thread::scope(|scope| {
+            let handles: Vec<_> = SEEDS
+                .iter()
+                .map(|&seed| scope.spawn(move || ntru_ees443ep1::encryption_attempts(TRIALS, seed)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("seed thread"))
+                .collect()
+        });
+        let p = PROBABILITIES[1];
+        for (seed, &n) in SEEDS.iter().zip(&attempts) {
+            let refused = (n - TRIALS) as f64;
+            let expected = p * n as f64;
+            eprintln!(
+                "ees443ep1 seed {seed:#04x}: {refused} of {n} refused; z = {:+.2}",
+                (refused - expected) / (expected * (1.0 - p)).sqrt()
+            );
+        }
+        let n = attempts.iter().sum::<usize>() as f64;
+        let refused = n - (TRIALS * SEEDS.len()) as f64;
+        let log_likelihood = |q: f64| refused * q.ln() + (n - refused) * (1.0 - q).ln();
+        let [below, table, above] = PROBABILITIES.map(log_likelihood);
+        let expected = p * n;
+        let sigma = (expected * (1.0 - p)).sqrt();
+        eprintln!(
+            "ees443ep1 pooled: {refused} of {n} refused; z = {:+.2}; log-likelihood ratios \
+             dm0 against dm0 − 1: {:.1}, against dm0 + 1: {:.1}",
+            (refused - expected) / sigma,
+            table - below,
+            table - above
+        );
+        assert!(
+            table > below && table > above,
+            "a neighbouring dm0 fits better"
+        );
+        assert!(
+            (refused - expected).abs() <= 4.0 * sigma,
+            "{refused} refusals against {expected:.1} ± 4·{sigma:.1}"
+        );
     }
 
     /// `Φ_N` splits over GF(2) into `(N − 1) / ord_N(2)` irreducibles of
@@ -3256,8 +3316,8 @@ mod tests {
     /// a multiple `u` of `P1` with constant term 1 and weight `2·113 + 1`;
     /// `F`'s nonzero degrees are the other 226 ones of `u`, and its signs
     /// are free (the first 113 degrees are `+1`). The message below, of
-    /// weight 74, was the 49th random message whose complemented codeword
-    /// had weight 227 and constant term 1.
+    /// weight 74, is the 49th random message whose complemented codeword has
+    /// weight 227 and constant term 1.
     fn non_invertible_f_401() -> TernaryPoly {
         let u = complemented_multiple_of_p1("1adb0a0514a64a88820c244840c0166a0ad63c9b60832064b9a");
         assert_eq!(u[0], 1);
@@ -3881,9 +3941,9 @@ mod tests {
     }
 
     /// Asserts a survey of an `N` = 443 or 1499 set: only coefficient `N − 1`
-    /// reaches past `M`; before convention 10's check, +1 there kept the
-    /// plaintext about two times in three and −2 the remaining third; now
-    /// nothing decrypts. Prints the counts.
+    /// reaches past `M`; without convention 10's check, +1 there would keep
+    /// the plaintext about two times in three and −2 the remaining third; with
+    /// it nothing decrypts. Prints the counts.
     fn tampering_past_the_message_is_rejected(name: &str, n: usize, trials: usize) {
         let survey = match n {
             443 => crate::public_key::ntru_ees443ep1::tamper_survey(trials),

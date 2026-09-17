@@ -12,10 +12,9 @@
 //! Algorithm Specifications and Supporting Documentation", NIST PQC round 3
 //! submission, 30 September 2020 (the `Supporting_Documentation/ntru.pdf` of
 //! NIST's `NTRU-Round3.zip`, kept in-tree as
-//! `pubs/ntru-round3-specification.pdf`). The code is a clean-room rewrite
-//! from that text (the provenance record is in `AUDIT.md`); the round-3
-//! reference implementation served only as a known-answer oracle, through
-//! the KAT files it produced. Functions carry the specification's names
+//! `pubs/ntru-round3-specification.pdf`). The code is written from that
+//! text; the round-3 reference implementation serves only as a known-answer
+//! oracle, through the KAT files it produced. Functions carry the specification's names
 //! in snake_case (`pack_Rq0` is [`pack_rq0`], `DPKE_Decrypt` is
 //! [`dpke_decrypt`], and so on) and cite its section numbers. The
 //! specification leaves the inversion routines, the sort, and all internal

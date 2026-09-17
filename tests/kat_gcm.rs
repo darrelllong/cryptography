@@ -3,12 +3,10 @@
 //! May 31, 2005, Appendix B "AES Test Vectors", Test Cases 3-18.
 //!
 //! The document is `pubs/mcgrew-viega-2005-gcm-revised-spec.pdf` (SHA-256
-//! `327e3c9363c268fae64e285e2f56f882bb6e3e04f81ef8098521f44c8e2b6c37`). NIST
-//! no longer serves it: as of 2026-09-15 the CSRC modes-development page
-//! links only the GCM intellectual-property statement, and every former path
-//! under csrc.nist.gov returns 404, so the copy in `pubs/` is the Internet
-//! Archive's 2016-04-09 capture of
-//! `csrc.nist.gov/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-revised-spec.pdf`.
+//! `327e3c9363c268fae64e285e2f56f882bb6e3e04f81ef8098521f44c8e2b6c37`), the
+//! Internet Archive's 2016-04-09 capture of
+//! `csrc.nist.gov/groups/ST/toolkit/BCM/documents/proposedmodes/gcm/gcm-revised-spec.pdf`;
+//! csrc.nist.gov does not serve the document itself.
 //! Every K, P, A, IV, C and T below was checked digit by digit against
 //! Appendix B of that PDF (the values were extracted from its text and
 //! compared mechanically), as were Test Cases 1, 2 and 4 in

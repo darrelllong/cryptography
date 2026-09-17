@@ -8,30 +8,34 @@
 //!
 //! No NIST standard specifies `ElGamal` encryption. The paper
 //! (`pubs/elgamal-1985.pdf`) takes a large prime `p` and a primitive element
-//! `g` of `Z_p*`. [`ElGamal::from_secret_exponent`] keeps that shape but
-//! checks less than the paper assumes: `p` is a probable prime under the
-//! hardened test and of at most 16384 bits, `1 < g < p`, and
-//! `1 ≤ a ≤ p − 2`. Whether `g` is primitive — whether its order is `p − 1`
-//! rather than a proper divisor — is not checked and cannot be without the
-//! factorization of `p − 1`, so such a key's exponents range over `[1, p − 1)`
-//! whatever the order of `g` is, and its security is that of the discrete
-//! logarithm in the subgroup `g` generates. Generated keys work in a
-//! prime-order subgroup instead, whose domain parameters come from FIPS 186-4
-//! Appendix A ([`ElGamal::generate`]) or, for tests, from a toy generator that
-//! follows no standard ([`ElGamal::generate_toy`]); those keys carry the
-//! subgroup order `q`, and every `g`, `b` and ciphertext `γ` they see is
-//! checked to lie in the order-`q` subgroup.
+//! `g` of `Z_p*`. A key has one of two group shapes, named by its exponent
+//! bound:
+//!
+//! - **`p − 1`, the paper's shape** ([`ElGamal::from_secret_exponent`]).
+//!   Whether `g` is primitive can be decided only from the factorization of
+//!   `p − 1`, so `p` must be a safe prime, `p = 2q + 1` with `q` prime. Then
+//!   the orders in `Z_p*` are 1, 2, `q` and `2q`, and `g` is primitive
+//!   exactly when `g ≠ p − 1` and `g^q ≠ 1`. Every constructor and parser
+//!   checks that. The secret `a = q` is refused (it gives `b = p − 1`, under
+//!   which `b^k = ±1`), as is the nonce `k = q`, the one that gives
+//!   `γ = p − 1` and `b^k = ±1`: either would make `δ = ±m`.
+//! - **A prime subgroup order `q`**, whose domain parameters come from FIPS
+//!   186-4 Appendix A ([`ElGamal::generate`]) or, for tests, from a toy
+//!   generator that follows no standard ([`ElGamal::generate_toy`]). Every
+//!   `g`, `b` and ciphertext `γ` such a key sees is checked to lie in the
+//!   order-`q` subgroup.
 //!
 //! ## What a ciphertext must satisfy
 //!
 //! A plaintext is an integer `m` in `[1, p − 1]`; `m = 0` is refused, since
 //! `δ = m · b^k` would then be `0` and announce the plaintext. Decryption
-//! accepts `(γ, δ)` only with `1 < γ < p` and `1 ≤ δ < p`, and, for a key
-//! that carries `q`, only a `γ` with `γ^q ≡ 1 (mod p)`. A `γ` outside the
-//! subgroup — `p − 1`, of order 2, or an element of another small subgroup —
-//! is a small-subgroup attack on the static exponent `a`: the plaintext
-//! recovered from `γ^(q − a)` would depend only on `a` modulo the small
-//! order, and each such query would hand the attacker bits of `a`.
+//! accepts `(γ, δ)` only with `1 < γ < p − 1` and `1 ≤ δ < p`, and, for a key
+//! that carries `q`, only a `γ` with `γ^q ≡ 1 (mod p)`. A `γ` of small order —
+//! `p − 1`, of order 2, or an element outside the order-`q` subgroup — is a
+//! small-subgroup attack on the static exponent `a`: the plaintext recovered
+//! from `γ^(e − a)` would depend only on `a` modulo the small order, and each
+//! such query would hand the attacker bits of `a`. Under a safe prime `p − 1`
+//! is the only element of order 2, and no honest ciphertext has it.
 //!
 //! ## Timing
 //!
@@ -50,7 +54,7 @@ use crate::public_key::io::{decode_biguints, encode_biguints};
 use crate::public_key::primes::{
     is_in_prime_order_subgroup, is_probable_prime_under, random_nonzero_below,
     within_group_size_bounds, FfcDomain, FfcHash, FfcParameterSize, PrimalityPolicy,
-    MAX_MODULUS_BITS,
+    MAX_MODULUS_BITS, MAX_NONCE_DRAWS,
 };
 use crate::Csprng;
 use rump::modular::{mod_pow, MontgomeryContext};
@@ -70,13 +74,10 @@ const GENERATOR_INDEX: u8 = 2;
 pub struct ElGamalPublicKey {
     /// Prime modulus `p`.
     p: BigUint,
-    /// Exclusive upper bound for the ephemeral exponent.
-    ///
-    /// Generated keys store the subgroup order `q`. Explicit caller-built
-    /// keys fall back to `p - 1`, which is always safe when the subgroup
-    /// order is unknown.
+    /// Exclusive upper bound for the ephemeral exponent: `p − 1` for a key
+    /// over a safe prime with primitive `g`, or the prime subgroup order `q`.
     exponent_bound: BigUint,
-    /// Generator of the active multiplicative group or subgroup.
+    /// Primitive root modulo `p`, or a generator of the order-`q` subgroup.
     g: BigUint,
     /// Public component `b = g^a mod p`.
     b: BigUint,
@@ -89,10 +90,8 @@ pub struct ElGamalPublicKey {
 pub struct ElGamalPrivateKey {
     /// Prime modulus `p`.
     p: BigUint,
-    /// Exponent cycle used during decryption.
-    ///
-    /// Generated keys store the subgroup order `q`; explicit caller-built
-    /// keys conservatively use `p - 1`.
+    /// Exponent cycle used during decryption: `p − 1` or the subgroup order
+    /// `q`, as for [`ElGamalPublicKey`].
     exponent_modulus: BigUint,
     /// Secret exponent `a`.
     a: BigUint,
@@ -117,17 +116,15 @@ impl ElGamalPublicKey {
         &self.p
     }
 
-    /// Return the caller-supplied generator/base.
+    /// Return the generator `g`.
     #[must_use]
     pub fn generator(&self) -> &BigUint {
         &self.g
     }
 
-    /// Return the exclusive upper bound for the ephemeral exponent.
-    ///
-    /// For generated keys this is the subgroup order `q`. For keys built from
-    /// explicit caller-supplied parameters, the code falls back to `p - 1`
-    /// because the subgroup order is not derivable from the inputs alone.
+    /// Return the exclusive upper bound for the ephemeral exponent: the
+    /// subgroup order `q` for a subgroup key, `p − 1` for a key over a safe
+    /// prime with primitive `g`.
     #[must_use]
     pub fn ephemeral_exclusive_bound(&self) -> &BigUint {
         &self.exponent_bound
@@ -147,7 +144,10 @@ impl ElGamalPublicKey {
     ///
     /// Returns `None` unless `1 ≤ m < p` and `1 ≤ k <` the key's exponent
     /// bound. `m = 0` is refused because its `δ` would be `0` (see the module
-    /// docs).
+    /// docs). Under a safe-prime key the nonce `k = q` is refused too: it
+    /// gives `γ = p − 1` and `b^k = ±1`, so `δ = ±m`. No other `k` in
+    /// `[1, p − 1)` makes `b^k = ±1`, and in a prime-order subgroup no `k` in
+    /// `[1, q)` does.
     #[must_use]
     pub fn encrypt_with_nonce(
         &self,
@@ -166,6 +166,9 @@ impl ElGamalPublicKey {
         } else {
             mod_pow(&self.g, ephemeral, &self.p)
         };
+        if gamma == self.p.sub(&BigUint::one()) {
+            return None;
+        }
         let shared = if let Some(ctx) = &self.p_ctx {
             ctx.pow(&self.b, ephemeral)
         } else {
@@ -192,6 +195,10 @@ impl ElGamalPublicKey {
     /// string, which encodes `0`, is refused. Callers that need hybrid
     /// encryption or padding should build that on top.
     ///
+    /// The nonce [`Self::encrypt_with_nonce`] refuses under a safe-prime key,
+    /// `k = q`, is redrawn, at most [`MAX_NONCE_DRAWS`] draws in all; `None`
+    /// after that.
+    ///
     /// # Panics
     ///
     /// Panics on a source that stalls, as
@@ -199,8 +206,16 @@ impl ElGamalPublicKey {
     #[must_use]
     pub fn encrypt<R: Csprng>(&self, message: &[u8], rng: &mut R) -> Option<ElGamalCiphertext> {
         let message_int = BigUint::from_be_bytes(message);
-        let ephemeral = random_nonzero_below(rng, &self.exponent_bound)?;
-        self.encrypt_with_nonce(&message_int, &ephemeral)
+        if message_int.is_zero() || message_int >= self.p {
+            return None;
+        }
+        for _ in 0..MAX_NONCE_DRAWS {
+            let ephemeral = random_nonzero_below(rng, &self.exponent_bound)?;
+            if let Some(ciphertext) = self.encrypt_with_nonce(&message_int, &ephemeral) {
+                return Some(ciphertext);
+            }
+        }
+        None
     }
 
     /// Encrypt a byte string and return a serialized ciphertext blob.
@@ -232,20 +247,30 @@ impl ElGamalPublicKey {
 
     /// Validate schema fields and rebuild the key with its derived state.
     ///
-    /// Structural validation (public material): `p` within the size bound,
-    /// odd and probable prime under the fixed-base test; `1 < g < p`;
+    /// Structural validation (public material), under the fixed-base
+    /// primality test: the group shape ([`group_shape`]); `1 < g < p` and
     /// `1 < b < p` (`b = 1` would be a key whose ciphertexts carry the
-    /// plaintext in the clear); and the exponent bound in one of its two
-    /// legitimate shapes — `p − 1` for a key built from explicit parameters,
-    /// or a prime subgroup order `q` within the size policy with `q | p − 1`
-    /// and both `g` and `b` in the order-`q` subgroup.
+    /// plaintext in the clear); for the safe-prime shape, `g` primitive and
+    /// `b ≠ p − 1`; for the subgroup shape, `g` and `b` in the order-`q`
+    /// subgroup.
     fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
         let mut fields = fields.into_iter();
         let p = fields.next()?;
         let exponent_bound = fields.next()?;
         let g = fields.next()?;
         let b = fields.next()?;
-        if !validate_group(&p, &exponent_bound, &[&g, &b], PrimalityPolicy::Structural) {
+        let one = BigUint::one();
+        if g <= one || g >= p || b <= one || b >= p {
+            return None;
+        }
+        let members_valid = match group_shape(&p, &exponent_bound, PrimalityPolicy::Structural)? {
+            GroupShape::SafePrime { q } => is_primitive_root(&g, &p, &q) && b != p.sub(&one),
+            GroupShape::PrimeOrderSubgroup => {
+                is_in_prime_order_subgroup(&g, &exponent_bound, &p)
+                    && is_in_prime_order_subgroup(&b, &exponent_bound, &p)
+            }
+        };
+        if !members_valid {
             return None;
         }
         let p_ctx = MontgomeryContext::new(&p).ok();
@@ -283,12 +308,9 @@ impl ElGamalPrivateKey {
         &self.a
     }
 
-    /// Return the exponent-cycle modulus used during decryption.
-    ///
-    /// Generated keys store the subgroup order here, so decryption can reduce
-    /// the exponent to `q - a`. Caller-supplied keys fall back to `p - 1`,
-    /// which is always valid by Fermat's little theorem even when the subgroup
-    /// order is unknown.
+    /// Return the exponent-cycle modulus used during decryption: the subgroup
+    /// order `q`, so decryption raises `γ` to `q − a`, or `p − 1`, where
+    /// Fermat's little theorem gives the same cancellation.
     #[must_use]
     pub fn exponent_modulus(&self) -> &BigUint {
         &self.exponent_modulus
@@ -297,12 +319,11 @@ impl ElGamalPrivateKey {
     /// Decrypt the raw ciphertext, or return `None` for one this key must
     /// not touch.
     ///
-    /// The ciphertext is validated first: `1 < γ < p`, `1 ≤ δ < p`, and,
+    /// The ciphertext is validated first: `1 < γ < p − 1`, `1 ≤ δ < p`, and,
     /// when the key carries the subgroup order `q`, `γ^q ≡ 1 (mod p)` —
     /// the same membership test the key's own `g` and `b` passed, refusing
-    /// `p − 1` and every other element outside the order-`q` subgroup (see
-    /// the module docs). For a key built from explicit parameters no
-    /// subgroup is known, so only the range is checked.
+    /// every element outside the order-`q` subgroup (see the module docs).
+    /// Under a safe prime every `γ` in that range has order `q` or `2q`.
     ///
     /// Decryption then avoids an explicit modular inverse by multiplying `δ`
     /// by `γ^(q − a)` (or `γ^(p − 1 − a)` when the subgroup order is unknown).
@@ -331,12 +352,13 @@ impl ElGamalPrivateKey {
     /// The ciphertext validation of [`Self::decrypt_raw`].
     fn accepts(&self, ciphertext: &ElGamalCiphertext) -> bool {
         let (gamma, delta) = (&ciphertext.gamma, &ciphertext.delta);
-        if gamma <= &BigUint::one() || gamma >= &self.p || delta.is_zero() || delta >= &self.p {
+        let p_minus_one = self.p.sub(&BigUint::one());
+        if gamma <= &BigUint::one() || gamma >= &p_minus_one || delta.is_zero() || delta >= &self.p
+        {
             return false;
         }
-        let p_minus_one = self.p.sub(&BigUint::one());
         // A key whose exponent modulus is q carries a subgroup: γ must be in
-        // it. A key with modulus p − 1 knows no subgroup to test against.
+        // it. Under a safe prime, excluding p − 1 leaves orders q and 2q.
         self.exponent_modulus == p_minus_one
             || is_in_prime_order_subgroup(gamma, &self.exponent_modulus, &self.p)
     }
@@ -369,22 +391,24 @@ impl ElGamalPrivateKey {
 
     /// Validate schema fields and rebuild the key with its derived state.
     ///
-    /// Full validation (private material): `p` within the size bound and
-    /// probable prime under the hardened test; the exponent modulus either
-    /// `p − 1` or a hardened probable prime `q` within the size policy
-    /// dividing `p − 1` (the blob carries no generator, so there is no
-    /// subgroup membership to check here; every `γ` decrypted under the key
-    /// is checked against `q` instead); and `a ∈ [1, modulus)`.
+    /// Full validation (private material), under the hardened primality
+    /// test: the group shape ([`group_shape`]) and `a ∈ [1, modulus)`, with
+    /// `a ≠ q` for the safe-prime shape. The blob carries no generator, so
+    /// there is no membership to check here; every `γ` decrypted under the
+    /// key is checked instead.
     fn from_serial_fields(fields: Vec<BigUint>) -> Option<Self> {
         let mut fields = fields.into_iter();
         let p = fields.next()?;
         let exponent_modulus = fields.next()?;
         let a = fields.next()?;
-        if !validate_group(&p, &exponent_modulus, &[], PrimalityPolicy::Hardened)
-            || a.is_zero()
-            || a >= exponent_modulus
-        {
+        let shape = group_shape(&p, &exponent_modulus, PrimalityPolicy::Hardened)?;
+        if a.is_zero() || a >= exponent_modulus {
             return None;
+        }
+        if let GroupShape::SafePrime { q } = shape {
+            if a == q {
+                return None;
+            }
         }
         let p_ctx = MontgomeryContext::new(&p).ok();
         Some(Self {
@@ -454,25 +478,35 @@ impl ElGamalCiphertext {
 
 impl ElGamal {
     /// Derive a raw `ElGamal` key pair from explicit parameters, the shape of
-    /// the 1985 paper.
+    /// the 1985 paper: a prime `p` and a primitive element `g` of `Z_p*`.
     ///
-    /// What is checked: `p` has at most [`MAX_MODULUS_BITS`] bits (before
-    /// any arithmetic), is odd and is a probable prime under the hardened
-    /// test; `1 < g < p`; and `1 ≤ a ≤ p − 2` (`a = 0` and `a = p − 1` both
-    /// give `b = 1` by Fermat, a key whose ciphertexts carry the plaintext).
-    /// What is not checked: the order of `g`. The paper takes `g` primitive;
-    /// nothing here verifies that, and the key's exponent bound is `p − 1`
-    /// regardless. Returns `None` if a check fails.
+    /// Checked, under the hardened primality test: `p` has at most
+    /// [`MAX_MODULUS_BITS`] bits (before any arithmetic) and is a safe prime,
+    /// `p = 2q + 1` with `p` and `q` prime; `g` is a primitive root,
+    /// `1 < g < p − 1` with `g^q ≠ 1`; and `1 ≤ a ≤ p − 2` with `a ≠ q`, so
+    /// that `b = g^a` is neither 1 nor `p − 1` (under either every ciphertext
+    /// carries `±m`). Returns `None` if a check fails.
     #[must_use]
     pub fn from_secret_exponent(
         prime: &BigUint,
         generator: &BigUint,
         secret: &BigUint,
     ) -> Option<(ElGamalPublicKey, ElGamalPrivateKey)> {
+        // `p − 1` is formed before `group_shape` sees `p`, so `p = 0` is
+        // refused here; every other `p` below 5 fails the shape checks.
+        if prime.is_zero() {
+            return None;
+        }
         let p_minus_one = prime.sub(&BigUint::one());
-        if !validate_group(prime, &p_minus_one, &[generator], PrimalityPolicy::Hardened)
+        let GroupShape::SafePrime { q } =
+            group_shape(prime, &p_minus_one, PrimalityPolicy::Hardened)?
+        else {
+            return None;
+        };
+        if !is_primitive_root(generator, prime, &q)
             || secret.is_zero()
             || secret >= &p_minus_one
+            || secret == &q
         {
             return None;
         }
@@ -574,40 +608,51 @@ impl ElGamal {
     }
 }
 
+/// The two group shapes a key's exponent bound can name.
+enum GroupShape {
+    /// Bound `p − 1` over a safe prime `p = 2q + 1`.
+    SafePrime {
+        /// The prime `(p − 1) / 2`.
+        q: BigUint,
+    },
+    /// Bound `q`, a prime within the size policy dividing `p − 1`.
+    PrimeOrderSubgroup,
+}
+
 /// The group check behind every constructor and parser, for both key halves.
 ///
 /// The size bound on `p` ([`MAX_MODULUS_BITS`]) is checked before any
-/// arithmetic. `exponent_bound` is either `p − 1` (no subgroup information;
-/// nothing more to check) or a prime subgroup order `q` within the size
-/// policy ([`within_group_size_bounds`]) with `q | p − 1`, in which case every
-/// element in `members` must lie in the order-`q` subgroup. Every member must
-/// be in `(1, p)` either way.
-fn validate_group(
+/// arithmetic, and `p` must be an odd probable prime under `policy`. An
+/// `exponent_bound` of `p − 1` requires `(p − 1)/2` prime under `policy` too,
+/// since only the factorization of `p − 1` lets a primitive root be
+/// recognized; any other bound must be a prime subgroup order `q` within the
+/// size policy ([`within_group_size_bounds`]) with `q | p − 1`.
+fn group_shape(
     p: &BigUint,
     exponent_bound: &BigUint,
-    members: &[&BigUint],
     policy: PrimalityPolicy,
-) -> bool {
+) -> Option<GroupShape> {
     if p.bits() > MAX_MODULUS_BITS || !p.is_odd() || !is_probable_prime_under(p, policy) {
-        return false;
+        return None;
     }
     let p_minus_one = p.sub(&BigUint::one());
-    if members.iter().any(|m| **m <= BigUint::one() || *m >= p) {
-        return false;
-    }
     if exponent_bound == &p_minus_one {
-        return true;
+        let mut q = p_minus_one;
+        q.shr1();
+        return is_probable_prime_under(&q, policy).then_some(GroupShape::SafePrime { q });
     }
-    if !within_group_size_bounds(p, exponent_bound)
-        || exponent_bound >= &p_minus_one
-        || !is_probable_prime_under(exponent_bound, policy)
-        || !p_minus_one.rem(exponent_bound).is_zero()
-    {
-        return false;
-    }
-    members
-        .iter()
-        .all(|m| is_in_prime_order_subgroup(m, exponent_bound, p))
+    let subgroup = within_group_size_bounds(p, exponent_bound)
+        && exponent_bound < &p_minus_one
+        && is_probable_prime_under(exponent_bound, policy)
+        && p_minus_one.rem(exponent_bound).is_zero();
+    subgroup.then_some(GroupShape::PrimeOrderSubgroup)
+}
+
+/// Whether `g` is a primitive root modulo the safe prime `p = 2q + 1`: the
+/// orders in `Z_p*` are 1, 2, `q` and `2q`, so `g` has order `2q` exactly
+/// when it is neither 1 nor `p − 1` and `g^q ≠ 1`.
+fn is_primitive_root(g: &BigUint, p: &BigUint, q: &BigUint) -> bool {
+    *g > BigUint::one() && *g < p.sub(&BigUint::one()) && mod_pow(g, q, p) != BigUint::one()
 }
 
 #[cfg(test)]
@@ -643,7 +688,7 @@ mod tests {
     #[test]
     fn byte_wrapper_refuses_zero_and_drops_leading_zeros() {
         let (public, private) =
-            ElGamal::from_secret_exponent(&u(65_537), &u(3), &u(7)).expect("valid key");
+            ElGamal::from_secret_exponent(&u(P), &u(5), &u(7)).expect("valid key");
         let mut drbg = CtrDrbgAes256::new(&[0x46; 48]);
         // The all-zero message encodes m = 0, whose delta would be 0.
         assert!(public.encrypt_bytes(&[0x00], &mut drbg).is_none());
@@ -710,19 +755,17 @@ mod tests {
         assert!(private.decrypt_raw(&with(gamma, 1)).is_some());
     }
 
-    /// A key built from explicit parameters knows no subgroup, so it checks
-    /// only the ranges; `γ = p − 1 = 5^11` is an honest ciphertext there,
-    /// since 5 is a primitive root modulo 23.
+    /// A safe-prime key refuses `γ` outside `(1, p − 1)`: modulo 23 = 2·11 + 1
+    /// with primitive root 5, `γ = 22` has order 2. The one nonce that would
+    /// produce it, `k = q = 11`, is refused at encryption.
     #[test]
-    fn explicit_key_checks_ranges_only() {
+    fn safe_prime_key_refuses_gamma_of_order_two() {
         let (public, private) =
             ElGamal::from_secret_exponent(&u(23), &u(5), &u(7)).expect("valid key");
-        let ciphertext = public
-            .encrypt_with_nonce(&u(11), &u(11))
-            .expect("valid ephemeral exponent");
-        assert_eq!(ciphertext.gamma(), &u(22));
-        assert_eq!(private.decrypt_raw(&ciphertext), Some(u(11)));
-        for (gamma, delta) in [(0, 5), (1, 5), (23, 5), (10, 0), (10, 23)] {
+        assert!(public.encrypt_with_nonce(&u(11), &u(11)).is_none());
+        let honest = public.encrypt_with_nonce(&u(11), &u(3)).expect("k = 3");
+        assert_eq!(private.decrypt_raw(&honest), Some(u(11)));
+        for (gamma, delta) in [(0, 5), (1, 5), (22, 5), (23, 5), (10, 0), (10, 23)] {
             let bad = ElGamalCiphertext {
                 gamma: u(gamma),
                 delta: u(delta),
@@ -733,7 +776,8 @@ mod tests {
 
     #[test]
     fn public_key_parse_rejects_tampered_fields() {
-        // Explicit-parameter shape: p = 23, bound = p - 1 = 22, g = 5, b = 17.
+        // Safe-prime shape: p = 23 = 2·11 + 1, bound p − 1 = 22, g = 5
+        // primitive, b = 5^7 = 17.
         let ok = |f: [u64; 4]| {
             let v: Vec<BigUint> = f.iter().map(|&x| u(x)).collect();
             let r: Vec<&BigUint> = v.iter().collect();
@@ -751,6 +795,13 @@ mod tests {
             [23, 22, 5, 23],
             [23, 22, 1, 17],
             [23, 22, 23, 17],
+            // g not primitive: 2 has order 11, 22 has order 2; b = p − 1.
+            [23, 22, 2, 17],
+            [23, 22, 22, 17],
+            [23, 22, 5, 22],
+            // p − 1 bound over a prime that is not safe: 29 = 2·14 + 1, with
+            // 2 a primitive root there.
+            [29, 28, 2, 7],
             // Bound neither p - 1 nor a prime divisor of p - 1: 9, 7, 24, 1.
             [23, 9, 4, 18],
             [23, 7, 4, 18],
@@ -785,6 +836,9 @@ mod tests {
             [22, 21, 7],
             [23, 22, 0],
             [23, 22, 22],
+            // a = q gives b = p − 1; 29 is not a safe prime.
+            [23, 22, 11],
+            [29, 28, 3],
             [P, Q, Q],
             [P, Q, 0],
             [23, 9, 3],
@@ -857,6 +911,16 @@ mod tests {
         let generator = BigUint::from_u64(5);
         let secret = BigUint::from_u64(7);
         assert!(ElGamal::from_secret_exponent(&composite, &generator, &secret).is_none());
+        // Modulo 23: g = 2 has order 11 and g = 22 order 2, so neither is
+        // primitive; a = q = 11 would give b = 22. 29 is prime but not safe.
+        assert!(ElGamal::from_secret_exponent(&u(23), &u(2), &secret).is_none());
+        assert!(ElGamal::from_secret_exponent(&u(23), &u(22), &secret).is_none());
+        assert!(ElGamal::from_secret_exponent(&u(23), &generator, &u(11)).is_none());
+        assert!(ElGamal::from_secret_exponent(&u(29), &u(2), &secret).is_none());
+        // p = 0, 1 and 2 are refused, not panicked on.
+        for small in [0, 1, 2] {
+            assert!(ElGamal::from_secret_exponent(&u(small), &generator, &secret).is_none());
+        }
 
         let p = BigUint::from_u64(23);
         assert!(ElGamal::from_secret_exponent(&p, &BigUint::one(), &secret).is_none());
@@ -867,16 +931,20 @@ mod tests {
         let mut wide = BigUint::zero();
         wide.set_bit(16384);
         wide = wide.add(&BigUint::one());
-        let started = std::time::Instant::now();
-        assert!(ElGamal::from_secret_exponent(&wide, &generator, &secret).is_none());
-        assert!(ElGamalPublicKey::from_key_blob(&encode_biguints(&[
-            &wide,
-            &wide.sub(&BigUint::one()),
-            &generator,
-            &secret
-        ]))
-        .is_none());
-        assert!(started.elapsed() < std::time::Duration::from_millis(50));
+        let elapsed = crate::test_utils::fastest_of_three(|| {
+            assert!(ElGamal::from_secret_exponent(&wide, &generator, &secret).is_none());
+            assert!(ElGamalPublicKey::from_key_blob(&encode_biguints(&[
+                &wide,
+                &wide.sub(&BigUint::one()),
+                &generator,
+                &secret
+            ]))
+            .is_none());
+        });
+        assert!(
+            elapsed < crate::test_utils::REFUSAL_BOUND,
+            "refusal took {elapsed:?}"
+        );
     }
 
     #[test]
@@ -929,8 +997,8 @@ mod tests {
 
     #[test]
     fn byte_wrapper_roundtrip() {
-        let p = BigUint::from_u64(65_537);
-        let g = BigUint::from_u64(3);
+        let p = BigUint::from_u64(P);
+        let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
         let (public, private) =
             ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
@@ -1042,8 +1110,8 @@ mod tests {
 
     #[test]
     fn byte_ciphertext_roundtrip() {
-        let p = BigUint::from_u64(65_537);
-        let g = BigUint::from_u64(3);
+        let p = BigUint::from_u64(P);
+        let g = BigUint::from_u64(5);
         let a = BigUint::from_u64(7);
         let (public, private) =
             ElGamal::from_secret_exponent(&p, &g, &a).expect("valid ElGamal key");
@@ -1053,5 +1121,35 @@ mod tests {
             .encrypt_bytes(&message, &mut drbg)
             .expect("message fits");
         assert_eq!(private.decrypt_bytes(&ciphertext), Some(message.to_vec()));
+    }
+
+    /// Under a safe-prime key only `k = q` makes `b^k = ±1`, which would send
+    /// `δ = ±m`. Modulo 23 with primitive root 5, for every `a` other than
+    /// `q = 11`, `k = 11` is refused and every other nonce gives a ciphertext
+    /// that hides `m` and decrypts to it; `encrypt` never returns the refused
+    /// nonce's ciphertext.
+    #[test]
+    fn only_the_nonce_q_would_send_the_plaintext_and_it_is_refused() {
+        let message = u(5);
+        let minus_message = u(23 - 5);
+        for a in (1..22).filter(|&a| a != 11) {
+            let (public, private) =
+                ElGamal::from_secret_exponent(&u(23), &u(5), &u(a)).expect("toy key");
+            assert!(public.encrypt_with_nonce(&message, &u(11)).is_none());
+            for k in (1..22).filter(|&k| k != 11) {
+                let ciphertext = public
+                    .encrypt_with_nonce(&message, &u(k))
+                    .unwrap_or_else(|| panic!("a = {a}, k = {k}"));
+                assert_ne!(ciphertext.delta, message, "a = {a}, k = {k}");
+                assert_ne!(ciphertext.delta, minus_message, "a = {a}, k = {k}");
+                assert_eq!(private.decrypt_raw(&ciphertext), Some(message.clone()));
+            }
+            let mut rng = CtrDrbgAes256::new(&[0x5e; 48]);
+            for _ in 0..64 {
+                let ciphertext = public.encrypt(&[5], &mut rng).expect("a nonce is found");
+                assert_ne!(ciphertext.gamma, u(22));
+                assert_eq!(private.decrypt_raw(&ciphertext), Some(message.clone()));
+            }
+        }
     }
 }

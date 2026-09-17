@@ -5,6 +5,11 @@
 //! the repository. A run names the seeds as a second, read-only corpus, so
 //! the inputs libFuzzer adds go to the ignored `fuzz/corpus/`:
 //! `cargo +nightly fuzz run <target> fuzz/corpus/<target> fuzz/seeds/<target>`.
+//! `fuzz/regressions/<target>/` holds minimized inputs at boundaries a target
+//! must keep handling; name it as a further read-only corpus, or replay it
+//! with `fuzz/target/<triple>/release/<target> fuzz/regressions/<target>/*`.
+//! `fuzz/campaigns/` records each long campaign's build, hosts and per-target
+//! executions and coverage.
 //!
 //! Every key comes from a fixed-seed DRBG, so the corpora are reproducible.
 

@@ -647,7 +647,7 @@ mod tests {
     use crate::public_key::io::{
         der_integer_u8, der_octet_string, der_sequence, pem_contents, DerReader,
     };
-    use crate::test_utils::openssl3;
+    use crate::test_utils::openssl3_pkcs8_der;
 
     /// RFC 8410 §9: `id-Ed25519 OBJECT IDENTIFIER ::= { 1 3 101 112 }`, used
     /// here only as the algorithm of the RFC's container examples.
@@ -692,8 +692,8 @@ mod tests {
             ObjectIdentifier::from_arcs(&[2, 999, 3]).content(),
             [0x88, 0x37, 0x03]
         );
-        // The rsaEncryption octets the RSA containers carried before this
-        // layer existed, cross-checked there against OpenSSL.
+        // The rsaEncryption octets, which the RSA container tests also check
+        // against OpenSSL.
         assert_eq!(
             RSA_ENCRYPTION.content(),
             [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01]
@@ -1128,11 +1128,8 @@ mod tests {
             Some(&expected[..])
         );
         // OpenSSL, run as a black box, reads the BER example as the same key.
-        let Some(openssl) = openssl3(
-            &["pkey", "-inform", "PEM", "-outform", "DER"],
-            RFC8410_BER_PEM.as_bytes(),
-        )
-        .or_skip(TEST) else {
+        let Some(openssl) = openssl3_pkcs8_der("PEM", RFC8410_BER_PEM.as_bytes()).or_skip(TEST)
+        else {
             return;
         };
         assert_eq!(openssl, expected);

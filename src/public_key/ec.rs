@@ -919,9 +919,9 @@ fn ld_add_mixed(
 /// in López–Dahab projective coordinates.
 ///
 /// The inner loop is inversion-free; the only binary-field inversion is the
-/// single one in [`LDPoint::to_affine`] at the end.  This replaces the former
-/// affine loop, which performed a full extended-GCD inversion in every add and
-/// double (roughly one per scalar bit).
+/// single one in [`LDPoint::to_affine`] at the end. Affine coordinates would
+/// need an extended-GCD inversion in every add and double, roughly one per
+/// scalar bit.
 fn scalar_mul_binary(curve: &CurveParams, point: &AffinePoint, k: &BigUint) -> AffinePoint {
     if k.is_zero() || point.is_infinity() {
         return AffinePoint::infinity();
@@ -2584,10 +2584,10 @@ mod tests {
     /// reduction polynomial of degree 64001, an admitted degree claimed for
     /// that polynomial, a 1 MiB field prime and a 1 MiB order are refused
     /// with no irreducibility test, Montgomery context or primality test run
-    /// on them, which a debug build shows by finishing well inside 50 ms.
+    /// on them, which a debug build shows by finishing inside
+    /// `test_utils::REFUSAL_BOUND`.
     #[test]
     fn oversized_explicit_parameters_are_refused_before_any_arithmetic() {
-        use std::time::Instant;
         let named = p256();
         let one = BigUint::one();
         let mut huge_poly = BigUint::one();
@@ -2621,13 +2621,16 @@ mod tests {
                 named.gy.clone(),
             )
         };
-        let start = Instant::now();
-        assert!(binary(&huge_poly, 64001).is_none());
-        assert!(binary(&huge_poly, 163).is_none());
-        assert!(prime(&huge_prime, &named.n).is_none());
-        assert!(prime(&named.p, &huge_prime).is_none());
-        let elapsed = start.elapsed();
-        assert!(elapsed.as_millis() < 50, "{elapsed:?}");
+        let elapsed = crate::test_utils::fastest_of_three(|| {
+            assert!(binary(&huge_poly, 64001).is_none());
+            assert!(binary(&huge_poly, 163).is_none());
+            assert!(prime(&huge_prime, &named.n).is_none());
+            assert!(prime(&named.p, &huge_prime).is_none());
+        });
+        assert!(
+            elapsed < crate::test_utils::REFUSAL_BOUND,
+            "refusal took {elapsed:?}"
+        );
     }
 
     /// SEC 1 §2.3.4 step 2.4.2: on a binary curve the compressed `x = 0`
@@ -3253,7 +3256,7 @@ mod tests {
     fn p224_compressed_roundtrip() {
         // P-224 has p ≡ 1 (mod 4), so decompression takes the general
         // Tonelli–Shanks path in rump::mod_sqrt rather than the
-        // (p+1)/4 shortcut — this used to be rejected outright.
+        // (p+1)/4 shortcut.
         let curve = p224();
         let g = curve.base_point();
         let enc = curve.encode_point_compressed(&g);

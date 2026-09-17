@@ -309,9 +309,14 @@ Core arithmetic:
 ```
 
 The paper works with a large prime `p` and a primitive element of
-$\mathbb{Z}_p^*$; `ElGamal::from_secret_exponent` keeps that shape and checks
-exactly this much of it: `p` a hardened probable prime of at most 16 384 bits,
-`1 < g < p` and `1 ≤ a ≤ p − 2`. It does not check `g`'s order. Generated
+$\mathbb{Z}_p^*$, and `ElGamal::from_secret_exponent` requires exactly that.
+Recognizing a primitive root needs the factorization of $p - 1$, so `p` must
+be a safe prime $p = 2q + 1$ (both hardened probable primes, at most 16 384
+bits); then `g` is primitive exactly when $1 < g < p - 1$ and $g^q \ne 1$.
+The secret must satisfy $1 \le a \le p - 2$ and $a \ne q$, since $a = q$
+gives $y = p - 1$; and the one nonce $k = q$, which gives $\gamma = p - 1$
+and $y^k = \pm 1$, is refused, because both would make $\delta = \pm m$.
+Every parser of a key with bound $p - 1$ applies the same checks. Generated
 keys work in a prime-order subgroup instead, with $p = kq + 1$ for a large
 cofactor `k` (a safe prime $p = 2q + 1$ would be far slower to find).
 `ElGamal::generate(rng, size, hash)` takes that group from FIPS 186-4
@@ -323,9 +328,8 @@ record, so a key's group cannot be revalidated from the key.
 
 The public key stores the real ephemeral bound used for encryption, so the
 random ephemeral exponent is sampled from the right range instead of from the
-full `p - 1` interval. Generated keys use the actual subgroup order `q` for
-that bound; explicitly constructed keys fall back to `p - 1` when the subgroup
-order is not derivable from the supplied parameters.
+full `p - 1` interval. Generated keys use the subgroup order `q` for that
+bound; keys over a safe prime with a primitive `g` use `p - 1`.
 
 The API follows the same layered pattern as the EC and Edwards ElGamal wrappers:
 

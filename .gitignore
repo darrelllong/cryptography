@@ -3,7 +3,8 @@
 /fuzz/target
 /fuzz/artifacts/
 /fuzz/corpus/
-Cargo.lock
+/fuzz/Cargo.lock
+/fast/**/Cargo.lock
 /pilot_result_*/
 /scripts/cipher_outputs/
 /scripts/shakespeare.txt

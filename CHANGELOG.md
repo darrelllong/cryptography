@@ -10,6 +10,15 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Added
+- `fuzz/regressions/`, minimized inputs for `fuzz_elgamal` and
+  `fuzz_ec_elgamal`, and `fuzz/campaigns/2026-09-16.txt`, the record of a
+  four-hour campaign over all 45 targets (build, hosts, executions and
+  coverage per target).
+- `Cargo.lock` is tracked, so a test report names the resolved dependency
+  graph it was built from.
+- `step_p_ees443ep1_refusal_rate_under_independent_seeds`, a release-only
+  test that measures the `ees443ep1` refusal rate under ten key, coin and
+  message seeds other than the fixed one, ten million encryptions pooled.
 - NIST ACVP known answers from the official `usnistgov/ACVP-Server`
   repository, with provenance headers: ML-KEM keyGen, encapsulation,
   decapsulation (valid and modified ciphertext) and the key checks for all
@@ -218,7 +227,7 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   turns every skip into a failure (except `enc`'s refusal of XTS, which no
   installation changes), and CI sets it. LibreSSL-only hosts need OpenSSL 3
   for the affected cross-checks.
-- **CI** pins the rump checkout to a commit, installs OpenSSL 3, runs the
+- **CI** checks out rump's `main`, prints each run's build identity (this commit, rump's commit, the toolchain, the `Cargo.lock` digest and the OpenSSL found), installs OpenSSL 3, runs the
   `ct_profile` suite and the full suite plus clippy under `arm-sha3`, checks
   the fuzz, benchmark and fast crates, asserts entropy's manifest points at
   this checkout, and runs the release-only ignored tests weekly and on
@@ -488,6 +497,43 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   the transitional `test_utils::run_openssl`.
 
 ### Fixed
+- OpenSSL cross-checks pass under OpenSSL 3.0, the release Ubuntu 24.04 CI
+  runners carry. They ask for PKCS #8 with `pkcs8 -topk8 -nocrypt`
+  (`test_utils::openssl3_pkcs8_der`), because OpenSSL 3.0's `pkey -outform
+  DER` writes an EC, DSA or RSA key's traditional structure. The RSA BER
+  cross-check reports, rather than fails on, OpenSSL 3.0's refusal of the
+  `rsaEncryption` NULL written with three length octets. Measured against
+  OpenSSL 3.0.13 and 3.6.4.
+- `R-REPORT.md` stated the battery's Bonferroni rule as an unconditional
+  bound. It holds only when every p-value is valid under the null, and
+  several tests take theirs from asymptotic laws, so α is reported as a
+  nominal rate beside the calibration that measures it; the report also
+  states that a pass is not a security claim.
+- **ElGamal did not require a primitive `g`, and could send the plaintext
+  in the clear.** `from_secret_exponent` and the parsers of keys with
+  exponent bound `p − 1` accepted any `1 < g < p`. Under a `g` of small order
+  some nonces gave `b^k = 1` and `δ = m`, and a secret with `g^a = 1` gave a
+  key with `b = 1`. The 1985 scheme takes `g` primitive, and recognizing a
+  primitive root needs the factorization of `p − 1`, so that shape now
+  requires a safe prime `p = 2q + 1` and checks `g ≠ p − 1`, `g^q ≠ 1`
+  (breaking: keys over other primes are refused). Under a safe prime the
+  remaining leaks are `a = q` (`b = p − 1`) and the nonce `k = q`
+  (`γ = p − 1`, `b^k = ±1`), both giving `δ = ±m`: the secret is refused,
+  `encrypt_with_nonce` refuses the nonce, `encrypt` redraws past it (at most
+  `MAX_NONCE_DRAWS`), and decryption refuses `γ = p − 1`. Keys in a
+  prime-order subgroup were never affected. Found by `fuzz_elgamal`.
+- `ElGamal::from_secret_exponent` panicked on `p = 0` (rump's subtraction
+  underflow forming `p − 1`); it returns `None`. Found by `fuzz_elgamal`.
+- `fuzz_ec_elgamal` asserted that byte messages round-trip exactly, which the
+  Koblitz embedding does not promise: `EcElGamalPrivateKey::decrypt` returns
+  the message without its leading zero bytes, as documented. The target
+  compares against that.
+- The five tests that bound a refusal of oversized parameters by wall-clock
+  time (DSA, EC, EdDSA, ElGamal, FFC groups) failed on a loaded host: one
+  debug-build refusal took 69 ms against a 50 ms bound at load 200 on 128
+  cores. They take the fastest of three runs against 500 ms
+  (`test_utils::REFUSAL_BOUND`), still an order of magnitude below the
+  arithmetic the refusal rules out.
 - **ECDSA rejected valid signatures** with `s > n/2`, about half of what
   OpenSSL produces. The verifier accepts any `1 ≤ s < n`; signing still emits
   the low-s form.

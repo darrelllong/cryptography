@@ -1,170 +1,146 @@
-# Suggestions for cryptography
+# Cryptography suggestions
 
-Revalidated 2026-09-11 against the paused `342989a` working tree and frozen
-rump `d30a7bcc`; source fingerprints and checks are in AUDIT.md. This is a
-current work queue. The standard-format implementations, plain Lucas adoption,
-EES canonical-bit check and resolved rump API gaps have been removed from it.
-Keep implementations derived from published algorithms and specifications;
-reference code is not a source of replacement code.
+> **Motto:** better that, better algorithms
+>
+> **Creed:** Experiment is asking God for peer review.
 
-## Owner rulings, 2026-09-11 afternoon
+2026-09-16. Evidence and reviewed source identity: [AUDIT.md](AUDIT.md).
+These are proposed changes; no implementation or speedup is claimed here.
+Implement from papers, specifications and independently derived mathematics.
+Preserve the exact hypotheses, representation and invariants beside the algorithm.
+An experiment records its source/dependency identities, features, input, seed,
+measurement rule and acceptance criterion before its validation run.
 
-The owner ruled on this queue after it was written. EC public keys refuse the
-identity; cryptography turns wiping on; encapsulation never creates zero
-polynomials; decoders do what each RFC says, with `_der` methods strict and BER
-receivers beside them; Ed25519 follows RFC 8032 exactly; and ML-KEM's pair-wise
-test is not skipped. Items 1, 2, 3, 5 and 6 below are done in the working tree
-under those rulings. Where an item recommends otherwise, such as opt-in wiping,
-a strict Ed25519 profile or an optional pair-wise test, the ruling governs.
-Item 4, fuzz entry points for the standard parsers, is still open.
+## 1. Fold GHASH from its field recurrence
 
-## First: make the contracts agree
-
-1. **Reject identity public keys in legacy wire import (C5).** Use the existing
-   `is_valid_public_point` at ECDSA/ECDH public-key boundaries. Preserve identity
-   support in low-level group arithmetic. Add the audit's public-data ECDSA
-   forgery as a negative regression, valid-key controls and cross-entry-point
-   tests. The SPKI validator already enforces the required invariant.
-2. **Honor opt-in automatic wiping (C1).** Gate crate-owned automatic state
-   and temporary scrubbing through the explicit cryptography feature and keep
-   rump forwarding there. Update the live-buffer helper tests, automatic-call
-   audit and feature documentation together. Specify explicit-erasure API
-   behavior separately. Compare outputs with and without the feature; do not
-   attempt to validate erasure by reading freed memory. Measure costs only
-   after recording the actual feature graph.
-3. **Keep the recorded NTRU rejection policy and repair the sender (C2).**
-   Add a checked deterministic coin-to-encapsulation boundary that can refuse
-   excluded r/m values before returning a ciphertext/key pair. Define how the
-   public random-source API reports failure or retries, including exhaustion
-   on a broken source. A conditioned sampler is a change to the specified
-   procedure and needs explicit distribution/interoperability analysis.
-   An unbounded secret-dependent retry loop is not a free constant-time fix.
-   Pin r=0 independently in all four sets, and m=0 independently for HRSS,
-   alongside normal KATs and unchanged invalid-ciphertext implicit rejection.
-4. **Exercise the implemented standard parsers (C4).** Add fuzz entry points
-   for SPKI/PKCS #8 DER and PEM with the existing RFC vectors as corpus seeds.
-   Include all supported parameter sets, optional public keys and attributes,
-   absent versus NULL parameters, seed/expanded mismatches, truncation and
-   trailing bytes. Check accepted encodings round-trip semantically and enforce
-   each import profile's consistency guarantees. Expanded-only ML-KEM currently
-   lacks the optional pairwise test; do not silently assume structural decoding
-   certifies an operational key pair. Keep crate formats as the recorded default.
-5. **Specify import profiles (C6 and audit import limits).** Keep DER entry
-   points strict; add a bounded BER-aware receiver if claiming the full RFC 5958
-   receiver profile. Preserve each algorithm's inner encoding requirements.
-   Name Ed25519's strict subgroup policy and test its boundary separately from
-   RFC 8032 decoding. A broader profile needs a complete equation/point review.
-   For ML-KEM, distinguish ordinary structural import from optional validated
-   import with pairwise checking, preserving existing seed/hash consistency
-   checks. Published malformed-key vectors already demonstrate the difference.
-6. **Account for PEM output growth when erasure is enabled (C7).** Compute the
-   exact required capacity before placing secret text in the output, or write
-   base64 directly to a single final allocation. For this encoder, if b is
-   `4*ceil(blob_bytes/3)` and L is the label length, the output length is
-   `32+2*L+b+ceil(b/64)`. Use checked integer arithmetic and verify empty input,
-   64-column boundaries and large keys. Measure allocations with controlled
-   test material; do not inspect freed secret memory. This reduces copies and
-   respects the opt-in wiping policy rather than mandating default scrubbing.
-
-## Arithmetic direction: folded GHASH with independently derived multiplication
-
-The current `src/modes/ghash.rs` precomputes the 128 values `H*u^i`, then
-performs 128 masked-XOR selections per input block. That is a clear constant-
-operation baseline, but it still reads about 2 KiB of key-dependent table
-contents per 16-byte block. The table addresses are sequential, not secret-
-indexed. The previous 0.31× throughput report is historical; establish a new
-baseline before attributing current costs to it.
-
-Exploit the polynomial recurrence, not another implementation's layout. From
-[NIST SP 800-38D §6.4](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf),
-expanding b steps gives the exact identity
+The existing baseline prepares H*u^i and performs 128 masked selections per
+block. Expanding `Y_i=(Y_(i−1) XOR X_i)*H` over b blocks gives
 
 ```text
 Y_(i+b) = Y_i*H^b XOR sum_(j=1..b) X_(i+j)*H^(b-j+1).
 ```
 
-Precompute a small set of H powers, perform the independent carryless
-products, XOR their unreduced polynomials, and reduce the aggregate once
-modulo `u^128+u^7+u^2+u+1`. For 64-bit polynomial halves, Karatsuba replaces
-four carryless half-products with three. Derive the bit order and reduction
-from the displayed polynomial; the GHASH/POLYVAL byte reversal is already
-specified in RFC 8452. This identity opens parallel work and shared reduction;
-it does not establish a speedup with the existing bit-serial multiply.
+Precompute a small number of H powers. Form the independent carryless
+products, XOR their unreduced polynomials, then reduce once modulo
+`u^128+u^7+u^2+u+1`. For 64-bit halves, Karatsuba needs three half-products:
+`a0*b0`, `a1*b1`, and `(a0 XOR a1)*(b0 XOR b1)`, with the cross term recovered
+by XOR. Derive the representation conversion and reduction from the polynomial.
+The recurrence is [SP 800-38D §6.4](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf);
+the batching identity above is its direct expansion.
 
-Compare b=1,2,4,8, short messages and long streams, charging precomputation,
-partial blocks and register/memory pressure. Use documented processor
-carryless-multiply operations in the appropriate optional fast path, with an
-independently derived portable baseline. Hardware support is not itself a
-mathematical contribution. Validate all products against the simple field
-oracle, then GCM/GMAC/GCM-SIV vectors and chunk boundaries. Preserve tag
-verification and do not emit unauthenticated plaintext. Reject the change
-if setup dominates the workloads that matter or timing behavior depends on
-secret indices. No acceleration was implemented or benchmarked in this pass.
+**Experiment:** compare b=1,2,4,8 against an independently written bit-polynomial
+oracle. Cover single basis bits, all-one values, reduction boundaries, partial
+blocks and GHASH/POLYVAL conversion. Replay the GCM/GMAC/GCM-SIV answer files
+and reject altered tags/AAD/ciphertexts. Compare total authenticated-operation
+time over short and long messages, charging H-power setup, storage and wiping.
+Keep a portable path and place any documented carryless-multiply intrinsics
+behind the appropriate optional acceleration boundary. Reject a variant that
+changes secret-dependent access or costs more on the intended workload.
 
-## Constant-time curves require a constant-time field representation
+## 2. Build constant-time curves from the field upward
 
-The old suggestion stopped too early at complete addition formulas and a
-fixed scalar schedule. The current prime-field path uses rump Montgomery
-objects; generic multiprecision operations, normalization and inversion also
-need a secret-independent execution contract. Replacing point formulas while
-leaving variable-width arithmetic underneath would not establish constant time.
+Addresses **C1**. Choose one named prime curve and an explicit threat model.
+Derive fixed-width field arithmetic, bounded carries, modular reduction and
+constant-time selection. Keep operation counts and addresses independent of
+secret values. Derive inversion with a fixed exponentiation chain or a
+published constant-time inversion algorithm.
 
-Start with one named prime curve. Derive fixed-width modular arithmetic with
-bounded carries, branchless reduction/selection and fixed memory access. Use
-[Renes, Costello and Batina's complete formulas](https://eprint.iacr.org/2015/1060.pdf)
-only where their field and group hypotheses hold; they are not a universal
-replacement for binary curves or arbitrary Edwards parameters. Fix the scalar
-schedule and table selection, then derive a fixed addition chain for inversion
-or another published constant-time inversion method. Keep formula equivalence
-checks separate from generated-code/timing checks.
+Then use complete point formulas only under their stated hypotheses;
+[Renes–Costello–Batina](https://eprint.iacr.org/2015/1060) addresses prime-order
+short-Weierstrass curves over fields of characteristic other than two or three.
+Those hypotheses are not a general license to reuse the formulas for arbitrary
+Edwards or binary curves. Preserve subgroup/key validation and scalar-range
+checks independently of the formulas.
 
-Measure end-to-end key agreement/signing, not just point addition. Test scalar
-edge values, exceptional points allowed by the API and malformed inputs.
-Timing experiments can find leaks; a negative result is evidence under that
-experiment, not proof. Publish compiler, target, feature and input classes.
-Keep the current honest `vt` labeling until the complete path warrants more.
-Generic rump algorithm work belongs in rump's own recommendations.
+**Acceptance has three parts:** mathematical equivalence on exceptional and
+ordinary inputs; functional agreement with published vectors; and generated-
+code plus timing evidence for each supported compiler/target. Measure complete
+key agreement and signing, including conversions and inversion. A negative
+timing experiment bounds what that experiment detected; it is not a proof of
+all execution paths. Keep variable-time APIs labeled until the whole path has
+the stronger contract. General variable-time rump arithmetic remains useful
+for public data and independent mathematical checks.
 
-## Calibrate the cipher battery to a stated statistical decision
+## 3. Make specification-to-test coverage inspectable
 
-At alpha=0.001, 300 p-values do not tightly establish the rejection rate.
-For an approximate 95% half-width of 20% of that rate, an independent binomial
-calibration needs roughly 96,000 trials. That calculation is a planning scale,
-not a demand to run every expensive cipher/FFT configuration 96,000 times.
-Use exact or justified finite-sample null calculations where available, then
-calibrate the actual finite byte/chunk construction at representative sizes.
+For each scheme maintain a compact mapping from specification/version/section
+to the implementing operation, its input conditions and a meaningful test.
+Separate valid-vector conformance from refusal of malformed inputs. An accepted
+encoding needs canonical round-trip checks; a key import needs the mathematical
+validation its profile requires, not merely a length check.
 
-Predeclare the precision target, acceptance threshold and treatment of skipped
-tests. Replicate independent streams; handle several widths of the same stream
-as a cluster. Measure power against specified bit bias, short periods and
-repeated blocks, not only false rejection under the null. Keep calibration
-streams separate from the ciphertext panel. Do not tune until those ciphers
-pass, or equate a randomness verdict with cryptographic security.
+Prioritize these adversarial boundaries:
 
-Cryptography owns ciphertext generation, its R script and a harness that
-replays exactly the same saved bytes through entropy's maintained battery.
-Record corpus hashes, modes/nonces, sampled variants and insufficient-input
-results. Reusable finite-input support and DIEHARD preservation belong in
-[entropy/SUGGESTIONS.md](../entropy/SUGGESTIONS.md); do not duplicate them here.
+- Identity and invalid points, wrong subgroups where the scheme forbids them,
+  explicit-domain limits and private/public disagreement.
+- Zero, maximum and out-of-range scalars; broken or repeating randomness;
+  retry limits that bound both random draws and expensive work.
+- ML-KEM modulus/key-pair checks and implicit rejection; ML-DSA expanded-key
+  consistency; NTRU prescribed sampling, zero cases and exact byte encodings.
+- Authentication failure at every supported tag/nonce/message boundary;
+  streaming splits, counter exhaustion and the returned buffer's contents.
+- DER/BER/PEM length arithmetic, malformed nesting and allocations constrained
+  before expensive arithmetic.
 
-## Remaining standards and performance work
+Retain answer-file source, parameter set, count and digest. Generate mathematical
+constants and tables from their definitions where possible. A disagreement
+between specification text and published vectors needs an explicit interpretation
+and a discriminating test, never an unexplained numerical adjustment.
+These rules apply equally to benchmark and fuzz harnesses.
 
-These are feature choices, not audit failures. After the contracts and boundary
-coverage above, consider SLH-DSA, Ed448, CTR_DRBG's derivation function and
-prediction resistance, bit-oriented SHA-3, named finite-field key-agreement
-groups, and a specified ECIES concatenation-KDF profile. Pin the exact published
-specification, accepted inputs and external vectors before implementation.
-Keep draft constructions labeled as drafts. Standard key containers for the
-currently supported named families are already implemented.
+**Experiment:** run the existing ignored cases and longer fuzz campaigns with
+coverage/iteration records and minimized failing inputs. Fuzz targets must
+assert the actual API contract: arbitrary corruption does not always imply
+rejection for a non-authenticating primitive. Do not replace an independent
+expected answer with an output freshly generated by the code under test.
 
-For ML-KEM and NTRU, obtain current stage profiles before selecting an arithmetic
-rewrite. Preserve prescribed distributions and deterministic coin mapping;
-optimizing a sampler by changing either is a different algorithm. Compare
-mathematical kernels and complete operations under the same parameters,
-compiler and features. Historical rewrite ratios do not describe the newest
-working tree or identify its current bottleneck.
+## 4. Resolve the battery's statistical boundary with entropy
 
-The provenance/publication record remains in AUDIT.md. On 2026-09-16 the
-remote still held the original history and tags and crates.io still served
-0.5.0–0.6.2 unyanked; `TODO.md` carries both as owner actions. This review
-neither publishes nor changes history.
+Addresses **C2**. Preserve the retained calibration corpus and reproduce the
+counts before changing a statistic. Predeclare the target tail precision,
+stream lengths, null sources, weak alternatives and a held-out validation set.
+Decide whether the gap test needs different pooling, a better tail law or an
+explicit simulated null. At threshold 0.001/7, 400,000 samples supply only
+57.14 expected marginal rejections; uncertainty is material.
+
+Keep Bonferroni only with individually valid null tail bounds, and report the
+measured family rejection rate with an interval. A battery change must improve
+calibration without silently losing power. Use entropy's finite-corpus interface
+when available, with exact byte identity and projection. Repair its discrete-
+null and error-result findings before using it as an independent verdict.
+The scientific question is whether the statistic sees a specified deviation;
+cryptographic security requires the scheme's own analysis.
+
+## 5. Profile complete operations before rewriting arithmetic
+
+Addresses **C4**. Establish fresh baselines for symmetric, RSA/EC and
+post-quantum operations under recorded features. Profile stages separately:
+setup, sampling, polynomial transforms/multiplication, reduction, hashing,
+encoding, allocation and wiping. Preserve sampler distributions and deterministic
+coin mapping: replacing either changes the algorithm, not just its speed.
+
+Use paired, interleaved trials on an idle host, fixed message/parameter grids,
+and an input corpus chosen before optimization. Report dispersion, CPU, memory
+and complete-operation time. Stage wins that disappear after conversions or
+setup do not establish a useful improvement. Regenerate tables and plots from
+identified raw observations; do not use stale ratios as current targets.
+
+Publish the dependency combination with every result. Rump's improvements
+must run with `wipe` enabled here, even if factoring selects the opposite mode.
+Check entropy's default adapters on the same bytes after cipher/DRBG changes.
+
+## 6. Add standards by precise profiles, not by names alone
+
+Potential extensions include Ed448, SLH-DSA, CTR_DRBG derivation-function and
+prediction-resistance support, bit-oriented SHA-3, named finite-field groups,
+and a specified ECIES KDF profile. Rank these by actual use after the audit
+priorities. Pin a final specification, define accepted inputs and failure
+behavior, and obtain published answer data before implementation. A FIPS
+algorithm implementation is not by itself a validated cryptographic module.
+
+| Boundary | Owner |
+|---|---|
+| Integer/field identities and generic arithmetic performance | [rump](../rump/SUGGESTIONS.md) |
+| Scheme validation, timing, secret buffers and wire profiles | cryptography |
+| Calibrated statistics and finite-corpus observations | [entropy](../entropy/SUGGESTIONS.md) |
+| Shared performance methodology, with different feature profiles | all four repositories |

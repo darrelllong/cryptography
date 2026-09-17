@@ -419,7 +419,7 @@ mod tests {
         ID_DSA, NULL_PARAMETERS, PRIVATE_KEY_LABEL,
     };
     use crate::public_key::primes::cavp;
-    use crate::test_utils::openssl3;
+    use crate::test_utils::{openssl3, openssl3_pkcs8_der};
     use rump::BigUint;
 
     /// RFC 9500 §2.2's publicly known DLP key "testDLP1024", which the RFC
@@ -521,11 +521,7 @@ mod tests {
         const TEST: &str = "openssl_converts_rfc9500_dsa_key_to_the_same_encodings";
         let (p, q, g, x, _) = dlp1024();
         let (public, private) = Dsa::from_secret_exponent(&p, &q, &g, &x).expect("RFC 9500 group");
-        let Some(pkcs8) = openssl3(
-            &["pkey", "-inform", "PEM", "-outform", "DER"],
-            DLP1024_PEM.as_bytes(),
-        )
-        .or_skip(TEST) else {
+        let Some(pkcs8) = openssl3_pkcs8_der("PEM", DLP1024_PEM.as_bytes()).or_skip(TEST) else {
             return;
         };
         assert_eq!(pkcs8, private.to_pkcs8_der());
@@ -537,11 +533,9 @@ mod tests {
             return;
         };
         assert_eq!(spki, public.to_spki_der());
-        let Some(reread) = openssl3(
-            &["pkey", "-inform", "PEM", "-outform", "DER"],
-            private.to_pkcs8_pem().as_bytes(),
-        )
-        .or_skip(TEST) else {
+        let Some(reread) =
+            openssl3_pkcs8_der("PEM", private.to_pkcs8_pem().as_bytes()).or_skip(TEST)
+        else {
             return;
         };
         assert_eq!(reread, pkcs8);
@@ -787,9 +781,7 @@ mod tests {
         assert_eq!(public.public_component(), &y);
         assert_eq!(private.to_pkcs8_der(), der);
 
-        let Some(reread) =
-            openssl3(&["pkey", "-inform", "DER", "-outform", "DER"], &der).or_skip(TEST)
-        else {
+        let Some(reread) = openssl3_pkcs8_der("DER", &der).or_skip(TEST) else {
             return;
         };
         assert_eq!(reread, der);
@@ -943,11 +935,8 @@ mod tests {
         let (p, q, g, x, _) = dlp1024();
         let (_, private) = Dsa::from_secret_exponent(&p, &q, &g, &x).expect("RFC 9500 group");
         let parameters = FfcAlgorithm::Dsa.parameters_der(&p, &q, &g, None);
-        let Some(expected) = openssl3(
-            &["pkey", "-inform", "DER", "-outform", "DER"],
-            &private.to_pkcs8_der(),
-        )
-        .or_skip(TEST) else {
+        let Some(expected) = openssl3_pkcs8_der("DER", &private.to_pkcs8_der()).or_skip(TEST)
+        else {
             return;
         };
         for style in [STYLES[0], STYLES[1]] {
@@ -960,9 +949,7 @@ mod tests {
                 ),
                 style,
             );
-            let Some(read) =
-                openssl3(&["pkey", "-inform", "DER", "-outform", "DER"], &ber).or_skip(TEST)
-            else {
+            let Some(read) = openssl3_pkcs8_der("DER", &ber).or_skip(TEST) else {
                 return;
             };
             assert_eq!(read, expected, "{style:?}");

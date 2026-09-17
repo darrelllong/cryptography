@@ -1,0 +1,56 @@
+Fuzz campaign, 2026-09-16
+
+Hosts: dennard and twilight, 128-core x86-64 Ubuntu 24.04, shared with other users' jobs (load 40-200).
+Toolchain: rustc 1.100.0-nightly (215a8af4b 2026-09-15), cargo-fuzz 0.13.2, libFuzzer with AddressSanitizer.
+Each target ran on one core at nice 10 for 14,400 s (-max_total_time), from the seeds in fuzz/seeds/<target> where they exist, growing a corpus outside the repository.
+Binaries: cryptography snapshot cf7440e with rump 799dd42, except where a line below says otherwise.
+
+fuzz_ec_elgamal: the first run stopped at an input whose message starts with a zero byte; the target asserted an exact round trip that EcElGamalPrivateKey::decrypt does not promise. Rerun for 12,000 s from snapshot c671aed with rump 258f5fd, with the target comparing against the message without leading zero bytes. Minimized input: fuzz/regressions/fuzz_ec_elgamal/leading-zero-message.
+fuzz_elgamal: the first run stopped at ElGamal::from_secret_exponent panicking on p = 0 (fuzz/regressions/fuzz_elgamal/p-zero). The second run, from snapshot c671aed with rump 258f5fd, stopped after 2,510,032 executions at a nonce with b^k = 1 under a non-primitive g, which encrypt_with_nonce accepted and decrypt_raw refused (fuzz/regressions/fuzz_elgamal/shared-secret-one). Both are repaired in snapshot 7e40aa4; every crash input, original and minimized, runs clean there with rump 6103c32. A third 14,400 s run from 7e40aa4 is recorded in fuzz_elgamal.log beside this campaign's results, not here.
+
+target host executions seconds cov ft corpus
+fuzz_aead_decrypt dennard 34057403 14401 1964 4878 565/260Kb
+fuzz_aes dennard 1284300830 14401 648 650 7/134b
+fuzz_camellia twilight 860576129 14401 878 884 7/134b
+fuzz_cast128 dennard 84196507 14401 1023 1025 2/25b
+fuzz_chacha20 dennard 520356208 14401 283 703 53/30Kb
+fuzz_cocks twilight 522644451 14401 654 967 40/5855b
+fuzz_cprng dennard 650531 14401 296 777 49/2931b
+fuzz_des dennard 241209630 14401 213 244 15/315b
+fuzz_dh twilight 1403466 14401 855 2977 343/67Kb
+fuzz_dsa dennard 1175344 14401 1296 3496 396/90Kb
+fuzz_ecdh twilight 74053 14401 1613 4937 559/54Kb
+fuzz_ecdsa dennard 146686 14402 1774 6439 720/74Kb
+fuzz_ec_elgamal dennard 145308 12001 1169 3294 303/16Kb
+fuzz_ecies dennard 1331564 14401 2669 6165 373/135Kb
+fuzz_ed25519 twilight 185965 14401 1020 1896 155/14425b
+fuzz_eddsa dennard 261399 14401 940 2770 225/22Kb
+fuzz_edwards_dh dennard 157401 14401 1309 2963 262/28Kb
+fuzz_edwards_elgamal twilight 226482 14401 1067 3076 246/13023b
+fuzz_elgamal dennard 2510032 stopped 794 2430 359/56Kb
+fuzz_grasshopper dennard 71366299 14401 727 729 2/49b
+fuzz_hash twilight 16748593 14401 1449 2771 129/91Kb
+fuzz_mac dennard 147041170 14401 1014 1872 127/57Kb
+fuzz_magma dennard 1687894112 14401 248 250 2/41b
+fuzz_ml_dsa twilight 581150 14401 1354 2859 204/16293b
+fuzz_ml_kem dennard 1868109 14401 1063 1518 51/4953b
+fuzz_modes dennard 110530694 14401 937 2953 170/65Kb
+fuzz_ntru twilight 2158301 14401 9589 14766 720/43Kb
+fuzz_paillier dennard 539705817 14401 629 1264 48/1082b
+fuzz_pkix_parse twilight 9539809 14401 10075 26095 2987/519Kb
+fuzz_pk_parse dennard 5010871 14401 4442 11721 926/109Kb
+fuzz_present dennard 309428589 14401 168 174 7/110b
+fuzz_rabbit dennard 654348116 14401 156 443 31/12191b
+fuzz_rabin twilight 8119045 14401 1294 1777 82/570b
+fuzz_rsa_pkcs1 dennard 4172051 14401 2030 2847 73/21Kb
+fuzz_salsa20 dennard 1447806212 14401 194 334 39/26Kb
+fuzz_schmidt_samoa twilight 636494047 14401 601 855 42/6806b
+fuzz_seed dennard 701795555 14401 423 425 2/33b
+fuzz_serpent dennard 1394565988 14401 278 280 7/134b
+fuzz_simon twilight 3558146415 14401 361 366 25/387b
+fuzz_sm4 dennard 1075541207 14401 144 146 2/33b
+fuzz_snow3g dennard 83898941 14401 193 504 32/7214b
+fuzz_speck twilight 3407872930 14401 363 388 25/387b
+fuzz_twofish dennard 47325013 14401 607 610 7/134b
+fuzz_x25519 dennard 1918441 14401 197 205 10/977b
+fuzz_zuc twilight 103807825 14401 220 567 32/7049b

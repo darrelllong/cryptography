@@ -44,8 +44,11 @@
 #      (Bartlett 1955; Durbin 1969);
 #   7. Wald-Wolfowitz runs test on the full bit stream.
 #
-# A cipher fails when any p-value falls below ALPHA / m (Bonferroni), which
-# bounds the probability that a good cipher fails by ALPHA.  Shannon entropy,
+# A cipher fails when any p-value falls below ALPHA / m (Bonferroni). That
+# bounds the probability that a good cipher fails by ALPHA, under any
+# dependence among the tests, only when every p-value is valid under the null
+# (Pr(p <= t) <= t); several tests take p-values from asymptotic laws, so
+# ALPHA is nominal and the --calibrate campaign measures the rate attained.  Shannon entropy,
 # the first ten moments and Fisher's g of the spectrum are reported as
 # descriptions, not counted as tests: the plug-in entropy deficit is, to
 # second order, the byte chi-square statistic scaled by 1 / (2 L ln 2), so
@@ -79,7 +82,7 @@ REPORT     <- file.path(ROOT, "R-REPORT.md")
 
 PG_URL      <- "https://www.gutenberg.org/cache/epub/100/pg100.txt"
 PG_BYTES    <- 5638480L  # size of Project Gutenberg #100 as fetched
-ALPHA       <- 0.001     # family-wise error bound per cipher
+ALPHA       <- 0.001     # nominal family-wise error rate per cipher
 CHUNK       <- 8L        # bytes per Uniform(0,1) sample
 NULL_SOURCE <- "/dev/urandom"
 
@@ -506,7 +509,7 @@ calibration_lines <- function(cal) {
                   "(hosts: %s; %s to %s UTC; mean %.1f s per stream).  A stream",
                   "that is random by construction should reject each test with",
                   "probability $\\alpha = %g$ and fail the battery with",
-                  "probability at most $\\alpha$; the table gives the observed",
+                  "probability at most $\\alpha$ if every p-value is valid; the table gives the observed",
                   "counts with Clopper-Pearson 95%% intervals, and the",
                   "Kolmogorov-Smirnov p-value of each test's %s p-values",
                   "against Uniform(0,1), which is what a calibrated test",
@@ -533,7 +536,7 @@ calibration_lines <- function(cal) {
              sprintf("Streams with some $p < \\alpha$: %s; nominal bound $m \\alpha = %g$.",
                      fmt_rate(sum(min_p < ALPHA), n), M_TESTS * ALPHA),
              "",
-             "Spearman correlation of the p-values across streams (a dependent pair would make the Bonferroni bound loose, never unsafe):",
+             "Spearman correlation of the p-values across streams (dependence makes the Bonferroni bound loose, never unsafe, when every p-value is valid):",
              "",
              paste0("| | ", paste(names(TESTS), collapse = " | "), " |"),
              paste0("|---|", paste(rep("---", M_TESTS), collapse = "|"), "|"))
@@ -643,7 +646,7 @@ run_battery <- function() {
             fmt_int(results[[1]]$spectrum_samples)),
     "7. Wald-Wolfowitz runs test on the full bit stream.",
     "",
-    sprintf("**Decision rule.** A cipher fails when any of its $m = %d$ p-values falls below $\\alpha / m = %s$ (Bonferroni), which bounds the probability that a good cipher fails at $\\alpha = %g$.  The `p < α` column counts the p-values below $\\alpha$, which a good cipher shows at a rate of about $m \\alpha = %g$ per battery.  The calibration section reports the rates the battery attains on streams that are random by construction.",
+    sprintf("**Decision rule.** A cipher fails when any of its $m = %d$ p-values falls below $\\alpha / m = %s$ (Bonferroni).  That bounds the probability that a good cipher fails by $\\alpha = %g$ under any dependence among the tests only if every p-value is valid under the null, $\\Pr(p \\le t) \\le t$; several tests take their p-values from asymptotic laws, so $\\alpha$ is a nominal rate, and the calibration section reports the rates the battery attains on streams that are random by construction.  The `p < α` column counts the p-values below $\\alpha$, which a good cipher shows at a rate of about $m \\alpha = %g$ per battery.  A pass means only that these statistics did not detect a departure from independent uniform bytes; it is not evidence of key secrecy, authentication security or unpredictability.",
             M_TESTS, fmt_sci_latex(ALPHA_BONF), ALPHA, M_TESTS * ALPHA),
     "",
     sprintf("**Entropy.** The plug-in byte entropy $H$ never exceeds $8$ bits; to second order $8 - H = \\chi^2 / (2 L \\ln 2)$ with $\\chi^2$ the byte-frequency statistic, so under a uniform source $8 - H$ has mean $(K - 1) / (2 L \\ln 2) = %s$ bits and standard deviation $\\sqrt{2 (K - 1)} / (2 L \\ln 2) = %s$ bits ($K = 256$, $L =$ %s).  Test 1 is therefore the calibrated form of the entropy check; $H$ is printed to six decimals as a description.",
@@ -660,7 +663,7 @@ run_battery <- function() {
     "|--------|------------|",
     "| $L$ | ciphertext length in bytes (equal to the plaintext length; CTR and keystream modes preserve length). |",
     sprintf("| $k$ | number of chunk values, $\\lfloor L / %d \\rfloor$. |", CHUNK),
-    sprintf("| $\\alpha = %g$ | family-wise error bound per cipher; each test rejects at $\\alpha / m = %s$. |", ALPHA, fmt_sci_latex(ALPHA_BONF)),
+    sprintf("| $\\alpha = %g$ | nominal family-wise error rate per cipher; each test rejects at $\\alpha / m = %s$. |", ALPHA, fmt_sci_latex(ALPHA_BONF)),
     "| $p$ | classical p-value $\\Pr(T \\ge T_\\mathrm{obs} \\mid H_0)$; small $p$ rejects $H_0$. |",
     "| $H$ | plug-in Shannon entropy of the byte distribution, in bits. |",
     "| $m_k$ | the $k$-th raw sample moment of $u$; ideal $E[U^k] = 1/(k+1)$. |",

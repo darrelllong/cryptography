@@ -1134,23 +1134,27 @@ mod tests {
         ];
         for blob in &oversized {
             let pem = pem_wrap(DSA_PARAMS_LABEL, blob);
-            let started = std::time::Instant::now();
-            assert!(DsaParams::from_pem(&pem).is_none());
-            assert!(DsaParams::from_key_blob(blob).is_none());
-            assert!(DsaParams::from_der(blob).is_none());
-            let elapsed = started.elapsed();
+            let elapsed = crate::test_utils::fastest_of_three(|| {
+                assert!(DsaParams::from_pem(&pem).is_none());
+                assert!(DsaParams::from_key_blob(blob).is_none());
+                assert!(DsaParams::from_der(blob).is_none());
+            });
             assert!(
-                elapsed < std::time::Duration::from_millis(50),
+                elapsed < crate::test_utils::REFUSAL_BOUND,
                 "refusal took {elapsed:?}"
             );
         }
         // The key parsers apply the same policy, structural and hardened alike.
         let public = encode_biguints(&[&wide_p, &q, &g, &g]);
         let private = encode_biguints(&[&wide_p, &q, &g, &u(3)]);
-        let started = std::time::Instant::now();
-        assert!(DsaPublicKey::from_key_blob(&public).is_none());
-        assert!(DsaPrivateKey::from_key_blob(&private).is_none());
-        assert!(started.elapsed() < std::time::Duration::from_millis(50));
+        let elapsed = crate::test_utils::fastest_of_three(|| {
+            assert!(DsaPublicKey::from_key_blob(&public).is_none());
+            assert!(DsaPrivateKey::from_key_blob(&private).is_none());
+        });
+        assert!(
+            elapsed < crate::test_utils::REFUSAL_BOUND,
+            "refusal took {elapsed:?}"
+        );
     }
 
     #[test]
