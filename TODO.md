@@ -51,10 +51,12 @@ Items are marked **owner** when only the repository owner can do them.
    bounds, a guard on an index or an allocation, or a comparison of public
    lengths; `src/ct.rs`, `src/ciphers/aes.rs` and the two ladder modules
    record the reading, and CI fails the build when a claim gains a branch
-   nobody has read. Still missing: the block ciphers' other `Ct` types beyond
-   the shared AES core, complete signature operations, the remaining supported
-   targets, and predeclared interleaved input-class timing experiments with
-   reported distributions.
+   nobody has read. `scripts/ct_timing` adds the measured half: the dudect
+   experiment with a positive control, whose runs are in its `RESULTS.md`.
+   Still missing: complete signature operations, the remaining supported
+   targets, and experiments over more input classes than fixed-against-random
+   (low-order points, degenerate scalars, tag positions other than first and
+   last).
 7. **Targeted fuzzing.** Campaigns aimed at parser length and count fields,
     explicit domain parameters, key-pair consistency, nonce and counter
     exhaustion, authentication failure and failure-buffer contents, with the

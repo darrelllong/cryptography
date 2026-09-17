@@ -28,6 +28,11 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- `scripts/ct_timing`, the measured counterpart to the machine-code evidence:
+  the dudect interleaved input-class experiment (Reparaz, Balasch and
+  Verbauwhede, ePrint 2016/1123) with its protocol fixed in the source and a
+  positive control that must be flagged for a run to count. Runs on
+  aarch64-apple-darwin and x86_64-unknown-linux-gnu are in its `RESULTS.md`.
 - `SPECIFICATIONS.md`: for every algorithm, the specification and section it
   is written from, the source of its known answers, and the tests that refuse
   malformed input, keeping conformance, interoperability and refusal apart.

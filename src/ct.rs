@@ -368,7 +368,8 @@ pub(crate) fn select_u64(mask: u64, chosen: u64, other: u64) -> u64 {
 /// until that script is run on them.
 /// `constant_time_eq_mask_has_no_gross_early_exit` (an ignored, release-only
 /// experiment in this module's tests) checks one consequence on the running
-/// machine, and no more than that.
+/// machine, and `scripts/ct_timing` runs the interleaved two-class experiment
+/// with a positive control, whose runs its `RESULTS.md` records.
 #[inline]
 pub(crate) fn constant_time_eq_mask(a: &[u8], b: &[u8]) -> u8 {
     if a.len() != b.len() {
