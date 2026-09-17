@@ -52,10 +52,11 @@ Items are marked **owner** when only the repository owner can do them.
    specification and vectors, with corrupted-encapsulation, AAD/context and
    invalid-key tests.
 6. **Timing qualification beyond the primitives.** `scripts/ct_codegen.sh`
-   classifies every conditional branch in the machine code of
-   `Hmac::<Sha256>::verify`, `Aes128Ct::encrypt_block`, the X25519 and X448
-   ladders, a complete X25519 key agreement and a complete ChaCha20-Poly1305
-   open. On aarch64-apple-darwin (rustc 1.93.1) and
+   classifies every conditional branch in the machine code of each claim the
+   crate makes: the tag comparison, every `Ct` block cipher, the ChaCha20
+   keystream, the Poly1305 MAC, the X25519 and X448 ladders, a complete
+   X25519 key agreement, a complete ChaCha20-Poly1305 open, and the two
+   constant-time KEM decapsulations (ML-KEM and NTRU round 3). On aarch64-apple-darwin (rustc 1.93.1) and
    x86_64-unknown-linux-gnu (rustc 1.95.0) each branch is a loop the source
    bounds, a guard on an index or an allocation, or a comparison of public
    lengths; `src/ct.rs`, `src/ciphers/aes.rs` and the two ladder modules
