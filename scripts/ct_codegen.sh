@@ -22,7 +22,12 @@
 # tests a key, a secret scalar, a tag or a plaintext byte is a secret-dependent
 # branch, and the claim for that function no longer holds on that target and
 # compiler. The first two kinds are public by construction; the unclassified
-# ones are the reading list, and `src/ct.rs` records what they turned out to be.
+# ones are the reading list, and `src/ct.rs`, `src/ciphers/aes.rs` and the two
+# ladder modules record what they turned out to be.
+#
+# Each claim carries the number of unclassified branches that reading covers,
+# and the script fails when a target or a compiler produces more than that, so
+# a new branch is read before the claim is repeated.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -51,7 +56,7 @@ esac
 # handler, a trap — guards an index, a length or an allocation. The rest is
 # for a person to read.
 classify() {
-    awk '
+    awk -v countfile="$3" '
         # The call, jump or return that decides what the block at `at` does,
         # following unconditional jumps to where they land.
         function fate(at,   hops, j, fields, field, target) {
@@ -97,6 +102,7 @@ classify() {
                     summary = summary sprintf("%s%d %s", summary == "" ? "" : ", ", \
                                               seen[kinds[k]], kinds[k])
             printf "  branches: %d (%s)\n%s", total, summary, listing
+            print seen["unclassified"] + 0 > countfile
         }
     ' "$1" "$2"
 }
@@ -104,18 +110,22 @@ classify() {
 echo "target:   $target"
 echo "compiler: $(rustc -vV | sed -n 's/^release: /rustc /p')"
 
-# Each claim, named with a pattern matching the symbol that carries it: the
+# Each claim: its name, a pattern matching the symbol that carries it — the
 # probe's own wrapper where the code is generic and instantiated there, the
-# library's mangled symbol otherwise.
+# library's mangled symbol otherwise — and the unclassified branches the
+# modules have read and accounted for.
 claims=(
-    "tag-comparison:verify_tag"
-    "aes128-ct:Aes128Ct.*encrypt_block"
-    "x25519-ladder:X255196scalar|X25519.*scalar_mult"
-    "x448-ladder:X4486scalar|X448.*scalar_mult"
+    "tag-comparison:verify_tag:2"
+    "aes128-ct:Aes128Ct.*encrypt_block:0"
+    "x25519-ladder:X255196scalar|X25519.*scalar_mult:1"
+    "x448-ladder:X4486scalar|X448.*scalar_mult:2"
 )
+unread=0
 for entry in "${claims[@]}"; do
     claim=${entry%%:*}
-    pattern=${entry#*:}
+    rest=${entry#*:}
+    pattern=${rest%:*}
+    budget=${rest##*:}
     file=$(grep -lE "^[._a-zA-Z0-9\$]*($pattern)[._a-zA-Z0-9\$]*:" $asm | head -1)
     [ -n "$file" ] || { echo "$claim: no symbol matching $pattern" >&2; exit 1; }
     symbol=$(grep -oE "^[._a-zA-Z0-9\$]*($pattern)[._a-zA-Z0-9\$]*:" "$file" | head -1 | tr -d ':')
@@ -148,9 +158,21 @@ for entry in "${claims[@]}"; do
     echo "$claim: $(grep -cE '^[[:space:]]+[a-z]' "$body") instructions in $symbol"
     grep -nE "^[[:space:]]+$branches" "$body" | cut -d: -f1 > "$body.branches" || true
     if [ -s "$body.branches" ]; then
-        classify "$body.branches" "$body"
+        classify "$body.branches" "$body" "$body.unread"
     else
         echo "  no conditional branches"
+        echo 0 > "$body.unread"
     fi
     echo "  assembly: $body"
+    if [ "$(cat "$body.unread")" -gt "$budget" ]; then
+        echo "  UNREAD: $(cat "$body.unread") unclassified branches, $budget accounted for" >&2
+        unread=1
+    fi
 done
+
+[ "$unread" -eq 0 ] || {
+    echo >&2
+    echo "A claim gained a branch this script cannot name. Read it, and either" >&2
+    echo "record it with the claim or fix the code it came from." >&2
+    exit 1
+}

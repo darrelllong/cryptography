@@ -122,6 +122,12 @@ jobs:
         run: cargo test --features arm-sha3
       - name: Doc build (deny warnings)
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+      # The constant-time claims are claims about emitted code, so each
+      # compiler this matrix covers re-reads it: the script fails when a claim
+      # gains a conditional branch the modules have not accounted for.
+      - name: Constant-time codegen
+        if: matrix.rust == 'stable'
+        run: ./scripts/ct_codegen.sh
 
   # The randomness report's decision, cache and atomic-write rules, checked
   # without cargo or the plaintext.

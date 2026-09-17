@@ -21,7 +21,9 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `x86_64-unknown-linux-gnu` the tag comparison, `Aes128Ct::encrypt_block` and
   the X25519 and X448 ladders leave only public-length and loop-counter
   comparisons unclassified, and `src/ct.rs`, `src/ciphers/aes.rs` and the two
-  ladder modules record the reading.
+  ladder modules record the reading. Each claim carries the number of
+  unclassified branches that reading covers and CI runs the script on both
+  platforms, so a compiler that introduces another one fails the build.
 - Fast-key-erasure tests for the evidence the review asks of the
   construction: served bytes appear in no buffer it keeps, an interrupted
   fill leaves none behind, reseeding after a simulated state compromise
