@@ -57,9 +57,9 @@ classify() {
         function fate(at,   hops, j, fields, field, target) {
             for (hops = 0; hops < 4; hops++) {
                 for (j = at + 1; j <= lines; j++)
-                    if (line[j] ~ /^[ \t]+(bl|call|ret|b|jmp|brk|ud2)([ \t]|$)/) break
+                    if (line[j] ~ /^[ \t]+(bl|call|ret|b|jmp|brk|ud2)q?([ \t]|$)/) break
                 if (j > lines) return ""
-                if (line[j] !~ /^[ \t]+(b|jmp)([ \t]|$)/) return line[j]
+                if (line[j] !~ /^[ \t]+(b|jmp)q?([ \t]|$)/) return line[j]
                 fields = split(line[j], field, /[ \t,]+/)
                 target = field[fields]
                 if (!(target in label)) return line[j]
