@@ -66,11 +66,14 @@ Items are marked **owner** when only the repository owner can do them.
    the dudect experiment with both a positive and a negative control, over
    pairs of fixed inputs, whose runs are in its `RESULTS.md`.
 
-   Still missing: the remaining supported targets, more input classes still
-   (scalars of a given Hamming weight, ciphertexts tampered at other
-   positions), and an account of the one difference the measurement did find —
-   an all-zero scalar against a dense one on Apple silicon, which no branch or
-   index explains and which the idle x86-64 host does not show.
+   Still missing: the remaining supported targets, and the experiment the
+   measurement's two findings ask for. An all-zero scalar separates from a
+   dense one on Apple silicon and `u = 1` separates from the base point on a
+   Cortex-A76, each a degenerate input against an ordinary one, while no host
+   separates two ordinary scalars. Since what distinguishes the first pair is
+   how often the ladder's swap fires — a property of the secret scalar — the
+   next experiment is scalars whose swap counts differ by a little rather than
+   by everything.
 7. **Targeted fuzzing.** The 45 targets cover the parsers, the AEAD failure
    path — including, since this campaign, that a refused decryption leaves the
    caller's buffer as it found it — and every public-key surface;

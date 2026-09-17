@@ -17,13 +17,13 @@
 //! input.
 //!
 //! Measurement is the other half. `scripts/ct_timing` runs the interleaved
-//! two-class experiment over this ladder; its `RESULTS.md` records that two
-//! ordinary scalars are indistinguishable on both hosts tried, while on one of
-//! them an all-zero scalar — which clamping turns into `2^254`, so the ladder
-//! swaps once and then never again — is distinguishable from a dense one. No
-//! branch or index accounts for that, and the other host shows nothing; what
-//! the processor does with data the code writes without changing it is not
-//! something the code decides.
+//! two-class experiment over this ladder, and its `RESULTS.md` records what
+//! three hosts found: no host separates two ordinary scalars, while one
+//! separates an all-zero scalar — which clamping turns into `2^254`, so the
+//! swap fires once and then never again — and another separates `u = 1` as
+//! the peer's point, which keeps the field elements small. No branch or index
+//! accounts for either, and an idle x86-64 host separates neither; what a
+//! processor does with degenerate data is not something this code decides.
 //!
 //! Unlike the rest of `crate::vt`, X25519 here is intended to be
 //! constant-time. It is exposed under `crate::vt` because the surrounding
