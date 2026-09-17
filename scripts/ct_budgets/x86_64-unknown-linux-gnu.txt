@@ -1,8 +1,9 @@
 # Unclassified branches a reading accounted for, per claim, on
-# x86_64-unknown-linux-gnu. Read under rustc 1.95.0 and 1.98.1: the newer
-# compiler inlines SHA-256's finalisation into the tag comparison, which adds
-# the padding decision on the message length — a public value — and so the
-# third branch here.
+# x86_64-unknown-linux-gnu. Read under rustc 1.95.0 and 1.98.1 with the
+# one-codegen-unit build the script pins; each count is the largest that claim
+# has shown across them. The newer compiler inlines SHA-256's finalisation into
+# the tag comparison, for instance, which brings its padding decision on the
+# message length — a public value — into the claim.
 #
 # `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
 tag-comparison 3
