@@ -9,6 +9,20 @@
 //! the published eSTREAM-family vectors.
 
 // Salsa20 specification constants for 256-bit (`sigma`) and 128-bit (`tau`) keys.
+/// Salsa20's state is sixteen 32-bit words, and one permutation of it yields
+/// a 64-byte keystream block (Bernstein, "Salsa20 specification", §§4–8).
+const STATE_WORDS: usize = 16;
+const WORD_BYTES: usize = 4;
+const BLOCK_BYTES: usize = STATE_WORDS * WORD_BYTES;
+
+/// Twenty rounds, applied as ten column-and-row double rounds (§7, §8).
+const DOUBLE_ROUNDS: usize = 10;
+
+/// The two key sizes, each with its own constant string (§9).
+const KEY_BYTES: usize = 32;
+const SHORT_KEY_BYTES: usize = 16;
+const NONCE_BYTES: usize = 8;
+
 const SIGMA: [u8; 16] = *b"expand 32-byte k";
 const TAU: [u8; 16] = *b"expand 16-byte k";
 
@@ -30,10 +44,10 @@ fn quarter_round(y0: &mut u32, y1: &mut u32, y2: &mut u32, y3: &mut u32) {
 }
 
 #[inline]
-fn salsa20_block(state: &[u32; 16]) -> [u8; 64] {
+fn salsa20_block(state: &[u32; STATE_WORDS]) -> [u8; BLOCK_BYTES] {
     let mut x = *state;
 
-    for _ in 0..10 {
+    for _ in 0..DOUBLE_ROUNDS {
         let (mut y0, mut y4, mut y8, mut y12) = (x[0], x[4], x[8], x[12]);
         quarter_round(&mut y0, &mut y4, &mut y8, &mut y12);
         (x[0], x[4], x[8], x[12]) = (y0, y4, y8, y12);
@@ -67,7 +81,7 @@ fn salsa20_block(state: &[u32; 16]) -> [u8; 64] {
         (x[15], x[12], x[13], x[14]) = (y15, y12, y13, y14);
     }
 
-    let mut out = [0u8; 64];
+    let mut out = [0u8; BLOCK_BYTES];
     for i in 0..16 {
         out[4 * i..4 * i + 4].copy_from_slice(&x[i].wrapping_add(state[i]).to_le_bytes());
     }
@@ -85,19 +99,19 @@ fn is_valid_key_len(len: usize) -> bool {
 }
 
 #[inline]
-fn key_setup(key: &[u8], nonce: [u8; 8], counter: u64) -> [u32; 16] {
+fn key_setup(key: &[u8], nonce: [u8; NONCE_BYTES], counter: u64) -> [u32; STATE_WORDS] {
     assert!(
         is_valid_key_len(key.len()),
-        "Salsa20 key length must be 16 or 32 bytes, got {}",
+        "Salsa20 key length must be {SHORT_KEY_BYTES} or {KEY_BYTES} bytes, got {}",
         key.len()
     );
 
     // Salsa20 swaps the sigma/tau constants depending on whether the caller is
     // using the 32-byte or legacy 16-byte key form.
-    let constants = if key.len() == 32 { &SIGMA } else { &TAU };
-    let k0 = &key[..16];
-    let k1 = if key.len() == 32 {
-        &key[16..32]
+    let constants = if key.len() == KEY_BYTES { &SIGMA } else { &TAU };
+    let k0 = &key[..SHORT_KEY_BYTES];
+    let k1 = if key.len() == KEY_BYTES {
+        &key[SHORT_KEY_BYTES..KEY_BYTES]
     } else {
         &key[..16]
     };
@@ -142,15 +156,15 @@ fn key_setup(key: &[u8], nonce: [u8; 8], counter: u64) -> [u32; 16] {
 /// `apply_keystream` XORs the generated stream into caller-owned buffers, so
 /// the same method handles both encryption and decryption.
 pub struct Salsa20 {
-    state: [u32; 16],
-    block: [u8; 64],
+    state: [u32; STATE_WORDS],
+    block: [u8; BLOCK_BYTES],
     offset: usize,
 }
 
 impl Salsa20 {
     /// Create a Salsa20 instance with a 32-byte key and 8-byte nonce.
     #[must_use]
-    pub fn new(key: &[u8; 32], nonce: &[u8; 8]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], nonce: &[u8; NONCE_BYTES]) -> Self {
         Self::with_key_bytes(key, nonce)
     }
 
@@ -161,7 +175,7 @@ impl Salsa20 {
     /// Panics if `key.len()` is neither 16 nor 32, the two key lengths the
     /// Salsa20 specification defines.
     #[must_use]
-    pub fn with_key_bytes(key: &[u8], nonce: &[u8; 8]) -> Self {
+    pub fn with_key_bytes(key: &[u8], nonce: &[u8; NONCE_BYTES]) -> Self {
         Self::with_counter(key, nonce, 0)
     }
 
@@ -171,7 +185,7 @@ impl Salsa20 {
     ///
     /// Panics if `key.len()` is neither 16 nor 32.
     #[must_use]
-    pub fn with_counter(key: &[u8], nonce: &[u8; 8], counter: u64) -> Self {
+    pub fn with_counter(key: &[u8], nonce: &[u8; NONCE_BYTES], counter: u64) -> Self {
         Self {
             state: key_setup(key, *nonce, counter),
             block: [0u8; 64],
@@ -180,7 +194,7 @@ impl Salsa20 {
     }
 
     /// Create with a 32-byte key and wipe the caller's key and nonce buffers.
-    pub fn new_wiping(key: &mut [u8; 32], nonce: &mut [u8; 8]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], nonce: &mut [u8; NONCE_BYTES]) -> Self {
         let out = Self::new(key, nonce);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(nonce.as_mut_slice());
@@ -194,14 +208,14 @@ impl Salsa20 {
     /// Panics if `key.len()` is neither 16 nor 32. The key and nonce buffers
     /// are wiped before the length is checked, so they are zero on the panic
     /// path as well.
-    pub fn with_key_bytes_wiping(key: &mut [u8], nonce: &mut [u8; 8]) -> Self {
+    pub fn with_key_bytes_wiping(key: &mut [u8], nonce: &mut [u8; NONCE_BYTES]) -> Self {
         let valid = is_valid_key_len(key.len());
         let state = valid.then(|| key_setup(key, *nonce, 0));
         crate::ct::zeroize_slice(key);
         crate::ct::zeroize_slice(nonce.as_mut_slice());
         assert!(
             valid,
-            "Salsa20 key length must be 16 or 32 bytes, got {}",
+            "Salsa20 key length must be {SHORT_KEY_BYTES} or {KEY_BYTES} bytes, got {}",
             key.len()
         );
         Self {
@@ -244,7 +258,7 @@ impl Salsa20 {
 
     /// Return the next 64 bytes of keystream, respecting the current stream position.
     pub fn keystream_block(&mut self) -> [u8; 64] {
-        let mut out = [0u8; 64];
+        let mut out = [0u8; BLOCK_BYTES];
         self.apply_keystream(&mut out);
         out
     }

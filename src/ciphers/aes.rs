@@ -1239,13 +1239,13 @@ pub(crate) mod encrypt_only {
 macro_rules! impl_block_cipher_aes {
     ($Name:ident) => {
         impl crate::BlockCipher for $Name {
-            const BLOCK_LEN: usize = 16;
+            const BLOCK_LEN: usize = BLOCK_BYTES;
             fn encrypt(&self, block: &mut [u8]) {
-                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
                 block.copy_from_slice(&self.encrypt_block(arr));
             }
             fn decrypt(&self, block: &mut [u8]) {
-                let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+                let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
                 block.copy_from_slice(&self.decrypt_block(arr));
             }
         }

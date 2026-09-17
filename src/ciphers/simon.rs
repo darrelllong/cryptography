@@ -52,6 +52,13 @@ use super::simon_speck_util::{load_le, rotl, rotr, store_le};
 // (round_index − m), so the first derived round key uses bit 0.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The key schedule draws from five constant sequences, each of period 62 or
+/// of period 31 written out twice, produced by a 5-bit LFSR (Beaulieu et al.,
+/// "The SIMON and SPECK Families of Lightweight Block Ciphers", §3).
+const SEQUENCE_BITS: u32 = 62;
+const LFSR_BITS: u32 = 5;
+const SEQUENCES: usize = 5;
+
 /// Run a 5-bit LFSR for 62 steps and pack its output, bit i at position i.
 ///
 /// `state` bit j holds s_{i+j}; `taps` selects the state bits XORed to form
@@ -62,10 +69,10 @@ const fn lfsr5_62(taps: u8, seed: u8) -> u64 {
     let mut state = seed;
     let mut out = 0u64;
     let mut i = 0;
-    while i < 62 {
+    while i < SEQUENCE_BITS {
         out |= ((state & 1) as u64) << i;
         let feedback = (state & taps).count_ones() & 1;
-        state = (state >> 1) | ((feedback as u8) << 4);
+        state = (state >> 1) | ((feedback as u8) << (LFSR_BITS - 1));
         i += 1;
     }
     out
@@ -78,9 +85,9 @@ const V_SEQ: u64 = lfsr5_62(0b0_1111, 0b1_0001);
 /// w: taps s_{i+2}, s_i; first bits 1 0 0 0 0.
 const W_SEQ: u64 = lfsr5_62(0b0_0101, 0b0_0001);
 /// t = 0101…: bit i is i mod 2.
-const T_SEQ: u64 = 0x2AAA_AAAA_AAAA_AAAA & ((1u64 << 62) - 1);
+const T_SEQ: u64 = 0x2AAA_AAAA_AAAA_AAAA & ((1u64 << SEQUENCE_BITS) - 1);
 
-const Z: [u64; 5] = [U_SEQ, V_SEQ, U_SEQ ^ T_SEQ, V_SEQ ^ T_SEQ, W_SEQ ^ T_SEQ];
+const Z: [u64; SEQUENCES] = [U_SEQ, V_SEQ, U_SEQ ^ T_SEQ, V_SEQ ^ T_SEQ, W_SEQ ^ T_SEQ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Key expansion — §3
@@ -105,7 +112,7 @@ fn simon_expand(key: &[u8], n: u32, m: usize, t: usize, z_idx: usize, mask: u64,
             tmp ^= rk[i - 3];
         }
         tmp ^= rotr(tmp, 1, n, mask);
-        let z_bit = (Z[z_idx] >> ((i - m) % 62)) & 1;
+        let z_bit = (Z[z_idx] >> ((i - m) % SEQUENCE_BITS as usize)) & 1;
         rk[i] = (!rk[i - m] ^ tmp ^ z_bit ^ 3) & mask;
     }
 }

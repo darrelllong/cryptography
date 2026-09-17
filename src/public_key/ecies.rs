@@ -1006,20 +1006,26 @@ fn ctr_apply<C: BlockCipher>(cipher: C, input: &[u8]) -> Vec<u8> {
     data
 }
 
+/// The AES key lengths of FIPS 197 Table 5, which the ECIES profiles select
+/// between by the key material the KDF is asked for.
+const AES128_KEY_BYTES: usize = 16;
+const AES192_KEY_BYTES: usize = 24;
+const AES256_KEY_BYTES: usize = 32;
+
 fn aes128(key: &[u8]) -> Aes128 {
-    let mut schedule_input = [0u8; 16];
+    let mut schedule_input = [0u8; AES128_KEY_BYTES];
     schedule_input.copy_from_slice(key);
     Aes128::new_wiping(&mut schedule_input)
 }
 
 fn aes192(key: &[u8]) -> Aes192 {
-    let mut schedule_input = [0u8; 24];
+    let mut schedule_input = [0u8; AES192_KEY_BYTES];
     schedule_input.copy_from_slice(key);
     Aes192::new_wiping(&mut schedule_input)
 }
 
 fn aes256(key: &[u8]) -> Aes256 {
-    let mut schedule_input = [0u8; 32];
+    let mut schedule_input = [0u8; AES256_KEY_BYTES];
     schedule_input.copy_from_slice(key);
     Aes256::new_wiping(&mut schedule_input)
 }

@@ -46,6 +46,17 @@
 //! reason and is unsuitable where an attacker can observe signing timing or
 //! cache behavior. Verification operates only on public data.
 
+/// RFC 8032 §5.1: a 32-byte seed, a 32-byte encoded public point, and a
+/// 64-byte signature `R ‖ S`. The seed hash is SHA-512, whose halves are the
+/// secret scalar and the nonce prefix.
+const SEED_LEN: usize = 32;
+const SIGNATURE_LEN: usize = 2 * SEED_LEN;
+
+/// §5.1.5 clamping: clear the three low bits, clear the top bit, set bit 254.
+const CLAMP_LOW_MASK: u8 = 0xf8;
+const CLAMP_HIGH_MASK: u8 = 0x3f;
+const CLAMP_HIGH_SET: u8 = 0x40;
+
 use core::fmt;
 use std::sync::OnceLock;
 
@@ -74,9 +85,9 @@ pub struct Ed25519PublicKey {
 /// Standard 32-byte Ed25519 private seed plus derived signing state.
 #[derive(Clone)]
 pub struct Ed25519PrivateKey {
-    seed: [u8; 32],
+    seed: [u8; SEED_LEN],
     scalar: BigUint,
-    prefix: [u8; 32],
+    prefix: [u8; SEED_LEN],
     public: Ed25519PublicKey,
 }
 
@@ -284,7 +295,7 @@ impl Eq for Ed25519PublicKey {}
 impl Ed25519PrivateKey {
     /// Return the original 32-byte secret seed.
     #[must_use]
-    pub fn seed(&self) -> &[u8; 32] {
+    pub fn seed(&self) -> &[u8; SEED_LEN] {
         &self.seed
     }
 
@@ -315,7 +326,7 @@ impl Ed25519PrivateKey {
     /// Parse the standard 32-byte private-key encoding (the seed).
     #[must_use]
     pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
-        let mut seed: [u8; 32] = bytes.try_into().ok()?;
+        let mut seed: [u8; SEED_LEN] = bytes.try_into().ok()?;
         let key = expand_seed(seed);
         crate::ct::zeroize_slice(seed.as_mut_slice());
         Some(key)
@@ -484,11 +495,11 @@ impl Ed25519Signature {
     /// 8032 requires.
     #[must_use]
     pub fn from_key_blob(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != 64 {
+        if bytes.len() != SIGNATURE_LEN {
             return None;
         }
-        let r_point = decode_point(&bytes[..32])?;
-        let s = BigUint::from_le_bytes(&bytes[32..]);
+        let r_point = decode_point(&bytes[..SEED_LEN])?;
+        let s = BigUint::from_le_bytes(&bytes[SEED_LEN..]);
         if s >= curve().n {
             return None;
         }
@@ -508,7 +519,7 @@ impl Ed25519 {
     /// Generate a random Ed25519 key pair from a fresh 32-byte seed.
     #[must_use]
     pub fn generate<R: Csprng>(rng: &mut R) -> (Ed25519PublicKey, Ed25519PrivateKey) {
-        let mut seed = [0u8; 32];
+        let mut seed = [0u8; SEED_LEN];
         rng.fill_bytes(&mut seed);
         let private = expand_seed(seed);
         crate::ct::zeroize_slice(seed.as_mut_slice());
@@ -518,7 +529,7 @@ impl Ed25519 {
 
     /// Derive a key pair from an explicit 32-byte seed.
     #[must_use]
-    pub fn from_seed(mut seed: [u8; 32]) -> (Ed25519PublicKey, Ed25519PrivateKey) {
+    pub fn from_seed(mut seed: [u8; SEED_LEN]) -> (Ed25519PublicKey, Ed25519PrivateKey) {
         let private = expand_seed(seed);
         crate::ct::zeroize_slice(seed.as_mut_slice());
         let public = private.to_public_key();
@@ -533,15 +544,15 @@ fn curve() -> &'static TwistedEdwardsCurve {
 }
 
 /// Expand a 32-byte RFC 8032 secret seed into signing state.
-fn expand_seed(mut seed: [u8; 32]) -> Ed25519PrivateKey {
+fn expand_seed(mut seed: [u8; SEED_LEN]) -> Ed25519PrivateKey {
     let mut digest = Sha512::digest(&seed);
-    let mut scalar_bytes = [0u8; 32];
+    let mut scalar_bytes = [0u8; SEED_LEN];
     scalar_bytes.copy_from_slice(&digest[..32]);
     clamp_scalar(&mut scalar_bytes);
     let scalar = BigUint::from_le_bytes(&scalar_bytes);
 
-    let mut prefix = [0u8; 32];
-    prefix.copy_from_slice(&digest[32..64]);
+    let mut prefix = [0u8; SEED_LEN];
+    prefix.copy_from_slice(&digest[SEED_LEN..2 * SEED_LEN]);
 
     let point = curve().scalar_mul_base(&scalar);
     let public = Ed25519PublicKey {
@@ -565,10 +576,10 @@ fn expand_seed(mut seed: [u8; 32]) -> Ed25519PrivateKey {
 }
 
 /// RFC 8032 Ed25519 scalar clamping.
-fn clamp_scalar(bytes: &mut [u8; 32]) {
-    bytes[0] &= 248;
-    bytes[31] &= 63;
-    bytes[31] |= 64;
+fn clamp_scalar(bytes: &mut [u8; SEED_LEN]) {
+    bytes[0] &= CLAMP_LOW_MASK;
+    bytes[SEED_LEN - 1] &= CLAMP_HIGH_MASK;
+    bytes[SEED_LEN - 1] |= CLAMP_HIGH_SET;
 }
 
 /// Compute the Ed25519 challenge scalar `k = H(R || A || M) mod n`.
@@ -846,7 +857,11 @@ mod tests {
 
     /// The 64-octet signature `R ‖ S`.
     fn signature_octets(r: &EdwardsPoint, s: &BigUint) -> Vec<u8> {
-        [curve().encode_point(r), s.to_le_bytes_padded(32)].concat()
+        [
+            curve().encode_point(r),
+            s.to_le_bytes_padded(super::SEED_LEN),
+        ]
+        .concat()
     }
 
     /// A point of order 8. The only point of order 2 is `(0, −1)` (`P = −P`

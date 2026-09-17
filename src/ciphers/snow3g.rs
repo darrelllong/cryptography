@@ -9,6 +9,14 @@
 //! (25 October 2012), section 3.
 
 #[rustfmt::skip]
+/// SNOW 3G takes a 128-bit key and a 128-bit IV, each read as four 32-bit
+/// big-endian words, and clocks 32 initialisation rounds before keystream
+/// (ETSI/SAGE SNOW 3G specification §3.4, §4.1).
+const KEY_BYTES: usize = 16;
+const IV_BYTES: usize = 16;
+const WORDS: usize = 4;
+const INIT_ROUNDS: usize = 32;
+
 const SR: [u8; 256] = [
     0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
     0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
@@ -195,7 +203,7 @@ fn fsm_clock<const CT: bool>(core: &mut Snow3gCore) -> u32 {
 
 /// The four 32-bit words of a 128-bit key or IV, most significant first
 /// (§4.1's `k0..k3` and `IV0..IV3`, split as §2.2.2 numbers sub-strings).
-fn be_words(bytes: &[u8; 16]) -> [u32; 4] {
+fn be_words(bytes: &[u8; KEY_BYTES]) -> [u32; WORDS] {
     let mut words = [0u32; 4];
     for (word, chunk) in words.iter_mut().zip(bytes.chunks_exact(4)) {
         *word = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
@@ -205,7 +213,7 @@ fn be_words(bytes: &[u8; 16]) -> [u32; 4] {
 
 /// §4.1 Initialisation, before the first clock: load the LFSR from the key
 /// and IV words and zero the FSM registers.
-fn load_key_iv(key: &[u8; 16], iv: &[u8; 16]) -> Snow3gCore {
+fn load_key_iv(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> Snow3gCore {
     let mut k = be_words(key);
     let mut v = be_words(iv);
     // §4.1: "Let 1 be the all-ones word (0xffffffff)."
@@ -243,9 +251,9 @@ fn load_key_iv(key: &[u8; 16], iv: &[u8; 16]) -> Snow3gCore {
 /// §4.1 and the start of §4.2: load key and IV, run the 32 initialisation
 /// clocks, then clock the FSM once (output discarded) and the LFSR once in
 /// Keystream Mode, so that the next `keystream_word` is `z1`.
-fn initialise<const CT: bool>(key: &[u8; 16], iv: &[u8; 16]) -> Snow3gCore {
+fn initialise<const CT: bool>(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> Snow3gCore {
     let mut core = load_key_iv(key, iv);
-    for _ in 0..32 {
+    for _ in 0..INIT_ROUNDS {
         let f = fsm_clock::<CT>(&mut core);
         lfsr_clock::<CT>(&mut core, f);
     }
@@ -395,14 +403,14 @@ pub struct Snow3gCt {
 impl Snow3g {
     /// Construct SNOW 3G from a 128-bit key and 128-bit IV.
     #[must_use]
-    pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> Self {
         Self {
             core: initialise::<false>(key, iv),
         }
     }
 
     /// Construct and wipe the caller-provided key and IV buffers.
-    pub fn new_wiping(key: &mut [u8; 16], iv: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], iv: &mut [u8; IV_BYTES]) -> Self {
         let out = Self::new(key, iv);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(iv.as_mut_slice());
@@ -431,14 +439,14 @@ impl Snow3g {
 impl Snow3gCt {
     /// Construct SNOW 3G constant-time software path from a 128-bit key and IV.
     #[must_use]
-    pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> Self {
         Self {
             core: initialise::<true>(key, iv),
         }
     }
 
     /// Construct and wipe the caller-provided key and IV buffers.
-    pub fn new_wiping(key: &mut [u8; 16], iv: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], iv: &mut [u8; IV_BYTES]) -> Self {
         let out = Self::new(key, iv);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(iv.as_mut_slice());

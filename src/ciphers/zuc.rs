@@ -77,7 +77,17 @@ const S1_ANF: [[u128; 2]; 8] = crate::ct::build_byte_sbox_anf(&S1);
 // d[i] are 15-bit constants packed into the middle of each 31-bit LFSR cell:
 //   s[i] = key[i](8b) ‖ d[i](15b) ‖ iv[i](8b)
 
-const D: [u16; 16] = [
+/// ZUC takes a 128-bit key and a 128-bit IV and clocks 32 initialisation
+/// rounds before keystream (ETSI/SAGE ZUC specification §3.6, §3.5).
+const KEY_BYTES: usize = 16;
+const IV_BYTES: usize = 16;
+const INIT_ROUNDS: usize = 32;
+
+/// The LFSR holds sixteen cells over GF(2^31 − 1) (§3.1); `D` supplies the
+/// fifteen-bit constants its key loading interleaves.
+const LFSR_CELLS: usize = 16;
+
+const D: [u16; LFSR_CELLS] = [
     0x44D7, 0x26BC, 0x626B, 0x135E, 0x5789, 0x35E2, 0x7135, 0x09AF, 0x4D78, 0x2F13, 0x6BC4, 0x1AF1,
     0x5E26, 0x3C4D, 0x789A, 0x47AC,
 ];
@@ -119,7 +129,7 @@ const fn fold_base_2_31(x: u64) -> u64 {
 /// Spec §3.2 `LFSRWithInitialisationMode(u)` steps 1–2 with `input = u`, or
 /// `LFSRWithWorkMode()` step 1 with `input = 0`.
 #[inline]
-fn lfsr_next(s: &[u32; 16], input: u32) -> u32 {
+fn lfsr_next(s: &[u32; LFSR_CELLS], input: u32) -> u32 {
     let cell = |i: usize| u64::from(s[i]);
     let sum = (cell(15) << 15)
         + (cell(13) << 17)
@@ -176,7 +186,7 @@ struct ZucCore {
     /// `ks[4 - ks_len..]` are still unused.
     ks: [u8; 4],
     ks_len: u8,
-    s: [u32; 16],
+    s: [u32; LFSR_CELLS],
     r1: u32,
     r2: u32,
 }
@@ -212,7 +222,7 @@ impl ZucCore {
 ///   s[i]^L as the low half:  s[14] & 0xFFFF keeps bits [15:0] in place.
 ///   s[i]^H as the low half:  s[k] >> 15 moves bits [30:15] to [15:0].
 #[inline]
-fn bit_reorganization(s: &[u32; 16]) -> (u32, u32, u32, u32) {
+fn bit_reorganization(s: &[u32; LFSR_CELLS]) -> (u32, u32, u32, u32) {
     let x0 = ((s[15] << 1) & 0xFFFF_0000) | (s[14] & 0xFFFF);
     let x1 = ((s[11] << 16) & 0xFFFF_0000) | ((s[9] >> 15) & 0xFFFF);
     let x2 = ((s[7] << 16) & 0xFFFF_0000) | ((s[5] >> 15) & 0xFFFF);
@@ -238,7 +248,7 @@ fn nonlinear_f<const CT: bool>(core: &mut ZucCore, x0: u32, x1: u32, x2: u32) ->
 }
 
 #[inline]
-fn lfsr_clock(s: &mut [u32; 16], new_val: u32) {
+fn lfsr_clock(s: &mut [u32; LFSR_CELLS], new_val: u32) {
     s.copy_within(1..16, 0);
     // 0 and 2^31-1 are congruent mod 2^31-1, so map a zero feedback word to
     // 0x7FFF_FFFF without branching on the secret `new_val`. `is_zero` is
@@ -249,7 +259,7 @@ fn lfsr_clock(s: &mut [u32; 16], new_val: u32) {
 }
 
 /// Key loading (spec §3.5): `s[i] = k[i] ‖ d[i] ‖ iv[i]`, with R1 = R2 = 0.
-fn load_key_iv(key: &[u8; 16], iv: &[u8; 16]) -> ZucCore {
+fn load_key_iv(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> ZucCore {
     let mut s = [0u32; 16];
     for (((cell, &k), &d), &v) in s.iter_mut().zip(key).zip(&D).zip(iv) {
         *cell = (u32::from(k) << 23) | (u32::from(d) << 8) | u32::from(v);
@@ -266,10 +276,10 @@ fn load_key_iv(key: &[u8; 16], iv: &[u8; 16]) -> ZucCore {
 /// Spec §3.6.1 initialisation stage: 32 clocks with `W >> 1` fed back into
 /// the LFSR, then the first working-stage clock whose output is discarded
 /// (§3.6.2), so that the next `next_word_core` returns `Z[1]`.
-fn init_core<const CT: bool>(key: &[u8; 16], iv: &[u8; 16]) -> ZucCore {
+fn init_core<const CT: bool>(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> ZucCore {
     let mut core = load_key_iv(key, iv);
 
-    for _ in 0..32 {
+    for _ in 0..INIT_ROUNDS {
         let (x0, x1, x2, _) = bit_reorganization(&core.s);
         let w = nonlinear_f::<CT>(&mut core, x0, x1, x2);
         let s16 = lfsr_next(&core.s, w >> 1);
@@ -356,14 +366,14 @@ pub struct Zuc128Ct {
 impl Zuc128 {
     /// Construct and initialize ZUC-128 from a 128-bit key and 128-bit IV.
     #[must_use]
-    pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> Self {
         Self {
             core: init_core::<false>(key, iv),
         }
     }
 
     /// Construct and wipe the caller-provided key and IV buffers.
-    pub fn new_wiping(key: &mut [u8; 16], iv: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], iv: &mut [u8; IV_BYTES]) -> Self {
         let out = Self::new(key, iv);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(iv.as_mut_slice());
@@ -395,14 +405,14 @@ impl Zuc128 {
 impl Zuc128Ct {
     /// Construct and initialize ZUC-128Ct from a 128-bit key and 128-bit IV.
     #[must_use]
-    pub fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES], iv: &[u8; IV_BYTES]) -> Self {
         Self {
             core: init_core::<true>(key, iv),
         }
     }
 
     /// Construct and wipe the caller-provided key and IV buffers.
-    pub fn new_wiping(key: &mut [u8; 16], iv: &mut [u8; 16]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES], iv: &mut [u8; IV_BYTES]) -> Self {
         let out = Self::new(key, iv);
         crate::ct::zeroize_slice(key.as_mut_slice());
         crate::ct::zeroize_slice(iv.as_mut_slice());

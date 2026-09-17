@@ -33,6 +33,12 @@
 //! [`pem_decode`] applies the conversion under the two labels, and
 //! [`pkcs8_ber`] to a binary `OneAsymmetricKey`.
 
+/// X.690 §8.19.4 packs the first two OID arcs into one subidentifier as
+/// `40 * X + Y`, which is why the first arc's value bounds the second.
+const FIRST_ARC_MULTIPLIER: u64 = 40;
+/// An OID has at least two arcs (X.660 §A.3).
+const MIN_ARCS: usize = 2;
+
 use crate::public_key::curve_pkix::{ID_ED25519, ID_X25519, ID_X448};
 use crate::public_key::io::{
     ber_to_der, class, context_tag, der_bit_string, der_implicit_bit_string, der_integer_u8,
@@ -67,11 +73,11 @@ impl ObjectIdentifier {
     /// exceed the capacity.
     pub(crate) const fn from_arcs(arcs: &[u64]) -> Self {
         assert!(
-            arcs.len() >= 2,
+            arcs.len() >= MIN_ARCS,
             "an object identifier has at least two components"
         );
         assert!(
-            arcs[0] == 2 || (arcs[0] < 2 && arcs[1] < 40),
+            arcs[0] == 2 || (arcs[0] < 2 && arcs[1] < FIRST_ARC_MULTIPLIER),
             "the first two components are out of range"
         );
         let mut oid = Self {
@@ -79,8 +85,8 @@ impl ObjectIdentifier {
             len: 0,
         };
         // §8.19.4: the first subidentifier is (X*40) + Y.
-        oid.push_subidentifier(arcs[0] * 40 + arcs[1]);
-        let mut index = 2;
+        oid.push_subidentifier(arcs[0] * FIRST_ARC_MULTIPLIER + arcs[1]);
+        let mut index = MIN_ARCS;
         while index < arcs.len() {
             // §8.19.5: each later subidentifier is the next component.
             oid.push_subidentifier(arcs[index]);
