@@ -12,15 +12,25 @@ found no difference.
 
 ## 2026-09-17
 
-| Host | Target | Compiler | Control | `Hmac::<Sha256>::verify` | `Aes128Ct::encrypt_block` | `X25519::scalar_mult` |
-|---|---|---|---|---|---|---|
-| Wigner (Apple M1 Max) | aarch64-apple-darwin | rustc 1.93.1 | 39.4 **flagged** | 2.8 | 3.0 | 1.4 |
-| dmz (Intel, idle, 4 cores pinned) | x86_64-unknown-linux-gnu | rustc 1.93.1 | 817.6 **flagged** | 1.9 | 1.3 | 2.3 |
+| Experiment | Classes | Wigner, aarch64-apple-darwin | dmz, x86_64-unknown-linux-gnu |
+|---|---|---|---|
+| control: early-exit compare | differs at byte 0 / byte 31 | 29.6 **flagged** | 378.9 **flagged** |
+| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 4.2 | 2.1 |
+| `Aes128Ct::encrypt_block` | fixed / random key and block | 1.6 | 1.4 |
+| `X25519::scalar_mult` | fixed / random scalar | 1.2 | 3.3 |
+| `X25519::scalar_mult` (point) | low-order / random point | 1.5 | 1.3 |
+| `Hmac::<Sha256>::verify` (middle) | differs at byte 15 / byte 31 | 1.0 | 1.2 |
 
-The classes are, for the tag comparison, a tag that differs in its first byte
-against one that differs in its last; for AES-128 and the ladder, a fixed key
-or scalar against random ones, with both classes drawing the same bytes and
-building their key schedule outside the timed span.
+Both hosts ran rustc 1.93.1; Wigner is an Apple M1 Max, dmz an idle Intel
+machine with the run pinned to four cores. Every class pair draws the same
+bytes and copies the same buffers before the timed span, and a key schedule is
+built outside it, so what differs between two classes is the value the
+operation is given.
+
+The tag comparison's statistic moves between 2 and 4.2 across runs on Wigner,
+near the threshold: a one-microsecond operation is at this apparatus's
+resolution there, and a run that wanted to separate a smaller difference would
+need more measurements than the protocol takes.
 
 The control's statistic differs by two orders of magnitude between the hosts,
 which is what one should expect: it measures how well that machine resolves a
