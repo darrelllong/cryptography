@@ -540,6 +540,12 @@ impl X25519PrivateKey {
     /// Diffie-Hellman: compute shared secret with `peer`. Returns `None` if
     /// the result is the all-zero u-coordinate (low-order point), per the
     /// conservative recommendation in RFC 7748 §6.1.
+    ///
+    /// Timing: `scripts/ct_codegen.sh` finds one conditional branch in this
+    /// operation beyond the ladder's own, on both targets it has been run on
+    /// — the test of that all-zero check, which the code folds over all 32
+    /// bytes before testing once, so the branch decides only the value this
+    /// returns.
     #[must_use]
     pub fn agree(&self, peer: &X25519PublicKey) -> Option<[u8; X25519_LEN]> {
         let shared = X25519::scalar_mult(&self.0, &peer.0);

@@ -44,15 +44,17 @@ Items are marked **owner** when only the repository owner can do them.
    invalid-key tests.
 6. **Timing qualification beyond the primitives.** `scripts/ct_codegen.sh`
    classifies every conditional branch in the machine code of
-   `Hmac::<Sha256>::verify`, `Aes128Ct::encrypt_block` and the X25519 and
-   X448 ladders. On aarch64-apple-darwin (rustc 1.93.1) and
+   `Hmac::<Sha256>::verify`, `Aes128Ct::encrypt_block`, the X25519 and X448
+   ladders, a complete X25519 key agreement and a complete ChaCha20-Poly1305
+   open. On aarch64-apple-darwin (rustc 1.93.1) and
    x86_64-unknown-linux-gnu (rustc 1.95.0) each branch is a loop the source
    bounds, a guard on an index or an allocation, or a comparison of public
    lengths; `src/ct.rs`, `src/ciphers/aes.rs` and the two ladder modules
-   record the reading. Still missing: the other `Ct` ciphers, complete AEAD,
-   signature and key-agreement operations, the remaining supported targets,
-   and predeclared interleaved input-class timing experiments with reported
-   distributions.
+   record the reading, and CI fails the build when a claim gains a branch
+   nobody has read. Still missing: the block ciphers' other `Ct` types beyond
+   the shared AES core, complete signature operations, the remaining supported
+   targets, and predeclared interleaved input-class timing experiments with
+   reported distributions.
 7. **Targeted fuzzing.** Campaigns aimed at parser length and count fields,
     explicit domain parameters, key-pair consistency, nonce and counter
     exhaustion, authentication failure and failure-buffer contents, with the
@@ -66,10 +68,12 @@ Items are marked **owner** when only the repository owner can do them.
    capacity, Camellia's rounds from its six-round stages). What remains are
    byte offsets inside a word or a block, such as AES's four-byte column
    boundaries, where the literal reads better than a name.
-9. **A specification-to-test map.** For each scheme, a table from
-    specification version and section to the operation, its accepted inputs
-    and the test that checks it, separating valid-vector conformance from
-    refusal of malformed input.
+9. **A specification-to-test map.** `SPECIFICATIONS.md` carries it: per
+   algorithm, the document and section it is written from, where its known
+   answers come from, and the tests that refuse malformed input, with
+   conformance, interoperability and refusal kept apart. What it does not yet
+   do is split a scheme's row per operation, so a reader cannot see which
+   test covers signing as against verification.
 
 ## Statistical residuals to decide on
 
