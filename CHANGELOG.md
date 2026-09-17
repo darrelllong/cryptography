@@ -510,6 +510,38 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   several tests take theirs from asymptotic laws, so α is reported as a
   nominal rate beside the calibration that measures it; the report also
   states that a pass is not a security claim.
+- **The randomness report could declare PASS without valid p-values.** Its
+  verdict dropped missing values before `all(p >= α/m)`, so seven NA values,
+  one value and six NA, values of 2 or `+Inf` all passed. A battery result
+  must now be exactly the seven named tests, each a finite probability in
+  [0, 1]; anything else, or a cipher whose encryption or analysis errors, is
+  reported as **INVALID** with the reason, and the script exits 0 when all
+  pass, 1 when some fail and 2 when some are invalid. `--self-test` checks
+  39 fixed cases, and CI runs it.
+- **Retained ciphertexts and analyses did not identify what was measured.**
+  The report now builds `cipher_encrypt` first and records the source commits
+  and uncommitted-change digests of this crate and rump, the compiler, and
+  the SHA-256 of the executable, plaintext and script, and each ciphertext's
+  digest with when it was encrypted and analysed. A kept ciphertext is reused
+  only for the same executable and plaintext with its recorded length and
+  digest, an analysis only for the same ciphertext, script and battery
+  version, and every file is written atomically.
+- **Held-out calibration protocol.** `--calibrate N --held-out` writes fresh
+  null streams to per-host files with the script's digest in each row, and
+  `--held-out-report` applies a decision fixed before those streams were
+  drawn: a one-sided exact binomial test for excess rejections at α/m per
+  test and at α for the battery. Its first campaign, 400,000 streams on
+  dennard and moore (`scripts/null_calibration/held_out-*.csv.gz`), found
+  every test calibrated at α/m (51–62 rejections against 57.1 expected; the
+  gap test 57) and the battery within α (397 against 400); the tuning rows'
+  79 gap rejections did not recur. At that size the rule flags a count of 77,
+  so it excludes rates of about 1.34 × α/m and above, not smaller excesses.
+- **Raw ElGamal's limits are stated where it is used.** The module, the byte
+  helpers, `ASYMMETRIC.md`, `MANUAL.md` and `README.md` say that its
+  ciphertexts are malleable and publish the message's subgroup coset
+  (`δ^q = m^q`) or, under a safe prime, its quadratic character, and the test
+  `raw_ciphertexts_publish_the_message_class` recovers the character in all
+  440 message and nonce pairs modulo 23.
 - **ElGamal did not require a primitive `g`, and could send the plaintext
   in the clear.** `from_secret_exponent` and the parsers of keys with
   exponent bound `p − 1` accepted any `1 < g < p`. Under a `g` of small order
@@ -529,7 +561,9 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   Koblitz embedding does not promise: `EcElGamalPrivateKey::decrypt` returns
   the message without its leading zero bytes, as documented. The target
   compares against that.
-- The release-only `constant_time_eq_mask` timing experiment compared the
+- The release-only `constant_time_eq_mask` timing experiment, now
+  `constant_time_eq_mask_has_no_gross_early_exit` and documented as a check
+  for that one regression rather than a constant-time certification, compared the
   means of five samples per case, which contention on a busy host could
   push past its 25 % band (ratio 4.55 during parallel builds). It compares
   the fastest of 101 interleaved samples per case: ratios 0.988–1.016 over

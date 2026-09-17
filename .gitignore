@@ -16,3 +16,4 @@
 /.ntru-upstream/
 __pycache__/
 /scripts/null_calibration/pvalues.csv
+/scripts/null_calibration/held_out-*.csv

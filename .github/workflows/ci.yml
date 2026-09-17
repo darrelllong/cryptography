@@ -123,6 +123,19 @@ jobs:
       - name: Doc build (deny warnings)
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
+  # The randomness report's decision, cache and atomic-write rules, checked
+  # without cargo or the plaintext.
+  report-script:
+    name: randomness report self-test
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install R
+        run: sudo apt-get update && sudo apt-get install -y r-base-core
+      - name: Self-test
+        run: Rscript scripts/cipher_randomness.R --self-test
+
   # The crates that depend on this one by path but are excluded from the
   # package: the fuzz targets, the criterion benchmarks, and the two
   # platform-intrinsics crates. Each fast crate is checked on its own

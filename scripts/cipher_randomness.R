@@ -5,11 +5,25 @@
 # Two modes:
 #
 #   Rscript scripts/cipher_randomness.R
-#       Encrypts the Complete Works of Shakespeare under every cipher (block
-#       ciphers in CTR mode with a fresh OS-random key and IV; stream ciphers
-#       in their native keystream mode), runs the battery on each ciphertext,
-#       and writes R-REPORT.md.  When scripts/null_calibration/pvalues.csv
-#       exists, the report also carries the calibration section.
+#       Builds target/release/cipher_encrypt, encrypts the Complete Works of
+#       Shakespeare under every cipher (block ciphers in CTR mode with a fresh
+#       OS-random key and IV; stream ciphers in their native keystream mode),
+#       runs the battery on each ciphertext, and writes R-REPORT.md with the
+#       experiment's identity: the source commits and uncommitted-change
+#       digests of this crate and rump, the compiler, and the SHA-256 of the
+#       executable, the plaintext, this script and every ciphertext.  A
+#       ciphertext kept under scripts/cipher_outputs/ is reused only when its
+#       manifest names the same executable and plaintext and its bytes still
+#       match; an analysis is reused only for the same ciphertext, script and
+#       battery version.  When scripts/null_calibration/pvalues.csv exists,
+#       the report also carries the calibration section.  Exit status: 0 when
+#       every cipher passes, 1 when some cipher fails the battery, 2 when some
+#       cipher could not be measured (its verdict is "invalid", with the
+#       reason).
+#
+#   Rscript scripts/cipher_randomness.R --self-test
+#       Checks the verdict, the cache acceptance rules and the atomic writer
+#       against fixed cases; needs neither cargo nor the plaintext.
 #
 #   Rscript scripts/cipher_randomness.R --calibrate N [--cores C] [--bytes L]
 #       Runs the same battery on N streams of L bytes read from /dev/urandom
@@ -22,6 +36,15 @@
 #
 #   Rscript scripts/cipher_randomness.R --calibration-report
 #       Rewrites only the calibration section of R-REPORT.md from the CSV.
+#
+#   Rscript scripts/cipher_randomness.R --calibrate N --held-out [--cores C]
+#       Runs the held-out validation campaign of HELD_OUT_PROTOCOL: fresh null
+#       streams, written to scripts/null_calibration/held_out-<host>.csv with
+#       this script's SHA-256 in every row, and never used to tune anything.
+#
+#   Rscript scripts/cipher_randomness.R --held-out-report
+#       Applies HELD_OUT_PROTOCOL's predeclared decision to the held-out rows
+#       and writes that section of R-REPORT.md.
 #
 # The battery works on the byte stream b_0..b_{L-1}, on its bit stream, and on
 # the sequence u_j of 8-byte chunks read as big-endian fractions in [0,1)
@@ -152,7 +175,7 @@ display_name <- function(token) {
 # ──────────────────────────────────────────────────────────────────────────────
 parse_args <- function(argv) {
   opts <- list(mode = "battery", n = 0L, cores = max(1L, detectCores() - 1L),
-               bytes = PG_BYTES)
+               bytes = PG_BYTES, held_out = FALSE)
   i <- 1L
   while (i <= length(argv)) {
     a <- argv[i]
@@ -168,6 +191,12 @@ parse_args <- function(argv) {
       opts$bytes <- as.integer(value()); i <- i + 2L
     } else if (a == "--calibration-report") {
       opts$mode <- "calibration-report"; i <- i + 1L
+    } else if (a == "--held-out") {
+      opts$held_out <- TRUE; i <- i + 1L
+    } else if (a == "--held-out-report") {
+      opts$mode <- "held-out-report"; i <- i + 1L
+    } else if (a == "--self-test") {
+      opts$mode <- "self-test"; i <- i + 1L
     } else {
       stop("unknown argument: ", a)
     }
@@ -189,14 +218,120 @@ fetch_shakespeare <- function() {
   invisible(NULL)
 }
 
-# Ciphertext for one cipher, produced once and kept under cipher_outputs/.
-encrypt <- function(name) {
+# ──────────────────────────────────────────────────────────────────────────────
+# Experiment identity
+# ──────────────────────────────────────────────────────────────────────────────
+
+# SHA-256 of a file, by the system tool (sha256sum on Linux, shasum on macOS).
+sha256_file <- function(path) {
+  tool <- Sys.which("sha256sum")
+  out <- if (nzchar(tool)) system2(tool, shQuote(path), stdout = TRUE)
+         else system2(Sys.which("shasum"), c("-a", "256", shQuote(path)), stdout = TRUE)
+  digest <- sub(" .*", "", out[1])
+  if (!grepl("^[0-9a-f]{64}$", digest)) stop("no SHA-256 for ", path)
+  digest
+}
+
+sha256_text <- function(lines) {
+  tmp <- tempfile()
+  on.exit(unlink(tmp))
+  writeLines(lines, tmp, useBytes = TRUE)
+  sha256_file(tmp)
+}
+
+# A checkout's commit, and a digest of what differs from it: the tracked diff
+# and the names of untracked, unignored files.
+git_identity <- function(dir) {
+  if (!dir.exists(file.path(dir, ".git")) && !file.exists(file.path(dir, ".git")))
+    return(list(commit = "not a git checkout", changes = NA_character_))
+  git <- function(...) system2("git", c("-C", shQuote(dir), ...), stdout = TRUE)
+  diff <- git("diff", "HEAD", "--binary")
+  untracked <- git("ls-files", "--others", "--exclude-standard")
+  list(commit = git("rev-parse", "HEAD")[1],
+       changes = if (length(diff) || length(untracked))
+                   sha256_text(c(diff, "--untracked--", untracked)) else "none")
+}
+
+# Build the executable, then name everything the measurement depends on.
+build_identity <- function(plaintext_path) {
+  rc <- system2("cargo", c("build", "--release", "--bin", "cipher_encrypt",
+                           "--manifest-path", shQuote(file.path(ROOT, "Cargo.toml"))))
+  if (rc != 0) stop("cargo build of cipher_encrypt failed (rc=", rc, ")")
+  list(cryptography = git_identity(ROOT),
+       rump = git_identity(file.path(ROOT, "..", "rump")),
+       rustc = system2("rustc", "-V", stdout = TRUE)[1],
+       features = "default",
+       executable_sha256 = sha256_file(BIN),
+       plaintext_sha256 = sha256_file(plaintext_path),
+       plaintext_bytes = file.info(plaintext_path)$size,
+       script_sha256 = sha256_file(script_path),
+       battery_version = BATTERY_VERSION)
+}
+
+# Write through a temporary file in the same directory and rename, so an
+# interrupted write leaves no file under the final name.
+write_atomic <- function(path, write) {
+  tmp <- tempfile(pattern = paste0(basename(path), ".partial-"), tmpdir = dirname(path))
+  on.exit(if (file.exists(tmp)) unlink(tmp))
+  write(tmp)
+  if (!file.rename(tmp, path)) stop("could not move ", tmp, " to ", path)
+  invisible(path)
+}
+
+# Whether a kept ciphertext may stand for this experiment: its manifest names
+# the same executable and plaintext, and the file still has the recorded
+# length and digest.
+ciphertext_reusable <- function(manifest, identity, size, digest) {
+  !is.null(manifest) &&
+    identical(manifest$executable_sha256, identity$executable_sha256) &&
+    identical(manifest$plaintext_sha256, identity$plaintext_sha256) &&
+    identical(as.numeric(manifest$bytes), as.numeric(identity$plaintext_bytes)) &&
+    identical(as.numeric(size), as.numeric(identity$plaintext_bytes)) &&
+    identical(manifest$ciphertext_sha256, digest)
+}
+
+# Whether a kept analysis may stand: same ciphertext, script and battery.
+analysis_reusable <- function(cached, identity, ciphertext_sha256) {
+  !is.null(cached) &&
+    identical(cached$version, identity$battery_version) &&
+    identical(cached$script_sha256, identity$script_sha256) &&
+    identical(cached$ciphertext_sha256, ciphertext_sha256)
+}
+
+read_rds_or_null <- function(path) {
+  if (!file.exists(path)) return(NULL)
+  tryCatch(readRDS(path), error = function(e) NULL)
+}
+
+# Ciphertext for one cipher, with its manifest: a kept one when
+# ciphertext_reusable allows it, otherwise freshly encrypted by the built
+# executable and written atomically.
+encrypt <- function(name, identity) {
   out <- file.path(OUT_DIR, paste0(name, ".bin"))
-  if (!file.exists(out) || file.info(out)$size == 0) {
-    rc <- system2(BIN, args = name, stdin = PT_PATH, stdout = out)
-    if (rc != 0) stop("cipher_encrypt failed for ", name, " (rc=", rc, ")")
+  manifest_path <- file.path(OUT_DIR, paste0(name, ".manifest.rds"))
+  manifest <- read_rds_or_null(manifest_path)
+  if (file.exists(out) &&
+      ciphertext_reusable(manifest, identity, file.info(out)$size, sha256_file(out))) {
+    manifest$retained <- TRUE
+  } else {
+    write_atomic(out, function(tmp) {
+      rc <- system2(BIN, args = name, stdin = PT_PATH, stdout = tmp)
+      if (rc != 0) stop("cipher_encrypt failed for ", name, " (rc=", rc, ")")
+      size <- file.info(tmp)$size
+      if (!identical(as.numeric(size), as.numeric(identity$plaintext_bytes)))
+        stop("cipher_encrypt wrote ", size, " bytes for ", name, ", expected ",
+             identity$plaintext_bytes)
+    })
+    manifest <- list(executable_sha256 = identity$executable_sha256,
+                     plaintext_sha256 = identity$plaintext_sha256,
+                     bytes = identity$plaintext_bytes,
+                     ciphertext_sha256 = sha256_file(out),
+                     encrypted = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+                     build = identity)
+    write_atomic(manifest_path, function(tmp) saveRDS(manifest, tmp))
+    manifest$retained <- FALSE
   }
-  readBin(out, what = "raw", n = file.info(out)$size)
+  list(bytes = readBin(out, what = "raw", n = file.info(out)$size), manifest = manifest)
 }
 
 # One null stream: L bytes of OS randomness.
@@ -291,6 +426,21 @@ serial_p <- function(u, d = 16L) {
 # t depends on the number of gaps, so a stream of another length runs a
 # different pooling and needs its own calibration.
 GAP_MIN_EXPECTED <- 50
+
+# Held-out validation, fixed before any held-out stream exists.  Battery
+# version 4 is frozen, GAP_MIN_EXPECTED included.  HELD_OUT_STREAMS fresh
+# streams of PG_BYTES bytes from /dev/urandom, none of them part of the tuning
+# rows in pvalues.csv.gz.  At the deciding threshold t = ALPHA / m, a p-value
+# is valid there when Pr(p <= t) <= t, so only an excess of rejections breaks
+# validity: each test's rejection count is checked by the one-sided exact
+# binomial test of rate t, and passes when that test's p-value is at least
+# HELD_OUT_LEVEL / m; the battery's count of streams with some p < t is
+# checked against rate ALPHA at level HELD_OUT_LEVEL.  Counts and 95%
+# Clopper-Pearson intervals are reported whatever the outcome, and a failed
+# check is reported as a miscalibration of that test at t, not repaired with
+# these rows.
+HELD_OUT_STREAMS <- 400000L
+HELD_OUT_LEVEL   <- 0.05
 gap_p <- function(u, alpha = 0, beta = 0.5) {
   p <- beta - alpha
   hits <- which(u >= alpha & u < beta)
@@ -411,11 +561,51 @@ battery <- function(bytes, keep_spectrum = FALSE) {
        elapsed = proc.time()[["elapsed"]] - started)
 }
 
-verdict <- function(p) {
-  p <- p[!is.na(p)]
-  list(min_p = min(p),
-       below_alpha = sum(p < ALPHA),
-       pass = all(p >= ALPHA_BONF))
+# Why `p` is not a complete measurement, or NULL when it is: exactly the
+# M_TESTS names of TESTS, once each, each a finite probability in [0, 1].
+invalid_reason <- function(p) {
+  if (!is.numeric(p) || !is.null(dim(p))) return("p-values are not a numeric vector")
+  if (length(p) == 0L) return("no p-values")
+  nm <- names(p)
+  if (is.null(nm) || any(is.na(nm) | nm == "")) return("unnamed p-values")
+  if (anyDuplicated(nm))
+    return(paste("duplicated results:", paste(unique(nm[duplicated(nm)]), collapse = ", ")))
+  missing <- setdiff(names(TESTS), nm)
+  if (length(missing)) return(paste("missing results:", paste(missing, collapse = ", ")))
+  extra <- setdiff(nm, names(TESTS))
+  if (length(extra)) return(paste("unexpected results:", paste(extra, collapse = ", ")))
+  bad <- nm[!(is.finite(p) & p >= 0 & p <= 1)]
+  if (length(bad))
+    return(paste("not a probability:", paste(sprintf("%s = %s", bad, format(p[bad])), collapse = ", ")))
+  NULL
+}
+
+# The decision for one battery: "invalid" (with the reason) for an incomplete
+# or broken measurement, which is never a pass; otherwise "pass" when every
+# p-value is at least ALPHA_BONF and "fail" when one is below.  `error` is a
+# producer's failure message, which makes the measurement invalid.
+verdict <- function(p, error = NULL) {
+  reason <- if (!is.null(error)) error else invalid_reason(p)
+  if (!is.null(reason))
+    return(list(status = "invalid", reason = reason, min_p = NA_real_, below_alpha = NA_integer_))
+  p <- p[names(TESTS)]
+  list(status = if (all(p >= ALPHA_BONF)) "pass" else "fail", reason = NULL,
+       min_p = min(p), below_alpha = sum(p < ALPHA))
+}
+
+# Run a producer of one battery result; its error becomes the result's
+# `error` instead of ending the report.
+measure <- function(produce) {
+  tryCatch(produce(), error = function(e) list(error = conditionMessage(e)))
+}
+
+verdict_label <- function(v) switch(v$status, pass = "PASS", fail = "**FAIL**",
+                                     invalid = sprintf("**INVALID** (%s)", v$reason))
+
+# 0 when every verdict passes, 1 when some fails, 2 when some is invalid.
+exit_status <- function(verdicts) {
+  statuses <- vapply(verdicts, function(v) v$status, character(1))
+  if (any(statuses == "invalid")) 2L else if (any(statuses == "fail")) 1L else 0L
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -449,9 +639,13 @@ fmt_rate <- function(x, n) {
 # ──────────────────────────────────────────────────────────────────────────────
 # Calibration campaign
 # ──────────────────────────────────────────────────────────────────────────────
-run_calibration <- function(n_streams, cores, L) {
+run_calibration <- function(n_streams, cores, L, held_out = FALSE) {
   dir.create(CAL_DIR, showWarnings = FALSE, recursive = TRUE)
   host <- Sys.info()[["nodename"]]
+  if (held_out && L != PG_BYTES) stop("the held-out protocol fixes the length at ", PG_BYTES)
+  out_csv <- if (held_out) file.path(CAL_DIR, sprintf("held_out-%s.csv", sub("\\..*", "", host)))
+             else CAL_CSV
+  script_digest <- sha256_file(script_path)
   batch_size <- max(cores, 64L)
   done <- 0L
   message(sprintf("calibration: %d streams of %s bytes from %s on %d cores (%s)",
@@ -462,6 +656,7 @@ run_calibration <- function(n_streams, cores, L) {
     rows <- mclapply(seq_len(this_batch), function(i) {
       res <- battery(null_stream(L))
       data.frame(battery = BATTERY_VERSION, host = host, started = stamp, bytes = L,
+                 script_sha256 = script_digest,
                  as.list(signif(res$p, 6)),
                  byte_entropy = signif(res$byte_entropy, 6),
                  elapsed_s = signif(res$elapsed, 4),
@@ -475,8 +670,14 @@ run_calibration <- function(n_streams, cores, L) {
            paste(format(rows[[which(failed)[1]]]), collapse = " "))
     }
     rows <- do.call(rbind, rows)
-    utils::write.table(rows, CAL_CSV, sep = ",", row.names = FALSE,
-                       col.names = !file.exists(CAL_CSV), append = file.exists(CAL_CSV))
+    reasons <- apply(as.matrix(rows[, names(TESTS)]), 1, function(r) {
+      reason <- invalid_reason(setNames(as.numeric(r), names(TESTS)))
+      if (is.null(reason)) NA_character_ else reason
+    })
+    if (any(!is.na(reasons))) stop("a null stream gave an invalid measurement: ",
+                                   reasons[!is.na(reasons)][1])
+    utils::write.table(rows, out_csv, sep = ",", row.names = FALSE,
+                       col.names = !file.exists(out_csv), append = file.exists(out_csv))
     done <- done + nrow(rows)
     message(sprintf("  %s / %s streams (batch mean %.1f s per stream)",
                     fmt_int(done), fmt_int(n_streams), mean(rows$elapsed_s)))
@@ -493,13 +694,17 @@ read_calibration <- function(bytes) {
   cal <- do.call(rbind, lapply(files, utils::read.csv, stringsAsFactors = FALSE))
   cal <- cal[cal$battery == BATTERY_VERSION & cal$bytes == bytes, ]
   if (nrow(cal) == 0) return(NULL)
+  pm <- as.matrix(cal[, names(TESTS)])
+  if (any(!(is.finite(pm) & pm >= 0 & pm <= 1)))
+    stop(sum(!apply(is.finite(pm) & pm >= 0 & pm <= 1, 1, all)),
+         " calibration rows hold a value that is not a probability")
   cal
 }
 
 calibration_lines <- function(cal) {
   n <- nrow(cal)
   pm <- as.matrix(cal[, names(TESTS)])
-  min_p <- apply(pm, 1, min, na.rm = TRUE)
+  min_p <- apply(pm, 1, min)
   # Batch stamps carry their UTC offset; compare them as instants.
   started <- as.POSIXct(strptime(cal$started, "%Y-%m-%dT%H:%M:%S%z", tz = "UTC"))
   window <- format(range(started, na.rm = TRUE), "%Y-%m-%d %H:%M", tz = "UTC")
@@ -562,6 +767,72 @@ calibration_lines <- function(cal) {
   lines
 }
 
+# The predeclared held-out decision (HELD_OUT_PROTOCOL above), applied to the
+# held-out rows of the current battery version at PG_BYTES bytes.
+held_out_lines <- function() {
+  files <- list.files(CAL_DIR, pattern = "^held_out-.*\\.csv(\\.gz)?$", full.names = TRUE)
+  if (!length(files)) stop("no held-out rows in ", CAL_DIR)
+  rows <- do.call(rbind, lapply(files, utils::read.csv, stringsAsFactors = FALSE))
+  rows <- rows[rows$battery == BATTERY_VERSION & rows$bytes == PG_BYTES, ]
+  n <- nrow(rows)
+  if (n == 0L) stop("no held-out rows of battery ", BATTERY_VERSION, " at ", PG_BYTES, " bytes")
+  pm <- as.matrix(rows[, names(TESTS)])
+  if (any(!(is.finite(pm) & pm >= 0 & pm <= 1))) stop("held-out rows hold a value that is not a probability")
+  excess_p <- function(x, rate) stats::binom.test(x, n, rate, alternative = "greater")$p.value
+  lines <- c("## Held-out calibration at the decision threshold", "",
+             sprintf(paste("Predeclared before any held-out stream was drawn (the protocol at `HELD_OUT_STREAMS` in",
+                           "`scripts/cipher_randomness.R`; scripts `%s`): %s fresh streams of %s bytes from `%s`",
+                           "(hosts %s), battery version %d frozen.  At $t = \\alpha / m = %s$ a valid p-value has",
+                           "$\\Pr(p \\le t) \\le t$, so each test passes when the one-sided exact binomial test for an",
+                           "excess of rejections over rate $t$ gives at least %g / %d, and the battery passes when the",
+                           "same test of the streams with some $p < t$ against rate $\\alpha$ gives at least %g."),
+                     paste(unique(substr(rows$script_sha256, 1, 16)), collapse = "`, `"),
+                     fmt_int(n), fmt_int(PG_BYTES), NULL_SOURCE, paste(unique(rows$host), collapse = ", "),
+                     BATTERY_VERSION, fmt_sci_latex(ALPHA_BONF), HELD_OUT_LEVEL, M_TESTS, HELD_OUT_LEVEL),
+             if (n < HELD_OUT_STREAMS) c("", sprintf("**Incomplete:** %s of the %s predeclared streams.",
+                                                     fmt_int(n), fmt_int(HELD_OUT_STREAMS))),
+             "",
+             sprintf("| test | rejections at $t$ (rate, 95%% CI) | expected | excess p | verdict |"),
+             "|------|------|------|------|------|")
+  for (t in names(TESTS)) {
+    x <- sum(pm[, t] < ALPHA_BONF)
+    ep <- excess_p(x, ALPHA_BONF)
+    lines <- c(lines, sprintf("| %s | %s | %.1f | %s | %s |", TESTS[[t]], fmt_rate(x, n),
+                              n * ALPHA_BONF, fmt_p(ep),
+                              if (ep >= HELD_OUT_LEVEL / M_TESTS) "calibrated" else "**miscalibrated at t**"))
+  }
+  any_t <- sum(apply(pm, 1, min) < ALPHA_BONF)
+  ep <- excess_p(any_t, ALPHA)
+  # The smallest count the per-test rule flags, and the rate at which a test
+  # reaches it half the time: what "calibrated" can and cannot exclude.
+  counts <- 0:ceiling(10 * n * ALPHA_BONF + 50)
+  flagged <- counts[which(vapply(counts, function(x) excess_p(x, ALPHA_BONF) < HELD_OUT_LEVEL / M_TESTS,
+                                 logical(1)))[1]]
+  half_power_rate <- stats::uniroot(function(r) stats::pbinom(flagged - 1L, n, r, lower.tail = FALSE) - 0.5,
+                                    c(ALPHA_BONF, 10 * ALPHA_BONF), tol = ALPHA_BONF * 1e-9)$root
+  c(lines, "",
+    sprintf(paste("At %s streams the per-test rule flags a count of %d or more, so a test whose true rejection",
+                  "rate at $t$ is %.2f times $t$ is flagged only half the time: \"calibrated\" excludes",
+                  "gross excesses, not small ones."),
+            fmt_int(n), flagged, half_power_rate / ALPHA_BONF),
+    "",
+    sprintf("Battery failures (some $p < t$): %s against rate $\\alpha = %g$ (expected %.1f); excess p %s: %s.",
+            fmt_rate(any_t, n), ALPHA, n * ALPHA, fmt_p(ep),
+            if (ep >= HELD_OUT_LEVEL) "within the nominal rate" else "**above the nominal rate**"),
+    "")
+}
+
+# Replace or append a `## ` section of an existing report.
+splice_section <- function(report_lines, heading, section_lines) {
+  start <- grep(paste0("^", heading), report_lines)
+  if (!length(start)) return(c(report_lines, section_lines))
+  after <- grep("^## ", report_lines)
+  after <- after[after > start[1]]
+  end <- if (length(after)) after[1] - 1L else length(report_lines)
+  c(report_lines[seq_len(start[1] - 1L)], section_lines,
+    if (end < length(report_lines)) report_lines[(end + 1L):length(report_lines)])
+}
+
 # Replace or append the calibration section of an existing report.
 splice_calibration <- function(report_lines, cal_lines) {
   start <- grep("^## Calibration on OS-random streams", report_lines)
@@ -594,39 +865,66 @@ run_battery <- function() {
   plaintext <- readBin(PT_PATH, what = "raw", n = file.info(PT_PATH)$size)
   plaintext_size <- length(plaintext)
   plaintext_entropy <- plugin_entropy(byte_counts(plaintext))
-  plaintext_md5 <- tools::md5sum(PT_PATH)
+  identity <- build_identity(PT_PATH)
+  k <- plaintext_size %/% CHUNK
 
   results <- list()
   for (cipher in CIPHERS) {
-    ct_path <- file.path(OUT_DIR, paste0(cipher, ".bin"))
     cache_path <- file.path(OUT_DIR, paste0(cipher, ".results.rds"))
-    cached <- if (file.exists(cache_path) && file.exists(ct_path) &&
-                  file.info(cache_path)$mtime >= file.info(ct_path)$mtime)
-      readRDS(cache_path) else NULL
-    if (!is.null(cached) && identical(cached$version, BATTERY_VERSION)) {
-      message(sprintf("[%-14s] using cached analysis", cipher))
-      res <- cached$result
-    } else {
-      message(sprintf("[%-14s] encrypting + analysing", cipher))
-      res <- battery(encrypt(cipher), keep_spectrum = TRUE)
-      saveRDS(list(version = BATTERY_VERSION, result = res), cache_path)
-    }
-    make_plot(cipher, res$spectrum)
-    res$spectrum <- NULL
-    res$verdict <- verdict(res$p)
+    res <- measure(function() {
+      ct <- encrypt(cipher, identity)
+      cached <- read_rds_or_null(cache_path)
+      if (analysis_reusable(cached, identity, ct$manifest$ciphertext_sha256)) {
+        message(sprintf("[%-14s] %s ciphertext, cached analysis", cipher,
+                        if (ct$manifest$retained) "kept" else "new"))
+        r <- cached$result
+        r$analysed <- cached$analysed
+      } else {
+        message(sprintf("[%-14s] %s ciphertext, analysing", cipher,
+                        if (ct$manifest$retained) "kept" else "new"))
+        r <- battery(ct$bytes, keep_spectrum = TRUE)
+        r$analysed <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+        write_atomic(cache_path, function(tmp) saveRDS(
+          list(version = identity$battery_version, script_sha256 = identity$script_sha256,
+               ciphertext_sha256 = ct$manifest$ciphertext_sha256,
+               analysed = r$analysed, result = r), tmp))
+      }
+      r$manifest <- ct$manifest
+      make_plot(cipher, r$spectrum)
+      r$spectrum <- NULL
+      r
+    })
+    res$verdict <- verdict(res$p, res$error)
+    if (!is.null(res$error)) message(sprintf("[%-14s] not measured: %s", cipher, res$error))
     results[[cipher]] <- res
   }
-  failures <- names(results)[!vapply(results, function(r) r$verdict$pass, logical(1))]
+  statuses <- vapply(results, function(r) r$verdict$status, character(1))
+  failures <- names(results)[statuses == "fail"]
+  invalid <- names(results)[statuses == "invalid"]
+  measured <- function(r) r$verdict$status != "invalid"
+  cal <- read_calibration(plaintext_size)
+  changes <- function(id) if (identical(id$changes, "none")) "none" else sprintf("SHA-256 `%s`", id$changes)
 
-  k <- results[[1]]$samples
   lines <- c(
     "# Symmetric-Cipher Randomness Report", "",
-    sprintf("Generated %s by `scripts/cipher_randomness.R` (battery version %d).",
+    sprintf("Rendered %s by `scripts/cipher_randomness.R` (battery version %d).",
             format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"), BATTERY_VERSION),
     sprintf("Toolchain: %s, base packages only.", R.version.string),
     "",
-    sprintf("**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (%s bytes; MD5 `%s`; byte-entropy %.6f bits/byte).",
-            fmt_int(plaintext_size), plaintext_md5, plaintext_entropy),
+    sprintf("**Plaintext.** Project Gutenberg #100 — *The Complete Works of William Shakespeare* (%s bytes; SHA-256 `%s`; byte-entropy %.6f bits/byte).",
+            fmt_int(plaintext_size), identity$plaintext_sha256, plaintext_entropy),
+    "",
+    "**Experiment identity.** Every ciphertext below was produced by the executable and plaintext named here and analysed by this script; the Ciphertexts section gives each one's digest and when it was encrypted and analysed.",
+    "",
+    "| item | identity |",
+    "|------|----------|",
+    sprintf("| cryptography | commit `%s`; uncommitted changes: %s |",
+            identity$cryptography$commit, changes(identity$cryptography)),
+    sprintf("| rump | commit `%s`; uncommitted changes: %s |",
+            identity$rump$commit, changes(identity$rump)),
+    sprintf("| compiler | %s; features: %s |", identity$rustc, identity$features),
+    sprintf("| `cipher_encrypt` | SHA-256 `%s` |", identity$executable_sha256),
+    sprintf("| script | SHA-256 `%s` |", identity$script_sha256),
     "",
     "**Caveat.** Passing this battery is **necessary** for a usable symmetric primitive but is **not sufficient** for cryptographic security; the battery rules out gross statistical defects in the keystream, not key-recovery, distinguishing-attack, or related-key resistance.",
     "",
@@ -643,7 +941,7 @@ run_battery <- function() {
     sprintf("4. Gap test on $[0, 1/2)$ with the tail pooled so every expected count is at least %d (Knuth §3.3.2 D).", GAP_MIN_EXPECTED),
     "5. Permutation test on disjoint 4-tuples, 24 orderings (Knuth §3.3.2 F).",
     sprintf("6. Bartlett's cumulative periodogram test for a flat spectrum, on the leading %s values of $u$ (the largest 5-smooth length, so the FFT is $O(n \\log n)$).",
-            fmt_int(results[[1]]$spectrum_samples)),
+            fmt_int(largest_5_smooth(plaintext_size %/% CHUNK))),
     "7. Wald-Wolfowitz runs test on the full bit stream.",
     "",
     sprintf("**Decision rule.** A cipher fails when any of its $m = %d$ p-values falls below $\\alpha / m = %s$ (Bonferroni).  That bounds the probability that a good cipher fails by $\\alpha = %g$ under any dependence among the tests only if every p-value is valid under the null, $\\Pr(p \\le t) \\le t$; several tests take their p-values from asymptotic laws, so $\\alpha$ is a nominal rate, and the calibration section reports the rates the battery attains on streams that are random by construction.  The `p < α` column counts the p-values below $\\alpha$, which a good cipher shows at a rate of about $m \\alpha = %g$ per battery.  A pass means only that these statistics did not detect a departure from independent uniform bytes; it is not evidence of key secrecy, authentication security or unpredictability.",
@@ -678,31 +976,55 @@ run_battery <- function() {
     "| `p < α` | number of the $m$ p-values below $\\alpha$. |",
     "| `min p` | smallest of the $m$ p-values. |",
     "",
+    if (is.null(cal))
+      c(sprintf("**Calibration.** No null calibration of battery version %d exists for streams of %s bytes, so the rates this battery attains at that length are unmeasured.",
+                BATTERY_VERSION, fmt_int(plaintext_size)), ""),
     "## Summary", "",
     "| cipher | token | $H$ (bits) | $8 - H$ (bits) | Fisher's $g$ | `p < α` | min p | verdict |",
     "|--------|-------|------------|----------------|--------------|---------|-------|---------|")
   for (cipher in CIPHERS) {
     r <- results[[cipher]]
-    lines <- c(lines, sprintf("| %s | `%s` | %.6f | $%s$ | %.1f | %d | %s | %s |",
-                              display_name(cipher), cipher, r$byte_entropy,
-                              fmt_sci_latex(8 - r$byte_entropy), r$peak_ratio,
-                              r$verdict$below_alpha, fmt_p(r$verdict$min_p),
-                              if (r$verdict$pass) "PASS" else "**FAIL**"))
+    lines <- c(lines, if (measured(r))
+      sprintf("| %s | `%s` | %.6f | $%s$ | %.1f | %d | %s | %s |",
+              display_name(cipher), cipher, r$byte_entropy,
+              fmt_sci_latex(8 - r$byte_entropy), r$peak_ratio,
+              r$verdict$below_alpha, fmt_p(r$verdict$min_p), verdict_label(r$verdict))
+    else
+      sprintf("| %s | `%s` | n/a | n/a | n/a | n/a | n/a | %s |",
+              display_name(cipher), cipher, verdict_label(r$verdict)))
   }
   lines <- c(lines, "",
              if (length(failures))
                sprintf("**Ciphers failing the battery: %s**",
-                       paste0(display_name(failures), " (`", failures, "`)", collapse = ", "))
-             else
+                       paste0(display_name(failures), " (`", failures, "`)", collapse = ", ")),
+             if (length(invalid))
+               sprintf("**Ciphers not measured (invalid): %s**",
+                       paste0(display_name(invalid), " (`", invalid, "`)", collapse = ", ")),
+             if (!length(failures) && !length(invalid))
                sprintf("**All %d ciphers pass the battery.**", length(CIPHERS)),
-             "")
-
-  lines <- c(lines, "## Per-cipher detail", "")
+             "",
+             "## Ciphertexts", "",
+             "| cipher | ciphertext SHA-256 | bytes | encrypted | analysed |",
+             "|--------|--------------------|-------|-----------|----------|")
   for (cipher in CIPHERS) {
     r <- results[[cipher]]
-    lines <- c(lines, sprintf("### %s (`%s`)", display_name(cipher), cipher), "",
+    lines <- c(lines, if (measured(r))
+      sprintf("| %s | `%s` | %s | %s | %s |", display_name(cipher),
+              r$manifest$ciphertext_sha256, fmt_int(r$manifest$bytes),
+              r$manifest$encrypted, r$analysed)
+    else sprintf("| %s | n/a | n/a | n/a | n/a |", display_name(cipher)))
+  }
+  lines <- c(lines, "", "## Per-cipher detail", "")
+  for (cipher in CIPHERS) {
+    r <- results[[cipher]]
+    lines <- c(lines, sprintf("### %s (`%s`)", display_name(cipher), cipher), "")
+    if (!measured(r)) {
+      lines <- c(lines, sprintf("Verdict: %s.", verdict_label(r$verdict)), "")
+      next
+    }
+    lines <- c(lines,
                sprintf("Verdict: %s &mdash; min p = %s against $\\alpha / m = %s$; %d of %d p-values below $\\alpha = %g$.",
-                       if (r$verdict$pass) "PASS" else "**FAIL**",
+                       verdict_label(r$verdict),
                        fmt_p(r$verdict$min_p), fmt_sci_latex(ALPHA_BONF),
                        r$verdict$below_alpha, M_TESTS, ALPHA),
                "",
@@ -723,33 +1045,144 @@ run_battery <- function() {
     lines <- c(lines, "", sprintf("![spectrum](scripts/cipher_plots/%s.png)", cipher), "")
   }
 
-  cal <- read_calibration(plaintext_size)
   if (!is.null(cal)) lines <- c(lines, calibration_lines(cal))
-  writeLines(lines, REPORT)
+  write_atomic(REPORT, function(tmp) writeLines(lines, tmp))
 
   cat("\n=== Summary ===\n")
   cat(sprintf("  plaintext entropy: %.4f bits/byte\n\n", plaintext_entropy))
   for (cipher in CIPHERS) {
     r <- results[[cipher]]
-    cat(sprintf("  %-14s  H=%.6f  p<alpha: %d  min p=%s  %s\n", cipher, r$byte_entropy,
-                r$verdict$below_alpha, fmt_p(r$verdict$min_p),
-                if (r$verdict$pass) "PASS" else "FAIL"))
+    if (measured(r)) {
+      cat(sprintf("  %-14s  H=%.6f  p<alpha: %d  min p=%s  %s\n", cipher, r$byte_entropy,
+                  r$verdict$below_alpha, fmt_p(r$verdict$min_p), toupper(r$verdict$status)))
+    } else {
+      cat(sprintf("  %-14s  INVALID: %s\n", cipher, r$verdict$reason))
+    }
   }
   cat("\n")
-  if (length(failures)) {
-    cat("FAILING:", paste(failures, collapse = ", "), "\n")
-  } else {
-    cat("All ciphers pass.\n")
-  }
+  if (length(failures)) cat("FAILING:", paste(failures, collapse = ", "), "\n")
+  if (length(invalid)) cat("NOT MEASURED:", paste(invalid, collapse = ", "), "\n")
+  if (!length(failures) && !length(invalid)) cat("All ciphers pass.\n")
   cat(sprintf("Report written to %s\n", REPORT))
+  exit_status(lapply(results, function(r) r$verdict))
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Self-test
+# ──────────────────────────────────────────────────────────────────────────────
+# Fixed cases for the decision, the exit status, the cache rules and the
+# atomic writer; returns 0 when every case holds and 1 otherwise.
+self_test <- function() {
+  failures <- 0L
+  check <- function(label, ok) {
+    cat(sprintf("%-64s %s\n", label, if (isTRUE(ok)) "ok" else "FAILED"))
+    if (!isTRUE(ok)) failures <<- failures + 1L
+  }
+  named <- function(values) setNames(values, names(TESTS))
+  status <- function(p, error = NULL) verdict(p, error)$status
+  half <- rep(0.5, M_TESTS - 1L)
+
+  check("all p = 0.5 passes", status(named(rep(0.5, M_TESTS))) == "pass")
+  check("exact 0 is a probability, and fails", status(named(c(0, half))) == "fail")
+  check("exact 1 is a probability, and passes", status(named(rep(1, M_TESTS))) == "pass")
+  check("p = alpha / m passes", status(named(rep(ALPHA_BONF, M_TESTS))) == "pass")
+  check("p just below alpha / m fails", status(named(c(ALPHA_BONF * (1 - 1e-9), half))) == "fail")
+  check("no results is invalid", status(numeric(0)) == "invalid")
+  check("NULL is invalid", status(NULL) == "invalid")
+  check("seven NA is invalid", status(named(rep(NA_real_, M_TESTS))) == "invalid")
+  check("one 0.5 and six NA is invalid", status(named(c(0.5, rep(NA_real_, M_TESTS - 1L)))) == "invalid")
+  check("a missing result is invalid", status(named(rep(0.5, M_TESTS))[-3]) == "invalid")
+  for (bad in list(NaN, Inf, -Inf, 2, 1.25, -0.5)) {
+    check(sprintf("a p-value of %s is invalid", format(bad)), status(named(c(bad, half))) == "invalid")
+  }
+  check("seven values of 2 are invalid", status(named(rep(2, M_TESTS))) == "invalid")
+  dup <- named(rep(0.5, M_TESTS))
+  names(dup)[2] <- names(dup)[1]
+  check("a duplicated name in place of another is invalid", status(dup) == "invalid")
+  check("an extra duplicated result is invalid",
+        status(c(named(rep(0.5, M_TESTS)), ks = 0.5)) == "invalid")
+  check("unnamed values are invalid", status(rep(0.5, M_TESTS)) == "invalid")
+  extra <- named(rep(0.5, M_TESTS))
+  names(extra)[M_TESTS] <- "other"
+  check("an unexpected name is invalid", status(extra) == "invalid")
+  check("character values are invalid", status(setNames(rep("0.5", M_TESTS), names(TESTS))) == "invalid")
+  failed <- measure(function() stop("producer failed"))
+  check("a producer that errors is invalid, with its message",
+        status(failed$p, failed$error) == "invalid" &&
+          grepl("producer failed", verdict(failed$p, failed$error)$reason))
+  check("an error alongside complete p-values is invalid",
+        status(named(rep(0.5, M_TESTS)), "analysis failed after the tests") == "invalid")
+  v <- function(st) list(status = st)
+  check("exit status 0 when every cipher passes", exit_status(list(v("pass"), v("pass"))) == 0L)
+  check("exit status 1 when one fails", exit_status(list(v("pass"), v("fail"))) == 1L)
+  check("exit status 2 when one is invalid", exit_status(list(v("fail"), v("invalid"))) == 2L)
+
+  digest <- function(ch) strrep(ch, 64)
+  identity <- list(executable_sha256 = digest("a"), plaintext_sha256 = digest("b"),
+                   plaintext_bytes = 100, script_sha256 = digest("c"),
+                   battery_version = BATTERY_VERSION)
+  manifest <- list(executable_sha256 = digest("a"), plaintext_sha256 = digest("b"),
+                   bytes = 100, ciphertext_sha256 = digest("d"))
+  check("a kept ciphertext of the same executable and plaintext is reused",
+        ciphertext_reusable(manifest, identity, 100, digest("d")))
+  check("a ciphertext without a manifest is not reused",
+        !ciphertext_reusable(NULL, identity, 100, digest("d")))
+  check("a ciphertext of another executable is not reused",
+        !ciphertext_reusable(modifyList(manifest, list(executable_sha256 = digest("e"))),
+                             identity, 100, digest("d")))
+  check("a ciphertext of another plaintext is not reused",
+        !ciphertext_reusable(manifest, modifyList(identity, list(plaintext_sha256 = digest("e"))),
+                             100, digest("d")))
+  check("a truncated ciphertext is not reused",
+        !ciphertext_reusable(manifest, identity, 99, digest("d")))
+  check("an altered ciphertext is not reused",
+        !ciphertext_reusable(manifest, identity, 100, digest("e")))
+  cached <- list(version = BATTERY_VERSION, script_sha256 = digest("c"),
+                 ciphertext_sha256 = digest("d"))
+  check("an analysis of the same ciphertext and script is reused",
+        analysis_reusable(cached, identity, digest("d")))
+  check("an analysis by another script is not reused",
+        !analysis_reusable(cached, modifyList(identity, list(script_sha256 = digest("e"))),
+                           digest("d")))
+  check("an analysis of another ciphertext is not reused",
+        !analysis_reusable(cached, identity, digest("e")))
+  check("an analysis by another battery version is not reused",
+        !analysis_reusable(modifyList(cached, list(version = BATTERY_VERSION - 1L)),
+                           identity, digest("d")))
+
+  dir <- tempfile("atomic-")
+  dir.create(dir)
+  target <- file.path(dir, "out.bin")
+  write_atomic(target, function(tmp) writeBin(as.raw(1:10), tmp))
+  check("an atomic write leaves the file and no partial",
+        identical(list.files(dir), "out.bin"))
+  interrupted <- tryCatch(write_atomic(target, function(tmp) {
+    writeBin(as.raw(1:3), tmp)
+    stop("interrupted")
+  }), error = function(e) "stopped")
+  check("an interrupted write keeps the old file and removes the partial",
+        identical(interrupted, "stopped") && identical(list.files(dir), "out.bin") &&
+          identical(readBin(target, "raw", 100), as.raw(1:10)))
+  unlink(dir, recursive = TRUE)
+
+  cat(sprintf("\n%d failure%s\n", failures, if (failures == 1L) "" else "s"))
+  if (failures) 1L else 0L
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────────
 # Run only when invoked as a script; `source()` loads the functions for use.
-if (sys.nframe() == 0L) if (OPTS$mode == "calibrate") {
-  run_calibration(OPTS$n, OPTS$cores, OPTS$bytes)
+if (sys.nframe() == 0L) if (OPTS$mode == "self-test") {
+  quit(status = self_test())
+} else if (OPTS$mode == "calibrate") {
+  run_calibration(OPTS$n, OPTS$cores, OPTS$bytes, OPTS$held_out)
+} else if (OPTS$mode == "held-out-report") {
+  existing <- if (file.exists(REPORT)) readLines(REPORT) else "# Symmetric-Cipher Randomness Report"
+  section <- held_out_lines()
+  write_atomic(REPORT, function(tmp)
+    writeLines(splice_section(existing, "## Held-out calibration at the decision threshold", section), tmp))
+  cat(sprintf("Held-out section written to %s\n", REPORT))
 } else if (OPTS$mode == "calibration-report") {
   cal <- read_calibration(PG_BYTES)
   if (is.null(cal)) stop("no calibration data for battery ", BATTERY_VERSION,
@@ -759,5 +1192,5 @@ if (sys.nframe() == 0L) if (OPTS$mode == "calibrate") {
   writeLines(splice_calibration(existing, calibration_lines(cal)), REPORT)
   cat(sprintf("Calibration section written to %s (%d streams)\n", REPORT, nrow(cal)))
 } else {
-  run_battery()
+  quit(status = run_battery())
 }

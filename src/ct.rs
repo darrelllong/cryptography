@@ -337,11 +337,12 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
 /// optimizer is asked to treat as opaque, with no guarantee attached, and
 /// `compiler_fence` only orders memory operations as seen by the compiler;
 /// neither is a promise that no early exit can be synthesised. The guarantee
-/// rests on the emitted code, which is inspected: the aarch64 release build
-/// carries length-driven branches only, with the loop vectorised into
-/// `eor`/`orr` accumulation. `constant_time_eq_mask_timing_is_length_only`
-/// (an ignored, release-only experiment in this module's tests) measures the
-/// same property on the running machine.
+/// rests on the emitted code: the aarch64 release build carries
+/// length-driven branches only, with the loop vectorised into `eor`/`orr`
+/// accumulation. The code for other targets and compilers is not inspected.
+/// `constant_time_eq_mask_has_no_gross_early_exit` (an ignored, release-only
+/// experiment in this module's tests) checks one consequence on the running
+/// machine, and no more than that.
 #[inline]
 pub(crate) fn constant_time_eq_mask(a: &[u8], b: &[u8]) -> u8 {
     if a.len() != b.len() {
@@ -744,9 +745,10 @@ mod tests {
         }
     }
 
-    /// Timing experiment: comparing equal-length slices that differ only at
-    /// byte 0 must cost the same as ones that differ only at the last byte.
-    /// An early-exit compare would finish the first case in one step and the
+    /// Timing experiment for one regression, a gross early exit: comparing
+    /// equal-length slices that differ only at byte 0 must not be markedly
+    /// faster than comparing ones that differ only at the last byte. An
+    /// early-exit compare would finish the first case in one step and the
     /// second in `n`. The two cases are sampled alternately, `SAMPLES` times
     /// each, and the ratio of their fastest samples must stay within
     /// `TOLERANCE`. Other load on the host only lengthens a sample, so the
@@ -755,13 +757,17 @@ mod tests {
     ///
     /// The tolerance covers cache and frequency noise, not a real early exit:
     /// with `LEN = 4096` an early exit at byte 0 would be hundreds of times
-    /// faster, far outside a 25 % band. Run in
-    /// release only (`cargo test --release --lib -- --ignored
-    /// constant_time_eq_mask_timing`); a debug build's overflow checks and
-    /// unoptimised loop measure the compiler, not the algorithm.
+    /// faster, far outside a 25 % band. A pass does not rule out smaller
+    /// differences in the timing distribution, dependence on other secret
+    /// classes, another compiler's or target's code, or leakage in the
+    /// operations that call this helper; it certifies no API as constant
+    /// time. Run in release only (`cargo test --release --lib -- --ignored
+    /// constant_time_eq_mask_has_no_gross_early_exit`); a debug build's
+    /// overflow checks and unoptimised loop measure the compiler, not the
+    /// algorithm.
     #[test]
     #[ignore = "release-only timing experiment"]
-    fn constant_time_eq_mask_timing_is_length_only() {
+    fn constant_time_eq_mask_has_no_gross_early_exit() {
         use std::time::Instant;
         const LEN: usize = 4096;
         const ROUNDS: usize = 2_000;

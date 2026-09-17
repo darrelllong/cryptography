@@ -35,7 +35,10 @@ Security note:
 - Constant-time symmetric implementations are explicitly suffixed `Ct`
   (e.g. `Aes128Ct`, `Sm4Ct`, `Zuc128Ct`); the bare-named types
   (`Aes128`, `Sm4`, `Zuc128`) are reference table-driven implementations
-  and are **not** constant-time. AEAD wrappers `Gcm`, `Gmac`, `GcmVt`, and
+  and are **not** constant-time. "Constant-time" here is a source-level
+  discipline (no branch or memory index depends on a secret); the code a
+  compiler emits for a given target is not certified, and no timing
+  measurement of complete operations backs the label. AEAD wrappers `Gcm`, `Gmac`, `GcmVt`, and
   `GmacVt` make the choice explicit per construction.
 - This crate intentionally does **not** provide an OS entropy source.
   `CtrDrbgAes256` (T-table AES) and `CtrDrbgAes256Ct` (constant-time AES)
@@ -658,7 +661,9 @@ let signature = private
 assert!(public.verify_message_bytes::<Sha256>(b"message", &signature));
 ```
 
-Generate and use an `ElGamal` key pair:
+Generate and use an `ElGamal` key pair. This is raw ElGamal: its ciphertexts
+are malleable and reveal a class of the message, so it is a primitive to build
+on, not a way to protect a message on its own.
 
 ```rust
 use cryptography::vt::{ElGamal, FfcHash, FfcParameterSize};

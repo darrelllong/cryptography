@@ -6,6 +6,26 @@
 //! serialization while keeping the group arithmetic itself visible and
 //! auditable.
 //!
+//! **This is raw (textbook) `ElGamal`, a low-level primitive, not a
+//! message-encryption scheme.** It is not semantically secure and it is
+//! malleable, on every entry point including the byte helpers:
+//!
+//! - Under a key with a prime subgroup order `q`, `δ^q = m^q · (b^q)^k =
+//!   m^q (mod p)`, so every ciphertext publishes `m^q`: which coset of the
+//!   order-`q` subgroup the message lies in.
+//! - Under a safe-prime key, with `χ(x) = x^((p − 1)/2) mod p` the quadratic
+//!   character, `χ(b)` is public and gives the parity of `a`, and `χ(γ)`
+//!   gives the parity of `k`; so `χ(m) = χ(δ)` when `χ(b) = 1` and
+//!   `χ(m) = χ(δ) · χ(γ)` otherwise. Every ciphertext publishes whether `m`
+//!   is a quadratic residue.
+//! - `(γ, c·δ)` decrypts to `c·m` for any `c` an attacker chooses.
+//!
+//! Confidentiality of messages needs a specified composition around a group
+//! operation (a KEM, a key-derivation function and an AEAD, with domain
+//! separation and context binding), which this module does not provide.
+//! `ElGamalPublicKey::encrypt_bytes` carries the byte string as the integer
+//! `m` itself and inherits all of the above.
+//!
 //! No NIST standard specifies `ElGamal` encryption. The paper
 //! (`pubs/elgamal-1985.pdf`) takes a large prime `p` and a primitive element
 //! `g` of `Z_p*`. A key has one of two group shapes, named by its exponent
@@ -187,6 +207,10 @@ impl ElGamalPublicKey {
 
     /// Encrypt a byte string with a fresh random ephemeral exponent.
     ///
+    /// Raw `ElGamal`: the ciphertext publishes the quadratic character (or
+    /// subgroup coset) of the message integer and is malleable; see the
+    /// module documentation before using it to protect a message.
+    ///
     /// This is the minimal "usable" layer for textbook `ElGamal`: it samples
     /// the ephemeral exponent from `[1, q)` when the public key carries an
     /// explicit subgroup order, and from `[1, p - 1)` otherwise. The encoded
@@ -219,6 +243,8 @@ impl ElGamalPublicKey {
     }
 
     /// Encrypt a byte string and return a serialized ciphertext blob.
+    ///
+    /// Raw `ElGamal`, with the limits of [`Self::encrypt`].
     ///
     /// The serialized form is a DER `SEQUENCE` containing the `(gamma, delta)`
     /// pair in order, so the byte-level API stays self-contained without
@@ -1149,6 +1175,50 @@ mod tests {
                 let ciphertext = public.encrypt(&[5], &mut rng).expect("a nonce is found");
                 assert_ne!(ciphertext.gamma, u(22));
                 assert_eq!(private.decrypt_raw(&ciphertext), Some(message.clone()));
+            }
+        }
+    }
+
+    /// Raw `ElGamal` publishes the message's class, from public values only.
+    /// Modulo 23 with primitive root 5 and `a = 7` (`χ(b) = −1`), every one of
+    /// the 22 messages under each of the 20 accepted nonces gives
+    /// `χ(m) = χ(δ) · χ(γ)`: 440 of 440. Under the subgroup key every
+    /// ciphertext gives `δ^q = m^q`. The documentation promises nothing more.
+    #[test]
+    fn raw_ciphertexts_publish_the_message_class() {
+        use rump::modular::mod_pow;
+        let (public, _) = ElGamal::from_secret_exponent(&u(23), &u(5), &u(7)).expect("key");
+        let p = public.modulus().clone();
+        let half = u(11);
+        let chi = |x: &BigUint| mod_pow(x, &half, &p);
+        let one = BigUint::one();
+        let chi_b = chi(public.public_component());
+        assert_ne!(chi_b, one, "a = 7 is odd");
+        let mut recovered = 0;
+        for m in 1..23 {
+            for k in (1..22).filter(|&k| k != 11) {
+                let ciphertext = public
+                    .encrypt_with_nonce(&u(m), &u(k))
+                    .expect("accepted nonce");
+                let from_public = if chi_b == one {
+                    chi(ciphertext.delta())
+                } else {
+                    BigUint::mod_mul(&chi(ciphertext.delta()), &chi(ciphertext.gamma()), &p)
+                };
+                assert_eq!(from_public, chi(&u(m)), "m = {m}, k = {k}");
+                recovered += 1;
+            }
+        }
+        assert_eq!(recovered, 440);
+
+        let (public, _) = subgroup_key();
+        let (p, q) = (u(P), u(Q));
+        for m in [2, 4, 5, 1234, P - 1] {
+            for k in [1, 77, Q - 1] {
+                let ciphertext = public
+                    .encrypt_with_nonce(&u(m), &u(k))
+                    .expect("accepted nonce");
+                assert_eq!(mod_pow(ciphertext.delta(), &q, &p), mod_pow(&u(m), &q, &p));
             }
         }
     }

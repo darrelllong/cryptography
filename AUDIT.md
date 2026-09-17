@@ -4,196 +4,207 @@
 >
 > **Creed:** Experiment is asking God for peer review.
 
-## Reviewed state
+## Reviewed state and method
 
-Reviewed 2026-09-16 on `aarch64-apple-darwin`, rustc/Cargo 1.93.1.
-HEAD: `601c97bbd9049a4a2ba02e3b37d113f00d063e66`. The reviewed cryptography tree includes the uncommitted source and CI changes present at capture.
-Tests ran against frozen sibling copies, with fresh build directories.
-This is a targeted mathematical and cross-repository review, supported by the
-runs below; it is not an assertion that every line or parameter regime was examined.
-Only AUDIT.md and SUGGESTIONS.md are changed by this review.
+2026-09-16 PDT / 2026-09-17 UTC. Frozen sibling checkouts on
+`aarch64-apple-darwin`, rustc/Cargo 1.93.1; separate Rust 1.87 checks.
 
-| Sibling | Reviewed HEAD |
+| Repository | HEAD at capture |
 |---|---|
-| entropy | `b52a72ddc63dc5ae2a41df0deb6c780fc990079d` |
-| rump | `70d12839933c32569fdee5cb2bc1d5b4f3964f1a` |
-| factoring | `5271af623135efbf7116d6e32e38ab8ac3d48eed` |
+| cryptography | `aa865da77502306f544b7031f65eaf3f7b7960b2` |
+| entropy | `de1bd2d061eea43fe1fca291edae346315b85983` |
+| rump | `66651ab0c82a21929c52da92823fad930766fef9` |
+| factoring | `d594060dc824a4f2c3a0800fdeb86c739dce7e71` |
 
-Reviewed-file manifest SHA-256: `59a8f526a3b3abed5613231a75e45076467078df6ff8b5935fbc86f9a62ae3e1` (567 files).
-The manifest includes tracked files and nonignored untracked regular files,
-except AUDIT.md and SUGGESTIONS.md. Sort repository-relative paths; emit
-`SHA256(file)`, two spaces, path and newline; hash that UTF-8 manifest.
-Hashes identify the captured working contents, including dirty files, rather
-than treating HEAD alone as their identity. A later source change requires
-revalidation of the affected findings and results.
+This repository's reviewed-file manifest SHA-256 is
+`0e1c714db3d0e27250ffb05340a6ef29462e0d5aa2de9b897b535620ab6fee42` (572 files).
+The manifest covers tracked and nonignored untracked regular files, excluding
+AUDIT.md and SUGGESTIONS.md: sort relative paths, emit `SHA256(file)`, two
+spaces, path and newline, then SHA-256 the UTF-8 manifest. It identifies working
+contents as well as commits. Tests used fresh build directories in the frozen
+copies. Later edits require checking which evidence still applies.
+
+This review combines source inspection, mathematical identities, the release
+suites, and focused boundary experiments. Reproduced failures, inspected risks,
+retained measurements and proposed experiments are distinguished below. Coverage
+is stated explicitly; passing suites do not establish every input domain,
+platform, timing property or statistical null law. This review changes the two
+review documents only. Diagnostic code ran in separate scratch copies.
 
 ## Assessment
 
-The default and all-feature release suites pass against the reviewed rump.
-The checked encoding, identity-key, key-pair, nonce-retry, authentication and
-wiping regressions are exercised by those runs. No new primitive-level failure
-was reproduced in this bounded pass. Current work concerns timing evidence,
-statistical interpretation, reproducible companion builds and performance
-measurement. These are separate questions from known-answer correctness.
+The default and all-feature release suites pass, including the required
+OpenSSL cross-checks. This pass concentrated on the changed ElGamal group
+validation, the reporting path, sibling composition, and the boundary between
+functional correctness and security claims. The reproduced report defects can
+produce a PASS without valid complete measurements. Raw ElGamal's message-space
+limitation is demonstrated separately; it is not a failed round-trip equation.
 
-## Findings and limits
+## Findings
 
-### C1 — High: source-level timing discipline is not an end-to-end timing guarantee
+### C1 — High: the randomness report can declare PASS with no valid p-values
 
-**Source inspection.** [src/lib.rs](src/lib.rs) explicitly places public-key
-operations in the variable-time category. Bare table-driven cipher types and
-their `Ct` alternatives have different timing contracts. Rump wiping is enabled,
-but generic multiprecision arithmetic still normalizes, allocates, divides and
-branches according to values. A fixed scalar schedule cannot repair that layer.
+**Reproduced from the current function.**
+[scripts/cipher_randomness.R](scripts/cipher_randomness.R), `verdict`, first
+removes missing values and then applies `all(p >= ALPHA_BONF)`.
 
-[src/modes/ghash.rs](src/modes/ghash.rs) reads its 128 precomputed multiples in
-public index order and masks each contribution. Its `black_box` barrier is
-explicitly a compiler hint. Functional agreement and source inspection do not
-establish the generated code's timing behavior on each supported target.
+| Supplied seven-test vector | Returned pass | Returned minimum |
+|---|---|---|
+| Seven NA values | TRUE | +Inf |
+| One 0.5 and six NA values | TRUE | 0.5 |
+| Seven values of 2 | TRUE | 2 |
+| Seven +Inf values | TRUE | +Inf |
 
-**Required evidence for a stronger claim:** fixed-width secret arithmetic;
-generated-code inspection for the actual compiler and target; separate input-
-class timing experiments; and a record of which complete operations satisfy
-which contract. Continue to name the existing variable-time paths accurately.
-No timing campaign or assembly audit was performed here.
+The first case follows from `all(logical(0))` being true. These are fresh helper
+probes, not a claim that every retained report row had this condition. The
+report uses the returned Boolean to print both per-cipher PASS and “All ciphers
+pass” statements, so result validation must precede that decision.
 
-### C2 — Medium: the statistical report's rare-tail claim needs qualification
+Require the exact expected set of seven named, scalar, finite probabilities in
+[0,1]. Missing, duplicate, nonfinite or out-of-range results must remain explicit
+errors through caching, the summary and process exit. A statistical rejection
+and an incomplete measurement are distinct outcomes. Entropy's R report has the
+same class of gap ([E2](../entropy/AUDIT.md)), although its Rust result
+constructors already validate probabilities.
 
-**Fresh recount of retained data, not a new calibration campaign.**
-[scripts/null_calibration/pvalues.csv.gz](scripts/null_calibration/pvalues.csv.gz)
-has 400,000 rows, all at **5,638,480 bytes**. At the report's decision threshold
-`0.001/7`, the counts are:
+### C2 — Medium: retained ciphertext and analysis caches do not identify the implementation tested
 
-| Test | Rejections |
-|---|---:|
-| byte χ² | 46 |
-| KS | 60 |
-| serial | 58 |
-| gap | 79 |
-| permutation | 55 |
-| Bartlett | 65 |
-| runs | 61 |
-| Any of the seven | 419 |
+**Source inspection.** The same script's `encrypt` accepts any nonempty
+`cipher_outputs/<name>.bin` without invoking `cipher_encrypt`. `run_battery`
+accepts an analysis cache when its modification time is at least the
+ciphertext's and its stored battery version is current. Neither condition
+identifies the executable, sibling sources, feature selection, input digest,
+key/nonce experiment identity or analysis-script contents. The report is dated
+when rendered, and no build is performed by this script.
 
-The marginal expectation at that threshold is 57.14. The gap count is about
-2.9 binomial standard deviations above it. The family rate is 419/400,000
-= 0.0010475, consistent with ordinary sampling uncertainty around 0.001;
-this recount alone does not prove that the family target is violated.
+A changed cipher can therefore receive a newly rendered report based entirely
+on retained output from a different executable. Cached data is useful when
+presented as a retained experiment with its own identity; it cannot establish
+current-tree behavior without that identity. Build the requested executable,
+record its digest and the source graph, and key or label the retained experiment
+accordingly. A changed plaintext must also invalidate a current-input claim.
 
-The Bonferroni inequality remains valid under arbitrary dependence **if each
-input p-value has the required null tail bound**. It does not confer that bound
-on an approximate statistic. [R-REPORT.md](R-REPORT.md)'s unconditional bound
-language is therefore stronger than the numerical evidence warrants. Calibrate
-the gap statistic at the deciding threshold on held-out data and at each
-supported stream length. A PASS from this battery is not evidence of key
-secrecy, authentication security or unpredictability.
+### C3 — Medium: raw ElGamal byte encryption discloses message-class information
 
-### C3 — Medium: evidence must name a complete sibling and feature combination
+**Derived and reproduced; security contract.**
+[src/public_key/elgamal.rs](src/public_key/elgamal.rs) accepts every integer
+`1 <= m < p`. In an order-q subgroup, `delta = m*b^k` implies
+`delta^q = m^q mod p`, which publicly identifies the message's subgroup coset.
+Rejecting zero and small-order ciphertext elements does not hide that class.
 
-**Source inspection.** [Cargo.toml](Cargo.toml) takes rump by path and enables
-`wipe`. [.github/workflows/ci.yml](.github/workflows/ci.yml) follows rump's main
-in the cryptography jobs; entropy's own workflow pins specific companion
-commits. Therefore identical cryptography HEADs need not mean identical builds,
-and entropy's pinned green result is not automatically a result for this tree.
+For the safe-prime primitive-root profile, write `chi(x)=x^((p-1)/2) mod p`.
+The public key b reveals the parity of a through chi(b), and gamma reveals
+that of k. Thus:
 
-Keep the advancing integration jobs, and record the resolved sibling hashes,
-features, toolchain and lockfile for every release/test report. Check the
-consumer graph after changing a dependency's defaults. Entropy E6 shows why a
-fresh no-default build is a distinct obligation even when the default suite is
-green. The initial `--locked` command in the fresh cryptography copy required
-`cargo generate-lockfile --offline`: the library does not track Cargo.lock.
-That is a reproducibility detail, not a primitive failure.
+```text
+if chi(b) = 1:  chi(m) = chi(delta)
+otherwise:     chi(m) = chi(delta) * chi(gamma) mod p
+```
 
-### C4 — Medium: current speed comparisons lack a current matched baseline
+A public-API experiment with `p=23, g=5, a=7`, all 22 nonzero messages and all
+20 accepted nonces recovered the correct character in **440/440 cases**.
+Only public key/ciphertext values were used for recovery. This is an exact
+algebraic witness; it does not depend on solving a small discrete logarithm or
+on timing. Arbitrary large safe primes have the same identity.
 
-**Source inspection.** [ASYMMETRIC.md](ASYMMETRIC.md),
-[SYMMETRIC.md](SYMMETRIC.md) and [POSTQUANTUM.md](POSTQUANTUM.md) explicitly
-mark performance figures stale. The source shows a concrete GHASH cost:
-128 masked selections, reading 2,048 bytes of prepared multiples per 16-byte
-input block. That is an operation count, not a measured bottleneck or a claimed
-speedup for an alternative.
+The module already labels this as textbook/raw encryption and asks callers to
+supply a hybrid construction or padding. Keep that scope prominent on the byte
+entry points and supply a precisely specified authenticated hybrid path if the
+library intends to offer message confidentiality. Raw multiplicative ElGamal
+also remains malleable. The group algorithm and semantic-security distinction
+are discussed in [HAC §§8.4 and 8.7](https://cacr.uwaterloo.ca/hac/about/chap8.pdf).
+No new primitive arithmetic failure is asserted by this finding.
 
-Re-measure the current implementation before choosing an optimization. Charge
-key setup, allocations, wiping, authentication and short-message overhead.
-Keep benchmark units, operand lengths, parameter sets and feature combinations
-with each result. All suites here ran as correctness checks; their elapsed
-times are not benchmark evidence.
+### C4 — Medium: timing evidence supports a narrower claim than end-to-end constant time
 
-## Mathematical and interface boundaries checked
+**Source inspection; no new timing campaign.** [src/lib.rs](src/lib.rs)
+correctly labels the generic public-key operations variable-time and distinguishes
+table-driven symmetric types from their `Ct` variants. Rump wiping is enabled
+through the dependency graph; normalization, allocation and generic arithmetic
+remain value dependent.
 
-| Boundary | Current implementation and evidence |
+[src/ct.rs](src/ct.rs)'s ignored equality timing test compares the fastest of
+101 samples from two mismatch positions. That is a useful check for a gross
+early-exit regression; it cannot rule out smaller distributional differences,
+other secret classes, compiler changes or complete-operation leakage. Its name
+and a passing result must not become a certification of every API. Preserve
+source-level discipline, then qualify generated code and measured operations on
+the actual targets separately.
+
+### C5 — Medium: statistical and performance claims need matching evidence domains
+
+**Retained statistical evidence; inspected performance limits.**
+[R-REPORT.md](R-REPORT.md) now describes the family threshold as nominal unless
+each marginal tail is valid. A fresh recount of the retained 400,000 null rows
+at 5,638,480 bytes gives the following counts below `0.001/7`:
+
+| byte chi-square | KS | serial | gap | permutation | Bartlett | runs | any |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 46 | 60 | 58 | 79 | 55 | 65 | 61 | 419 |
+
+The family rate 0.0010475 is compatible with ordinary sampling uncertainty
+around 0.001; these rows do not prove an excess family error. The gap marginal
+and any new stream length or tuned pooling rule require held-out validation at
+the deciding threshold. No new null streams were generated in this review.
+
+The comparison tables in [SYMMETRIC.md](SYMMETRIC.md),
+[ASYMMETRIC.md](ASYMMETRIC.md) and [POSTQUANTUM.md](POSTQUANTUM.md) identify stale
+performance data. Current correctness-suite durations are not replacement
+benchmarks. GHASH's 128 masked selections per block are an operation count;
+they do not establish which phase dominates a complete AEAD call.
+
+## Mathematical and implementation boundaries checked
+
+| Boundary | Evidence and remaining limit |
 |---|---|
-| GHASH/POLYVAL | Field `F2[u]/(u^128+u^7+u^2+u+1)` with GHASH bit i at integer bit 127−i; reduction mask `0xE1<<120` follows from that representation. GCM and GCM-SIV known-answer tests pass. |
-| EC import and verification | Invalid points, identity keys, private/public consistency and explicit-domain validation have regressions in the passing suite. Apply each scheme's own validation rules. |
-| Ed25519 | The implementation specifies RFC 8032's cofactored verification equation. Small-order acceptance is part of that chosen profile; it must not be confused with ECDSA's identity-key rule or a stricter application key-registration policy. |
-| ML-KEM / ML-DSA | Tests cover external FIPS answer subsets, malformed encodings and expanded-key validation. A successful pair-wise test is not proof that arbitrary input keys were generated with the prescribed distribution. |
-| NTRU | Release-mode `nist_kat` exercises all 100 entries in each of four committed submission answer files. Encoding/sampling conventions are explicit in the shared modules; a sampler optimization must preserve the prescribed coin-to-output map and distribution. |
-| AEAD failure and wiping | Tag/ciphertext/AAD perturbation and wipe-behavior suites pass. Wiping is best effort over the buffers actually covered; this does not establish erasure of registers or every allocation copy. |
+| ElGamal group validation | Safe-prime primitive-root and prime-order-subgroup profiles are explicit; degenerate secret/nonce and ciphertext membership checks are covered by the current suite. Message-space secrecy is a separate contract, C3. |
+| AEAD | Known answers, tag/AAD/ciphertext perturbations and wipe regressions pass; nonce and per-key usage requirements remain scheme-specific. |
+| EC and signature imports | The exercised invalid-point, identity-key and private/public consistency regressions pass. RFC 8032 cofactored verification is a chosen profile, not every application's key-registration policy. |
+| ML-KEM, ML-DSA and NTRU | Included known-answer, malformed-input and key-validation regressions pass. This is not a fresh clause-by-clause standards review or the entire ignored campaign. |
+| Randomness | CSPRNG/DRBG state is deterministic after seeding. Ciphertext uniformity cannot establish seed entropy, unpredictability, confidentiality or authenticity. |
+| Dependency graph | Cryptography enables rump wipe; both this crate and entropy default pass with the captured rump. |
 
-The GHASH equations and representation were checked against
-[SP 800-38D §§6.3–6.4](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf).
-The scheme rows above describe the reviewed source and executed regressions,
-not a fresh clause-by-clause standards certification. Preserve precise
-specification versions, sections, parameter sets and accepted-input profiles
-in any future change.
+## Fresh verification
 
-## Verification
+OpenSSL 3.6.4 was discovered through the Homebrew path.
+`CRYPTOGRAPHY_OPENSSL_REQUIRED=1` was set on both release runs. The helper's
+explicit exception for modes unavailable through `openssl enc` remains part of
+that test contract.
 
-OpenSSL 3.6.4 was available through the configured Homebrew discovery path;
-`CRYPTOGRAPHY_OPENSSL_REQUIRED=1` was set, so missing supported cross-checks
-could not silently count as success. The helper's explicit exception for modes
-unavailable through `openssl enc` remains part of that test contract.
+| Check | Result |
+|---|---|
+| `cargo test --offline --locked --release --all-targets` | 1,620 passed, 19 ignored |
+| Same `--all-features` | 1,620 passed, 19 ignored |
+| `cargo test --offline --locked --release --doc` | 57 passed |
+| `cargo +1.87 check --offline --locked --all-targets` | Passed |
+| Current R `verdict` with incomplete/invalid vectors | C1 reproduced |
+| Public ElGamal character-recovery experiment | 440/440 exact matches |
+| Recount of retained null CSV | C5 table reproduced |
 
-```bash
-cargo generate-lockfile --offline
-CRYPTOGRAPHY_OPENSSL_REQUIRED=1 cargo test --offline --locked --release --all-targets
-CRYPTOGRAPHY_OPENSSL_REQUIRED=1 cargo test --offline --locked --release --all-features --all-targets
-cargo test --offline --locked --release --doc
-```
-
-Both all-target runs: **1,619 passed, 19 ignored**. Doctests: **57 passed**.
-All features here means `ct_profile` and `arm-sha3` on this ARM64 host;
-compilation alone does not show that a runtime-dispatched hardware branch was
-taken. No ignored-test campaign, fuzz campaign, x86 build, MSRV run, companion
-fast-crate build or timing certification was repeated in this pass.
-
-The calibration recount is reproducible without regenerating random streams:
-
-```python
-import csv, gzip
-names = ['byte_chisq', 'ks', 'serial', 'gap', 'permutation', 'bartlett', 'runs']
-counts = dict.fromkeys(names + ['any'], 0)
-rows = 0
-with gzip.open('scripts/null_calibration/pvalues.csv.gz', 'rt') as stream:
-    for row in csv.DictReader(stream):
-        rows += 1
-        values = [float(row[name]) for name in names]
-        for name, value in zip(names, values):
-            counts[name] += value < 0.001 / 7
-        counts['any'] += min(values) < 0.001 / 7
-print(rows, counts)
-```
+All features means `ct_profile` and `arm-sha3` on this ARM64 host. These runs
+are functional evidence, not a new assembly/timing review. No fresh full fuzz
+campaign, ignored-test campaign, x86/Linux build or companion-fast-crate benchmark
+was run. Existing campaign and remote-host reports remain separately dated
+records; their results are not added to the fresh counts above.
 
 ## Cross-repository contracts
 
-| Owner | Contract and consumers |
+| Owner | Obligation at the boundary |
 |---|---|
-| [rump](../rump/AUDIT.md) | Exact integer/field arithmetic and matrix identities; numerical approximations identify their domain and error. Used by all three companions. |
-| [cryptography](../cryptography/AUDIT.md) | Scheme validation, entropy requirements, secret handling and timing properties. Enables rump's `wipe`; that feature does not make arithmetic constant-time. |
-| [entropy](../entropy/AUDIT.md) | The statistic, input projection, null distribution and calibrated decision rule. A statistical PASS is not a security claim. |
-| [factoring](../factoring/AUDIT.md) | Relation identities, matrix expansion and verified divisors. Uses entropy without default features; probable-prime leaves remain distinguished from proved primes. |
+| [rump](../rump/AUDIT.md) | Exact arithmetic and matrix identities; numerical domains, error and convergence; explicit search completion. |
+| [cryptography](../cryptography/AUDIT.md) | Scheme-specific validation, randomness requirements, confidentiality/authentication profiles, timing and secret handling. |
+| [entropy](../entropy/AUDIT.md) | Explicit input view, statistic, null law, calibrated decision and complete report; a statistical pass is not a security claim. |
+| [factoring](../factoring/AUDIT.md) | Exact relation identities and dependency expansion, verified proper divisors, measured selection cost; probable-prime leaves are not proofs. |
 
-The links assume the repositories are sibling checkouts. Mathematical kernels
-belong with their owner; consumers add their own preconditions and verify
-results at the boundary. With cryptography enabled, Cargo unifies rump's
-`wipe` feature across the dependency graph. Factoring alone was checked with
-`cargo tree --offline --locked -e features -i rust-mp`: no `wipe` and no active
-cryptography dependency.
+The links assume sibling checkouts. Cryptography enables rump's additive `wipe`
+feature. Entropy default inherits it; entropy minimal and factoring alone do
+not. The same rump version string can therefore describe different timing and
+allocation costs. Record the resolved dependency revisions, lockfiles,
+features, compiler and target alongside results.
 
-Implementation work starts from papers, specifications and mathematical
-derivations. A citation identifies the exact equation or algorithm, and the
-implementation states its representation, hypotheses and invariants. Numerical
-tables need a derivation or a precisely identified standard table. Published
-answer files are test data; another implementation's source is not an
-implementation reference. A passing round trip alone cannot validate two
-functions that share the same mistake.
+Implementations start from papers, specifications and mathematical derivations.
+State the equation, representation, hypotheses and invariant. Derive numerical
+tables reproducibly and separate approximation error from floating evaluation.
+Use published answer files and independently constructed oracles for checks;
+another implementation's source is not an implementation reference. A round
+trip alone cannot detect a shared error in its two halves.

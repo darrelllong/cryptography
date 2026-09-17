@@ -345,6 +345,15 @@ This is still multiplicative ElGamal, not one of the additive homomorphic
 variants. The native plaintext group law is multiplication modulo `p`; the byte
 helpers are only a serialization layer over that arithmetic.
 
+It is raw ElGamal and not a message-encryption scheme: it is malleable
+($(\gamma, c\delta)$ decrypts to $cm$), and every ciphertext publishes a class
+of the message. Under a subgroup key $\delta^q = m^q$ gives the message's coset
+of the order-$q$ subgroup; under a safe-prime key the public quadratic
+characters give $\chi(m) = \chi(\delta)$ when $\chi(y) = 1$ and
+$\chi(m) = \chi(\delta)\chi(\gamma)$ otherwise. Protecting messages needs a
+specified KEM, KDF and AEAD composition, which the crate does not provide; the
+test `raw_ciphertexts_publish_the_message_class` pins both identities.
+
 #### DSA
 
 Reference: FIPS 186-4, Digital Signature Standard (`pubs/fips186-4.pdf`).

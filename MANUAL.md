@@ -822,6 +822,10 @@ assert!(public.verify_message::<Sha256>(b"message", &sig));
 
 #### ElGamal, Paillier, and the educational schemes
 
+These are raw arithmetic schemes, not message-encryption schemes: raw ElGamal
+ciphertexts are malleable and publish the message's quadratic character or
+subgroup coset (see `ASYMMETRIC.md`), and none of them carries a KDF or AEAD.
+
 Normal APIs:
 
 - `ElGamalPublicKey::encrypt(...)`
