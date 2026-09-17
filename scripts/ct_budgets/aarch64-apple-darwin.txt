@@ -1,22 +1,29 @@
 # Unclassified branches a reading accounted for, per claim, on
-# aarch64-apple-darwin. Read under rustc 1.93.1.
+# aarch64-apple-darwin. Read under rustc 1.93.1 and 1.98.1; the counts are the
+# largest each claim has shown across those compilers and builds. How much of a
+# claim's callees end up inlined into it varies — SHA-256's finalisation into
+# the tag comparison, CAST-128's and SEED's key schedules into their block
+# functions — and a build that inlines more sees more of the same public-value
+# branches: the round counts, the encoding widths and the path selectors that
+# the claims table in scripts/ct_codegen.sh names.
 #
 # `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
-tag-comparison 2
+tag-comparison 3
 aes128-ct 0
 camellia128-ct 0
-cast128-ct 8
+cast128-ct 20
 des-ct 0
 grasshopper-ct 0
 magma-ct 0
 present80-ct 0
-seed-ct 0
+seed-ct 1
 sm4-ct 0
 twofish128-ct 13
 serpent128 0
 x25519-ladder 1
 x448-ladder 3
 x25519-agree 1
+ml-kem-decaps 26
 chacha20-keystream 16
 poly1305-mac 2
 chacha20poly1305-open 4

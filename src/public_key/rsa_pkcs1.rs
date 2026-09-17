@@ -280,7 +280,7 @@ impl<H: Digest> RsaOaep<H> {
             let take_separator = before_separator & is_one;
             let mask = ct_mask_to_usize(take_separator);
             let candidate_idx = h_len + idx + 1;
-            msg_idx = (msg_idx & !mask) | (candidate_idx & mask);
+            msg_idx = crate::ct::select_usize(mask, candidate_idx, msg_idx);
             saw_separator |= take_separator;
         }
 

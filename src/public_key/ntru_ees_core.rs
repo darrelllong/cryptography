@@ -530,8 +530,7 @@ fn ct_ge(a: u32, b: u32) -> u32 {
 /// `if_one` when `bit == 1`, `if_zero` when `bit == 0`.
 #[inline]
 fn ct_select(bit: u32, if_one: u32, if_zero: u32) -> u32 {
-    let mask = bit.wrapping_neg();
-    (if_one & mask) | (if_zero & !mask)
+    crate::ct::select_u32(bit.wrapping_neg(), if_one, if_zero)
 }
 
 /// Lift `a ∈ [0, q)` into `[−q/2, q/2)` and reduce mod 3 into `{0, 1, 2}`

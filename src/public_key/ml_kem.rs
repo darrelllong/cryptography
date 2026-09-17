@@ -1835,7 +1835,7 @@ fn ml_kem_decaps_internal(
     // Lines 9–11: K′ if c = c′, else K̄, selected by mask.
     let mut equal = crate::ct::constant_time_eq_mask(c, &c_prime);
     for ((out, &good), &reject) in shared_key.iter_mut().zip(&k_prime).zip(&k_bar) {
-        *out = (good & equal) | (reject & !equal);
+        *out = crate::ct::select_u8(equal, good, reject);
     }
     crate::ct::zeroize_slice(core::slice::from_mut(&mut equal));
     crate::ct::zeroize_slice(c_prime.as_mut_slice());

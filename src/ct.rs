@@ -325,20 +325,30 @@ pub(crate) fn ct_lookup_u8_16(table: &[u8; 16], idx: u8) -> u8 {
 // Mask-driven selection
 // ---------------------------------------------------------------------------
 
-/// Returns `chosen` where `mask` has one bits and `other` where it has zeros;
-/// `mask` is all ones or all zeros.
+/// Selection under an all-ones or all-zeros mask, one function per width.
 ///
-/// The mask goes through `black_box` first. Written plainly, a selection whose
-/// mask comes from a borrow or a comparison is a pattern LLVM recognises and
-/// may emit as a conditional branch, which is what it did to the X25519 field
-/// canonicalisation: the branch then tests the secret the selection was there
-/// to protect. `scripts/ct_codegen.sh` is what catches that, and this is what
-/// keeps it from coming back.
-#[inline]
-pub(crate) fn select_u64(mask: u64, chosen: u64, other: u64) -> u64 {
-    let mask = black_box(mask);
-    (chosen & mask) | (other & !mask)
+/// Each takes the mask through `black_box` first. Written plainly, a selection
+/// whose mask comes from a borrow or a comparison is a pattern LLVM
+/// recognises and may rewrite: in the X25519 field canonicalisation it became
+/// a conditional branch on the value being encoded, and in ML-KEM's implicit
+/// rejection it became a `csel` between two addresses followed by a load, so
+/// the address read depended on whether the ciphertext was well formed.
+/// `scripts/ct_codegen.sh` is what catches such a rewrite; the barrier is what
+/// keeps it from happening.
+macro_rules! define_select {
+    ($name:ident, $type:ty) => {
+        #[inline]
+        pub(crate) fn $name(mask: $type, chosen: $type, other: $type) -> $type {
+            let mask = black_box(mask);
+            (chosen & mask) | (other & !mask)
+        }
+    };
 }
+
+define_select!(select_u8, u8);
+define_select!(select_u32, u32);
+define_select!(select_u64, u64);
+define_select!(select_usize, usize);
 
 // ---------------------------------------------------------------------------
 // Slice equality

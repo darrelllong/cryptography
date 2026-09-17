@@ -10,6 +10,13 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Fixed
+- ML-KEM's implicit rejection selected the shared secret with a mask, which
+  the compiler rewrote into a conditional move between two stack addresses
+  followed by a load: the address read then depended on whether the ciphertext
+  was well formed. It now goes through `ct::select_u8`, whose barrier keeps
+  the selection arithmetic. NTRU's `ct_select` and the OAEP message-index
+  selection take the same route. `scripts/ct_codegen.sh` found this once the
+  claim covered ML-KEM decapsulation.
 - X25519's field canonicalisation was compiled into a conditional branch on
   the value being encoded. `fe_to_bytes` subtracts `p` under a mask built from
   the borrow, which the source writes branch-free, but under rustc 1.93.1 on

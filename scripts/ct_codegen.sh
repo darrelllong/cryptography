@@ -162,6 +162,7 @@ claims=(
     "x25519-ladder:X255196scalar|X25519.*scalar_mult"
     "x448-ladder:X4486scalar|X448.*scalar_mult"
     "x25519-agree:x25519_agree|X25519PrivateKey.*agree:d0"
+    "ml-kem-decaps:ml_kem_decaps|ml_kem_decaps_internal:d0"
     "chacha20-keystream:chacha20_keystream|ChaCha2015apply_keystream"
     "poly1305-mac:poly1305_one_shot|modes8poly130512poly1305_mac"
     "chacha20poly1305-open:chacha20poly1305_open|ChaCha20Poly1305.*decrypt_in_place:d0"

@@ -7,7 +7,10 @@
 
 use cryptography::modes::chacha20_poly1305::ChaCha20Poly1305;
 use cryptography::ChaCha20;
-use cryptography::vt::{X25519, X25519PrivateKey, X25519PublicKey, X448};
+use cryptography::vt::{
+    MlKem, MlKemCiphertext, MlKemPrivateKey, MlKemSharedSecret, X25519, X25519PrivateKey,
+    X25519PublicKey, X448,
+};
 use cryptography::{
     Aes128Ct, Camellia128Ct, Cast128Ct, DesCt, GrasshopperCt, Hmac, MagmaCt, Present80Ct, SeedCt,
     Serpent128, Sha256, Sm4Ct, Twofish128Ct,
@@ -143,4 +146,16 @@ pub extern "Rust" fn serpent128_encrypt_block(key: &[u8; 16], block: &[u8; 16]) 
 #[no_mangle]
 pub extern "Rust" fn chacha20_keystream(key: &[u8; 32], nonce: &[u8; 12], data: &mut [u8]) {
     ChaCha20::new(key, nonce).apply_keystream(data);
+}
+
+/// ML-KEM decapsulation, including the implicit rejection of FIPS 203 §7.3
+/// lines 9–11: the shared secret is selected under a mask, and the selection
+/// must not become a branch on whether the ciphertext was well formed.
+#[inline(never)]
+#[no_mangle]
+pub extern "Rust" fn ml_kem_decaps(
+    key: &MlKemPrivateKey,
+    ciphertext: &MlKemCiphertext,
+) -> Option<MlKemSharedSecret> {
+    MlKem::decaps(key, ciphertext)
 }
