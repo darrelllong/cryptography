@@ -121,6 +121,12 @@ const Q: u32 = 3329;
 const SYM_BYTES: usize = 32;
 const SS_BYTES: usize = 32;
 const POLY_BYTES: usize = 384;
+/// Bits per coefficient in a full-precision encoding: `⌈log₂ q⌉ = 12`
+/// (FIPS 203 §2, ByteEncode₁₂).
+const COEFF_BITS: usize = 12;
+/// `PRF_η` output is `64·η` bytes (FIPS 203 §4.1), and η is at most 3.
+const PRF_BYTES_PER_ETA: usize = 64;
+const MAX_ETA: usize = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Profile {
@@ -1171,10 +1177,10 @@ const fn pow_mod_q(base: u32, mut exponent: u32) -> u32 {
 }
 
 /// The table ζ^(scale·BitRev7(i) + offset) mod q for i = 0, …, 127.
-const fn zeta_power_table(scale: u32, offset: u32) -> [u16; 128] {
-    let mut table = [0u16; 128];
+const fn zeta_power_table(scale: u32, offset: u32) -> [u16; N / 2] {
+    let mut table = [0u16; N / 2];
     let mut i = 0;
-    while i < 128 {
+    while i < N / 2 {
         table[i] = pow_mod_q(ZETA, scale * bit_rev7(i) as u32 + offset) as u16;
         i += 1;
     }
@@ -1184,11 +1190,11 @@ const fn zeta_power_table(scale: u32, offset: u32) -> [u16; 128] {
 /// ζ^BitRev7(i) mod q for i = 0, …, 127, the constants of line 5 of
 /// Algorithms 9 and 10 (FIPS 203 §4.3). Generated from ζ at compile time;
 /// `ml_kem_ntt_tables_match_fips203_appendix_a` compares it with Appendix A.
-const NTT_ZETAS: [u16; 128] = zeta_power_table(1, 0);
+const NTT_ZETAS: [u16; N / 2] = zeta_power_table(1, 0);
 
 /// ζ^(2·BitRev7(i)+1) mod q for i = 0, …, 127: the γ with X^2 − γ the i-th
 /// quadratic factor of X^256 + 1 (FIPS 203 (4.10)), as Algorithm 11 uses it.
-const MULTIPLY_GAMMAS: [u16; 128] = zeta_power_table(2, 1);
+const MULTIPLY_GAMMAS: [u16; N / 2] = zeta_power_table(2, 1);
 
 /// 128^(−1) mod q = 3303, the final scale of NTT⁻¹ (Algorithm 10, line 14),
 /// computed as 128^(q−2) mod q (Fermat's little theorem, q prime).
@@ -1213,7 +1219,7 @@ fn byte_encode(d: usize, f: &ZqArray, out: &mut [u8]) {
     let mut pending_bits = 0usize;
     let mut next = 0usize;
     for &entry in f {
-        debug_assert!(u32::from(entry) < if d == 12 { Q } else { 1 << d });
+        debug_assert!(u32::from(entry) < if d == COEFF_BITS { Q } else { 1 << d });
         pending |= u32::from(entry) << pending_bits;
         pending_bits += d;
         while pending_bits >= 8 {
@@ -1253,7 +1259,11 @@ fn byte_decode(d: usize, bytes: &[u8]) -> ZqArray {
         let field = pending & field_mask;
         pending >>= d;
         pending_bits -= d;
-        let value = if d == 12 { reduce_once(field) } else { field };
+        let value = if d == COEFF_BITS {
+            reduce_once(field)
+        } else {
+            field
+        };
         *entry = value as u16;
     }
     f
@@ -1317,7 +1327,7 @@ fn decompress(d: usize, f: &ZqArray) -> ZqArray {
 /// PRF_η(s, b) = SHAKE256(s ‖ b, 8·64·η) (FIPS 203 (4.2)–(4.3)), written to
 /// `out`, which must hold exactly 64·η bytes.
 fn prf(eta: usize, s: &[u8; SYM_BYTES], b: u8, out: &mut [u8]) {
-    debug_assert_eq!(out.len(), 64 * eta);
+    debug_assert_eq!(out.len(), PRF_BYTES_PER_ETA * eta);
     let mut xof = Shake256::new();
     xof.update(s);
     xof.update(&[b]);
@@ -1378,8 +1388,8 @@ fn sample_poly_cbd(eta: usize, b: &[u8]) -> ZqArray {
 /// SamplePolyCBD_η(PRF_η(seed, nonce)), the noise draw of Algorithm 13 (lines
 /// 9, 13) and Algorithm 14 (lines 10, 14, 17). The PRF output is wiped.
 fn sample_poly_cbd_prf(eta: usize, seed: &[u8; SYM_BYTES], nonce: u8) -> ZqArray {
-    let mut buf = [0u8; 64 * 3];
-    let bytes = &mut buf[..64 * eta];
+    let mut buf = [0u8; PRF_BYTES_PER_ETA * MAX_ETA];
+    let bytes = &mut buf[..PRF_BYTES_PER_ETA * eta];
     prf(eta, seed, nonce, bytes);
     let f = sample_poly_cbd(eta, bytes);
     crate::ct::zeroize_slice(&mut buf);

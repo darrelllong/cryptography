@@ -145,6 +145,14 @@ use crate::public_key::pkix::{
 use crate::Csprng;
 
 /// n = 256, the number of coefficients of a polynomial in R and R_q (§2.3).
+/// Bits in a byte, the width every packing here fills.
+const BYTE_BITS: u32 = 8;
+
+/// CoeffFromHalfByte (FIPS 204 Algorithm 15) rejects a half-byte at or above
+/// `5⌈(2η + 1)/5⌉` for η = 2, and at or above `2η + 1` for η = 4.
+const ETA2_REJECT_BOUND: i32 = 15;
+const ETA4_REJECT_BOUND: i32 = 9;
+
 const N: usize = 256;
 /// Algorithms 2 and 3 refuse context strings longer than 255 bytes.
 const MAX_CONTEXT_BYTES: usize = u8::MAX as usize;
@@ -1887,8 +1895,8 @@ const fn pow_mod_q(base: i32, mut exponent: u32) -> i32 {
 const fn bit_rev8(m: u8) -> u8 {
     let mut reversed = 0u8;
     let mut i = 0;
-    while i < 8 {
-        reversed |= ((m >> i) & 1) << (7 - i);
+    while i < BYTE_BITS as u8 {
+        reversed |= ((m >> i) & 1) << (BYTE_BITS as u8 - 1 - i);
         i += 1;
     }
     reversed
@@ -1914,7 +1922,7 @@ const NTT_INVERSE_SCALE: i32 = pow_mod_q(N as i32, (Q - 2) as u32);
 /// NTT (Algorithm 41), in place on coefficients in [0, q).
 fn ntt(w: &mut Poly) {
     let mut m = 0;
-    let mut len = 128;
+    let mut len = N / 2;
     while len >= 1 {
         let mut start = 0;
         while start < N {
@@ -2059,11 +2067,11 @@ impl<'a> BitStringWriter<'a> {
     fn integer_to_bits(&mut self, x: u32, alpha: u32) {
         self.pending |= (u64::from(x) & ((1u64 << alpha) - 1)) << self.pending_bits;
         self.pending_bits += alpha;
-        while self.pending_bits >= 8 {
+        while self.pending_bits >= BYTE_BITS {
             self.bytes[self.next_byte] = self.pending as u8;
             self.next_byte += 1;
-            self.pending >>= 8;
-            self.pending_bits -= 8;
+            self.pending >>= BYTE_BITS;
+            self.pending_bits -= BYTE_BITS;
         }
     }
 
@@ -2129,10 +2137,10 @@ const DIVIDE_HALF_BYTE_BY_5: FloorDivision = FloorDivision::derive(5, 15);
 #[inline(always)]
 fn coeff_from_half_byte(eta: i32, b: u8) -> Option<i32> {
     let b = i32::from(b);
-    if eta == 2 && b < 15 {
+    if eta == 2 && b < ETA2_REJECT_BOUND {
         let quotient = DIVIDE_HALF_BYTE_BY_5.quotient(b as u64) as i32;
         Some(2 - (b - 5 * quotient))
-    } else if eta == 4 && b < 9 {
+    } else if eta == 4 && b < ETA4_REJECT_BOUND {
         Some(4 - b)
     } else {
         None

@@ -61,6 +61,19 @@ use rump::BigUint;
 /// Each round independently catches a composite with probability ≥ 3/4
 /// (Rabin), so forging a value that survives all of them requires grinding on
 /// the order of `4^64 = 2^128` candidates — infeasible.
+/// Candidates of at most this width are decided exactly by rump's sieve and
+/// the twelve fixed bases, below which no witness derivation is needed.
+const SMALL_CANDIDATE_BITS: usize = 10;
+
+/// Bits in a byte, for the seed lengths FIPS 186-4 Appendix A states in bits.
+const BYTE_BITS: usize = 8;
+
+/// A toy group's subgroup is a quarter of the modulus, kept inside the range
+/// the generator can actually search, and each subgroup order gets this many
+/// cofactor attempts before a fresh one is drawn.
+const TOY_SUBGROUP_BITS: core::ops::RangeInclusive<usize> = 16..=256;
+const TOY_COFACTOR_ATTEMPTS: usize = 256;
+
 const HARDENED_HASH_ROUNDS: usize = 64;
 
 /// How many per-message secrets `k` a signer tries before it gives up on a
@@ -133,7 +146,7 @@ pub fn is_probable_prime_untrusted(candidate: &BigUint) -> bool {
     // multiples, and the twelve fixed bases are a proof for everything else
     // below ψ₁₂ ≈ 3.19 × 10^23. Such a candidate also sits below the range
     // the witness derivation assumes (its map into [2, n-2] needs n > 4).
-    if candidate.bits() <= 10 {
+    if candidate.bits() <= SMALL_CANDIDATE_BITS {
         return true;
     }
 
@@ -450,7 +463,7 @@ impl FfcSeed {
     /// `seedlen`, the bit length of the seed.
     #[must_use]
     pub fn seedlen(&self) -> usize {
-        self.domain_parameter_seed.len() * 8
+        self.domain_parameter_seed.len() * BYTE_BITS
     }
 
     /// The `counter` A.1.1.2 returned: how many candidates for `p` preceded
@@ -500,7 +513,7 @@ fn is_probable_prime_fips186_4<R: Csprng>(candidate: &BigUint, rounds: usize, rn
     }
     // Sieve-sized candidates are already decided exactly, and sit below the
     // range the base draw needs (w > 3).
-    if candidate.bits() <= 10 {
+    if candidate.bits() <= SMALL_CANDIDATE_BITS {
         return true;
     }
     let two = BigUint::from_u64(2);
@@ -1189,12 +1202,12 @@ fn generate_toy_prime_order_group<R: Csprng>(
     if !TOY_GROUP_BITS.contains(&bits) {
         return None;
     }
-    let subgroup_bits = (bits / 4).clamp(16, 256);
+    let subgroup_bits = (bits / 4).clamp(*TOY_SUBGROUP_BITS.start(), *TOY_SUBGROUP_BITS.end());
     let cofactor_bits = bits - subgroup_bits;
     let one = BigUint::one();
     loop {
         let q = random_probable_prime(rng, subgroup_bits)?;
-        for _ in 0..256 {
+        for _ in 0..TOY_COFACTOR_ATTEMPTS {
             let cofactor = random_even_with_bits(rng, cofactor_bits)?;
             let p = cofactor.mul(&q).add(&one);
             if p.bits() != bits || !is_probable_prime(&p) {
