@@ -90,16 +90,11 @@ const WARMUP: usize = 10_000;
 const CROPS: [u32; 10] = [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100];
 /// dudect's decision threshold on |t|.
 const THRESHOLD: f64 = 4.5;
-/// The fixed class's inputs: arbitrary constants, not all-zero. A degenerate
-/// input can be faster for reasons that have nothing to do with a branch on a
-/// secret — a multiplier that shortcuts zero operands, for one — and that
-/// would be a difference in the data, not in the code under test.
+/// Dense inputs, every byte different from the next: one side of the pairs
+/// whose other side is degenerate, and the ordinary value where a pair holds
+/// two ordinary ones.
 const FIXED_KEY: [u8; 32] = *b"ct_timing fixed class key bytes.";
 const FIXED_BLOCK: [u8; 16] = *b"fixed block 0123";
-/// A second fixed input, for the pairs that hold both classes fixed. A class
-/// that repeats one value sees caches and predictors in the same state every
-/// time, which a class of fresh random values does not; comparing two fixed
-/// values removes that difference and leaves only the values themselves.
 const OTHER_KEY: [u8; 32] = *b"ct_timing other fixed class key.";
 
 /// A point of small order on Curve25519: `u = 1`, whose ladder output is the
@@ -223,31 +218,25 @@ impl Coin {
         out
     }
 
-    fn fill(&mut self, out: &mut [u8]) {
-        for byte in out.iter_mut() {
-            *byte = self.byte();
-        }
-    }
-
     /// One fair bit, as a class index.
     fn class(&mut self) -> usize {
         usize::from(self.byte() & 1)
     }
 }
 
-/// Run one experiment: `prepare` builds the inputs for a class outside the
-/// timed span, `run` is what gets timed.
+/// Run one experiment: `prepare` builds a class's input outside the timed
+/// span, `run` is what gets timed, and the coin picks the class.
 fn experiment<T>(
     name: &str,
     classes: [&str; 2],
     coin: &mut Coin,
-    mut prepare: impl FnMut(usize, &mut Coin) -> T,
+    mut prepare: impl FnMut(usize) -> T,
     mut run: impl FnMut(&T),
 ) -> (f64, u32) {
     let mut samples = Samples::new();
     for i in 0..MEASUREMENTS {
         let class = coin.class();
-        let input = prepare(class, coin);
+        let input = prepare(class);
         let start = Instant::now();
         run(black_box(&input));
         let elapsed = start.elapsed().as_nanos() as f64;
@@ -331,7 +320,7 @@ fn main() {
         "control: early-exit compare",
         ["differs at byte 0", "differs at byte 31"],
         &mut coin,
-        |class, _| {
+        |class| {
             let mut tag = [0u8; 32];
             tag.copy_from_slice(if class == 0 { &tag_first } else { &tag_last });
             tag
@@ -350,7 +339,7 @@ fn main() {
         "control: identical classes",
         ["differs at byte 31", "differs at byte 31"],
         &mut coin,
-        |_, _| {
+        |_| {
             let mut tag = reference;
             let last = tag.len() - 1;
             tag[last] ^= 0xff;
@@ -370,7 +359,7 @@ fn main() {
         "Hmac::<Sha256>::verify",
         ["differs at byte 0", "differs at byte 31"],
         &mut coin,
-        |class, _| {
+        |class| {
             let mut tag = [0u8; 32];
             tag.copy_from_slice(if class == 0 { &tag_first } else { &tag_last });
             tag
@@ -389,27 +378,14 @@ fn main() {
         "Aes128Ct::encrypt_block",
         ["all-zero key and block", "dense key and block"],
         &mut coin,
-        |class, coin| {
-            // Both classes do the same work before the timed span: draw the
-            // same bytes, then copy once from the class's source. The key
-            // schedule is built here too, so what is timed is the block
-            // function alone.
-            let mut drawn_key = [0u8; 16];
-            let mut drawn_block = [0u8; 16];
-            coin.fill(&mut drawn_key);
-            coin.fill(&mut drawn_block);
+        |class| {
+            // Both classes copy one fixture, so what precedes the timed span
+            // is the same work either way. The key schedule is built here too,
+            // so what is timed is the block function alone.
             let mut key = [0u8; 16];
             let mut block = [0u8; 16];
-            key.copy_from_slice(if class == 0 {
-                &[0u8; 16]
-            } else {
-                &FIXED_KEY[..16]
-            });
-            block.copy_from_slice(if class == 0 {
-                &[0u8; 16]
-            } else {
-                &FIXED_BLOCK
-            });
+            key.copy_from_slice(if class == 0 { &[0u8; 16] } else { &FIXED_KEY[..16] });
+            block.copy_from_slice(if class == 0 { &[0u8; 16] } else { &FIXED_BLOCK });
             (Aes128Ct::new(&key), block)
         },
         |(cipher, block)| {
@@ -430,9 +406,7 @@ fn main() {
         "X25519::scalar_mult",
         ["scalar of zero bytes", "dense scalar"],
         &mut coin,
-        |class, coin| {
-            let mut drawn = [0u8; 32];
-            coin.fill(&mut drawn);
+        |class| {
             let mut scalar = [0u8; 32];
             scalar.copy_from_slice(if class == 0 { &[0u8; 32] } else { &FIXED_KEY });
             scalar
@@ -452,9 +426,7 @@ fn main() {
         "X25519::scalar_mult (two fixed)",
         ["fixed scalar A", "fixed scalar B"],
         &mut coin,
-        |class, coin| {
-            let mut drawn = [0u8; 32];
-            coin.fill(&mut drawn);
+        |class| {
             let mut scalar = [0u8; 32];
             scalar.copy_from_slice(if class == 0 { &FIXED_KEY } else { &OTHER_KEY });
             scalar
@@ -475,9 +447,7 @@ fn main() {
         "X25519::scalar_mult (point)",
         ["low-order point", "ordinary point"],
         &mut coin,
-        |class, coin| {
-            let mut drawn = [0u8; 32];
-            coin.fill(&mut drawn);
+        |class| {
             let mut u = [0u8; 32];
             u.copy_from_slice(if class == 0 { &LOW_ORDER_POINT } else { &base });
             u
@@ -496,7 +466,7 @@ fn main() {
         "Hmac::<Sha256>::verify (middle)",
         ["differs at byte 15", "differs at byte 31"],
         &mut coin,
-        |class, _| {
+        |class| {
             let mut tag = [0u8; 32];
             tag.copy_from_slice(if class == 0 { &tag_middle } else { &tag_last });
             tag
@@ -527,13 +497,9 @@ fn main() {
         "MlKem::decaps",
         ["well-formed ciphertext", "tampered ciphertext"],
         &mut coin,
-        |class, coin| {
-            let mut position = [0u8; 8];
-            coin.fill(&mut position);
+        |class| {
             let mut wire = good_wire.clone();
             if class == 1 {
-                // A fixed position, so this class repeats one ciphertext as
-                // the other does.
                 wire[0] ^= 1;
             }
             MlKemCiphertext::from_wire_bytes(MlKemParameterSet::MlKem768, &wire)
