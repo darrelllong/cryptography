@@ -841,26 +841,45 @@ mod tests {
     /// OpenSSL reads the BER forms of the PKCS #8 key, the `RSAPrivateKey`
     /// inside in BER too, as the key the DER form encodes.
     ///
-    /// OpenSSL 3.0 refuses one of them with `ASN1_get_object: header too
-    /// long`: the `rsaEncryption` NULL written with three length octets,
-    /// `05 83 00 00 00`, which X.690 §8.1.3.5 permits. It reads the NULL with
-    /// one length octet, and OpenSSL 3.6 reads both. On OpenSSL 3.0 that
-    /// refusal is reported and the other forms are checked.
+    /// Some OpenSSL releases refuse one form element that X.690 §8.1.3.5
+    /// permits: the `rsaEncryption` NULL written with three length octets,
+    /// `05 83 00 00 00` (3.0.13 and 3.5.5 refuse it; 3.5.7 and 3.6.4 read it).
+    /// A probe decides which kind of tool is installed: a DER key whose only
+    /// non-DER element is that NULL. A tool that refuses the probe has its
+    /// refusal of the long-length styles reported rather than failed; a tool
+    /// that reads the probe must read every style.
     #[test]
     fn openssl_reads_the_ber_forms_as_the_same_key() {
         use crate::public_key::io::ber_forms::{reencode, STYLES};
-        use crate::public_key::pkix::OneAsymmetricKey;
-        use crate::test_utils::{openssl3, openssl3_pkcs8_der, OpenSslOutcome};
+        use crate::public_key::pkix::{AlgorithmIdentifier, OneAsymmetricKey, RSA_ENCRYPTION};
+        use crate::test_utils::{openssl3_pkcs8_der, OpenSslOutcome};
         const TEST: &str = "rsa_io::openssl_reads_the_ber_forms_as_the_same_key";
+        const LONG_NULL: &[u8] = &[0x05, 0x83, 0x00, 0x00, 0x00];
         let (_, private) = toy_key();
         let Some(expected) = openssl3_pkcs8_der("DER", &private.to_pkcs8_der()).or_skip(TEST)
         else {
             return;
         };
-        let Some(version) = openssl3(&["version"], b"").or_skip(TEST) else {
-            return;
+        let probe = OneAsymmetricKey::new(
+            AlgorithmIdentifier::new(&RSA_ENCRYPTION, Some(LONG_NULL)),
+            &private.to_pkcs1_der(),
+            None,
+        )
+        .to_der();
+        let refuses_long_null = match openssl3_pkcs8_der("DER", &probe) {
+            OpenSslOutcome::Output(read) => {
+                assert_eq!(read, expected, "long-length NULL probe");
+                false
+            }
+            OpenSslOutcome::Unsupported(reason) => {
+                eprintln!("{TEST}: installed openssl refuses a long-length NULL: {reason}");
+                true
+            }
+            OpenSslOutcome::Absent => {
+                OpenSslOutcome::Absent.or_skip(TEST);
+                return;
+            }
         };
-        let openssl_3_0 = version.starts_with(b"OpenSSL 3.0.");
         for style in STYLES {
             let inner = reencode(&private.to_pkcs1_der(), style);
             let ber = reencode(
@@ -868,9 +887,9 @@ mod tests {
                 style,
             );
             let outcome = openssl3_pkcs8_der("DER", &ber);
-            if let (true, OpenSslOutcome::Unsupported(reason)) = (openssl_3_0, &outcome) {
-                if style.length_octets > 1 {
-                    eprintln!("{TEST}: OpenSSL 3.0 refuses {style:?}: {reason}");
+            if refuses_long_null && style.length_octets > 1 {
+                if let OpenSslOutcome::Unsupported(reason) = &outcome {
+                    eprintln!("{TEST}: refused as the probe was, {style:?}: {reason}");
                     continue;
                 }
             }

@@ -747,12 +747,15 @@ mod tests {
     /// Timing experiment: comparing equal-length slices that differ only at
     /// byte 0 must cost the same as ones that differ only at the last byte.
     /// An early-exit compare would finish the first case in one step and the
-    /// second in `n`; this loop measures many repetitions of each and requires
-    /// the ratio of the two means to stay within `TOLERANCE`.
+    /// second in `n`. The two cases are sampled alternately, `SAMPLES` times
+    /// each, and the ratio of their fastest samples must stay within
+    /// `TOLERANCE`. Other load on the host only lengthens a sample, so the
+    /// fastest is the one closest to the work itself; an early exit shortens
+    /// every sample of the first case, including its fastest.
     ///
-    /// The tolerance covers scheduler and cache noise on a shared machine,
-    /// not a real early exit: with `LEN = 4096` an early exit at byte 0
-    /// would be hundreds of times faster, far outside a 25 % band. Run in
+    /// The tolerance covers cache and frequency noise, not a real early exit:
+    /// with `LEN = 4096` an early exit at byte 0 would be hundreds of times
+    /// faster, far outside a 25 % band. Run in
     /// release only (`cargo test --release --lib -- --ignored
     /// constant_time_eq_mask_timing`); a debug build's overflow checks and
     /// unoptimised loop measure the compiler, not the algorithm.
@@ -761,7 +764,8 @@ mod tests {
     fn constant_time_eq_mask_timing_is_length_only() {
         use std::time::Instant;
         const LEN: usize = 4096;
-        const ROUNDS: usize = 20_000;
+        const ROUNDS: usize = 2_000;
+        const SAMPLES: usize = 101;
         const TOLERANCE: f64 = 0.25;
 
         let reference = vec![0x5au8; LEN];
@@ -787,23 +791,23 @@ mod tests {
             elapsed / ROUNDS as f64
         };
 
-        // Warm both paths, then interleave the measurements so a frequency
-        // change during the run lands on both sides.
+        // Warm both paths, then interleave the samples so a frequency change
+        // during the run lands on both sides.
         time(&differs_first);
         time(&differs_last);
-        let mut first_total = 0.0;
-        let mut last_total = 0.0;
-        for _ in 0..5 {
-            first_total += time(&differs_first);
-            last_total += time(&differs_last);
+        let mut first_fastest = f64::INFINITY;
+        let mut last_fastest = f64::INFINITY;
+        for _ in 0..SAMPLES {
+            first_fastest = first_fastest.min(time(&differs_first));
+            last_fastest = last_fastest.min(time(&differs_last));
         }
-        let ratio = first_total / last_total;
+        let ratio = first_fastest / last_fastest;
         eprintln!(
-            "constant_time_eq_mask over {LEN} bytes: differs at byte 0 {:.1} ns, \
-             differs at byte {} {:.1} ns, ratio {ratio:.3}",
-            first_total / 5.0 * 1e9,
+            "constant_time_eq_mask over {LEN} bytes, fastest of {SAMPLES} samples: \
+             differs at byte 0 {:.1} ns, differs at byte {} {:.1} ns, ratio {ratio:.3}",
+            first_fastest * 1e9,
             LEN - 1,
-            last_total / 5.0 * 1e9
+            last_fastest * 1e9
         );
         assert!(
             (ratio - 1.0).abs() <= TOLERANCE,

@@ -501,9 +501,10 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   runners carry. They ask for PKCS #8 with `pkcs8 -topk8 -nocrypt`
   (`test_utils::openssl3_pkcs8_der`), because OpenSSL 3.0's `pkey -outform
   DER` writes an EC, DSA or RSA key's traditional structure. The RSA BER
-  cross-check reports, rather than fails on, OpenSSL 3.0's refusal of the
-  `rsaEncryption` NULL written with three length octets. Measured against
-  OpenSSL 3.0.13 and 3.6.4.
+  cross-check first probes whether the installed tool reads the
+  `rsaEncryption` NULL written with three length octets (OpenSSL 3.0.13 and
+  3.5.5 do not; 3.5.7 and 3.6.4 do), and reports rather than fails that
+  form's refusal only where the probe was refused.
 - `R-REPORT.md` stated the battery's Bonferroni rule as an unconditional
   bound. It holds only when every p-value is valid under the null, and
   several tests take theirs from asymptotic laws, so α is reported as a
@@ -528,6 +529,11 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   Koblitz embedding does not promise: `EcElGamalPrivateKey::decrypt` returns
   the message without its leading zero bytes, as documented. The target
   compares against that.
+- The release-only `constant_time_eq_mask` timing experiment compared the
+  means of five samples per case, which contention on a busy host could
+  push past its 25 % band (ratio 4.55 during parallel builds). It compares
+  the fastest of 101 interleaved samples per case: ratios 0.988–1.016 over
+  ten runs at load 84 on 10 cores, and 0.001 against an early-exit compare.
 - The five tests that bound a refusal of oversized parameters by wall-clock
   time (DSA, EC, EdDSA, ElGamal, FFC groups) failed on a loaded host: one
   debug-build refusal took 69 ms against a 50 ms bound at load 200 on 128
