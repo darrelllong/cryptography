@@ -31,7 +31,18 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-target=${1:-$(rustc -vV | sed -n 's/^host: //p')}
+
+# Arguments: a target triple, and `--accept` to record what this run found as
+# the counts a reading accounts for.
+accept=no
+target_arg=""
+for arg in "$@"; do
+    case $arg in
+        --accept) accept=yes ;;
+        *) target_arg=$arg ;;
+    esac
+done
+target=${target_arg:-$(rustc -vV | sed -n 's/^host: //p')}
 probe=$root/scripts/ct_probe
 out=${CT_CODEGEN_OUT:-$root/target/ct-codegen}
 mkdir -p "$out"
@@ -136,39 +147,47 @@ echo "compiler: $(rustc -vV | sed -n 's/^release: /rustc /p')"
 #
 # None of them tests a key, a scalar, a tag or a plaintext byte.
 claims=(
-    "tag-comparison:verify_tag:2"
-    "aes128-ct:Aes128Ct.*encrypt_block:0"
-    "camellia128-ct:camellia128_ct_encrypt_block|Camellia128Ct.*encrypt_block:0"
-    "cast128-ct:cast128_ct_encrypt_block|Cast128Ct.*encrypt_block:8"
-    "des-ct:des_ct_encrypt_block|DesCt.*encrypt_block:0"
-    "grasshopper-ct:grasshopper_ct_encrypt_block|GrasshopperCt.*encrypt_block:0"
-    "magma-ct:magma_ct_encrypt_block|MagmaCt.*encrypt_block:0"
-    "present80-ct:present80_ct_encrypt_block|Present80Ct.*encrypt_block:0"
-    "seed-ct:seed_ct_encrypt_block|SeedCt.*encrypt_block:0"
-    "sm4-ct:sm4_ct_encrypt_block|Sm4Ct.*encrypt_block:0"
-    "twofish128-ct:twofish128_ct_encrypt_block|Twofish128Ct.*encrypt_block:13"
-    "serpent128:serpent128_encrypt_block|Serpent128.*encrypt_block:0"
-    "x25519-ladder:X255196scalar|X25519.*scalar_mult:1"
-    "x448-ladder:X4486scalar|X448.*scalar_mult:3"
-    "x25519-agree:x25519_agree|X25519PrivateKey.*agree:1:d0"
-    "chacha20-keystream:chacha20_keystream|ChaCha2015apply_keystream:16"
-    "poly1305-mac:poly1305_one_shot|modes8poly130512poly1305_mac:2"
-    "chacha20poly1305-open:chacha20poly1305_open|ChaCha20Poly1305.*decrypt_in_place:4:d0"
+    "tag-comparison:verify_tag"
+    "aes128-ct:Aes128Ct.*encrypt_block"
+    "camellia128-ct:camellia128_ct_encrypt_block|Camellia128Ct.*encrypt_block"
+    "cast128-ct:cast128_ct_encrypt_block|Cast128Ct.*encrypt_block"
+    "des-ct:des_ct_encrypt_block|DesCt.*encrypt_block"
+    "grasshopper-ct:grasshopper_ct_encrypt_block|GrasshopperCt.*encrypt_block"
+    "magma-ct:magma_ct_encrypt_block|MagmaCt.*encrypt_block"
+    "present80-ct:present80_ct_encrypt_block|Present80Ct.*encrypt_block"
+    "seed-ct:seed_ct_encrypt_block|SeedCt.*encrypt_block"
+    "sm4-ct:sm4_ct_encrypt_block|Sm4Ct.*encrypt_block"
+    "twofish128-ct:twofish128_ct_encrypt_block|Twofish128Ct.*encrypt_block"
+    "serpent128:serpent128_encrypt_block|Serpent128.*encrypt_block"
+    "x25519-ladder:X255196scalar|X25519.*scalar_mult"
+    "x448-ladder:X4486scalar|X448.*scalar_mult"
+    "x25519-agree:x25519_agree|X25519PrivateKey.*agree:d0"
+    "chacha20-keystream:chacha20_keystream|ChaCha2015apply_keystream"
+    "poly1305-mac:poly1305_one_shot|modes8poly130512poly1305_mac"
+    "chacha20poly1305-open:chacha20poly1305_open|ChaCha20Poly1305.*decrypt_in_place:d0"
 )
+# What a reading accounted for, per target: how a compiler lays the same source
+# out differs, so the counts are recorded per triple and `--accept` rewrites
+# them after a person has read the listing.
+budgets=$root/scripts/ct_budgets/$target.txt
+expected() {
+    [ -f "$budgets" ] || { echo 0; return; }
+    awk -v claim="$1" '$1 == claim { print $2; found = 1 } END { if (!found) print 0 }' "$budgets"
+}
 unread=0
+rm -f "$out/$target.budgets"
 for entry in "${claims[@]}"; do
     claim=${entry%%:*}
     rest=${entry#*:}
-    # name:pattern:budget[:dN], where dN is how far to follow this claim's own
-    # calls. A composite operation whose parts are claims of their own takes
-    # d0, so each piece is read once, where it is made.
+    # name:pattern[:dN], where dN is how far to follow this claim's own calls.
+    # A composite operation whose parts are claims of their own takes d0, so
+    # each piece is read once, where it is made.
     depth=${rest##*:}
     case $depth in
-        d[0-9]) depth=${depth#d}; rest=${rest%:*} ;;
-        *) depth=3 ;;
+        d[0-9]) depth=${depth#d}; pattern=${rest%:*} ;;
+        *) depth=3; pattern=$rest ;;
     esac
-    pattern=${rest%:*}
-    budget=${rest##*:}
+    budget=$(expected "$claim")
     # `set -o pipefail` would make a no-match exit the script before the
     # message below is printed.
     file=$(grep -lE "^[._a-zA-Z0-9\$]*($pattern)[._a-zA-Z0-9\$]*:" $asm | head -1 || true)
@@ -245,11 +264,22 @@ for entry in "${claims[@]}"; do
         echo 0 > "$body.unread"
     fi
     echo "  assembly: $body"
-    if [ "$(cat "$body.unread")" -gt "$budget" ]; then
-        echo "  UNREAD: $(cat "$body.unread") unclassified branches, $budget accounted for" >&2
+    found=$(cat "$body.unread")
+    printf '%s %s\n' "$claim" "$found" >> "$out/$target.budgets"
+    if [ "$found" -gt "$budget" ]; then
+        echo "  UNREAD: $found unclassified branches, $budget accounted for" >&2
         unread=1
     fi
 done
+
+if [ "$accept" = yes ]; then
+    mkdir -p "$(dirname "$budgets")"
+    mv "$out/$target.budgets" "$budgets"
+    echo
+    echo "recorded $(grep -c . "$budgets") claims in $budgets"
+    exit 0
+fi
+rm -f "$out/$target.budgets"
 
 [ "$unread" -eq 0 ] || {
     echo >&2
