@@ -142,7 +142,7 @@ impl ChaCha20Poly1305 {
     /// there are four: the length bound above, two zero-size tests before
     /// freeing the MAC input, and the authentication result deciding whether
     /// the keystream runs — which is the value this returns. The tag
-    /// comparison itself is the branch-free mask of [`crate::ct`]. Neither
+    /// comparison itself is the branch-free mask in `crate::ct`. Neither
     /// the key, the one-time key nor a tag byte reaches a branch.
     #[must_use]
     pub fn decrypt_in_place(
