@@ -13,6 +13,10 @@
 //!   without short-circuiting; `black_box` and a compiler fence discourage the
 //!   optimizer from reintroducing an early exit, and the emitted code is what
 //!   settles the question (see the function's documentation).
+//! - **Mask-driven selection** (`select_u8`, `select_u32`, `select_u64`,
+//!   `select_usize`) — choose between two values under an all-ones or
+//!   all-zeros mask, with a barrier that keeps the optimizer from turning the
+//!   arithmetic back into a branch or a choice of address.
 //! - **Zeroization** (`zeroize_slice`) — volatile zero writes over primitive
 //!   integers, active in every build of this crate.
 //! - **ANF S-box evaluation** — converts an S-box to Algebraic Normal Form at
