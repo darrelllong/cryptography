@@ -706,7 +706,7 @@ impl Trapdoor {
                 for &i in &t.neg_ones {
                     digits[usize::from(i)] = 2;
                 }
-                for (octet, group) in out.iter_mut().zip(digits.chunks_exact(5)) {
+                for (octet, group) in out.iter_mut().zip(digits.chunks_exact(TRITS_PER_OCTET)) {
                     *octet = group.iter().rev().fold(0u8, |acc, &d| acc * 3 + d);
                 }
                 crate::zeroize_slice(&mut digits);

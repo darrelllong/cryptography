@@ -163,7 +163,7 @@ fn hash_associated_data<C: BlockCipher>(
     let mut x = [0u8; BLOCK_BYTES];
 
     let (full, partial) = split_blocks(aad);
-    for (idx, block) in full.chunks_exact(16).enumerate() {
+    for (idx, block) in full.chunks_exact(BLOCK_BYTES).enumerate() {
         // RFC 7253 uses L_{ntz(i)} to advance offsets for full associated-data blocks.
         xor_block16_in_place(&mut offset, offsets.for_block(idx + 1));
         x.copy_from_slice(block);
@@ -302,7 +302,7 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
         let mut checksum = [0u8; BLOCK_BYTES];
         let mut p = [0u8; BLOCK_BYTES];
 
-        for (idx, block) in data[..full_len].chunks_exact_mut(16).enumerate() {
+        for (idx, block) in data[..full_len].chunks_exact_mut(BLOCK_BYTES).enumerate() {
             // RFC 7253 §4.2: Offset_i = Offset_{i-1} xor L_{ntz(i)}.
             xor_block16_in_place(&mut offset, offsets.for_block(idx + 1));
             p.copy_from_slice(block);
@@ -380,7 +380,10 @@ impl<C: BlockCipher, const TAG_LEN: usize> Ocb<C, TAG_LEN> {
 
         // Decrypt into a heap copy and commit only if the tag verifies.
         let mut plaintext = data.to_vec();
-        for (idx, block) in plaintext[..full_len].chunks_exact_mut(16).enumerate() {
+        for (idx, block) in plaintext[..full_len]
+            .chunks_exact_mut(BLOCK_BYTES)
+            .enumerate()
+        {
             // RFC 7253 §4.3: Offset_i = Offset_{i-1} xor L_{ntz(i)}.
             xor_block16_in_place(&mut offset, offsets.for_block(idx + 1));
             c.copy_from_slice(block);

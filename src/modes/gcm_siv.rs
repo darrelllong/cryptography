@@ -218,7 +218,7 @@ fn aes_ctr_le32_apply<C: BlockCipher>(enc: &C, tag: &[u8; 16], data: &mut [u8]) 
     let mut counter = *tag;
     counter[15] |= 0x80;
     let mut stream = [0u8; 16];
-    for chunk in data.chunks_mut(16) {
+    for chunk in data.chunks_mut(BLOCK_BYTES) {
         stream = counter;
         enc.encrypt(&mut stream);
         for (byte, key) in chunk.iter_mut().zip(stream.iter()) {

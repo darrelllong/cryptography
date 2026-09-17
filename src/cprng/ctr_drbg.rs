@@ -76,14 +76,16 @@ fn increment_be(counter: &mut [u8; BLOCK_LEN]) {
 }
 
 mod private {
+    use super::{BLOCK_LEN, KEY_LEN};
+
     /// What the DRBG needs of its block cipher: keying a forward-only
     /// schedule, and `Block_Encrypt`. Private so that the set of ciphers
     /// stays the approved one.
     pub trait Sealed {
         /// The keyed, encrypt-only schedule; it wipes itself on drop.
         type Keyed;
-        fn key(key: &[u8; 32]) -> Self::Keyed;
-        fn encrypt(keyed: &Self::Keyed, block: &[u8; 16]) -> [u8; 16];
+        fn key(key: &[u8; KEY_LEN]) -> Self::Keyed;
+        fn encrypt(keyed: &Self::Keyed, block: &[u8; BLOCK_LEN]) -> [u8; BLOCK_LEN];
     }
 }
 
@@ -97,10 +99,10 @@ pub trait CtrDrbgCipher: private::Sealed {}
 
 impl private::Sealed for Aes256 {
     type Keyed = Aes256Encryptor;
-    fn key(key: &[u8; 32]) -> Self::Keyed {
+    fn key(key: &[u8; KEY_LEN]) -> Self::Keyed {
         Aes256Encryptor::new(key)
     }
-    fn encrypt(keyed: &Self::Keyed, block: &[u8; 16]) -> [u8; 16] {
+    fn encrypt(keyed: &Self::Keyed, block: &[u8; BLOCK_LEN]) -> [u8; BLOCK_LEN] {
         keyed.encrypt_block(block)
     }
 }
@@ -108,10 +110,10 @@ impl CtrDrbgCipher for Aes256 {}
 
 impl private::Sealed for Aes256Ct {
     type Keyed = Aes256CtEncryptor;
-    fn key(key: &[u8; 32]) -> Self::Keyed {
+    fn key(key: &[u8; KEY_LEN]) -> Self::Keyed {
         Aes256CtEncryptor::new(key)
     }
-    fn encrypt(keyed: &Self::Keyed, block: &[u8; 16]) -> [u8; 16] {
+    fn encrypt(keyed: &Self::Keyed, block: &[u8; BLOCK_LEN]) -> [u8; BLOCK_LEN] {
         keyed.encrypt_block(block)
     }
 }
