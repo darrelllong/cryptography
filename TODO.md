@@ -58,10 +58,14 @@ Items are marked **owner** when only the repository owner can do them.
     exhaustion, authentication failure and failure-buffer contents, with the
    corpus, duration, features and revisions recorded.
 
-8. **Named constants across the tree.** Today's generator, ChaCha20, NTRU and
-   benchmark constants carry their derivations. The rest of the tree still
-   holds bare literals for spec-fixed widths, round counts and table sizes;
-   sweep each module and name them or cite the section that fixes them.
+8. **Named constants across the tree.** Every block cipher, stream cipher,
+   hash, the DRBGs, the modes, the curve modules, HMAC, HKDF, RFC 6979,
+   ML-KEM, ML-DSA, NTRU and the prime policy now name their widths, round
+   counts, table sizes and bounds, and derive the ones that follow from
+   another (AES's expanded key from `Nb(Nr + 1)`, SHA-3's rate from its
+   capacity, Camellia's rounds from its six-round stages). What remains are
+   byte offsets inside a word or a block, such as AES's four-byte column
+   boundaries, where the literal reads better than a name.
 9. **A specification-to-test map.** For each scheme, a table from
     specification version and section to the operation, its accepted inputs
     and the test that checks it, separating valid-vector conformance from

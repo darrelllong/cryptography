@@ -9,6 +9,14 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
+### Changed
+- Spec-fixed widths, round counts, table sizes and bounds across the ciphers,
+  hashes, curve modules, HMAC, HKDF, RFC 6979, ML-KEM, ML-DSA and the prime
+  policy are named for what fixes them, and the ones that follow from another
+  are derived rather than written out: AES's expanded key from `Nb(Nr + 1)`,
+  SHA-3's rate from its capacity, Camellia's round count from its six-round
+  `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
+
 ### Added
 - `SPECIFICATIONS.md`: for every algorithm, the specification and section it
   is written from, the source of its known answers, and the tests that refuse
