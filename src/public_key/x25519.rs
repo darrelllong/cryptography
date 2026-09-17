@@ -16,6 +16,15 @@
 //! digits of the public exponent `p − 2`. None takes the scalar or `u` as
 //! input.
 //!
+//! Measurement is the other half. `scripts/ct_timing` runs the interleaved
+//! two-class experiment over this ladder; its `RESULTS.md` records that two
+//! ordinary scalars are indistinguishable on both hosts tried, while on one of
+//! them an all-zero scalar — which clamping turns into `2^254`, so the ladder
+//! swaps once and then never again — is distinguishable from a dense one. No
+//! branch or index accounts for that, and the other host shows nothing; what
+//! the processor does with data the code writes without changing it is not
+//! something the code decides.
+//!
 //! Unlike the rest of `crate::vt`, X25519 here is intended to be
 //! constant-time. It is exposed under `crate::vt` because the surrounding
 //! key-handling code (PEM/DER blobs, error paths) shares conventions with

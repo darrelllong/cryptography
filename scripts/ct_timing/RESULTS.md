@@ -1,37 +1,65 @@
 # Interleaved input-class timing runs
 
 Each row is one run of `scripts/ct_timing` at the protocol its source fixes:
-200,000 measurements per experiment, the first 10,000 discarded, classes drawn
+800,000 measurements per experiment, the first 10,000 discarded, classes drawn
 by a seeded coin and interleaved, tails cropped at ten percentiles, and the
-statistic the largest `|t|` over those crops against dudect's threshold of 4.5.
+statistic the largest `|t|` over those crops — computed on the first quarter of
+the measurements and on all of them — against dudect's threshold of 4.5.
 
-A run counts only if its positive control — a comparison that stops at the
-first differing byte — is flagged. A statistic below the threshold is not proof
-of constant time; it says this experiment, at this sample size, on this machine,
-found no difference.
+Two controls bracket every run. The positive control is a comparison that stops
+at the first differing byte and must be flagged; a run that does not flag it has
+not shown the apparatus can see a leak, and its other results say nothing. The
+negative control is a pair of identical classes and must not be flagged; if it
+is, the apparatus separates equal inputs and the run says nothing either.
+
+Every pair is two *fixed* values. A class of fresh random inputs leaves the
+machine in a different state from one that repeats a single input, and for an
+operation as large as a scalar multiplication that difference alone was enough:
+a fixed scalar against random scalars gave `|t| = 10.4` on an idle host where
+two fixed scalars gave 0.9.
+
+A statistic below the threshold is not proof of constant time. It says this
+experiment, at this sample size, on this machine, found no difference.
 
 ## 2026-09-17
 
-| Experiment | Classes | dyson (M4 Pro), aarch64-apple-darwin | dmz (Intel), x86_64-unknown-linux-gnu |
+| Experiment | Classes | dmz (Intel, idle) | dyson (Apple M4 Pro, shared) |
 |---|---|---|---|
-| control: early-exit compare | differs at byte 0 / byte 31 | 29.6 **flagged** | 378.9 **flagged** |
-| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 4.2 | 2.1 |
-| `Aes128Ct::encrypt_block` | fixed / random key and block | 1.6 | 1.4 |
-| `X25519::scalar_mult` | fixed / random scalar | 1.2 | 3.3 |
-| `X25519::scalar_mult` (point) | low-order / random point | 1.5 | 1.3 |
-| `Hmac::<Sha256>::verify` (middle) | differs at byte 15 / byte 31 | 1.0 | 1.2 |
+| control: early-exit compare | differs at byte 0 / byte 31 | 1386–1617 **flagged** | 53 **flagged** |
+| control: identical classes | differs at byte 31, both | 1.7–2.7 | 1.0 |
+| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 1.9–2.0 | 3.0 |
+| `Hmac::<Sha256>::verify` | differs at byte 15 / byte 31 | 4.2–4.3 | 2.0 |
+| `Aes128Ct::encrypt_block` | all-zero / dense key and block | 1.3–1.6 | 0.5 |
+| `X25519::scalar_mult` | all-zero / dense scalar | 0.9–1.7 | 44–51 **flagged** |
+| `X25519::scalar_mult` | two ordinary fixed scalars | 1.4–2.3 | 2.1–2.6 |
+| `X25519::scalar_mult` | low-order point / base point | 1.0–1.5 | 1.3–1.7 |
+| `MlKem::decaps` | well-formed / tampered ciphertext | 1.8–3.4 | 1.0–2.4 |
 
-Both hosts ran rustc 1.93.1; the Apple host is an M4 Pro (macOS 27.0), dmz
-an idle Intel machine with the run pinned to four cores. Every class pair draws the same
-bytes and copies the same buffers before the timed span, and a key schedule is
-built outside it, so what differs between two classes is the value the
-operation is given.
+Both hosts ran rustc 1.93.1. dmz is an idle Intel machine with the run pinned to
+four cores; dyson is an Apple M4 Pro (macOS 27.0) that was running other work,
+which is why its marginal statistics move more between runs. The dmz figures
+span two consecutive runs, the dyson ones three.
 
-The tag comparison's statistic moves between 2 and 4.2 across runs on the
-Apple host, near the threshold: a one-microsecond operation is at this
-apparatus's resolution there, and a run that wanted to separate a smaller difference would
-need more measurements than the protocol takes.
+## The scalar that never swaps
 
-The control's statistic differs by two orders of magnitude between the hosts,
-which is what one should expect: it measures how well that machine resolves a
-difference of a few hundred nanoseconds, not how large the leak is.
+On the Apple host, and only there, an all-zero scalar is distinguishable from a
+dense one: `|t|` of 44, 47 and 51 across three runs, each with the quarter
+statistic already past the threshold. That host separates neither two ordinary
+scalars nor a low-order point from the base point, its negative control is
+quiet, and the idle Intel host separates nothing at all.
+
+What differs between those two classes is the conditional swap. RFC 7748's
+ladder swaps on `k_t ⊕ k_{t-1}`, and clamping turns an all-zero scalar into
+exactly `2^254`: one swap at the top bit and none in the remaining 254 rounds,
+against about 127 for a dense scalar. `fe_cswap` is branch-free and touches
+every limb either way, and the machine-code evidence in `scripts/ct_budgets/`
+shows no branch and no secret-dependent index anywhere in the ladder, so what
+the measurement sees is not the code taking a different path. It is the same
+instructions writing values that do not change, which a processor may complete
+differently from ones that do.
+
+Two things follow. An all-zero scalar is not a key, and the comparison that
+bears on key recovery — two ordinary scalars — separates nothing on either
+host. And a constant-time claim of this kind is a claim about the code, which
+the machine-code evidence supports; what a particular processor does with the
+data is a separate question, which only measurement on that processor answers.
