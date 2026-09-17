@@ -493,7 +493,9 @@ fn aes_decrypt(block: &[u8; 16], dk: &[u32], nr: usize) -> [u8; 16] {
 // `Aes128Ct::encrypt_block`. Under rustc 1.93.1 on `aarch64-apple-darwin` and
 // rustc 1.95.0 on `x86_64-unknown-linux-gnu` it holds three: the round loop,
 // and two index checks on the round-key slice. Neither the key nor the block
-// reaches a branch or a table index.
+// reaches a branch or a table index. All three widths call `aes_encrypt_ct`
+// with their round count, so that reading is the reading for `Aes192Ct` and
+// `Aes256Ct` as well.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[inline]

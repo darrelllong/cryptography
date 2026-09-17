@@ -135,6 +135,15 @@ impl ChaCha20Poly1305 {
     /// Returns `false` and leaves `data` untouched on authentication failure,
     /// and also when `data` is longer than the RFC 8439 §2.8 bound of
     /// 2^38 − 64 bytes (no valid ciphertext of that length exists).
+    ///
+    /// Timing: `scripts/ct_codegen.sh` classifies every conditional branch in
+    /// this operation's release assembly. Under rustc 1.93.1 on
+    /// `aarch64-apple-darwin` and rustc 1.95.0 on `x86_64-unknown-linux-gnu`
+    /// there are four: the length bound above, two zero-size tests before
+    /// freeing the MAC input, and the authentication result deciding whether
+    /// the keystream runs — which is the value this returns. The tag
+    /// comparison itself is the branch-free mask of [`crate::ct`]. Neither
+    /// the key, the one-time key nor a tag byte reaches a branch.
     #[must_use]
     pub fn decrypt_in_place(
         &self,
