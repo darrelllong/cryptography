@@ -119,6 +119,7 @@ claims=(
     "aes128-ct:Aes128Ct.*encrypt_block:0"
     "x25519-ladder:X255196scalar|X25519.*scalar_mult:1"
     "x448-ladder:X4486scalar|X448.*scalar_mult:2"
+    "x25519-agree:x25519_agree|X25519PrivateKey.*agree:1"
     "chacha20poly1305-open:chacha20poly1305_open|ChaCha20Poly1305.*decrypt_in_place:4"
 )
 unread=0

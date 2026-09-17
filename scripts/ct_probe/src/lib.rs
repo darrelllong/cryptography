@@ -6,7 +6,7 @@
 //! key, a secret scalar, a tag or a plaintext byte.
 
 use cryptography::modes::chacha20_poly1305::ChaCha20Poly1305;
-use cryptography::vt::{X25519, X448};
+use cryptography::vt::{X25519, X25519PrivateKey, X25519PublicKey, X448};
 use cryptography::{Aes128Ct, Hmac, Sha256};
 
 /// Verify `tag` over `data` under `key`: the shortest public path to
@@ -52,4 +52,15 @@ pub extern "Rust" fn chacha20poly1305_open(
     tag: &[u8; 16],
 ) -> bool {
     aead.decrypt_in_place(nonce, aad, data, tag)
+}
+
+/// A complete X25519 key agreement: the ladder, and RFC 7748 §6.1's refusal of
+/// an all-zero shared secret, whose outcome this function returns.
+#[inline(never)]
+#[no_mangle]
+pub extern "Rust" fn x25519_agree(
+    secret: &X25519PrivateKey,
+    peer: &X25519PublicKey,
+) -> Option<[u8; 32]> {
+    secret.agree(peer)
 }
