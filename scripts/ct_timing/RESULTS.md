@@ -12,7 +12,7 @@ found no difference.
 
 ## 2026-09-17
 
-| Experiment | Classes | M4 Pro, aarch64-apple-darwin | dmz, x86_64-unknown-linux-gnu |
+| Experiment | Classes | dyson (M4 Pro), aarch64-apple-darwin | dmz (Intel), x86_64-unknown-linux-gnu |
 |---|---|---|---|
 | control: early-exit compare | differs at byte 0 / byte 31 | 29.6 **flagged** | 378.9 **flagged** |
 | `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 4.2 | 2.1 |
