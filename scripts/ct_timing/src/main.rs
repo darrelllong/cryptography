@@ -68,6 +68,14 @@ const THRESHOLD: f64 = 4.5;
 const FIXED_KEY: [u8; 32] = *b"ct_timing fixed class key bytes.";
 const FIXED_BLOCK: [u8; 16] = *b"fixed block 0123";
 
+/// A point of small order on Curve25519: `u = 1`, whose ladder output is the
+/// all-zero shared secret RFC 7748 §6.1 names.
+const LOW_ORDER_POINT: [u8; 32] = {
+    let mut u = [0u8; 32];
+    u[0] = 1;
+    u
+};
+
 /// The CSPRNG seed, so a run is reproducible.
 const SEED: [u8; 32] = *b"ct_timing interleaved class draw";
 /// The ChaCha20 nonce beside it; one stream is drawn per run.
@@ -349,6 +357,53 @@ fn main() {
     );
     if ladder > THRESHOLD {
         failures.push("X25519::scalar_mult separated the two scalar classes");
+    }
+
+    // The peer's point rather than the scalar: a low-order point, whose ladder
+    // state stays degenerate, against a random one. RFC 7748 §6.1 lets the
+    // agreement reject the all-zero result, but the ladder that produces it
+    // must not take a different amount of time to do so.
+    let (points, _) = experiment(
+        "X25519::scalar_mult (point)",
+        ["low-order point", "random point"],
+        &mut coin,
+        |class, coin| {
+            let mut drawn = [0u8; 32];
+            coin.fill(&mut drawn);
+            let mut u = [0u8; 32];
+            u.copy_from_slice(if class == 0 { &LOW_ORDER_POINT } else { &drawn });
+            u
+        },
+        |u| {
+            black_box(X25519::scalar_mult(&FIXED_KEY, u));
+        },
+    );
+    if points > THRESHOLD {
+        failures.push("X25519::scalar_mult separated the two point classes");
+    }
+
+    // A tag differing in its middle byte against one differing in its last: a
+    // comparison that stopped early anywhere would separate these too.
+    let (middle, _) = experiment(
+        "Hmac::<Sha256>::verify (middle)",
+        ["differs at byte 15", "differs at byte 31"],
+        &mut coin,
+        |class, _| {
+            let mut tag = reference;
+            let position = if class == 0 {
+                tag.len() / 2 - 1
+            } else {
+                tag.len() - 1
+            };
+            tag[position] ^= 0xff;
+            tag
+        },
+        |tag| {
+            black_box(Hmac::<Sha256>::verify(&key, &message, tag));
+        },
+    );
+    if middle > THRESHOLD {
+        failures.push("Hmac::<Sha256>::verify separated the middle and last tag classes");
     }
 
     if failures.is_empty() {
