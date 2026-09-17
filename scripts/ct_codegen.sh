@@ -286,13 +286,18 @@ done
 
 if [ "$accept" = yes ]; then
     mkdir -p "$(dirname "$budgets")"
-    # Keep the file's header, which says what compilers the counts were read
-    # under; the counts themselves are replaced.
+    # A claim's count is what a reading accounts for, and how many branches a
+    # given compiler emits for the same source differs, so accepting keeps the
+    # larger of what is recorded and what this run found. The file's header,
+    # which says what the readings were, is kept as it is.
     if [ -f "$budgets" ]; then
-        grep '^#' "$budgets" > "$out/$target.header" || true
-        cat "$out/$target.header" "$out/$target.budgets" > "$out/$target.merged"
-        mv "$out/$target.merged" "$out/$target.budgets"
-        rm -f "$out/$target.header"
+        awk '
+            FNR == NR { if ($1 ~ /^#/) header = header $0 "\n"; else was[$1] = $2; next }
+            { print $1, ($1 in was && was[$1] > $2) ? was[$1] : $2 }
+            END { printf "%s", header > "/dev/stderr" }
+        ' "$budgets" "$out/$target.budgets" > "$out/$target.merged" 2> "$out/$target.header"
+        cat "$out/$target.header" "$out/$target.merged" > "$out/$target.budgets"
+        rm -f "$out/$target.merged" "$out/$target.header"
     fi
     mv "$out/$target.budgets" "$budgets"
     echo

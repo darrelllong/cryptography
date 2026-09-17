@@ -298,14 +298,36 @@ fn main() {
     let reference: [u8; 32] = Hmac::<Sha256>::compute(&key, &message)
         .try_into()
         .expect("HMAC-SHA-256 is 32 bytes");
+    // The two classes' tags are built once, here, and each iteration copies
+    // one of them whole. Flipping a byte inside the timed loop would store to
+    // a different offset per class immediately before the comparison reads
+    // the array, and that store, not the comparison, is what the measurement
+    // would then see.
+    let tag_first = {
+        let mut tag = reference;
+        tag[0] ^= 0xff;
+        tag
+    };
+    let tag_last = {
+        let mut tag = reference;
+        let last = tag.len() - 1;
+        tag[last] ^= 0xff;
+        tag
+    };
+    let tag_middle = {
+        let mut tag = reference;
+        let middle = tag.len() / 2 - 1;
+        tag[middle] ^= 0xff;
+        tag
+    };
+
     let (control, _) = experiment(
         "control: early-exit compare",
         ["differs at byte 0", "differs at byte 31"],
         &mut coin,
         |class, _| {
-            let mut tag = reference;
-            let position = if class == 0 { 0 } else { tag.len() - 1 };
-            tag[position] ^= 0xff;
+            let mut tag = [0u8; 32];
+            tag.copy_from_slice(if class == 0 { &tag_first } else { &tag_last });
             tag
         },
         |tag| {
@@ -343,9 +365,8 @@ fn main() {
         ["differs at byte 0", "differs at byte 31"],
         &mut coin,
         |class, _| {
-            let mut tag = reference;
-            let position = if class == 0 { 0 } else { tag.len() - 1 };
-            tag[position] ^= 0xff;
+            let mut tag = [0u8; 32];
+            tag.copy_from_slice(if class == 0 { &tag_first } else { &tag_last });
             tag
         },
         |tag| {
@@ -470,13 +491,8 @@ fn main() {
         ["differs at byte 15", "differs at byte 31"],
         &mut coin,
         |class, _| {
-            let mut tag = reference;
-            let position = if class == 0 {
-                tag.len() / 2 - 1
-            } else {
-                tag.len() - 1
-            };
-            tag[position] ^= 0xff;
+            let mut tag = [0u8; 32];
+            tag.copy_from_slice(if class == 0 { &tag_middle } else { &tag_last });
             tag
         },
         |tag| {
