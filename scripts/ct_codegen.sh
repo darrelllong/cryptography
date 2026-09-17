@@ -119,6 +119,7 @@ claims=(
     "aes128-ct:Aes128Ct.*encrypt_block:0"
     "x25519-ladder:X255196scalar|X25519.*scalar_mult:1"
     "x448-ladder:X4486scalar|X448.*scalar_mult:2"
+    "chacha20poly1305-open:chacha20poly1305_open|ChaCha20Poly1305.*decrypt_in_place:4"
 )
 unread=0
 for entry in "${claims[@]}"; do
@@ -154,6 +155,12 @@ for entry in "${claims[@]}"; do
         mv "$body.next" "$body"
         symbol=$callee
     done
+    if ! grep -qE "^[[:space:]]+$branches" "$body" \
+       && grep -qE '^[[:space:]]+(bl|call|callq)[[:space:]]' "$body"; then
+        echo "$claim: $symbol branches nowhere but calls out; the work is in a" >&2
+        echo "  callee this script could not follow, so nothing was inspected." >&2
+        exit 1
+    fi
     echo
     echo "$claim: $(grep -cE '^[[:space:]]+[a-z]' "$body") instructions in $symbol"
     grep -nE "^[[:space:]]+$branches" "$body" | cut -d: -f1 > "$body.branches" || true

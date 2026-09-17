@@ -5,6 +5,7 @@
 //! only branches are over public lengths and loop counts: no branch may test a
 //! key, a secret scalar, a tag or a plaintext byte.
 
+use cryptography::modes::chacha20_poly1305::ChaCha20Poly1305;
 use cryptography::vt::{X25519, X448};
 use cryptography::{Aes128Ct, Hmac, Sha256};
 
@@ -37,4 +38,18 @@ pub extern "Rust" fn x25519_scalar_mult(scalar: &[u8; 32], point: &[u8; 32]) -> 
 #[no_mangle]
 pub extern "Rust" fn x448_scalar_mult(scalar: &[u8; 56], point: &[u8; 56]) -> [u8; 56] {
     X448::scalar_mult(scalar, point)
+}
+
+/// Open an RFC 8439 AEAD message: a complete operation, whose claim is that
+/// only the authentication result — the value it returns — decides anything.
+#[inline(never)]
+#[no_mangle]
+pub extern "Rust" fn chacha20poly1305_open(
+    aead: &ChaCha20Poly1305,
+    nonce: &[u8; 12],
+    aad: &[u8],
+    data: &mut [u8],
+    tag: &[u8; 16],
+) -> bool {
+    aead.decrypt_in_place(nonce, aad, data, tag)
 }
