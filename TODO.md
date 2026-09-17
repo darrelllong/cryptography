@@ -56,21 +56,30 @@ Items are marked **owner** when only the repository owner can do them.
    crate makes: the tag comparison, every `Ct` block cipher, the ChaCha20
    keystream, the Poly1305 MAC, the X25519 and X448 ladders, a complete
    X25519 key agreement, a complete ChaCha20-Poly1305 open, and the two
-   constant-time KEM decapsulations (ML-KEM and NTRU round 3). On aarch64-apple-darwin (rustc 1.93.1) and
-   x86_64-unknown-linux-gnu (rustc 1.95.0) each branch is a loop the source
-   bounds, a guard on an index or an allocation, or a comparison of public
-   lengths; `src/ct.rs`, `src/ciphers/aes.rs` and the two ladder modules
-   record the reading, and CI fails the build when a claim gains a branch
-   nobody has read. `scripts/ct_timing` adds the measured half: the dudect
-   experiment with a positive control, whose runs are in its `RESULTS.md`.
-   Still missing: complete signature operations, the remaining supported
-   targets, and experiments over more input classes than fixed-against-random
-   (low-order points, degenerate scalars, tag positions other than first and
-   last).
-7. **Targeted fuzzing.** Campaigns aimed at parser length and count fields,
-    explicit domain parameters, key-pair consistency, nonce and counter
-    exhaustion, authentication failure and failure-buffer contents, with the
-   corpus, duration, features and revisions recorded.
+   constant-time KEM decapsulations (ML-KEM and NTRU round 3). On
+   aarch64-apple-darwin and x86_64-unknown-linux-gnu every branch is a loop
+   the source bounds, a guard that ends in a panic or the allocator, or a
+   comparison of a public length, round count, encoding width or path
+   selector; the claims table in the script says what each reading found,
+   `scripts/ct_budgets/` holds the counts, and CI fails the build when a claim
+   gains a branch nobody has read. `scripts/ct_timing` adds the measured half:
+   the dudect experiment with both a positive and a negative control, over
+   pairs of fixed inputs, whose runs are in its `RESULTS.md`.
+
+   Still missing: the remaining supported targets, more input classes still
+   (scalars of a given Hamming weight, ciphertexts tampered at other
+   positions), and an account of the one difference the measurement did find —
+   an all-zero scalar against a dense one on Apple silicon, which no branch or
+   index explains and which the idle x86-64 host does not show.
+7. **Targeted fuzzing.** The 45 targets cover the parsers, the AEAD failure
+   path — including, since this campaign, that a refused decryption leaves the
+   caller's buffer as it found it — and every public-key surface;
+   `scripts/fuzz_regressions.sh` replays the inputs behind repaired defects,
+   and counter exhaustion is checked by tests, which can reach lengths a
+   fuzzer cannot. Still to aim at: explicit domain parameters, key-pair
+   consistency as its own target, and nonce reuse across calls. Campaign
+   records, with corpus, duration, features and revisions, are in
+   `fuzz/campaigns/`.
 
 8. **Named constants across the tree.** Every block cipher, stream cipher,
    hash, the DRBGs, the modes, the curve modules, HMAC, HKDF, RFC 6979,
