@@ -9,6 +9,21 @@
 //! packed ANF bitset form for the S-box and direct arithmetic for the linear
 //! transform; it is the constant-time path.
 
+/// Block size in bytes: Kuznyechik is a 128-bit block cipher (RFC 7801 §2).
+const BLOCK_BYTES: usize = 16;
+
+/// Key size in bytes: 256 bits (RFC 7801 §2).
+const KEY_BYTES: usize = 32;
+
+/// Round keys, `K₁..K₁₀` (RFC 7801 §4.4).
+const ROUND_KEYS: usize = 10;
+
+/// The key schedule runs 32 Feistel steps, emitting a pair of round keys
+/// every eighth step (RFC 7801 §4.4): `K₁, K₂` are the key itself, and each
+/// of the four groups yields the next two.
+const SCHEDULE_GROUPS: usize = 4;
+const STEPS_PER_GROUP: usize = 8;
+
 // ── GF(2⁸) with primitive polynomial p(x) = x⁸ + x⁷ + x⁶ + x + 1 ──────────
 //
 // Reduction: x⁸ ≡ x⁷ + x⁶ + x + 1  ⟹  modulus byte 0xC3.
@@ -105,11 +120,11 @@ const PI_INV_ANF: [[u128; 2]; 8] = build_pi_anf(&PI_INV);
 // products directly instead so the linear layer does not depend on secret-
 // indexed byte lookups.
 
-const L_COEFF: [u8; 16] = [
+const L_COEFF: [u8; BLOCK_BYTES] = [
     148, 32, 133, 16, 194, 192, 1, 251, 1, 192, 194, 16, 133, 32, 148, 1,
 ];
 
-const fn build_l_tables() -> [[u8; 256]; 16] {
+const fn build_l_tables() -> [[u8; 256]; BLOCK_BYTES] {
     let mut t = [[0u8; 256]; 16];
     let mut i = 0usize;
     while i < 16 {
@@ -126,7 +141,7 @@ const fn build_l_tables() -> [[u8; 256]; 16] {
     t
 }
 
-static L_TABLES: [[u8; 256]; 16] = build_l_tables();
+static L_TABLES: [[u8; 256]; BLOCK_BYTES] = build_l_tables();
 
 // ── Fused S∘L lookup tables (fast path only) ─────────────────────────────────
 //
@@ -157,7 +172,7 @@ static L_TABLES: [[u8; 256]; 16] = build_l_tables();
 // access pattern; `GrasshopperCt` is the constant-time path.
 
 /// Const l-function, used only while building the fused tables at compile time.
-const fn l_func_const(block: &[u8; 16]) -> u8 {
+const fn l_func_const(block: &[u8; BLOCK_BYTES]) -> u8 {
     let mut r = 0u8;
     let mut i = 0;
     while i < 16 {
@@ -168,7 +183,7 @@ const fn l_func_const(block: &[u8; 16]) -> u8 {
 }
 
 /// Const L = R¹⁶ (compile-time only).
-const fn apply_l_const(mut block: [u8; 16]) -> [u8; 16] {
+const fn apply_l_const(mut block: [u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
     let mut n = 0;
     while n < 16 {
         let lc = l_func_const(&block);
@@ -184,7 +199,7 @@ const fn apply_l_const(mut block: [u8; 16]) -> [u8; 16] {
 }
 
 /// Const L⁻¹ = (R⁻¹)¹⁶ (compile-time only).
-const fn apply_l_inv_const(mut block: [u8; 16]) -> [u8; 16] {
+const fn apply_l_inv_const(mut block: [u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
     let mut n = 0;
     while n < 16 {
         let mut sum = 0u8;
@@ -199,7 +214,7 @@ const fn apply_l_inv_const(mut block: [u8; 16]) -> [u8; 16] {
             block[j] = block[j + 1];
             j += 1;
         }
-        block[15] = new_last;
+        block[BLOCK_BYTES - 1] = new_last;
         n += 1;
     }
     block
@@ -211,7 +226,7 @@ const fn apply_l_inv_const(mut block: [u8; 16]) -> [u8; 16] {
 /// (S⁻¹ then L⁻¹) table. Column `i` is `(L or L⁻¹)(eᵢ)` where `eᵢ` is the unit
 /// vector with value 1 at position `i`; by GF(2⁸)-linearity the contribution of
 /// input byte value `v` at position `i` is `v · col[i]` componentwise.
-const fn build_fused_tables(inv: bool) -> [[u128; 256]; 16] {
+const fn build_fused_tables(inv: bool) -> [[u128; 256]; BLOCK_BYTES] {
     let mut col = [[0u8; 16]; 16];
     let mut i = 0;
     while i < 16 {
@@ -250,13 +265,13 @@ const fn build_fused_tables(inv: bool) -> [[u128; 256]; 16] {
 }
 
 /// Forward fused table: `LS_ENC[i][x] = L(eᵢ · Pi[x])`.
-static LS_ENC: [[u128; 256]; 16] = build_fused_tables(false);
+static LS_ENC: [[u128; 256]; BLOCK_BYTES] = build_fused_tables(false);
 /// Inverse fused table: `LS_DEC[i][x] = L⁻¹(eᵢ · Pi'[x])`.
-static LS_DEC: [[u128; 256]; 16] = build_fused_tables(true);
+static LS_DEC: [[u128; 256]; BLOCK_BYTES] = build_fused_tables(true);
 
 /// One fused round: `XOR_i table[i][state[i]]`, packed big-endian into a u128.
 #[inline]
-fn fused_round(table: &[[u128; 256]; 16], state: &[u8; 16]) -> u128 {
+fn fused_round(table: &[[u128; 256]; BLOCK_BYTES], state: &[u8; BLOCK_BYTES]) -> u128 {
     let mut acc = 0u128;
     for (i, &b) in state.iter().enumerate() {
         acc ^= table[i][b as usize];
@@ -267,21 +282,21 @@ fn fused_round(table: &[[u128; 256]; 16], state: &[u8; 16]) -> u128 {
 // ── Core transforms ───────────────────────────────────────────────────────────
 
 #[inline]
-fn xor_block(a: &mut [u8; 16], b: &[u8; 16]) {
+fn xor_block(a: &mut [u8; BLOCK_BYTES], b: &[u8; BLOCK_BYTES]) {
     for (x, y) in a.iter_mut().zip(b.iter()) {
         *x ^= y;
     }
 }
 
 #[inline]
-fn apply_s(block: &mut [u8; 16]) {
+fn apply_s(block: &mut [u8; BLOCK_BYTES]) {
     for b in block.iter_mut() {
         *b = PI[*b as usize];
     }
 }
 
 #[inline]
-fn apply_s_inv(block: &mut [u8; 16]) {
+fn apply_s_inv(block: &mut [u8; BLOCK_BYTES]) {
     for b in block.iter_mut() {
         *b = PI_INV[*b as usize];
     }
@@ -289,9 +304,9 @@ fn apply_s_inv(block: &mut [u8; 16]) {
 
 /// l-function: linear combination of 16 bytes over GF(2⁸).
 #[inline]
-fn l_func(block: &[u8; 16]) -> u8 {
+fn l_func(block: &[u8; BLOCK_BYTES]) -> u8 {
     let mut r = 0u8;
-    for i in 0..16 {
+    for i in 0..BLOCK_BYTES {
         r ^= L_TABLES[i][block[i] as usize];
     }
     r
@@ -299,9 +314,9 @@ fn l_func(block: &[u8; 16]) -> u8 {
 
 /// R step: push l(block) to front, shift right, drop last byte.
 #[inline]
-fn r_step(block: &mut [u8; 16]) {
+fn r_step(block: &mut [u8; BLOCK_BYTES]) {
     let lc = l_func(block);
-    block.copy_within(0..15, 1); // block[1..=15] ← old block[0..=14]
+    block.copy_within(0..BLOCK_BYTES - 1, 1); // block[1..=15] ← old block[0..=14]
     block[0] = lc;
 }
 
@@ -310,24 +325,24 @@ fn r_step(block: &mut [u8; 16]) {
 /// Since l-coefficient for the last input byte (a₀) is 1, the missing byte
 /// equals block[0] XOR l(block[1..16] ∥ 0), with no modular inversion needed.
 #[inline]
-fn r_inv_step(block: &mut [u8; 16]) {
+fn r_inv_step(block: &mut [u8; BLOCK_BYTES]) {
     // sum = L_COEFF[0..15] · block[1..16]
-    let sum: u8 = (0..15).fold(0u8, |acc, i| acc ^ L_TABLES[i][block[i + 1] as usize]);
+    let sum: u8 = (0..BLOCK_BYTES - 1).fold(0u8, |acc, i| acc ^ L_TABLES[i][block[i + 1] as usize]);
     let new_last = block[0] ^ sum;
-    block.copy_within(1..16, 0); // block[0..=14] ← old block[1..=15]
-    block[15] = new_last;
+    block.copy_within(1..BLOCK_BYTES, 0); // block[0..=14] ← old block[1..=15]
+    block[BLOCK_BYTES - 1] = new_last;
 }
 
 /// L = R¹⁶.
-fn apply_l(block: &mut [u8; 16]) {
-    for _ in 0..16 {
+fn apply_l(block: &mut [u8; BLOCK_BYTES]) {
+    for _ in 0..BLOCK_BYTES {
         r_step(block);
     }
 }
 
 /// L⁻¹ = (R⁻¹)¹⁶.
-fn apply_l_inv(block: &mut [u8; 16]) {
-    for _ in 0..16 {
+fn apply_l_inv(block: &mut [u8; BLOCK_BYTES]) {
+    for _ in 0..BLOCK_BYTES {
         r_inv_step(block);
     }
 }
@@ -338,7 +353,7 @@ fn pi_eval(coeffs: &[[u128; 2]; 8], input: u8) -> u8 {
 }
 
 #[inline]
-fn apply_s_ct(block: &mut [u8; 16]) {
+fn apply_s_ct(block: &mut [u8; BLOCK_BYTES]) {
     // Same S layer as `apply_s()`, but each byte is evaluated through the
     // packed ANF representation instead of indexing the 256-byte table.
     for b in block.iter_mut() {
@@ -347,7 +362,7 @@ fn apply_s_ct(block: &mut [u8; 16]) {
 }
 
 #[inline]
-fn apply_s_inv_ct(block: &mut [u8; 16]) {
+fn apply_s_inv_ct(block: &mut [u8; BLOCK_BYTES]) {
     // Inverse S layer using the packed ANF form of `PI_INV`.
     for b in block.iter_mut() {
         *b = pi_eval(&PI_INV_ANF, *b);
@@ -355,39 +370,39 @@ fn apply_s_inv_ct(block: &mut [u8; 16]) {
 }
 
 #[inline]
-fn l_func_ct(block: &[u8; 16]) -> u8 {
+fn l_func_ct(block: &[u8; BLOCK_BYTES]) -> u8 {
     // Same linear map as `l_func()`. The Ct path computes the field products
     // directly instead of indexing `L_TABLES` with secret bytes.
     let mut r = 0u8;
-    for i in 0..16 {
+    for i in 0..BLOCK_BYTES {
         r ^= gf_mul(L_COEFF[i], block[i]);
     }
     r
 }
 
 #[inline]
-fn r_step_ct(block: &mut [u8; 16]) {
+fn r_step_ct(block: &mut [u8; BLOCK_BYTES]) {
     let lc = l_func_ct(block);
-    block.copy_within(0..15, 1);
+    block.copy_within(0..BLOCK_BYTES - 1, 1);
     block[0] = lc;
 }
 
 #[inline]
-fn r_inv_step_ct(block: &mut [u8; 16]) {
-    let sum: u8 = (0..15).fold(0u8, |acc, i| acc ^ gf_mul(L_COEFF[i], block[i + 1]));
+fn r_inv_step_ct(block: &mut [u8; BLOCK_BYTES]) {
+    let sum: u8 = (0..BLOCK_BYTES - 1).fold(0u8, |acc, i| acc ^ gf_mul(L_COEFF[i], block[i + 1]));
     let new_last = block[0] ^ sum;
-    block.copy_within(1..16, 0);
-    block[15] = new_last;
+    block.copy_within(1..BLOCK_BYTES, 0);
+    block[BLOCK_BYTES - 1] = new_last;
 }
 
-fn apply_l_ct(block: &mut [u8; 16]) {
-    for _ in 0..16 {
+fn apply_l_ct(block: &mut [u8; BLOCK_BYTES]) {
+    for _ in 0..BLOCK_BYTES {
         r_step_ct(block);
     }
 }
 
-fn apply_l_inv_ct(block: &mut [u8; 16]) {
-    for _ in 0..16 {
+fn apply_l_inv_ct(block: &mut [u8; BLOCK_BYTES]) {
+    for _ in 0..BLOCK_BYTES {
         r_inv_step_ct(block);
     }
 }
@@ -395,7 +410,7 @@ fn apply_l_inv_ct(block: &mut [u8; 16]) {
 // ── Key schedule (RFC 7801 §4.4) ──────────────────────────────────────────────
 //
 // Round constants C_i = L(Vec₁₂₈(i)), i = 1..32.
-// Vec₁₂₈(i): 128-bit big-endian representation of i (stored as [u8; 16]).
+// Vec₁₂₈(i): 128-bit big-endian representation of i (stored as [u8; BLOCK_BYTES]).
 // For i ≤ 255 this is [0, …, 0, i] with i in byte[15].
 //
 // Feistel step F[C](a₁, a₀) = (L(S(a₁ ⊕ C)) ⊕ a₀, a₁).
@@ -404,21 +419,21 @@ fn apply_l_inv_ct(block: &mut [u8; 16]) {
 // K₁ = k₁, K₂ = k₀; round keys K₃–K₁₀ derived by 4 groups of 8 F steps
 // using constants C₁–C₃₂.
 
-fn round_const(i: u8) -> [u8; 16] {
+fn round_const(i: u8) -> [u8; BLOCK_BYTES] {
     let mut v = [0u8; 16];
     v[15] = i;
     apply_l(&mut v);
     v
 }
 
-fn round_const_ct(i: u8) -> [u8; 16] {
+fn round_const_ct(i: u8) -> [u8; BLOCK_BYTES] {
     let mut v = [0u8; 16];
     v[15] = i;
     apply_l_ct(&mut v);
     v
 }
 
-fn f_step(a1: &mut [u8; 16], a0: &mut [u8; 16], c: &[u8; 16]) {
+fn f_step(a1: &mut [u8; BLOCK_BYTES], a0: &mut [u8; BLOCK_BYTES], c: &[u8; BLOCK_BYTES]) {
     let mut tmp = *a1;
     xor_block(&mut tmp, c); // X[C]
     apply_s(&mut tmp); // S
@@ -431,7 +446,7 @@ fn f_step(a1: &mut [u8; 16], a0: &mut [u8; 16], c: &[u8; 16]) {
     crate::ct::zeroize_slice(tmp.as_mut_slice());
 }
 
-fn f_step_ct(a1: &mut [u8; 16], a0: &mut [u8; 16], c: &[u8; 16]) {
+fn f_step_ct(a1: &mut [u8; BLOCK_BYTES], a0: &mut [u8; BLOCK_BYTES], c: &[u8; BLOCK_BYTES]) {
     let mut tmp = *a1;
     xor_block(&mut tmp, c);
     apply_s_ct(&mut tmp);
@@ -444,16 +459,17 @@ fn f_step_ct(a1: &mut [u8; 16], a0: &mut [u8; 16], c: &[u8; 16]) {
 
 /// Expand the key into the ten round keys, written directly into `rk` (the
 /// caller's struct field).
-fn key_schedule(key: &[u8; 32], rk: &mut [[u8; 16]; 10]) {
-    rk[0].copy_from_slice(&key[0..16]); // K₁
-    rk[1].copy_from_slice(&key[16..32]); // K₂
+fn key_schedule(key: &[u8; KEY_BYTES], rk: &mut [[u8; BLOCK_BYTES]; ROUND_KEYS]) {
+    rk[0].copy_from_slice(&key[..BLOCK_BYTES]); // K₁
+    rk[1].copy_from_slice(&key[BLOCK_BYTES..]); // K₂
 
     let mut a1 = rk[0];
     let mut a0 = rk[1];
 
-    for group in 0usize..4 {
-        for step in 0usize..8 {
-            let ci = u8::try_from(group * 8 + step + 1).expect("round constant index fits in u8"); // 1..=32
+    for group in 0usize..SCHEDULE_GROUPS {
+        for step in 0usize..STEPS_PER_GROUP {
+            let ci = u8::try_from(group * STEPS_PER_GROUP + step + 1)
+                .expect("round constant index fits in u8"); // 1..=32
             let c = round_const(ci);
             f_step(&mut a1, &mut a0, &c);
         }
@@ -467,16 +483,17 @@ fn key_schedule(key: &[u8; 32], rk: &mut [[u8; 16]; 10]) {
 }
 
 /// [`key_schedule`] with the constant-time S and L layers.
-fn key_schedule_ct(key: &[u8; 32], rk: &mut [[u8; 16]; 10]) {
-    rk[0].copy_from_slice(&key[0..16]);
-    rk[1].copy_from_slice(&key[16..32]);
+fn key_schedule_ct(key: &[u8; KEY_BYTES], rk: &mut [[u8; BLOCK_BYTES]; ROUND_KEYS]) {
+    rk[0].copy_from_slice(&key[..BLOCK_BYTES]);
+    rk[1].copy_from_slice(&key[BLOCK_BYTES..]);
 
     let mut a1 = rk[0];
     let mut a0 = rk[1];
 
-    for group in 0usize..4 {
-        for step in 0usize..8 {
-            let ci = u8::try_from(group * 8 + step + 1).expect("round constant index fits in u8");
+    for group in 0usize..SCHEDULE_GROUPS {
+        for step in 0usize..STEPS_PER_GROUP {
+            let ci = u8::try_from(group * STEPS_PER_GROUP + step + 1)
+                .expect("round constant index fits in u8");
             let c = round_const_ct(ci);
             f_step_ct(&mut a1, &mut a0, &c);
         }
@@ -498,10 +515,10 @@ fn key_schedule_ct(key: &[u8; 32], rk: &mut [[u8; 16]; 10]) {
 /// bytes: not constant-time (see the table comments); [`GrasshopperCt`] is
 /// the constant-time path.
 pub struct Grasshopper {
-    rk: [[u8; 16]; 10],
+    rk: [[u8; BLOCK_BYTES]; ROUND_KEYS],
     /// `dk[i] = L⁻¹(rk[i])` for i = 1..=8, used by the fully-fused decryption
     /// path (index 0 is unused). Derived key material — zeroized on drop.
-    dk: [[u8; 16]; 9],
+    dk: [[u8; BLOCK_BYTES]; 9],
 }
 
 impl Grasshopper {
@@ -509,7 +526,7 @@ impl Grasshopper {
     /// L⁻¹-transformed copies are written directly into the new instance's
     /// fields.
     #[must_use]
-    pub fn new(key: &[u8; 32]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = Grasshopper {
             rk: [[0u8; 16]; 10],
             dk: [[0u8; 16]; 9],
@@ -525,7 +542,7 @@ impl Grasshopper {
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -533,7 +550,7 @@ impl Grasshopper {
 
     /// Encrypt a 128-bit block (ECB mode).
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let mut s = *block;
         for i in 0..9 {
             xor_block(&mut s, &self.rk[i]);
@@ -555,7 +572,7 @@ impl Grasshopper {
     ///   vₖ = LS_DEC(vₖ₋₁) ⊕ L⁻¹(rk)            for the 8 inner rounds
     ///   pt = S⁻¹(v₈) ⊕ K₁
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let mut s = *block;
         xor_block(&mut s, &self.rk[9]);
         // v₀ = L⁻¹(c ⊕ K₁₀). Since LS_DEC folds in S⁻¹, feed it S(c ⊕ K₁₀) so the
@@ -578,14 +595,14 @@ impl Grasshopper {
 /// the fast path's table-driven S and L layers: the S-box uses the packed ANF
 /// bitset form above and the linear layer uses direct GF(2^8) arithmetic.
 pub struct GrasshopperCt {
-    rk: [[u8; 16]; 10],
+    rk: [[u8; BLOCK_BYTES]; ROUND_KEYS],
 }
 
 impl GrasshopperCt {
     /// Construct from a 32-byte (256-bit) key. The round keys are written
     /// directly into the new instance.
     #[must_use]
-    pub fn new(key: &[u8; 32]) -> Self {
+    pub fn new(key: &[u8; KEY_BYTES]) -> Self {
         let mut cipher = GrasshopperCt {
             rk: [[0u8; 16]; 10],
         };
@@ -594,7 +611,7 @@ impl GrasshopperCt {
     }
 
     /// Construct from a 32-byte key and wipe the provided key buffer.
-    pub fn new_wiping(key: &mut [u8; 32]) -> Self {
+    pub fn new_wiping(key: &mut [u8; KEY_BYTES]) -> Self {
         let out = Self::new(key);
         crate::ct::zeroize_slice(key.as_mut_slice());
         out
@@ -602,7 +619,7 @@ impl GrasshopperCt {
 
     /// Encrypt a 128-bit block (ECB mode).
     #[must_use]
-    pub fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let mut s = *block;
         for i in 0..9 {
             xor_block(&mut s, &self.rk[i]);
@@ -615,7 +632,7 @@ impl GrasshopperCt {
 
     /// Decrypt a 128-bit block (ECB mode).
     #[must_use]
-    pub fn decrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+    pub fn decrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let mut s = *block;
         xor_block(&mut s, &self.rk[9]);
         for i in (0..9).rev() {
@@ -630,11 +647,11 @@ impl GrasshopperCt {
 impl crate::BlockCipher for Grasshopper {
     const BLOCK_LEN: usize = 16;
     fn encrypt(&self, block: &mut [u8]) {
-        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
         block.copy_from_slice(&self.encrypt_block(arr));
     }
     fn decrypt(&self, block: &mut [u8]) {
-        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
         block.copy_from_slice(&self.decrypt_block(arr));
     }
 }
@@ -642,11 +659,11 @@ impl crate::BlockCipher for Grasshopper {
 impl crate::BlockCipher for GrasshopperCt {
     const BLOCK_LEN: usize = 16;
     fn encrypt(&self, block: &mut [u8]) {
-        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
         block.copy_from_slice(&self.encrypt_block(arr));
     }
     fn decrypt(&self, block: &mut [u8]) {
-        let arr: &[u8; 16] = (&*block).try_into().expect("wrong block length");
+        let arr: &[u8; BLOCK_BYTES] = (&*block).try_into().expect("wrong block length");
         block.copy_from_slice(&self.decrypt_block(arr));
     }
 }
