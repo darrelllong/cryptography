@@ -93,6 +93,40 @@ unchanged is therefore part of what is observable, but not all of it, and an
 emitted code was checked: the two passes survived, the constant appears sixty
 times in the ladder.
 
+## What scalar blinding would cost, and why it is not here
+
+The channel is the swap count, a property of the secret scalar, so the
+countermeasure that would close it is one that makes the scalar's bit pattern
+differ from call to call: replace `k` by `k + rM` for a random `r` and a
+modulus `M` that leaves every result unchanged. What `M` has to be decides the
+price.
+
+RFC 7748 §5 defines `X25519(k, u)` for every 32-byte `u`, which includes the
+points of the quadratic twist; §6.1's warning is about the shared secret, not
+about which `u` the function accepts. So `M` must annihilate every point the
+function may be handed:
+
+- Curve25519's group order is `8ℓ`, `ℓ = 2^252 + 27742317777372353535851937790883648493`.
+- Its twist's is `4ℓ'`, `ℓ' = 2^253 - 55484635554744707071703875581767296995`,
+  from `#E + #E_twist = 2p + 2`. Both `ℓ` and `ℓ'` are prime.
+- Any point on either curve has order dividing one of them, so
+  `M = lcm(8ℓ, 4ℓ') = 8ℓℓ'`, which is 508 bits.
+
+The ladder's cost is linear in the scalar's length, so with a 64-bit `r` the
+scalar is 572 bits and the ladder takes 2.24 times as long. Blinding by the
+curve order alone — 320 bits, 1.25 times as long — changes the result for
+twist inputs, which is not X25519 as the RFC defines it, and this crate obeys
+the standard it names.
+
+Against that: what the measurement found is an aggregate over the whole
+scalar, the same for every call with that key, on one of four processors, in
+the pair that contrasts alternating bits with long runs. Two ordinary scalars
+of similar swap count are not separated on any host. A 2.24-fold cost on every
+agreement is not a trade this crate makes for that, and a 1.25-fold one is not
+available at all. The door stays open: if a caller's threat model puts the
+few bits of aggregate at issue, blinding by `8ℓℓ'` is what it would take, and
+the measurement above is what it would have to be re-run against.
+
 What the measurement is worth knowing for:
 
 - The comparison that bears on key recovery is two ordinary scalars of similar
