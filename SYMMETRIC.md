@@ -275,16 +275,13 @@ Design philosophy by family:
 
 ## Symmetric Performance
 
-> **Stale figures (2026-09-10).** The `snow3g`, `snow3gct`, `zuc128`, and
-> `zuc128ct` rows predate the rewrite of their LFSR and FSM arithmetic from the
-> ETSI/SAGE specifications and have not been re-swept. GCM, GMAC, and
-> AES-GCM-SIV now use a GHASH/POLYVAL multiply written from SP 800-38D: on the
-> development machine GCM tag computation runs at 0.31× and GCM encryption at
-> 0.63× its former throughput. That also changes the baseline the go-fast GHASH
-> comparisons below were measured against. The MD5, SHA-1, and SHA-2 rows
-> predate the rewrite of their compression functions in their specifications'
-> notation; on the development machine MD5 became about 2.3× faster and SHA-1,
-> SHA-256, and SHA-512 slightly faster.
+> **What is and is not current.** The cipher and hash tables below are the
+> 2026-09-17 sweep and post-date every rewrite of this year's audit round: the
+> SNOW 3G and ZUC arithmetic, the GHASH/POLYVAL multiply, and the MD5, SHA-1
+> and SHA-2 compression functions. The go-fast comparison sections further
+> down are older single-host snapshots, and their GHASH baseline is the one
+> that multiply replaced, so their speedup figures are against a comparator
+> this crate no longer ships.
 
 Measured with [pilot-bench](https://github.com/darrelllong/pilot-bench)
 driving `pilot_cipher`, a dedicated Rust binary that encrypts a fixed
@@ -293,162 +290,157 @@ the chosen confidence interval is achieved, correcting for autocorrelation
 and startup transients.
 
 Columns: **Block** and **Key** in bits; **MB/s** mean; **±CI** half-width at
-**90%**; **Runs** rounds required to reach CI. The 2026-06-11 sweep was run
+**90%**; **Runs** rounds required to reach CI. The 2026-09-17 sweep was run
 with `PILOT_PRESET=normal --confidence-level 0.90` (10% CI half-width target,
-autocorrelation tolerance 0.2, ≥ 50 rounds minimum sample size) against
-crate v0.7.0 (commit `1aae1df`). The tables below are parallel runs on:
+autocorrelation tolerance 0.2, ≥ 50 rounds minimum sample size) and
+`PILOT_SESSION_LIMIT=300`, one case at a time on each of:
 
-- Apple M1 (`tolkien`, macOS)
-- AMD EPYC 7452 (`dennard.soe.ucsc.edu`, single-core slice)
-- NVIDIA Jetson (`heinlein.local`, aarch64)
+- Intel Core i5-8259U (`dmz`, Linux, idle)
+- Apple M1 (`tolkien`, macOS; no Mac is idle, and its background load is
+  recorded with the run)
+- Arm Cortex-X925 (`baase`, Linux, idle)
+- Arm Cortex-A76 (`darby`, Raspberry Pi 5, Linux, idle)
+
+The raw per-host tables, the host notes and the merge commands are in
+[bench/sweep-2026-09-17](bench/sweep-2026-09-17/README.md). The compilers
+differ with the hosts, which is part of what each column measures.
 
 ### AES
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| aes128 | 128 | 128 | 331.4 | ±0.8148 | 321 | 208.1 | ±7.3 | 50 | 90.35 | ±7.473 | 6388 |
-| aes128ct | 128 | 128 | 44.65 | ±0.1916 | 87 | 35.23 | ±0.1357 | 89 | 15.19 | ±0.5082 | 230 |
-| aes192 | 128 | 192 | 292.6 | ±0.9843 | 140 | 183.4 | ±1.429 | 50 | 86.81 | ±6.894 | 5609 |
-| aes192ct | 128 | 192 | 37.03 | ±0.1972 | 141 | 29.42 | ±0.1271 | 111 | 12.7 | ±0.3536 | 50 |
-| aes256 | 128 | 256 | 243.1 | ±1.302 | 890 | 162.9 | ±1.012 | 50 | 76.15 | ±6.351 | 7588 |
-| aes256ct | 128 | 256 | 31.71 | ±0.1045 | 57 | 25.29 | ±0.09249 | 80 | 11.05 | ±0.2853 | 230 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| aes128 | 128 | 128 | 215 | ±1.643 | 80 | 392.5 | ±0.4886 | 140 | 494.8 | ±11.82 | 267 | 186.4 | ±1.442 | 50 |
+| aes128ct | 128 | 128 | 37.18 | ±0.1773 | 140 | 48.28 | ±0.06194 | 50 | 64.31 | ±2.188 | 80 | 25.2 | ±0.08274 | 83 |
+| aes192 | 128 | 192 | 183 | ±2.119 | 144 | 329.6 | ±0.1671 | 200 | 408.9 | ±19.46 | 50 | 158.8 | ±1.324 | 110 |
+| aes192ct | 128 | 192 | 31.17 | ±0.08466 | 110 | 39.79 | ±0.03657 | 50 | 53.47 | ±1.818 | 170 | 20.96 | ±0.07426 | 55 |
+| aes256 | 128 | 256 | 161.3 | ±1.211 | 50 | 286.6 | ±0.1047 | 50 | 329.2 | ±21.63 | 85 | 138.8 | ±0.702 | 53 |
+| aes256ct | 128 | 256 | 26.62 | ±0.05391 | 110 | 33.84 | ±0.03596 | 80 | 46.28 | ±0.07804 | 175 | 17.93 | ±0.06138 | 118 |
 
 ### Camellia
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| camellia128 | 128 | 128 | 95.48 | ±0.5059 | 53 | 82.63 | ±0.4945 | 50 | 38.42 | ±2.908 | 50 |
-| camellia128ct | 128 | 128 | 9.211 | ±0.01902 | 51 | 5.799 | ±0.01197 | 54 | 2.944 | ±0.02098 | 50 |
-| camellia192 | 128 | 192 | 69.95 | ±0.3813 | 170 | 61.94 | ±0.6963 | 50 | 29.69 | ±2.028 | 50 |
-| camellia192ct | 128 | 192 | 6.892 | ±0.01383 | 50 | 4.351 | ±0.007133 | 110 | 2.241 | ±0.01375 | 55 |
-| camellia256 | 128 | 256 | 69.43 | ±0.3038 | 200 | 62.02 | ±0.3191 | 50 | 29.12 | ±2.399 | 51 |
-| camellia256ct | 128 | 256 | 6.893 | ±0.01519 | 110 | 4.353 | ±0.007219 | 50 | 2.236 | ±0.01142 | 110 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| camellia128 | 128 | 128 | 92.31 | ±0.8526 | 50 | 102.4 | ±0.6168 | 350 | 136.4 | ±5.104 | 50 | 71.98 | ±0.1416 | 50 |
+| camellia128ct | 128 | 128 | 6.635 | ±0.03416 | 50 | 9.29 | ±0.2193 | 50 | 11.44 | ±0.2584 | 380 | 4.291 | ±0.003072 | 171 |
+| camellia192 | 128 | 192 | 69.8 | ±0.3937 | 117 | 75.33 | ±0.05319 | 350 | 100.5 | ±4.419 | 80 | 42.76 | ±0.06733 | 140 |
+| camellia192ct | 128 | 192 | 4.97 | ±0.03365 | 113 | 6.851 | ±0.2617 | 80 | 8.582 | ±0.1589 | 50 | 3.205 | ±0.0445 | 50 |
+| camellia256 | 128 | 256 | 65.27 | ±0.1394 | 80 | 75.46 | ±0.01832 | 380 | 101 | ±4.035 | 80 | 54.03 | ±0.08136 | 50 |
+| camellia256ct | 128 | 256 | 4.969 | ±0.03223 | 50 | 6.412 | ±0.337 | 55 | 8.626 | ±0.01044 | 140 | 3.205 | ±0.0438 | 144 |
 
 ### CAST-128
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| cast128 | 64 | 128 | 149.1 | ±0.1225 | 170 | 98.86 | ±0.7563 | 59 | 46.64 | ±3.78 | 59 |
-| cast128ct | 64 | 128 | 3.14 | ±0.002884 | 140 | 1.774 | ±0.006342 | 50 | 0.8697 | ±0.001223 | 50 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| cast128 | 64 | 128 | 112 | ±1.343 | 80 | 167.3 | ±0.1133 | 140 | 180.4 | ±3.636 | 209 | 86.57 | ±0.2769 | 50 |
+| cast128ct | 64 | 128 | 1.834 | ±0.007179 | 80 | 3.309 | ±0.0002772 | 100 | 3.924 | ±0.2381 | 80 | 1.29 | ±0.01116 | 50 |
 
 ### DES / 3DES
 
-FIPS 46-3 (single DES) was withdrawn on 19 May 2005 (70 FR 28907). Under SP
-800-131A Rev. 2 §2.1, three-key TDEA encryption was deprecated through 2023 and
-is disallowed after 31 December 2023, two-key TDEA encryption is disallowed, and
-decryption is legacy use only; SP 800-67 Rev. 2 withdrew keying option 3
-(three equal keys) and limits a key bundle to 2^20 blocks. The crate therefore
-exposes no public constructor for a single-key bundle, and its checked
-constructors refuse weak, semi-weak and repeated key components.
-
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| des | 64 | 56 | 56.99 | ±0.1843 | 80 | 53.45 | ±0.3116 | 50 | 23.31 | ±1.06 | 110 |
-| desct | 64 | 56 | 6.649 | ±0.009946 | 260 | 3.424 | ±0.006416 | 50 | 2.249 | ±0.01122 | 50 |
-| 3des | 64 | 168 | 17.67 | ±0.05124 | 1103 | 17.49 | ±0.08911 | 82 | 8.597 | ±0.1488 | 57 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| des | 64 | 56 | 59.6 | ±0.2939 | 50 | 60.68 | ±0.01401 | 380 | 80.13 | ±0.09811 | 140 | 40.36 | ±0.0657 | 80 |
+| desct | 64 | 56 | 3.144 | ±0.1183 | 50 | 6.917 | ±0.0003662 | 350 | 9.666 | ±0.003761 | 1370 | 3.379 | ±0.0006071 | 121 |
+| 3des | 64 | 168 | 19.69 | ±0.07952 | 80 | 18.66 | ±0.001731 | 110 | 24.88 | ±1.061 | 54 | 13.65 | ±0.005685 | 50 |
+| 3desct | 64 | 168 | 1.069 | ±0.002881 | 81 | 2.296 | ±7.436e-05 | 100 | 2.984 | ±0.1253 | 83 | 1.124 | ±0.005318 | 76 |
 
 ### Grasshopper (GOST R 34.12-2015)
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| grasshopper | 128 | 256 | 21.16 | ±0.01513 | 110 | 12.53 | ±0.09348 | 50 | 5.696 | ±0.0786 | 140 |
-| grasshopperct | 128 | 256 | 4.755 | ±0.05184 | 53 | 3.33 | ±0.005137 | 50 | 1.848 | ±0.009802 | 50 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| grasshopper | 128 | 256 | 103.4 | ±0.6639 | 58 | 200.7 | ±0.1343 | 80 | 223.1 | ±7.559 | 110 | 86.12 | ±0.394 | 51 |
+| grasshopperct | 128 | 256 | 3.893 | ±0.02015 | 110 | 4.831 | ±0.001922 | 50 | 5.421 | ±0.3374 | 50 | 2.668 | ±0.01675 | 100 |
 
 ### Magma (GOST R 34.12-2015)
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| magma | 64 | 256 | 36.82 | ±0.02677 | 110 | 40.31 | ±0.1761 | 54 | 20.39 | ±1.145 | 50 |
-| magmact | 64 | 256 | 8.587 | ±0.002342 | 110 | 6.309 | ±0.01318 | 110 | 3.498 | ±0.03009 | 52 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| magma | 64 | 256 | 47.48 | ±0.1832 | 50 | 38.64 | ±0.1288 | 740 | 61.42 | ±4.653 | 50 | 37.11 | ±0.0326 | 50 |
+| magmact | 64 | 256 | 6.479 | ±0.06809 | 51 | 9.005 | ±0.0005405 | 153 | 14.77 | ±0.8489 | 200 | 4.419 | ±0.0005261 | 50 |
 
 ### PRESENT
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| present80 | 64 | 80 | 8.454 | ±0.001569 | 50 | 2.711 | ±0.005232 | 80 | 1.928 | ±0.009072 | 141 |
-| present80ct | 64 | 80 | 3.095 | ±0.002144 | 206 | 1.297 | ±0.002073 | 50 | 0.6636 | ±0.001045 | 50 |
-| present128 | 64 | 128 | 8.447 | ±0.006071 | 50 | 2.712 | ±0.004831 | 50 | 1.924 | ±0.008547 | 50 |
-| present128ct | 64 | 128 | 3.097 | ±0.002885 | 50 | 1.298 | ±0.001778 | 50 | 0.6644 | ±0.0009077 | 80 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| present80 | 64 | 80 | 2.64 | ±0.006397 | 57 | 8.855 | ±0.001497 | 81 | 10.28 | ±0.01819 | 950 | 2.704 | ±0.0371 | 50 |
+| present80ct | 64 | 80 | 1.28 | ±0.003532 | 113 | 3.272 | ±0.0001727 | 100 | 2.91 | ±0.1008 | 110 | 1.013 | ±0.005164 | 50 |
+| present128 | 64 | 128 | 2.626 | ±0.006265 | 142 | 8.856 | ±0.0007118 | 350 | 9.428 | ±0.7864 | 265 | 2.711 | ±0.01749 | 100 |
+| present128ct | 64 | 128 | 1.277 | ±0.003169 | 110 | 3.272 | ±0.0001444 | 138 | 2.946 | ±0.1209 | 50 | 1.013 | ±0.003551 | 100 |
 
 ### SEED
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| seed | 128 | 128 | 47.23 | ±0.08011 | 50 | 44.86 | ±0.1409 | 83 | 20.55 | ±1.006 | 50 |
-| seedct | 128 | 128 | 6.505 | ±0.006343 | 80 | 4.068 | ±0.009125 | 50 | 2.184 | ±0.01194 | 50 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| seed | 128 | 128 | 49.59 | ±0.2736 | 56 | 49.66 | ±0.01877 | 80 | 80.29 | ±1.973 | 50 | 39.64 | ±0.03707 | 110 |
+| seedct | 128 | 128 | 4.871 | ±0.04322 | 50 | 6.542 | ±0.1079 | 50 | 7.017 | ±0.4815 | 50 | 3.219 | ±0.05128 | 50 |
 
 ### Serpent
 
-`Serpent128Ct`/`Serpent192Ct`/`Serpent256Ct` are aliases of the fast types:
-the bitsliced round function is already constant-time, so there is no second
-path to measure.
-
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| serpent128 | 128 | 128 | 7.986 | ±0.005284 | 50 | 4.699 | ±0.01364 | 50 | 2.433 | ±0.0153 | 50 |
-| serpent192 | 128 | 192 | 7.984 | ±0.004522 | 471 | 4.696 | ±0.00828 | 50 | 2.441 | ±0.0142 | 50 |
-| serpent256 | 128 | 256 | 7.986 | ±0.00375 | 200 | 4.699 | ±0.01032 | 80 | 2.43 | ±0.0154 | 110 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| serpent128 | 128 | 128 | 24.51 | ±0.1194 | 59 | 23.46 | ±0.01514 | 80 | 30.22 | ±2.464 | 110 | 14.8 | ±0.03645 | 54 |
+| serpent192 | 128 | 192 | 24.21 | ±0.4652 | 50 | 23.47 | ±0.01368 | 80 | 32.98 | ±0.04135 | 110 | 14.84 | ±0.06683 | 50 |
+| serpent256 | 128 | 256 | 24.36 | ±0.6582 | 50 | 23.44 | ±0.02014 | 50 | 32.66 | ±0.7887 | 143 | 14.86 | ±0.05158 | 50 |
 
 ### SM4
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| sm4 | 128 | 128 | 149.3 | ±0.5177 | 1079 | 120.9 | ±1.025 | 50 | 50.35 | ±4.167 | 142 |
-| sm4ct | 128 | 128 | 9.499 | ±0.01158 | 50 | 6.386 | ±0.01314 | 110 | 3.173 | ±0.02603 | 80 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| sm4 | 128 | 128 | 117.5 | ±0.5034 | 50 | 158 | ±0.05036 | 327 | 163.1 | ±11.47 | 52 | 74.31 | ±0.1896 | 264 |
+| sm4ct | 128 | 128 | 7.366 | ±0.06728 | 50 | 9.604 | ±0.1499 | 54 | 11.05 | ±0.6641 | 1256 | 4.732 | ±0.0126 | 268 |
 
 ### Twofish
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| twofish128 | 128 | 128 | 9.679 | ±0.03363 | 50 | 8.577 | ±0.04337 | 50 | 2.571 | ±0.01555 | 50 |
-| twofish128ct | 128 | 128 | 1.897 | ±0.003274 | 50 | 1.063 | ±0.009289 | 50 | 0.5139 | ±0.0008311 | 50 |
-| twofish192 | 128 | 192 | 9.455 | ±0.001209 | 80 | 7.529 | ±0.06608 | 50 | 2.493 | ±0.0159 | 80 |
-| twofish192ct | 128 | 192 | 1.672 | ±0.008048 | 110 | 0.813 | ±0.001481 | 81 | 0.4037 | ±0.0004001 | 127 |
-| twofish256 | 128 | 256 | 9.196 | ±0.008706 | 50 | 6.533 | ±0.04008 | 83 | 2.398 | ±0.01493 | 80 |
-| twofish256ct | 128 | 256 | 1.488 | ±0.0004584 | 299 | 0.653 | ±0.003624 | 50 | 0.332 | ±0.0002243 | 93 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| twofish128 | 128 | 128 | 201.1 | ±1.241 | 110 | 250.6 | ±0.2087 | 140 | 317.1 | ±1.327 | 110 | 116.7 | ±0.3953 | 140 |
+| twofish128ct | 128 | 128 | 1.469 | ±0.005947 | 50 | 1.616 | ±0.0006938 | 50 | 1.864 | ±0.04868 | 80 | 0.8623 | ±0.005618 | 50 |
+| twofish192 | 128 | 192 | 201.7 | ±1.874 | 80 | 251 | ±0.2701 | 80 | 310.5 | ±10.07 | 80 | 117 | ±0.4351 | 380 |
+| twofish192ct | 128 | 192 | 1.13 | ±0.003674 | 51 | 1.207 | ±0.0002876 | 50 | 1.427 | ±0.02895 | 113 | 0.6784 | ±0.003772 | 50 |
+| twofish256 | 128 | 256 | 195.5 | ±0.6249 | 140 | 248.7 | ±3.338 | 50 | 315.4 | ±4.751 | 170 | 155.9 | ±0.8715 | 50 |
+| twofish256ct | 128 | 256 | 0.9225 | ±0.002703 | 50 | 0.9479 | ±0.000138 | 75 | 1.144 | ±0.01616 | 51 | 0.5661 | ±0.002297 | 50 |
 
 ### Simon
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| simon32_64 | 32 | 64 | 58.23 | ±0.1054 | 54 | 50.3 | ±0.2092 | 53 | 26.47 | ±1.451 | 80 |
-| simon48_72 | 48 | 72 | 75.17 | ±0.1529 | 50 | 66.18 | ±0.2902 | 50 | 33.13 | ±2.705 | 50 |
-| simon48_96 | 48 | 96 | 75.23 | ±0.145 | 350 | 66.07 | ±0.2619 | 110 | 33.31 | ±2.422 | 50 |
-| simon64_96 | 64 | 96 | 97.17 | ±0.2174 | 50 | 83.1 | ±1.146 | 50 | 38.69 | ±3.204 | 84 |
-| simon64_128 | 64 | 128 | 91.98 | ±0.1247 | 80 | 80.97 | ±0.4001 | 50 | 39.94 | ±2.695 | 110 |
-| simon96_96 | 96 | 96 | 96.36 | ±0.06035 | 80 | 87.37 | ±0.5467 | 50 | 48.77 | ±2.243 | 50 |
-| simon96_144 | 96 | 144 | 92.25 | ±0.1166 | 88 | 84.17 | ±0.3726 | 59 | 50.06 | ±2.691 | 50 |
-| simon128_128 | 128 | 128 | 170.2 | ±0.3255 | 740 | 137.8 | ±1.024 | 50 | 98.61 | ±5.828 | 50 |
-| simon128_192 | 128 | 192 | 166.8 | ±0.7618 | 860 | 137.1 | ±1.175 | 350 | 95.73 | ±5.326 | 80 |
-| simon128_256 | 128 | 256 | 158.5 | ±0.5673 | 620 | 129.8 | ±0.9313 | 80 | 91.71 | ±6.075 | 110 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| simon32_64 | 32 | 64 | 47.63 | ±0.3644 | 80 | 61.32 | ±0.06612 | 1471 | 83.05 | ±5.62 | 260 | 45.61 | ±0.04618 | 53 |
+| simon48_72 | 48 | 72 | 69.12 | ±0.6314 | 50 | 79.29 | ±0.01561 | 2452 | 114.5 | ±0.2088 | 80 | 59.34 | ±0.1102 | 50 |
+| simon48_96 | 48 | 96 | 69.96 | ±0.4104 | 80 | 79.3 | ±0.01593 | 688 | 108.8 | ±6.734 | 80 | 59.41 | ±0.1409 | 145 |
+| simon64_96 | 64 | 96 | 78.07 | ±0.6907 | 50 | 102.5 | ±0.03629 | 687 | 154.3 | ±0.569 | 171 | 78.74 | ±0.3719 | 50 |
+| simon64_128 | 64 | 128 | 70.19 | ±0.1231 | 170 | 97.13 | ±0.0292 | 470 | 140.4 | ±7.907 | 116 | 75.75 | ±0.1303 | 140 |
+| simon96_96 | 96 | 96 | 79.03 | ±0.179 | 110 | 101.7 | ±0.01953 | 80 | 141.1 | ±10.65 | 50 | 78.94 | ±0.4631 | 50 |
+| simon96_144 | 96 | 144 | 82.58 | ±0.9264 | 290 | 97.54 | ±0.007028 | 55 | 139 | ±9.099 | 140 | 60.4 | ±0.1841 | 50 |
+| simon128_128 | 128 | 128 | 116.4 | ±0.9202 | 50 | 188.5 | ±0.09627 | 233 | 293.2 | ±24.18 | 81 | 112.3 | ±0.438 | 320 |
+| simon128_192 | 128 | 192 | 130.3 | ±0.6393 | 235 | 184.9 | ±0.1102 | 140 | 319.5 | ±2.522 | 110 | 110.1 | ±0.4905 | 260 |
+| simon128_256 | 128 | 256 | 123.3 | ±0.3557 | 54 | 175.4 | ±0.07212 | 110 | 299.2 | ±11.82 | 80 | 107.1 | ±0.3118 | 354 |
 
 ### Speck
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| speck32_64 | 32 | 64 | 141 | ±0.3748 | 958 | 97.64 | ±0.6028 | 50 | 45.09 | ±1.719 | 50 |
-| speck48_72 | 48 | 72 | 212 | ±0.1515 | 1310 | 143.1 | ±0.8356 | 50 | 67.69 | ±3.602 | 50 |
-| speck48_96 | 48 | 96 | 172.4 | ±0.3479 | 1100 | 133 | ±0.8569 | 80 | 69.47 | ±4.938 | 590 |
-| speck64_96 | 64 | 96 | 191.9 | ±0.6116 | 836 | 194.5 | ±1.463 | 80 | 73.42 | ±2.002 | 80 |
-| speck64_128 | 64 | 128 | 183.4 | ±0.325 | 1340 | 190.1 | ±1.663 | 52 | 70.99 | ±2.371 | 50 |
-| speck96_96 | 96 | 96 | 217.1 | ±1.502 | 110 | 189.9 | ±1.408 | 50 | 109.7 | ±3.763 | 50 |
-| speck96_144 | 96 | 144 | 239.2 | ±2.161 | 1044 | 186.9 | ±1.491 | 80 | 103.1 | ±4.707 | 140 |
-| speck128_128 | 128 | 128 | 564.7 | ±1.858 | 680 | 394.9 | ±3.407 | 50 | 219.9 | ±10.95 | 110 |
-| speck128_192 | 128 | 192 | 586.7 | ±0.6879 | 1250 | 390.6 | ±2.526 | 80 | 218.1 | ±11.05 | 53 |
-| speck128_256 | 128 | 256 | 559.9 | ±1.196 | 1130 | 378.7 | ±3.099 | 50 | 209.5 | ±9.208 | 325 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| speck32_64 | 32 | 64 | 116.8 | ±0.3077 | 80 | 148.8 | ±0.05921 | 140 | 146.4 | ±9.354 | 80 | 57.5 | ±0.1238 | 80 |
+| speck48_72 | 48 | 72 | 166.3 | ±0.9249 | 144 | 225.3 | ±0.07528 | 110 | 215.4 | ±14.18 | 140 | 79.66 | ±0.1681 | 260 |
+| speck48_96 | 48 | 96 | 162 | ±1.366 | 110 | 182.7 | ±0.0446 | 50 | 230.8 | ±15.63 | 50 | 84.69 | ±0.2344 | 350 |
+| speck64_96 | 64 | 96 | 245.8 | ±2.419 | 80 | 204.5 | ±0.1298 | 59 | 253 | ±1.032 | 80 | 90.79 | ±0.2266 | 170 |
+| speck64_128 | 64 | 128 | 238.4 | ±2.034 | 80 | 194.2 | ±0.1098 | 81 | 237.8 | ±6.007 | 140 | 87.19 | ±0.2212 | 320 |
+| speck96_96 | 96 | 96 | 236.5 | ±2.293 | 175 | 266.9 | ±0.1776 | 50 | 333.2 | ±26.78 | 50 | 129.2 | ±0.74 | 140 |
+| speck96_144 | 96 | 144 | 207.6 | ±0.7088 | 111 | 255.6 | ±0.1443 | 80 | 341.8 | ±14.23 | 50 | 125.4 | ±0.6833 | 80 |
+| speck128_128 | 128 | 128 | 412.4 | ±3.947 | 112 | 764.4 | ±0.4849 | 50 | 984.4 | ±12.01 | 260 | 218.4 | ±1.929 | 50 |
+| speck128_192 | 128 | 192 | 405.2 | ±4.826 | 57 | 731.8 | ±0.313 | 88 | 935.6 | ±38.3 | 260 | 220 | ±1.503 | 290 |
+| speck128_256 | 128 | 256 | 392.2 | ±3.52 | 148 | 700.6 | ±0.5227 | 80 | 904.1 | ±15.97 | 50 | 217.1 | ±1.569 | 260 |
 
 ### Stream ciphers
 
-| Cipher | Block | Key | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| chacha20 | stream | 256 | 462 | ±1.997 | 415 | 409.2 | ±2.265 | 83 | 195.7 | ±9.495 | 143 |
-| xchacha20 | stream | 256 | 462.3 | ±1.965 | 1010 | 406.6 | ±3.29 | 50 | 194 | ±14.28 | 55 |
-| salsa20 | stream | 256 | 521.5 | ±3.769 | 1071 | 396.4 | ±3.476 | 50 | 242.2 | ±16.6 | 50 |
-| rabbit | stream | 128 | 853.3 | ±1.216 | 140 | 454.4 | ±3.574 | 50 | 225.4 | ±16.89 | 80 |
-| snow3g | stream | 128 | 271.5 | ±0.5142 | 447 | 254.1 | ±2.246 | 50 | 117.8 | ±9.74 | 1919 |
-| snow3gct | stream | 128 | 40.28 | ±0.01064 | 230 | 23.65 | ±0.07317 | 110 | 11.55 | ±0.241 | 50 |
-| zuc128 | stream | 128 | 363 | ±1.455 | 920 | 254.3 | ±2.217 | 50 | 107.2 | ±8.861 | 628 |
-| zuc128ct | stream | 128 | 41.47 | ±0.01106 | 200 | 24.48 | ±0.06694 | 50 | 11.3 | ±0.327 | 51 |
+| Cipher | Block | Key | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| chacha20 | stream | 256 | 346.3 | ±2.082 | 80 | 673.3 | ±0.1012 | 80 | 910.7 | ±33.23 | 140 | 298.7 | ±2.158 | 416 |
+| xchacha20 | stream | 256 | 235.2 | ±0.6852 | 320 | 673.1 | ±0.08714 | 80 | 892.8 | ±54.22 | 110 | 299.7 | ±1.551 | 230 |
+| salsa20 | stream | 256 | 216.7 | ±0.8704 | 50 | 586.6 | ±0.4194 | 50 | 1184 | ±59.54 | 80 | 331.5 | ±4.533 | 50 |
+| rabbit | stream | 128 | 273 | ±1.679 | 80 | 977.8 | ±4.558 | 170 | 1125 | ±30.16 | 80 | 256.2 | ±2.548 | 118 |
+| snow3g | stream | 128 | 162.7 | ±1.155 | 52 | 350.3 | ±0.3478 | 80 | 536.1 | ±35.75 | 140 | 188 | ±4.362 | 115 |
+| snow3gct | stream | 128 | 26.8 | ±0.2158 | 500 | 41.49 | ±0.01389 | 80 | 50.5 | ±0.03687 | 230 | 18.06 | ±0.01411 | 80 |
+| zuc128 | stream | 128 | 267.5 | ±7.473 | 50 | 390.9 | ±0.5177 | 260 | 516.2 | ±12.24 | 140 | 271.8 | ±1.864 | 50 |
+| zuc128ct | stream | 128 | 28.31 | ±0.09849 | 80 | 41.31 | ±1.132 | 50 | 49.16 | ±3.202 | 50 | 18.67 | ±0.02217 | 80 |
 
 ### Hash and XOF throughput
 
@@ -459,45 +451,45 @@ per-byte input cost dominates.
 
 ### MD5 / SHA-1 / RIPEMD-160 (legacy)
 
-| Hash | Out | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|
-| md5 | 128 | 206.5 | ±0.8391 | 207 | 360.7 | ±5.679 | 50 | 115.2 | ±9.586 | 3265 |
-| sha1 | 160 | 182 | ±0.8126 | 200 | 275.1 | ±3.627 | 56 | 152.6 | ±9.664 | 800 |
-| ripemd160 | 160 | 212.2 | ±0.6193 | 800 | 161.9 | ±1.378 | 80 | 95.99 | ±4.79 | 55 |
+| Hash | Out | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| md5 | 128 | 549.5 | ±2.582 | 170 | 649.8 | ±0.2112 | 110 | 774.5 | ±25.84 | 50 | 460.8 | ±3.487 | 51 |
+| sha1 | 160 | 245.2 | ±1.078 | 80 | 219.5 | ±0.1571 | 50 | 426.7 | ±4.301 | 80 | 170.7 | ±0.8454 | 328 |
+| ripemd160 | 160 | 125.5 | ±0.4776 | 50 | 287.3 | ±0.3605 | 81 | 415.1 | ±29.97 | 110 | 98.97 | ±0.4661 | 50 |
 
 ### SHA-2 (FIPS 180-4)
 
-| Hash | Out | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|
-| sha224 | 224 | 193.6 | ±0.5624 | 890 | 206 | ±1.588 | 80 | 96.93 | ±7.222 | 4734 |
-| sha256 | 256 | 193.7 | ±0.3768 | 770 | 206.1 | ±3.116 | 80 | 97.1 | ±6.566 | 5873 |
-| sha384 | 384 | 238.9 | ±0.1269 | 475 | 318.8 | ±1.86 | 80 | 149.4 | ±12.45 | 955 |
-| sha512 | 512 | 293.2 | ±2.198 | 740 | 318.6 | ±1.851 | 50 | 153.4 | ±12.79 | 58 |
-| sha512_224 | 224 | 256.2 | ±1.097 | 292 | 318.4 | ±1.736 | 55 | 154.8 | ±11.4 | 50 |
-| sha512_256 | 256 | 256.3 | ±0.3129 | 561 | 317.5 | ±2.736 | 87 | 143.7 | ±11.89 | 355 |
+| Hash | Out | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| sha224 | 224 | 204.6 | ±0.9379 | 50 | 200.5 | ±0.119 | 50 | 339.9 | ±9.039 | 110 | 164.4 | ±0.79 | 89 |
+| sha256 | 256 | 186.8 | ±0.8505 | 230 | 200.5 | ±0.09441 | 82 | 344.3 | ±2.065 | 230 | 164.7 | ±0.8369 | 170 |
+| sha384 | 384 | 283.3 | ±1.462 | 55 | 311.7 | ±0.1644 | 80 | 494.5 | ±23.53 | 239 | 186.1 | ±0.9009 | 261 |
+| sha512 | 512 | 283.8 | ±1.142 | 230 | 311.5 | ±0.1449 | 80 | 508.8 | ±17.27 | 50 | 185.9 | ±0.9029 | 148 |
+| sha512_224 | 224 | 283.6 | ±1.824 | 110 | 311.7 | ±0.1766 | 50 | 498.7 | ±20.88 | 80 | 185.9 | ±1.19 | 110 |
+| sha512_256 | 256 | 283 | ±1.822 | 50 | 311.5 | ±0.2108 | 170 | 510.1 | ±12.52 | 110 | 186 | ±0.9143 | 143 |
 
 ### SHA-3 (FIPS 202)
 
-| Hash | Out | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|
-| sha3_224 | 224 | 238 | ±13.84 | 625 | 307 | ±1.939 | 80 | 189.4 | ±15.7 | 177 |
-| sha3_256 | 256 | 226.7 | ±7.664 | 80 | 286.8 | ±1.796 | 50 | 179.5 | ±14.84 | 50 |
-| sha3_384 | 384 | 176.5 | ±7.119 | 478 | 223.1 | ±1.908 | 140 | 124.9 | ±10.4 | 2577 |
-| sha3_512 | 512 | 134.5 | ±0.8357 | 920 | 156.9 | ±1.103 | 50 | 95.47 | ±6.359 | 5903 |
+| Hash | Out | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| sha3_224 | 224 | 159.7 | ±0.5975 | 50 | 484.8 | ±0.3438 | 50 | 722.1 | ±9.895 | 200 | 86.39 | ±0.3054 | 170 |
+| sha3_256 | 256 | 150.1 | ±0.4682 | 50 | 456.5 | ±0.3299 | 80 | 663.9 | ±34.88 | 110 | 81.66 | ±0.258 | 110 |
+| sha3_384 | 384 | 114.9 | ±0.4533 | 50 | 347.7 | ±0.3337 | 52 | 525.1 | ±6.035 | 230 | 62.65 | ±0.3901 | 200 |
+| sha3_512 | 512 | 90.55 | ±0.375 | 170 | 242.5 | ±0.2849 | 80 | 353.9 | ±21.73 | 80 | 54.97 | ±0.1783 | 80 |
 
 ### SHAKE XOFs (FIPS 202; 32-byte squeeze)
 
-| Hash | Out | Tolkien (M1) MB/s | Tolkien (M1) ±CI (90%) | Tolkien (M1) Runs | Dennard (EPYC 7452) MB/s | Dennard (EPYC 7452) ±CI (90%) | Dennard (EPYC 7452) Runs | Heinlein (Jetson) MB/s | Heinlein (Jetson) ±CI (90%) | Heinlein (Jetson) Runs |
-|---|---|---|---|---|---|---|---|---|---|---|
-| shake128 | xof | 262.4 | ±8.668 | 175 | 351.5 | ±1.199 | 50 | 209.8 | ±16.86 | 170 |
-| shake256 | xof | 234.4 | ±1.655 | 770 | 286.6 | ±2.071 | 110 | 186.6 | ±14.84 | 53 |
+| Hash | Out | i5-8259U MB/s | i5-8259U ±CI (90%) | i5-8259U Runs | Apple M1 MB/s | Apple M1 ±CI (90%) | Apple M1 Runs | Cortex-X925 MB/s | Cortex-X925 ±CI (90%) | Cortex-X925 Runs | Cortex-A76 MB/s | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| shake128 | xof | 208.8 | ±2.39 | 110 | 565.6 | ±0.4784 | 80 | 808.7 | ±50.1 | 470 | 127 | ±0.5039 | 50 |
+| shake256 | xof | 168.8 | ±2.604 | 144 | 455.9 | ±0.4095 | 50 | 675.3 | ±25.88 | 110 | 103.2 | ±0.3278 | 53 |
 
 Cross-platform summary Kiviat diagrams (radar charts; log-radial axis,
 outer ring = faster):
 
-![Symmetric throughput Kiviat (Tolkien / Dennard / Heinlein)](assets/sweep-2026-06-11-symmetric-radar.svg)
+![Symmetric throughput Kiviat (i5-8259U / Apple M1 / Cortex-X925 / Cortex-A76)](assets/sweep-2026-09-17-symmetric-radar.svg)
 
-![Hash throughput Kiviat (Tolkien / Dennard / Heinlein)](assets/sweep-2026-06-11-hash-radar.svg)
+![Hash throughput Kiviat (i5-8259U / Apple M1 / Cortex-X925 / Cortex-A76)](assets/sweep-2026-09-17-hash-radar.svg)
 The Kiviat diagram (radar chart) below compares representative fast-vs-`Ct`
 pairs across
 table-driven ciphers. Simon and Speck are absent because their designs are
