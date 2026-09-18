@@ -32,7 +32,7 @@ experiment, at this sample size, on this machine, found no difference.
 | `Aes128Ct::encrypt_block` | all-zero / dense key and block | 2.1 | 2.0 | 1.2 | 1.3 |
 | `X25519::scalar_mult` | all-zero / dense scalar | 1.3 | 46 **flagged** | 2.1 | 1.8 |
 | `X25519::scalar_mult` | two ordinary fixed scalars | 1.6 | 2.2 | 2.2 | 2.5 |
-| `X25519::scalar_mult` | alternating bits / long runs | 1.3 | 11–13 **flagged** | not run | 2.8 |
+| `X25519::scalar_mult` | alternating bits / long runs | 1.3 | 11–13 **flagged** | 1.8 | 2.8 |
 | `X25519::scalar_mult` | low-order point / base point | 1.0 | 1.8 | 28 **flagged** | 1.3 |
 | `MlKem::decaps` | well-formed / tampered ciphertext | 1.6 | 1.3 | 1.7 | 0.5 |
 
@@ -42,8 +42,8 @@ Linux 6.18, all three under rustc 1.93.1; baase is an idle heterogeneous ARM
 machine under Linux 7.0 and rustc 1.95.0, with the run pinned to five Cortex-X925
 cores of one cluster so it cannot migrate to the Cortex-A725 cores beside them,
 which run at a different frequency. The dyson scalar figure reproduced at 44, 46,
-47, 51 and 52 across five runs; the darby point figure is from its one run with
-this harness.
+47, 51 and 52 across five runs; the darby column is the larger of two runs,
+whose point figures were 28 and 16.5.
 
 ## Degenerate inputs, and only on two hosts
 
@@ -59,8 +59,7 @@ with an ordinary one:
 
 Neither host flags the other's pair, neither the idle Intel host nor the
 Cortex-X925 flags either, and no host separates two ordinary scalars of similar
-swap count — the section below
-takes up the pair that does. The machine-code evidence in
+swap count — the section below takes up the pair that does. The machine-code evidence in
 `scripts/ct_budgets/` shows no branch and no secret-dependent index anywhere in
 the ladder, and `fe_cswap` touches every limb whatever the mask says, so this is
 not the code taking a different path for one class. It is the same instructions
@@ -72,8 +71,9 @@ The experiment the all-zero scalar asked for has now been run: two *ordinary*
 scalars, one of alternating bits (the swap fires on almost every round) and one
 of long runs (about a sixth of them). On the Apple host they separate at `|t|`
 of 11.0 and 13.2 over two runs, each growing from a quarter statistic near 4;
-on the idle Intel host the same pair gives 1.3 and on the Cortex-X925 2.8. Two
-ordinary scalars whose swap counts are alike stay quiet on every host.
+on the idle Intel host the same pair gives 1.3, on the Cortex-X925 2.8 and on
+the Raspberry Pi 1.8. Two ordinary scalars whose swap counts are alike stay
+quiet on every host.
 
 So what that processor resolves is not a degenerate input but how often the
 ladder's conditional swap fires, which is a property of the secret scalar: the
