@@ -1,0 +1,4 @@
+Linux baase 7.0.0-1019-nvidia #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Sun Sep  6 18:35:11 UTC 2 aarch64 aarch64 aarch64 GNU/Linux
+rustc 1.95.0 (59807616e 2026-04-14)
+20
+Model name:                              Cortex-X925
