@@ -18,6 +18,10 @@ harness = false
 name = "drbg_bench"
 harness = false
 
+[[bench]]
+name = "keystream_sizes"
+harness = false
+
 [features]
 # The libsodium comparison in aes_bench. Off by default so the benchmarks
 # build and run on a machine without libsodium.

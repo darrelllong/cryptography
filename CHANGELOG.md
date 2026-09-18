@@ -51,6 +51,12 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- `benchmarks/benches/keystream_sizes.rs`, which prices a ChaCha20 keystream
+  at the sizes and shapes a caller asks for rather than only at a megabyte in
+  one call: a word, an AES block, a ChaCha block, a 480-byte record with its
+  32-byte tail, whole blocks, a page and a megabyte; one call against a word
+  at a time; a buffer offset by one byte; and construction alone against
+  construction plus one block.
 - `SPECIFICATIONS.md` gains a table naming the test behind each public-key
   operation, so a reader after the signature-verification case goes straight
   to it rather than opening the file and searching.
