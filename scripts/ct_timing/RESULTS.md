@@ -23,27 +23,41 @@ experiment, at this sample size, on this machine, found no difference.
 
 ## 2026-09-17
 
-| Experiment | Classes | dmz (Intel Xeon, idle) | dyson (Apple M4 Pro) | darby (Cortex-A76) | baase (Cortex-X925) |
-|---|---|---|---|---|---|
-| control: early-exit compare | differs at byte 0 / byte 31 | 1707 **flagged** | 49 **flagged** | 662 **flagged** | 247 **flagged** |
-| control: identical classes | differs at byte 31, both | 2.2 | 1.4 | 1.7 | 1.6 |
-| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 1.8 | 1.1 | 2.6 | 1.9 |
-| `Hmac::<Sha256>::verify` | differs at byte 15 / byte 31 | 2.1 | 2.1 | 3.3 | 0.8 |
-| `Aes128Ct::encrypt_block` | all-zero / dense key and block | 2.1 | 2.0 | 1.2 | 1.3 |
-| `X25519::scalar_mult` | all-zero / dense scalar | 1.3 | 46 **flagged** | 2.1 | 1.8 |
-| `X25519::scalar_mult` | two ordinary fixed scalars | 1.6 | 2.2 | 2.2 | 2.5 |
-| `X25519::scalar_mult` | alternating bits / long runs | 1.3 | 11–13 **flagged** | 1.8 | 2.8 |
-| `X25519::scalar_mult` | low-order point / base point | 1.0 | 1.8 | 28 **flagged** | 1.3 |
-| `MlKem::decaps` | well-formed / tampered ciphertext | 1.6 | 1.3 | 1.7 | 0.5 |
+Every column is one run of the whole battery at `e312ab3`, so the rows compare.
 
-Each column is one run: dmz is an idle Intel machine with the run pinned to four
-cores, dyson an Apple M4 Pro under macOS 27.0, darby a Raspberry Pi 5 under
-Linux 6.18, all three under rustc 1.93.1; baase is an idle heterogeneous ARM
-machine under Linux 7.0 and rustc 1.95.0, with the run pinned to five Cortex-X925
-cores of one cluster so it cannot migrate to the Cortex-A725 cores beside them,
-which run at a different frequency. The dyson scalar figure reproduced at 44, 46,
-47, 51 and 52 across five runs; the darby column is the larger of two runs,
-whose point figures were 28 and 16.5.
+| Experiment | Classes | dmz (i5-8259U) | dyson (Apple M4 Pro) | darby (Cortex-A76) | baase (Cortex-X925) |
+|---|---|---|---|---|---|
+| control: early-exit compare | differs at byte 0 / byte 31 | 1119 **flagged** | 50 **flagged** | 571 **flagged** | 268 **flagged** |
+| control: identical classes | differs at byte 31, both | 1.7 | 2.3 | 1.7 | 1.9 |
+| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 2.4 | 1.3 | 1.6 | 2.6 |
+| `Hmac::<Sha256>::verify` | differs at byte 15 / byte 31 | 1.1 | 2.0 | 1.2 | 1.8 |
+| `Aes128Ct::encrypt_block` | all-zero / dense key and block | 1.4 | 0.6 | 1.8 | 0.4 |
+| `X25519::scalar_mult` | all-zero / dense scalar | 1.1 | 14.2 **flagged** | 1.4 | 1.4 |
+| `X25519::scalar_mult` | two ordinary fixed scalars | 1.4 | 1.4 | 0.9 | 0.8 |
+| `X25519::scalar_mult` | alternating bits / long runs | 1.0 | 15.1 **flagged** | 2.3 | 1.5 |
+| `X25519::scalar_mult` | low-order point / base point | 2.6 | 1.3 | 10.7 **flagged** | 1.3 |
+| `ChaCha20Poly1305::open` | tag differs at byte 0 / byte 7, both reject | 1.1 | 1.6 | 1.4 | 0.7 |
+| `ChaCha20Poly1305::open` | two keys, both accept | 3.2 | 1.1 | 5.0 *over, not growing* | 2.4 |
+| `Ed25519::sign_message` | dense seed / one-bit seed | 66 **flagged** | 19 **flagged** | 426 **flagged** | 5.3 **flagged** |
+| `Ed25519::sign_message` | one key, nonce of 97 / 157 set bits | 7.9 **flagged** | 7.2 **flagged** | — | 35 **flagged** |
+| `MlKem::decaps` | well-formed / tampered ciphertext | 1.1 | 0.7 | 1.3 | 1.4 |
+
+The hosts: dmz an idle Intel Core i5-8259U under Linux, pinned to four cores;
+dyson an Apple M4 Pro under macOS 27.0, this session's own machine, which was
+doing nothing else during its run but is not a quiet benchmark host; darby a
+Raspberry Pi 5 under Linux 6.18; baase an idle heterogeneous ARM machine under
+Linux 7.0, pinned to five Cortex-X925 cores of one cluster so the run cannot
+migrate to the Cortex-A725 cores beside them, which run at a different
+frequency.
+
+Two rows carry a reading that is not a verdict. `ChaCha20Poly1305::open` on two
+accepting keys reaches 5.0 on the Raspberry Pi, over the threshold but growing
+only 1.18× from its quarter statistic, which by this file's rule is not a
+flag; it is quiet on the other three hosts and was 2.2 on an earlier run of the
+same pair on baase. The dyson column's magnitudes are lower than earlier runs
+of the same experiments — 14.2 where five earlier runs gave 44 to 52 — and its
+control is lower too, which is what a less quiet machine looks like; the
+pattern of which pairs separate is unchanged.
 
 ## Degenerate inputs, and only on two hosts
 
@@ -92,6 +106,43 @@ unchanged is therefore part of what is observable, but not all of it, and an
 11% cost for a distinguisher that remains is not a trade worth making. The
 emitted code was checked: the two passes survived, the constant appears sixty
 times in the ladder.
+
+## Ed25519 signing publishes its nonce
+
+Signing separates two secret keys on every host — 66, 19, 426 and 5.3 — which
+the crate's policy allows: public-key code here is variable-time by design,
+X25519 and X448 excepted, and the module says so. What the policy does not say,
+and what the second experiment measures, is *which* secret the timing follows.
+
+One key signs two messages. Everything is fixed but the nonce `r`, which
+RFC 8032 derives as `H(prefix ‖ M) mod L`; the two messages were searched for
+beforehand, over twenty thousand candidates, as the ones whose reduced nonces
+have the fewest and the most set bits — 97 against 157. They separate at 7.9,
+7.2 and 35 on the three hosts that have run the experiment.
+
+The code says why. `scalar_mul_with_table` runs one window per
+`ED25519_BASE_WINDOW_BITS` bits of the scalar, so the loop count follows `r`'s
+bit length, and each window reads `table[value]` from 256 precomputed extended
+points with 8 bits of `r` as the index, so the memory pattern follows `r`'s
+value. A sparse nonce reads a few entries many times and a dense one reads
+many; that difference is what the statistic sees.
+
+This is the leak a signature scheme can least afford. A key is used for many
+signatures and an attacker sees the timing of each, while partial knowledge of
+many nonces recovers the private key by lattice reduction — the attack that
+`k`-bias and `k`-leak papers have been building since the first ECDSA nonce
+results. The private key's own scalar `a` is multiplied by the same code, so
+`A = a·B` at key generation leaks in the same way, once.
+
+Closing it means a fixed-base multiplication whose loop count and memory
+pattern do not depend on the scalar: a fixed number of windows over the full
+scalar length, and a table read that touches every entry under a mask, as
+`fe_cswap` does in the X25519 ladder. That is the research-grade
+constant-time public-key work this crate's README puts out of scope, and it is
+the owner's call whether Ed25519 should be the exception beside X25519 and
+X448. Until then the honest statement is the one the module now carries: this
+signing implementation is unsuitable where an attacker can time it, and the
+quantity it publishes is the nonce.
 
 ## What scalar blinding would cost, and why it is not here
 

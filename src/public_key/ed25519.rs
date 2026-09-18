@@ -45,6 +45,18 @@
 //! scalar (see that module's note). It lives under [`crate::vt`] for that
 //! reason and is unsuitable where an attacker can observe signing timing or
 //! cache behavior. Verification operates only on public data.
+//!
+//! What leaks is worth naming, because for a Schnorr signature it is the
+//! nonce rather than the key that an attacker collects. The fixed-base
+//! multiplication runs one window per 8 bits of `r`, so its loop count
+//! follows `r`'s bit length, and each window indexes a 256-entry table of
+//! precomputed points with 8 bits of `r`, so its memory pattern follows `r`'s
+//! value. `scripts/ct_timing` measures the consequence: one key signing two
+//! messages whose reduced nonces differ in weight — 97 set bits against 157 —
+//! separates at `|t|` of 7.2 on an Apple M4 Pro, 7.9 on an idle Intel host
+//! and 35.4 on a Cortex-X925. Partial knowledge of many nonces recovers the
+//! private key by lattice reduction, so timing that correlates with `r` is
+//! the quantity this scheme can least afford to publish.
 
 /// RFC 8032 §5.1: a 32-byte seed, a 32-byte encoded public point, and a
 /// 64-byte signature `R ‖ S`. The seed hash is SHA-512, whose halves are the
