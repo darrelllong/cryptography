@@ -53,8 +53,9 @@
 //! precomputed points with 8 bits of `r`, so its memory pattern follows `r`'s
 //! value. `scripts/ct_timing` measures the consequence: one key signing two
 //! messages whose reduced nonces differ in weight — 97 set bits against 157 —
-//! separates at `|t|` of 7.2 on an Apple M4 Pro, 7.9 on an idle Intel host
-//! and 35.4 on a Cortex-X925. Partial knowledge of many nonces recovers the
+//! separates on every host measured: `|t|` of 7.2 on an Apple M4 Pro, 7.9 on
+//! an idle Intel host, 35 on a Cortex-X925 and 244 on a Cortex-A76. Partial
+//! knowledge of many nonces recovers the
 //! private key by lattice reduction, so timing that correlates with `r` is
 //! the quantity this scheme can least afford to publish.
 

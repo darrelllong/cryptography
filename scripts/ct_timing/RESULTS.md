@@ -27,20 +27,20 @@ Every column is one run of the whole battery at `e312ab3`, so the rows compare.
 
 | Experiment | Classes | dmz (i5-8259U) | dyson (Apple M4 Pro) | darby (Cortex-A76) | baase (Cortex-X925) |
 |---|---|---|---|---|---|
-| control: early-exit compare | differs at byte 0 / byte 31 | 1119 **flagged** | 50 **flagged** | 571 **flagged** | 268 **flagged** |
-| control: identical classes | differs at byte 31, both | 1.7 | 2.3 | 1.7 | 1.9 |
-| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 2.4 | 1.3 | 1.6 | 2.6 |
-| `Hmac::<Sha256>::verify` | differs at byte 15 / byte 31 | 1.1 | 2.0 | 1.2 | 1.8 |
-| `Aes128Ct::encrypt_block` | all-zero / dense key and block | 1.4 | 0.6 | 1.8 | 0.4 |
-| `X25519::scalar_mult` | all-zero / dense scalar | 1.1 | 14.2 **flagged** | 1.4 | 1.4 |
-| `X25519::scalar_mult` | two ordinary fixed scalars | 1.4 | 1.4 | 0.9 | 0.8 |
-| `X25519::scalar_mult` | alternating bits / long runs | 1.0 | 15.1 **flagged** | 2.3 | 1.5 |
-| `X25519::scalar_mult` | low-order point / base point | 2.6 | 1.3 | 10.7 **flagged** | 1.3 |
-| `ChaCha20Poly1305::open` | tag differs at byte 0 / byte 7, both reject | 1.1 | 1.6 | 1.4 | 0.7 |
-| `ChaCha20Poly1305::open` | two keys, both accept | 3.2 | 1.1 | 5.0 *over, not growing* | 2.4 |
+| control: early-exit compare | differs at byte 0 / byte 31 | 1119 **flagged** | 50 **flagged** | 651 **flagged** | 268 **flagged** |
+| control: identical classes | differs at byte 31, both | 1.7 | 2.3 | 1.4 | 1.9 |
+| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 2.4 | 1.3 | 2.0 | 2.6 |
+| `Hmac::<Sha256>::verify` | differs at byte 15 / byte 31 | 1.1 | 2.0 | 2.2 | 1.8 |
+| `Aes128Ct::encrypt_block` | all-zero / dense key and block | 1.4 | 0.6 | 2.2 | 0.4 |
+| `X25519::scalar_mult` | all-zero / dense scalar | 1.1 | 14.2 **flagged** | 2.6 | 1.4 |
+| `X25519::scalar_mult` | two ordinary fixed scalars | 1.4 | 1.4 | 1.2 | 0.8 |
+| `X25519::scalar_mult` | alternating bits / long runs | 1.0 | 15.1 **flagged** | 1.2 | 1.5 |
+| `X25519::scalar_mult` | low-order point / base point | 2.6 | 1.3 | 6.9 **flagged** | 1.3 |
+| `ChaCha20Poly1305::open` | tag differs at byte 0 / byte 7, both reject | 1.1 | 1.6 | 1.8 | 0.7 |
+| `ChaCha20Poly1305::open` | two keys, both accept | 3.2 | 1.1 | 3.9 | 2.4 |
 | `Ed25519::sign_message` | dense seed / one-bit seed | 66 **flagged** | 19 **flagged** | 426 **flagged** | 5.3 **flagged** |
-| `Ed25519::sign_message` | one key, nonce of 97 / 157 set bits | 7.9 **flagged** | 7.2 **flagged** | — | 35 **flagged** |
-| `MlKem::decaps` | well-formed / tampered ciphertext | 1.1 | 0.7 | 1.3 | 1.4 |
+| `Ed25519::sign_message` | one key, nonce of 97 / 157 set bits | 7.9 **flagged** | 7.2 **flagged** | 244 **flagged** | 35 **flagged** |
+| `MlKem::decaps` | well-formed / tampered ciphertext | 1.1 | 0.7 | 1.2 | 1.4 |
 
 The hosts: dmz an idle Intel Core i5-8259U under Linux, pinned to four cores;
 dyson an Apple M4 Pro under macOS 27.0, this session's own machine, which was
@@ -50,14 +50,13 @@ Linux 7.0, pinned to five Cortex-X925 cores of one cluster so the run cannot
 migrate to the Cortex-A725 cores beside them, which run at a different
 frequency.
 
-Two rows carry a reading that is not a verdict. `ChaCha20Poly1305::open` on two
-accepting keys reaches 5.0 on the Raspberry Pi, over the threshold but growing
-only 1.18× from its quarter statistic, which by this file's rule is not a
-flag; it is quiet on the other three hosts and was 2.2 on an earlier run of the
-same pair on baase. The dyson column's magnitudes are lower than earlier runs
-of the same experiments — 14.2 where five earlier runs gave 44 to 52 — and its
-control is lower too, which is what a less quiet machine looks like; the
-pattern of which pairs separate is unchanged.
+The dyson column's magnitudes are lower than earlier runs of the same
+experiments — 14.2 where five earlier runs gave 44 to 52 — and its control is
+lower too, which is what a less quiet machine looks like; which pairs separate
+is unchanged. The `ChaCha20Poly1305::open` pair on two accepting keys reached
+5.0 on the Raspberry Pi in an earlier run, over the threshold but growing only
+1.18× from its quarter statistic, which by this file's rule is not a flag; it
+is 3.9 here and quiet on the other three hosts.
 
 ## Degenerate inputs, and only on two hosts
 
@@ -117,8 +116,8 @@ and what the second experiment measures, is *which* secret the timing follows.
 One key signs two messages. Everything is fixed but the nonce `r`, which
 RFC 8032 derives as `H(prefix ‖ M) mod L`; the two messages were searched for
 beforehand, over twenty thousand candidates, as the ones whose reduced nonces
-have the fewest and the most set bits — 97 against 157. They separate at 7.9,
-7.2 and 35 on the three hosts that have run the experiment.
+have the fewest and the most set bits — 97 against 157. They separate on every
+host: 7.9, 7.2, 244 and 35.
 
 The code says why. `scalar_mul_with_table` runs one window per
 `ED25519_BASE_WINDOW_BITS` bits of the scalar, so the loop count follows `r`'s
