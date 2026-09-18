@@ -344,6 +344,56 @@ mod tests {
         }
     }
 
+    /// Where a nonce-dependent time would have to come from, measured one
+    /// step at a time: the comb, the encoding, and the two together, on two
+    /// scalars of very different weight.
+    ///
+    /// Release-only, and printed rather than asserted: a threshold here would
+    /// be a threshold on whatever machine happened to run it.
+    /// `scripts/ct_timing` is what decides, over interleaved classes with
+    /// controls; this says which step to look at when it flags.
+    #[test]
+    #[ignore = "release-only timing experiment"]
+    fn the_steps_of_a_signature_are_priced_against_two_scalar_weights() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const ROUNDS: usize = 2_000;
+        const SAMPLES: usize = 51;
+
+        let sparse = {
+            let mut s = [0u8; FE_BYTES];
+            for byte in s.iter_mut().step_by(4) {
+                *byte = 0x01;
+            }
+            s
+        };
+        let dense = [0x7fu8; FE_BYTES];
+
+        let fastest = |mut body: Box<dyn FnMut()>| {
+            let mut best = f64::INFINITY;
+            for _ in 0..SAMPLES {
+                let start = Instant::now();
+                for _ in 0..ROUNDS {
+                    body();
+                }
+                best = best.min(start.elapsed().as_secs_f64() / ROUNDS as f64);
+            }
+            best * 1e9
+        };
+
+        for (name, scalar) in [("sparse", sparse), ("dense", dense)] {
+            let comb = fastest(Box::new(move || {
+                black_box(scalar_mul_base(black_box(&scalar)));
+            }));
+            let point = scalar_mul_base(&scalar);
+            let encode = fastest(Box::new(move || {
+                black_box(compress(black_box(&point)));
+            }));
+            println!("{name:>6}: comb {comb:8.1} ns, compress {encode:8.1} ns");
+        }
+    }
+
     /// RFC 8032 §7.1's first public key, straight from its secret scalar: the
     /// seed's SHA-512 digest, clamped, times the base point.
     #[test]
