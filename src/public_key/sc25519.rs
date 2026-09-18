@@ -318,6 +318,56 @@ mod tests {
         }
     }
 
+    /// What the scalar arithmetic costs on two values of very different
+    /// weight, which is the pair `scripts/ct_timing` signs with.
+    ///
+    /// Release-only, and printed rather than asserted, for the same reason as
+    /// the group's step pricing: a threshold here would be a threshold on
+    /// whichever machine ran it.
+    #[test]
+    #[ignore = "release-only timing experiment"]
+    fn the_arithmetic_is_priced_against_two_operand_weights() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const ROUNDS: usize = 20_000;
+        const SAMPLES: usize = 51;
+
+        let sparse_wide = {
+            let mut w = [0u8; WIDE_BYTES];
+            for byte in w.iter_mut().step_by(8) {
+                *byte = 0x01;
+            }
+            w
+        };
+        let dense_wide = [0x7fu8; WIDE_BYTES];
+
+        let fastest = |mut body: Box<dyn FnMut()>| {
+            let mut best = f64::INFINITY;
+            for _ in 0..SAMPLES {
+                let start = Instant::now();
+                for _ in 0..ROUNDS {
+                    body();
+                }
+                best = best.min(start.elapsed().as_secs_f64() / ROUNDS as f64);
+            }
+            best * 1e9
+        };
+
+        for (name, wide) in [("sparse", sparse_wide), ("dense", dense_wide)] {
+            let reduction = fastest(Box::new(move || {
+                black_box(reduce_wide(black_box(&wide)));
+            }));
+            let a = reduce_wide(&wide);
+            let b = reduce_wide(&wide);
+            let c = reduce_wide(&wide);
+            let product = fastest(Box::new(move || {
+                black_box(mul_add(black_box(&a), black_box(&b), black_box(&c)));
+            }));
+            println!("{name:>6}: reduce_wide {reduction:7.2} ns, mul_add {product:7.2} ns");
+        }
+    }
+
     /// A reduced scalar round-trips through its encoding.
     #[test]
     fn encoding_round_trips() {
