@@ -106,6 +106,15 @@ limbs, no data-dependent branches or table lookups), and both are validated
 against the full RFC 7748 §5.2 KAT set including the 1 000 000-iteration
 vectors.
 
+Message encryption (under `cryptography::vt`):
+
+- `Hpke` — RFC 9180 hybrid public key encryption over
+  `DHKEM(X25519, HKDF-SHA256)` with HKDF-SHA256 and AES-128-GCM, AES-256-GCM
+  or ChaCha20-Poly1305, in all four modes: base, PSK, auth and auth-PSK. A
+  context seals, opens and exports; `Hpke::seal` and `Hpke::open` are the
+  single-shot pair. This is the crate's authenticated construction for
+  messages; the raw schemes above encrypt group elements and say so.
+
 Asymmetric post-quantum work:
 
 - ML-KEM (Kyber) under `cryptography::vt`:
