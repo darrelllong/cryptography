@@ -36,11 +36,20 @@ Override paths without editing scripts via:
 Tune run behavior without editing scripts via:
 
 - `PILOT_PRESET` (`quick`, `normal`, `strict`; default `quick`)
+- `PILOT_SESSION_LIMIT` (seconds a single case may run; default `600`)
 - `PILOT_CONFIDENCE_LEVEL` (e.g. `0.90` for 90%; default unset, which leaves pilot-bench's 0.95 in place)
 - `PILOT_CIPHER_BYTES` (bytes per `pilot_cipher` invocation; default `262144`)
 - `PILOT_HASH_BYTES` (bytes per `pilot_hash` invocation; default `262144`)
 - `PILOT_HASH_XOF_OUT` (bytes squeezed per XOF round in `pilot_hash`; default `32`)
 - `PILOT_PK_ITERS_PERCENT` (scales per-invocation loop counts in `pilot_pk`; default `25`)
+
+A key-generation row is the one to read carefully. Generating a modulus or a
+domain parameter set searches for primes, so its timing has a long tail and its
+confidence interval may never reach the preset's target: the case then stops at
+`PILOT_SESSION_LIMIT` and the table marks it `(limit)`, which means the mean is
+the mean of what was measured and the interval is as wide as the tail made it,
+not that the measurement failed. `elgamal_keygen_1024` on a Cortex-X925, for
+instance, reported 30.3 ms with a ±9.3 interval after 4,245 rounds.
 
 For Apple Silicon optimization loops (no assembly, in-repo code only), use:
 
