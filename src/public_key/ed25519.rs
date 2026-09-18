@@ -122,11 +122,31 @@ impl PartialEq for Ed25519PrivateKey {
 impl Eq for Ed25519PrivateKey {}
 
 /// Standard 64-byte Ed25519 signature.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct Ed25519Signature {
-    r_point: EdwardsPoint,
-    s: BigUint,
+    /// `R` and `S` as RFC 8032 §5.1.6 encodes them, which is what a signature
+    /// is. The point and the scalar are views of these bytes, built by
+    /// [`Ed25519Signature::nonce_point`] and
+    /// [`Ed25519Signature::response`] when a caller asks: signing itself
+    /// touches no big integer, so its work does not vary with the value it
+    /// just produced.
+    encoded_r: [u8; SEED_LEN],
+    encoded_s: [u8; SEED_LEN],
+    /// `R` decoded. Parsing fills it, since it has to decode `R` anyway to
+    /// refuse a signature whose `R` is not a point; signing leaves it empty,
+    /// so producing a signature costs no decoding at all.
+    point: OnceLock<EdwardsPoint>,
 }
+
+impl PartialEq for Ed25519Signature {
+    /// Two signatures are equal when their encodings are. The decoded point
+    /// is a cache of `encoded_r`, so it cannot disagree.
+    fn eq(&self, other: &Self) -> bool {
+        self.encoded_r == other.encoded_r && self.encoded_s == other.encoded_s
+    }
+}
+
+impl Eq for Ed25519Signature {}
 
 /// Namespace wrapper for the fixed-curve Ed25519 construction.
 ///
@@ -261,7 +281,8 @@ impl Ed25519PublicKey {
     pub fn verify_message(&self, message: &[u8], signature: &Ed25519Signature) -> bool {
         // Step 1. Every `Ed25519Signature` already has S < L; the check keeps
         // the step where the section puts it.
-        if signature.s >= curve().n {
+        let s = signature.response();
+        if s >= curve().n {
             return false;
         }
         // Step 2. §5.1.3 decodes exactly one 32-octet string to each point
@@ -269,10 +290,11 @@ impl Ed25519PublicKey {
         // back the octets R and A that the section hashes. `k` comes back
         // reduced mod L, which step 3 cannot see: [8]A' lies in the subgroup
         // of order L, so [8][k]A' = [8][k mod L]A'.
-        let k = challenge_scalar(&signature.r_point, &self.point, message);
+        let r_point = signature.nonce_point();
+        let k = challenge_scalar(&r_point, &self.point, message);
         // Step 3, with [8]R + [8][k]A' taken as [8](R + [k]A').
-        let s_b = curve().scalar_mul_base(&signature.s);
-        let r_plus_k_a = curve().add(&signature.r_point, &self.mul_public_point(&k));
+        let s_b = curve().scalar_mul_base(&s);
+        let r_plus_k_a = curve().add(&r_point, &self.mul_public_point(&k));
         curve().mul_by_pow2(&s_b, COFACTOR_LOG2) == curve().mul_by_pow2(&r_plus_k_a, COFACTOR_LOG2)
     }
 
@@ -455,14 +477,7 @@ impl Ed25519PrivateKey {
         let commitment = ed25519_group::scalar_mul_base(&r_bytes);
         crate::ct::zeroize_slice(r_bytes.as_mut_slice());
 
-        // `R` in both forms the rest of signing needs, taken from the one
-        // multiplication: the encoding the challenge hashes, and the affine
-        // coordinates the signature carries. Encoding and decoding again would
-        // put a square root, whose time depends on the point, on a value the
-        // nonce determines.
-        let (r_x, r_y) = ed25519_group::affine(&commitment);
         let encoded_r = ed25519_group::compress(&commitment);
-        let r_point = EdwardsPoint::new(le_to_biguint(&r_x), le_to_biguint(&r_y));
 
         let mut challenge_bytes = challenge_digest(&encoded_r, &self.public_encoded, message);
         let mut k = sc25519::reduce_wide(&challenge_bytes);
@@ -470,14 +485,17 @@ impl Ed25519PrivateKey {
         let mut a = sc25519::reduce(&self.scalar_bytes);
 
         let mut response = sc25519::mul_add(&k, &a, &r);
-        let s_bytes = response.to_le_bytes();
-        let s = BigUint::from_le_bytes(&s_bytes);
+        let encoded_s = response.to_le_bytes();
 
         r.zeroize();
         k.zeroize();
         a.zeroize();
         response.zeroize();
-        Ed25519Signature { r_point, s }
+        Ed25519Signature {
+            encoded_r,
+            encoded_s,
+            point: OnceLock::new(),
+        }
     }
 
     /// Sign and return the standard 64-byte `R || S` form.
@@ -511,23 +529,34 @@ impl Drop for Ed25519PrivateKey {
 }
 
 impl Ed25519Signature {
-    /// Return the nonce point `R`.
+    /// The nonce point `R`, decoded from the signature.
+    ///
+    /// A signature holds `R` encoded, so this decodes it. Every signature this
+    /// crate builds or parses has an `R` that decodes, which is why the
+    /// decoding cannot fail here.
     #[must_use]
-    pub fn nonce_point(&self) -> &EdwardsPoint {
-        &self.r_point
+    pub fn nonce_point(&self) -> EdwardsPoint {
+        self.point
+            .get_or_init(|| {
+                curve()
+                    .decode_point(&self.encoded_r)
+                    .expect("a signature holds an R that decodes")
+            })
+            .clone()
     }
 
-    /// Return the response scalar `S`.
+    /// The response scalar `S`.
     #[must_use]
-    pub fn response(&self) -> &BigUint {
-        &self.s
+    pub fn response(&self) -> BigUint {
+        le_to_biguint(&self.encoded_s)
     }
 
     /// Standard 64-byte signature encoding `R || S`.
     #[must_use]
     pub fn to_key_blob(&self) -> Vec<u8> {
-        let mut out = curve().encode_point(&self.r_point);
-        out.extend_from_slice(&self.s.to_le_bytes_padded(32));
+        let mut out = Vec::with_capacity(SIGNATURE_LEN);
+        out.extend_from_slice(&self.encoded_r);
+        out.extend_from_slice(&self.encoded_s);
         out
     }
 
@@ -543,12 +572,24 @@ impl Ed25519Signature {
         if bytes.len() != SIGNATURE_LEN {
             return None;
         }
+        // `R` must decode and `S` must be below `L`. The decoded point is
+        // kept, so verifying a parsed signature decodes nothing further.
         let r_point = decode_point(&bytes[..SEED_LEN])?;
         let s = BigUint::from_le_bytes(&bytes[SEED_LEN..]);
         if s >= curve().n {
             return None;
         }
-        Some(Self { r_point, s })
+        let mut encoded_r = [0u8; SEED_LEN];
+        let mut encoded_s = [0u8; SEED_LEN];
+        encoded_r.copy_from_slice(&bytes[..SEED_LEN]);
+        encoded_s.copy_from_slice(&bytes[SEED_LEN..]);
+        let point = OnceLock::new();
+        point.set(r_point).expect("a fresh cell");
+        Some(Self {
+            encoded_r,
+            encoded_s,
+            point,
+        })
     }
 }
 
@@ -599,13 +640,13 @@ fn expand_seed(mut seed: [u8; SEED_LEN]) -> Ed25519PrivateKey {
     let mut prefix = [0u8; SEED_LEN];
     prefix.copy_from_slice(&digest[SEED_LEN..2 * SEED_LEN]);
 
-    // `A = a·B` through the constant-time comb, then decoded back into the
-    // generic point type the public key and verification use. Decoding reads
-    // a public value.
-    let encoded = ed25519_group::compress(&ed25519_group::scalar_mul_base(&scalar_bytes));
-    let point = curve()
-        .decode_point(&encoded)
-        .expect("a multiple of the base point encodes to a decodable point");
+    // `A = a·B` through the constant-time comb. Its coordinates and its
+    // encoding both come from that one multiplication; decoding the encoding
+    // again would cost a square root for a point already in hand.
+    let public_point = ed25519_group::scalar_mul_base(&scalar_bytes);
+    let encoded = ed25519_group::compress(&public_point);
+    let (public_x, public_y) = ed25519_group::affine(&public_point);
+    let point = EdwardsPoint::new(le_to_biguint(&public_x), le_to_biguint(&public_y));
     let public = Ed25519PublicKey {
         point,
         point_table: OnceLock::new(),

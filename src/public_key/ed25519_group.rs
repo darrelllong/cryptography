@@ -209,10 +209,9 @@ pub(crate) fn scalar_mul_base(scalar: &[u8; FE_BYTES]) -> Point {
 /// The affine coordinates `(x, y) = (X/Z, Y/Z)`, each canonically encoded
 /// little-endian.
 ///
-/// A caller that needs both the encoding and the coordinates takes them from
-/// here, rather than encoding and decoding again: decoding recovers `x` with a
-/// square root, and the time that takes depends on the point, which for `R` is
-/// a function of the nonce.
+/// A caller that needs the coordinates takes them from here rather than
+/// encoding and decoding again: decoding recovers `x` with a square root,
+/// which costs more than the multiplication that produced the point.
 pub(crate) fn affine(p: &Point) -> ([u8; FE_BYTES], [u8; FE_BYTES]) {
     let z_inverse = fe_invert(&p.z);
     let mut x = fe_mul(&p.x, &z_inverse);
