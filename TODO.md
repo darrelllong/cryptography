@@ -102,8 +102,11 @@ Items are marked **owner** when only the repository owner can do them.
    records, with corpus, duration, features and revisions, are in
    `fuzz/campaigns/`; the 2026-09-17 campaign ran all 45 targets then defined
    for four hours each at 69d9fa6 with no crash and no regression input
-   broken. The HPKE target arrived after it and has had one five-minute
-   session, 339,902 runs, no crash; it belongs in the next campaign.
+   broken. The four targets written after it — HPKE, explicit curve
+   parameters, key-pair consistency and counter reuse — have had an hour each
+   on a busy machine with no crash, recorded in
+   `fuzz/campaigns/2026-09-17-new-targets.txt`; they belong in the next full
+   campaign on quiet hosts.
 
 8. **Named constants across the tree.** Every block cipher, stream cipher,
    hash, the DRBGs, the modes, the curve modules, HMAC, HKDF, RFC 6979,

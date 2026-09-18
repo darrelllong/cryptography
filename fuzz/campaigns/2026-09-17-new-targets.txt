@@ -1,0 +1,38 @@
+Fuzz campaign, 2026-09-17 (the four targets added after the main campaign)
+
+Host: dyson, Apple M4 Pro, macOS 27.0. One core each, four targets at once, on
+a machine also running this session's builds and doc work. The executions
+below are therefore lower than the same targets would reach on a quiet host;
+what the run establishes is that none of them stops, not how fast they go.
+Toolchain: rustc 1.100.0-nightly (574ff7d98 2026-09-14), cargo-fuzz 0.13.2,
+libFuzzer with AddressSanitizer.
+Each target ran 3,600 s (-max_total_time) from its seeds in fuzz/seeds/<target>
+and the corpus in fuzz/corpus/<target>.
+Binaries: cryptography c4b76ce with rump 9a13054.
+
+Why these four: the 2026-09-17 campaign covered the 45 targets that existed
+then. fuzz_hpke, fuzz_explicit_curve, fuzz_key_pair and fuzz_counter_reuse
+were written afterwards, for RFC 9180, for the explicit-domain-parameter gate,
+for key-pair consistency across five schemes, and for keystream counters
+across calls. They belong in the next full campaign; this is what they have
+had so far.
+
+No target stopped: 3,601 s each, no crash artifact.
+
+target executions seconds cov ft corpus
+fuzz_counter_reuse 51468155 3601 705 2201 186/70Kb
+fuzz_hpke 3086003 3601 1919 3865 143/14067b
+fuzz_explicit_curve 233445 3601 2080 5317 396/7094b
+fuzz_key_pair 100587 3601 4023 7531 318/37Kb
+
+On the execution rates: fuzz_counter_reuse runs a keystream and compares
+buffers, so it is fast; fuzz_explicit_curve and fuzz_key_pair each run
+primality tests, scalar multiplications or lattice key generation per input,
+which is why their counts are four orders of magnitude lower. A target that
+does real public-key work measures depth per input, not inputs per second.
+
+One defect, in a target rather than in the crate: fuzz_key_pair's first
+session stopped on "Ed25519: a signature verified under a foreign key". Its
+two 48-byte DRBG seeds differed only past byte 32, and Ed25519 takes the first
+32, so both classes were one key pair. The guard now compares what each scheme
+reads. Fixed in c804c50; the session above is after the fix.
