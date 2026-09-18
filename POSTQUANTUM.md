@@ -703,37 +703,35 @@ ran one case at a time:
 
 ## Benchmark Discussion
 
-- `ML-KEM` scales roughly with parameter size and is stable across runs; CIs
-  are tight on Tolkien and Twilight, while Heinlein needs thousands of rounds
-  to converge on its noisier silicon but still meets the 10% target.
-- `ML-DSA` verify is consistently cheaper than sign at each level, as expected.
+- `ML-KEM` scales roughly with parameter size and is stable across runs. The
+  intervals are tight everywhere in this sweep: ML-KEM-768 encapsulation is
+  0.02455 ms ±0.04% on the M1 and 0.07864 ms ±0.3% on the Raspberry Pi.
+- `ML-DSA` verify is consistently cheaper than sign at each level, as expected:
+  by 9.1× at ML-DSA-44 on the i5, and by 7.2× at ML-DSA-87 on the M1.
 - `ML-DSA` signing variance is driven by rejection behavior in the signer loop.
-  In the 2026-08-11 sweep this manifests as *non-monotone absolute timings
-  across parameter sets* — `mldsa65_sign` lands at 0.332 ms on Tolkien while
-  `mldsa87_sign` lands at 0.214 ms — even though the per-iteration cost
-  grows monotonically with parameter size. The CI on each individual
-  measurement is tight (≤ 1.3% half-width on Tolkien), but a tight CI of the
-  mean only constrains within-run variance, not across-seed reproducibility:
-  the cross-level ordering is plausibly explained by the rejection-loop
-  count distribution differing across parameter sets for these particular
-  inputs, but ruling out a slow-tail draw on the smaller `mldsa65_sign` sample
-  would require a multi-seed reproduction.
+  The 2026-08-11 sweep showed it as *non-monotone absolute timings across
+  parameter sets* — `mldsa65_sign` above `mldsa87_sign` on that host — which
+  raised the question of whether a slow-tail draw had landed on the smaller
+  sample. This sweep is monotone on all four hosts: sign costs rise with the
+  parameter set everywhere, and the gap between ML-DSA-65 and ML-DSA-87 is
+  narrow (0.2902 against 0.3039 ms on the M1, 0.2521 against 0.2602 on the
+  Cortex-X925). A narrow, monotone gap across four machines is what the
+  rejection-loop explanation predicts, and the earlier inversion is best read
+  as the draw it looked like.
 - `NTRU` keygen costs are dominated by the polynomial inversion in $R_q$
-  (Hensel lift over the variable-time $\mathbb{F}_2[x]$ Euclidean inverse). Keygen is
-  the slowest operation on every parameter set; on Tolkien the keygen-vs-other
-  ratios span 6.5× (HPS-509 keygen / HPS-509 decaps) up to 25.3× (HRSS-701
-  keygen / HRSS-701 encaps).
+  (Hensel lift over the variable-time $\mathbb{F}_2[x]$ Euclidean inverse).
+  Keygen is the slowest operation on every parameter set: on the M1 it is
+  14.8× HPS-509 decapsulation and 31.0× HRSS-701 encapsulation.
 - `NTRU-HRSS-701` encaps is the cheapest of the NTRU-family encapsulations
-  on Tolkien (≈0.047 ms), because HRSS encryption is a single
+  on the M1 (0.046 ms), because HRSS encryption is a single
   trinary-by-dense convolution (the Karatsuba split amortizes well for
-  sparse trinary inputs). It is still slower than ML-KEM encaps at
-  comparable security on Tolkien — ML-KEM-512 lands at ≈0.020 ms and
-  ML-KEM-768 at ≈0.033 ms, with only ML-KEM-1024 (≈0.051 ms) costing
-  more — because the NTT-friendly ring used by ML-KEM
+  sparse trinary inputs). It is still slower than every ML-KEM encapsulation
+  on that host — ML-KEM-512 at 0.019 ms, ML-KEM-768 at 0.025 ms and
+  ML-KEM-1024 at 0.032 ms — because the NTT-friendly ring used by ML-KEM
   remains a structural advantage that dense-trinary convolution cannot
-  close. `EES443EP1` encrypt/decrypt are even cheaper than HRSS-701 encaps
-  on Tolkien (≈0.042 ms encrypt, ≈0.041 ms decrypt vs ≈0.047 ms for HRSS
-  encaps) because `EES443EP1` is the one product-form parameter set in this
+  close. `EES443EP1` encrypt and decrypt are cheaper still (0.024 ms and
+  0.035 ms against 0.046 ms for HRSS encaps) because `EES443EP1` is the one
+  product-form parameter set in this
   crate: both the trapdoor $t = t_1 \cdot t_2 + t_3$ and the encrypt-side
   blinding $r = r_1 \cdot r_2 + r_3$ use the IEEE 1363.1 nonzero counts
   $df_1, df_2, df_3 = 9, 8, 5$ (each factor has $df_i$ coefficients equal
@@ -741,8 +739,10 @@ ran one case at a time:
   each $t\cdot e$ (in decrypt) reduces to three very sparse convolutions
   plus an addition.
 - `NTRU-HPS` and `NTRUEncrypt-EES` show the gap with NTT-friendly rings
-  clearly: ML-KEM-512 keygen is ~44× faster than NTRU-HPS-509 keygen on
-  Tolkien (0.023 ms vs 1.01 ms). The polynomial rings here are
+  clearly: ML-KEM-512 keygen is 21.5× faster than NTRU-HPS-509 keygen on
+  the M1 (0.088 ms against 1.899 ms). The ratio was ~44× in the 2026-08-11
+  sweep; the clean-room rewrites cost ML-KEM keygen more than they cost
+  NTRU's, which narrowed it without changing which side of it is which. The polynomial rings here are
   $\mathbb{Z}_q[x] / (x^N - 1)$ with prime $N$, which do not admit a direct
   radix-2 NTT; an in-tree two-prime Montgomery NTT at the smallest
   power-of-two length covering all parameter sets
