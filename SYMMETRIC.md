@@ -442,6 +442,44 @@ differ with the hosts, which is part of what each column measures.
 | zuc128 | stream | 128 | 267.5 | ±7.473 | 50 | 390.9 | ±0.5177 | 260 | 516.2 | ±12.24 | 140 | 271.8 | ±1.864 | 50 |
 | zuc128ct | stream | 128 | 28.31 | ±0.09849 | 80 | 41.31 | ±1.132 | 50 | 49.16 | ±3.202 | 50 | 18.67 | ±0.02217 | 80 |
 
+### What a keystream costs below a megabyte
+
+The table above is a megabyte in one call, which is the best case: whole
+blocks, one construction amortised over sixteen thousand of them. What a
+caller actually asks for is often a record or a word.
+`benchmarks/benches/keystream_sizes.rs` measures the other shapes; these are
+`baase` (Cortex-X925, idle), criterion's median of each estimate.
+
+| Request | One call | A word at a time | Offset by one byte |
+|---|---:|---:|---:|
+| 4 B | 89.5 ns | 90.4 ns | — |
+| 16 B | 89.2 ns | 95.5 ns | 90.3 ns |
+| 64 B | 91.9 ns | 134.0 ns | 92.6 ns |
+| 480 B | 571 ns | 926 ns | 567 ns |
+| 512 B | 574 ns | 951 ns | 568 ns |
+| 4 KiB | 4.39 µs | 7.40 µs | 4.38 µs |
+| 1 MiB | 1.114 ms | — | 1.115 ms |
+
+Construction alone is 34.0 ns, and a construction plus one block is 91.2 ns.
+Three things follow:
+
+- **Below one block, the cost is the setup.** A four-byte request costs the
+  same as a sixty-four-byte one, and 38% of it is the constructor. A caller
+  that needs a word at a time should hold one cipher, not build one per call.
+- **Holding the cipher is worth 1.7×.** Asking for a page a word at a time
+  costs 7.40 µs against 4.39 µs in one call, because each call re-enters and
+  re-checks rather than because the keystream costs more. The penalty is 1.07×
+  at sixteen bytes, where the setup still dominates, and settles at 1.68× by a
+  page.
+- **Alignment does not matter here.** A buffer starting one byte into its
+  allocation measures the same as an aligned one at every size, within the
+  intervals. The XOR is byte-wise and the block generation does not touch the
+  caller's buffer.
+
+The marginal cost of a whole block, from the 64-to-512-byte span, is 68.9 ns,
+which is 933 MB/s at a page and 942 MB/s at a megabyte: the keystream reaches
+its asymptote well before the megabyte the table above uses.
+
 ### Hash and XOF throughput
 
 `pilot_hash` reports the same MB/s shape as `pilot_cipher`, absorbing a
