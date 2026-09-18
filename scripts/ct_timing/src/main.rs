@@ -511,10 +511,13 @@ fn main() {
         failures.push("Hmac::<Sha256>::verify separated the middle and last tag classes");
     }
 
-    // A whole AEAD, not a primitive: opening a message whose tag is right
-    // against one whose tag is wrong. The tag comparison is the only step that
-    // differs, so a difference here is an early exit in the failure path — the
-    // one an attacker gets to repeat as often as it likes.
+    // A whole AEAD, not a primitive. The contrast is *not* an accepted tag
+    // against a rejected one: the crate authenticates before it decrypts, so a
+    // rejected message skips the keystream over the body, and the experiment
+    // would measure work the caller is told about anyway by the return value.
+    // What can be secret is where the tag first differs, so both classes here
+    // reject and differ only in that — an early exit in the comparison is what
+    // would separate them.
     let aead_key = FIXED_KEY;
     let aead_nonce = [0x5au8; 12];
     let aead_aad = *b"ct_timing associated data";
@@ -522,29 +525,62 @@ fn main() {
     for (index, byte) in aead_message.iter_mut().enumerate() {
         *byte = (index % 251) as u8;
     }
-    let sealed = {
+    let (sealed_body, good_tag) = {
         let mut buffer = aead_message.clone();
         let aead = ChaCha20Poly1305::new(&aead_key);
         let tag = aead.encrypt_in_place(&aead_nonce, &aead_aad, &mut buffer);
         (buffer, tag)
     };
-    let mut wrong_tag = sealed.1;
-    wrong_tag[0] ^= 0xff;
+    let mut wrong_first = good_tag;
+    wrong_first[0] ^= 0xff;
+    let mut wrong_middle = good_tag;
+    wrong_middle[good_tag.len() / 2 - 1] ^= 0xff;
     let aead = ChaCha20Poly1305::new(&aead_key);
-    let (open, _) = experiment(
-        "ChaCha20Poly1305::open",
-        ["tag accepts", "tag rejects"],
+    let (reject, _) = experiment(
+        "ChaCha20Poly1305::open (reject)",
+        ["tag differs at byte 0", "tag differs at byte 7"],
         &mut coin,
         |class| {
-            let tag = if class == 0 { sealed.1 } else { wrong_tag };
-            (sealed.0.clone(), tag)
+            let tag = if class == 0 { wrong_first } else { wrong_middle };
+            (sealed_body.clone(), tag)
         },
         |(buffer, tag)| {
             black_box(aead.decrypt_in_place(&aead_nonce, &aead_aad, buffer, tag));
         },
     );
-    if open > THRESHOLD {
-        failures.push("ChaCha20Poly1305::open separated an accepted tag from a rejected one");
+    if reject > THRESHOLD {
+        failures.push("ChaCha20Poly1305::open separated two rejected tags");
+    }
+
+    // The accepting path under two different keys: the same message length,
+    // the same work, different secrets.
+    let other_aead_key = OTHER_KEY;
+    let (other_body, other_tag) = {
+        let mut buffer = aead_message.clone();
+        let aead = ChaCha20Poly1305::new(&other_aead_key);
+        let tag = aead.encrypt_in_place(&aead_nonce, &aead_aad, &mut buffer);
+        (buffer, tag)
+    };
+    let other_aead = ChaCha20Poly1305::new(&other_aead_key);
+    let (accept, _) = experiment(
+        "ChaCha20Poly1305::open (accept)",
+        ["one fixed key", "another fixed key"],
+        &mut coin,
+        // Which key the class uses is settled in the preparation, so the
+        // timed span holds one open and nothing else.
+        |class| {
+            if class == 0 {
+                (sealed_body.clone(), good_tag, &aead)
+            } else {
+                (other_body.clone(), other_tag, &other_aead)
+            }
+        },
+        |(buffer, tag, cipher)| {
+            black_box(cipher.decrypt_in_place(&aead_nonce, &aead_aad, buffer, tag));
+        },
+    );
+    if accept > THRESHOLD {
+        failures.push("ChaCha20Poly1305::open separated two keys on the accepting path");
     }
 
     // A whole signature under two fixed secret keys, one of them a seed of a
