@@ -1,0 +1,6 @@
+Linux 7.0.0-31-generic #31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026 x86_64
+rustc 1.93.1 (01f6ddf75 2026-02-11)
+8
+model name	: Intel(R) Core(TM) i5-8259U CPU @ 2.30GHz
+c804c50 fuzz: key-pair consistency across five schemes
+ 19:42:09 up 1 day,  9:51,  2 users,  load average: 2.20, 0.80, 0.31
