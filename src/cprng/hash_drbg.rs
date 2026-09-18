@@ -2,8 +2,11 @@
 //!
 //! The working state is `V` and `C`, each `seedlen` = 440 bits (§10.1 Table 2),
 //! and the reseed counter. `V`, `C`, the Hashgen counter and every addend are
-//! unsigned big-endian integers, and every addition is modulo 2^seedlen,
-//! carried out in rump's `BigUint` and reduced to the low 440 bits.
+//! unsigned big-endian integers, and every addition is modulo 2^seedlen: a
+//! carry loop over the 55 columns, which needs no allocation and visits every
+//! column whatever the carry does. The module's tests state the same
+//! arithmetic a second way, in rump's `BigUint`, and require the two to agree
+//! on the boundary cases and on every addend width the mechanism uses.
 //!
 //! One call of [`HashDrbg::generate`] is one §10.1.1.4 Generate: Hashgen
 //! produces ⌈n/256⌉ blocks for an `n`-bit request, and `V` is updated once.
