@@ -39,10 +39,10 @@
 //! # Side channels
 //!
 //! Signing is constant time in its secrets. `R = r·B` and `A = a·B` go
-//! through the fixed-base comb of [`super::ed25519_group`], which runs a fixed
+//! through the fixed-base comb of `ed25519_group`, which runs a fixed
 //! number of operations and reads every table entry under a mask, and
 //! `S = (r + k·a) mod L` through the fixed-width arithmetic of
-//! [`super::sc25519`]. Nothing in signing branches on a secret, indexes memory
+//! `sc25519`. Nothing in signing branches on a secret, indexes memory
 //! with one, or hands one to a variable-width big integer.
 //!
 //! That matters most for the nonce. In a Schnorr signature it is `r`, not the
@@ -99,7 +99,7 @@ pub struct Ed25519PrivateKey {
     seed: [u8; SEED_LEN],
     scalar: BigUint,
     /// The same scalar as `scalar`, clamped and little-endian, which is the
-    /// form [`ed25519_group::scalar_mul_base`] and [`sc25519`] take.
+    /// form `ed25519_group::scalar_mul_base` and `sc25519` take.
     scalar_bytes: [u8; SEED_LEN],
     prefix: [u8; SEED_LEN],
     public: Ed25519PublicKey,
