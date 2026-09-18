@@ -107,6 +107,14 @@ mod ec_io;
 mod ec_pkix;
 pub mod ecdh;
 pub mod ecdsa;
+mod ed25519_group;
+
+/// The field of `2^255 - 19`, shared by the X25519 ladder and edwards25519.
+mod fe25519;
+
+/// Arithmetic modulo the order of edwards25519's prime-order subgroup.
+mod sc25519;
+
 pub mod ecies;
 pub mod ed25519;
 pub mod eddsa;

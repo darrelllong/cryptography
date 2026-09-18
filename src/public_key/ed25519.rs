@@ -73,6 +73,7 @@ const CLAMP_HIGH_SET: u8 = 0x40;
 use core::fmt;
 use std::sync::OnceLock;
 
+use super::{ed25519_group, sc25519};
 use crate::public_key::curve_pkix::{self, ID_ED25519};
 use crate::public_key::ec_edwards::{ed25519, EdwardsMulTable, EdwardsPoint, TwistedEdwardsCurve};
 use crate::public_key::io::{pem_unwrap, pem_wrap};
@@ -100,6 +101,9 @@ pub struct Ed25519PublicKey {
 pub struct Ed25519PrivateKey {
     seed: [u8; SEED_LEN],
     scalar: BigUint,
+    /// The same scalar as `scalar`, clamped and little-endian, which is the
+    /// form [`ed25519_group::scalar_mul_base`] and [`sc25519`] take.
+    scalar_bytes: [u8; SEED_LEN],
     prefix: [u8; SEED_LEN],
     public: Ed25519PublicKey,
 }
@@ -439,12 +443,33 @@ impl Ed25519PrivateKey {
         nonce_input.extend_from_slice(message);
         let mut nonce_digest = Sha512::digest(&nonce_input);
         crate::ct::zeroize_slice(nonce_input.as_mut_slice());
-        let r = BigUint::from_le_bytes(&nonce_digest).rem(&curve().n);
+
+        // `r`, `a` and `S` stay in the fixed-width constant-time arithmetic;
+        // `R`, the challenge and `S`'s encoding are public.
+        let mut r = sc25519::reduce_wide(&nonce_digest);
         crate::ct::zeroize_slice(nonce_digest.as_mut_slice());
-        let r_point = curve().scalar_mul_base(&r);
+        let mut r_bytes = r.to_le_bytes();
+        let encoded_r = ed25519_group::compress(&ed25519_group::scalar_mul_base(&r_bytes));
+        crate::ct::zeroize_slice(r_bytes.as_mut_slice());
+        let r_point = curve()
+            .decode_point(&encoded_r)
+            .expect("a multiple of the base point encodes to a decodable point");
+
         let challenge = challenge_scalar(&r_point, &self.public.point, message);
-        let ka = curve().scalar_ctx().mul(&challenge, &self.scalar);
-        let s = r.add(&ka).rem(&curve().n);
+        let mut challenge_bytes =
+            biguint_to_fixed_le(&challenge).expect("a scalar below L is 32 bytes");
+        let mut k = sc25519::reduce(&challenge_bytes);
+        crate::ct::zeroize_slice(challenge_bytes.as_mut_slice());
+        let mut a = sc25519::reduce(&self.scalar_bytes);
+
+        let mut response = sc25519::mul_add(&k, &a, &r);
+        let s_bytes = response.to_le_bytes();
+        let s = BigUint::from_le_bytes(&s_bytes);
+
+        r.zeroize();
+        k.zeroize();
+        a.zeroize();
+        response.zeroize();
         Ed25519Signature { r_point, s }
     }
 
@@ -567,7 +592,13 @@ fn expand_seed(mut seed: [u8; SEED_LEN]) -> Ed25519PrivateKey {
     let mut prefix = [0u8; SEED_LEN];
     prefix.copy_from_slice(&digest[SEED_LEN..2 * SEED_LEN]);
 
-    let point = curve().scalar_mul_base(&scalar);
+    // `A = a·B` through the constant-time comb, then decoded back into the
+    // generic point type the public key and verification use. Decoding reads
+    // a public value.
+    let encoded = ed25519_group::compress(&ed25519_group::scalar_mul_base(&scalar_bytes));
+    let point = curve()
+        .decode_point(&encoded)
+        .expect("a multiple of the base point encodes to a decodable point");
     let public = Ed25519PublicKey {
         point,
         point_table: OnceLock::new(),
@@ -576,6 +607,7 @@ fn expand_seed(mut seed: [u8; SEED_LEN]) -> Ed25519PrivateKey {
     let key = Ed25519PrivateKey {
         seed,
         scalar,
+        scalar_bytes,
         prefix,
         public,
     };
@@ -615,6 +647,17 @@ const COFACTOR_LOG2: u32 = 3;
 /// (step 4). Every other string yields its point, of whatever order.
 fn decode_point(bytes: &[u8]) -> Option<EdwardsPoint> {
     curve().decode_point(bytes)
+}
+
+/// A scalar below `L` in the 32-byte little-endian form the fixed-width
+/// arithmetic takes.
+fn biguint_to_fixed_le(value: &BigUint) -> Option<[u8; SEED_LEN]> {
+    let mut be = biguint_to_fixed_be(value, SEED_LEN)?;
+    be.reverse();
+    let mut out = [0u8; SEED_LEN];
+    out.copy_from_slice(&be);
+    crate::ct::zeroize_slice(be.as_mut_slice());
+    Some(out)
 }
 
 fn biguint_to_fixed_be(value: &BigUint, len: usize) -> Option<Vec<u8>> {
