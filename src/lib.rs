@@ -400,6 +400,7 @@ pub mod vt {
     pub use crate::public_key::elgamal::{
         ElGamal, ElGamalCiphertext, ElGamalPrivateKey, ElGamalPublicKey,
     };
+    pub use crate::public_key::hpke::{Hpke, HpkeAead, HpkeContext, HpkeMode};
     pub use crate::public_key::ml_dsa::{
         MlDsa, MlDsaParameterSet, MlDsaPrivateKey, MlDsaPublicKey, MlDsaSignature,
     };

@@ -35,6 +35,13 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- RFC 9180 HPKE over `DHKEM(X25519, HKDF-SHA256)` with `HKDF-SHA256` and the
+  AES-128-GCM, AES-256-GCM and ChaCha20Poly1305 AEADs, in all four modes:
+  base, PSK, auth and auth-PSK, with context `seal`/`open`/`export`, the
+  single-shot `Seal`/`Open`, and `DeriveKeyPair`. This is the crate's
+  message-encryption interface; the raw schemes remain primitives. Appendix
+  A.1 and A.2 are checked in full — the key schedule's intermediate values
+  included — from `tests/vectors/hpke_rfc9180.txt`.
 - `scripts/ct_timing`, the measured counterpart to the machine-code evidence:
   the dudect interleaved input-class experiment (Reparaz, Balasch and
   Verbauwhede, ePrint 2016/1123) with its protocol fixed in the source and a

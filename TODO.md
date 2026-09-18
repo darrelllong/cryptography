@@ -50,12 +50,14 @@ Items are marked **owner** when only the repository owner can do them.
 
 ## Security contracts and evidence
 
-5. **A message-encryption API.** Raw ElGamal (and the other raw schemes) are
-   documented as primitives, not message encryption. If the crate is to
-   offer message confidentiality, implement a complete published composition
-   (for example RFC 9180 HPKE over a DH-KEM the crate already has) from its
-   specification and vectors, with corrupted-encapsulation, AAD/context and
-   invalid-key tests.
+5. **A message-encryption API.** RFC 9180 HPKE over
+   `DHKEM(X25519, HKDF-SHA256)` is implemented in `src/public_key/hpke.rs`,
+   in all four modes and with three AEADs, and checked against the whole of
+   the RFC's Appendix A.1 and A.2 along with the refusals a composition owes:
+   a changed encapsulation, info string, associated data or ciphertext, a
+   low-order encapsulation, and the wrong key on either side. What is not
+   here is the rest of §7: the P-256 and P-521 KEMs, HKDF-SHA384 and
+   HKDF-SHA512, and the export-only AEAD.
 6. **Timing qualification beyond the primitives.** `scripts/ct_codegen.sh`
    classifies every conditional branch in the machine code of each claim the
    crate makes: the tag comparison, every `Ct` block cipher, the ChaCha20
