@@ -76,7 +76,9 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use cryptography::public_key::ed25519::Ed25519;
-use cryptography::{Aes128Ct, ChaCha20, ChaCha20Poly1305, CtrDrbgAes256, Hmac, Sha256};
+use cryptography::hash::Digest;
+use cryptography::vt::BigUint;
+use cryptography::{Aes128Ct, ChaCha20, ChaCha20Poly1305, CtrDrbgAes256, Hmac, Sha256, Sha512};
 use cryptography::vt::{MlKem, MlKemCiphertext, MlKemParameterSet, X25519};
 
 /// Timed runs per experiment, before cropping. The statistic is computed on
@@ -104,6 +106,17 @@ const OTHER_KEY: [u8; 32] = *b"ct_timing other fixed class key.";
 /// on almost every round, the run-length one on about a sixth of them.
 const ALTERNATING_SCALAR: [u8; 32] = [0x55; 32];
 const LONG_RUN_SCALAR: [u8; 32] = [0xf0; 32];
+
+/// The Ed25519 group order, `2^252 + 27742317777372353535851937790883648493`
+/// (RFC 8032 §5.1), which the nonce is reduced modulo.
+const ED25519_ORDER: [u8; 32] = [
+    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x14, 0xde, 0xf9, 0xde, 0xa2, 0xf7, 0x9c, 0xd6, 0x58, 0x12, 0x63, 0x1a, 0x5c, 0xf5, 0xd3, 0xed,
+];
+/// How many messages the nonce search tries, and how long each one is. The
+/// search runs once, before any timing, and its cost is a hash per candidate.
+const MESSAGE_SEARCH_COUNT: usize = 20_000;
+const MESSAGE_SEARCH_BYTES: usize = 32;
 
 /// A point of small order on Curve25519: `u = 1`, whose ladder output is the
 /// all-zero shared secret RFC 7748 §6.1 names.
@@ -612,6 +625,69 @@ fn main() {
     );
     if sign > THRESHOLD {
         failures.push("Ed25519::sign_message separated the two secret keys");
+    }
+
+    // The quantity a signature can least afford to leak is its nonce: in a
+    // Schnorr scheme, timing that correlates with `r` is what lattice attacks
+    // on partial nonce knowledge are built from. RFC 8032 derives `r` from the
+    // secret prefix and the message, so one key signing two chosen messages
+    // varies `r` and nothing else. The two messages here are searched for
+    // before any timing: one whose reduced nonce has few set bits, one whose
+    // has many.
+    let (few_bits_message, many_bits_message) = {
+        let mut h = Sha512::new();
+        h.update(&dense_seed);
+        let digest = h.finalize();
+        let prefix = &digest[32..];
+        let order = BigUint::from_be_bytes(&ED25519_ORDER);
+        let mut lowest = (usize::MAX, [0u8; MESSAGE_SEARCH_BYTES]);
+        let mut highest = (0usize, [0u8; MESSAGE_SEARCH_BYTES]);
+        for candidate in 0..MESSAGE_SEARCH_COUNT {
+            let mut message = [0u8; MESSAGE_SEARCH_BYTES];
+            message[..8].copy_from_slice(&(candidate as u64).to_be_bytes());
+            let mut nonce = Sha512::new();
+            nonce.update(prefix);
+            nonce.update(&message);
+            // RFC 8032 reduces the 64-byte digest little-endian; the bit count
+            // is what this search is after, and reversing gives the same one.
+            let mut wide = nonce.finalize();
+            wide.reverse();
+            let reduced = BigUint::from_be_bytes(&wide).rem(&order);
+            let bits = reduced
+                .to_be_bytes()
+                .iter()
+                .map(|byte| byte.count_ones() as usize)
+                .sum::<usize>();
+            if bits < lowest.0 {
+                lowest = (bits, message);
+            }
+            if bits > highest.0 {
+                highest = (bits, message);
+            }
+        }
+        println!(
+            "nonce search over {MESSAGE_SEARCH_COUNT} messages: {} set bits against {}",
+            lowest.0, highest.0
+        );
+        (lowest.1, highest.1)
+    };
+    let (nonce_weight, _) = experiment(
+        "Ed25519::sign_message (nonce)",
+        ["few set bits in r", "many set bits in r"],
+        &mut coin,
+        |class| {
+            if class == 0 {
+                &few_bits_message
+            } else {
+                &many_bits_message
+            }
+        },
+        |message| {
+            black_box(dense_key.sign_message(*message));
+        },
+    );
+    if nonce_weight > THRESHOLD {
+        failures.push("Ed25519::sign_message separated two nonces by their weight");
     }
 
     // ML-KEM decapsulation of a well-formed ciphertext against a tampered one.
