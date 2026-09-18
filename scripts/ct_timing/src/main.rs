@@ -566,6 +566,12 @@ fn main() {
 
     // The accepting path under two different keys: the same message length,
     // the same work, different secrets.
+    //
+    // Each class builds its own cipher in the preparation rather than sharing
+    // two long-lived ones. Sharing made the classes differ in something other
+    // than the key: the experiment above leaves its cipher hot in cache, and
+    // the class that reused it was faster for that reason alone, which showed
+    // up as a flag of 1589 on one host and 5.1 on another.
     let other_aead_key = OTHER_KEY;
     let (other_body, other_tag) = {
         let mut buffer = aead_message.clone();
@@ -573,18 +579,23 @@ fn main() {
         let tag = aead.encrypt_in_place(&aead_nonce, &aead_aad, &mut buffer);
         (buffer, tag)
     };
-    let other_aead = ChaCha20Poly1305::new(&other_aead_key);
     let (accept, _) = experiment(
         "ChaCha20Poly1305::open (accept)",
         ["one fixed key", "another fixed key"],
         &mut coin,
-        // Which key the class uses is settled in the preparation, so the
-        // timed span holds one open and nothing else.
         |class| {
             if class == 0 {
-                (sealed_body.clone(), good_tag, &aead)
+                (
+                    sealed_body.clone(),
+                    good_tag,
+                    ChaCha20Poly1305::new(&aead_key),
+                )
             } else {
-                (other_body.clone(), other_tag, &other_aead)
+                (
+                    other_body.clone(),
+                    other_tag,
+                    ChaCha20Poly1305::new(&other_aead_key),
+                )
             }
         },
         |(buffer, tag, cipher)| {

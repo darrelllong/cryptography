@@ -678,17 +678,6 @@ fn decode_point(bytes: &[u8]) -> Option<EdwardsPoint> {
     curve().decode_point(bytes)
 }
 
-/// A scalar below `L` in the 32-byte little-endian form the fixed-width
-/// arithmetic takes.
-fn biguint_to_fixed_le(value: &BigUint) -> Option<[u8; SEED_LEN]> {
-    let mut be = biguint_to_fixed_be(value, SEED_LEN)?;
-    be.reverse();
-    let mut out = [0u8; SEED_LEN];
-    out.copy_from_slice(&be);
-    crate::ct::zeroize_slice(be.as_mut_slice());
-    Some(out)
-}
-
 fn biguint_to_fixed_be(value: &BigUint, len: usize) -> Option<Vec<u8>> {
     let mut bytes = value.to_be_bytes();
     if bytes.len() > len {
