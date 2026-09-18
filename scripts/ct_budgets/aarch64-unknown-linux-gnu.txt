@@ -1,0 +1,47 @@
+# Unclassified branches a reading accounted for, per claim, on
+# aarch64-unknown-linux-gnu. Read under rustc 1.95.0 on a Cortex-X925 host.
+#
+# Every count here was read, not carried over from another triple. What the
+# branches test, claim by claim: the length of the message or the tag and the
+# chunk widths LLVM picks for the copy and XOR loops (tag-comparison,
+# chacha20-keystream, poly1305-mac, chacha20poly1305-open); the round and
+# limb counters of a key schedule inlined into a block function (cast128-ct,
+# seed-ct, twofish128-ct); the bit index of the scalar loop and the limb
+# index of the encoder, both fixed by the curve (x25519-ladder at 255 bits,
+# x448-ladder at 448 bits and 8 limbs); the parameter set, the once-only
+# table initialisation, the coefficient counters and the slice lengths
+# (ml-kem-decaps, ntru-hps509-decaps).
+#
+# x25519-agree's one branch is the documented refusal: the 32 output bytes are
+# OR-reduced and compared against zero, which decides whether the agreement
+# returns `None` for a low-order peer point. That answer is what the caller is
+# told anyway.
+#
+# The counts are at or below the aarch64-apple-darwin ones for every claim but
+# chacha20-keystream, where this target unrolls the copy and XOR paths wider:
+# 19 branches against 16, all of them on the requested length, the bytes left
+# in the current keystream block, or the public flag that selects XOR-into-
+# output against write-keystream. No comparison in any claim reads a key, a
+# nonce, a scalar or a keystream word.
+#
+# `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
+tag-comparison 2
+aes128-ct 0
+camellia128-ct 0
+cast128-ct 20
+des-ct 0
+grasshopper-ct 0
+magma-ct 0
+present80-ct 0
+seed-ct 1
+sm4-ct 0
+twofish128-ct 9
+serpent128 0
+x25519-ladder 1
+x448-ladder 3
+x25519-agree 1
+ml-kem-decaps 28
+ntru-hps509-decaps 2
+chacha20-keystream 19
+poly1305-mac 2
+chacha20poly1305-open 4
