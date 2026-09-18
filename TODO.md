@@ -66,14 +66,16 @@ Items are marked **owner** when only the repository owner can do them.
    the dudect experiment with both a positive and a negative control, over
    pairs of fixed inputs, whose runs are in its `RESULTS.md`.
 
-   Still missing: the remaining supported targets, and the experiment the
-   measurement's two findings ask for. An all-zero scalar separates from a
-   dense one on Apple silicon and `u = 1` separates from the base point on a
-   Cortex-A76, each a degenerate input against an ordinary one, while no host
-   separates two ordinary scalars. Since what distinguishes the first pair is
-   how often the ladder's swap fires — a property of the secret scalar — the
-   next experiment is scalars whose swap counts differ by a little rather than
-   by everything.
+   What the measurement found, and what is still open: on an Apple M4 Pro the
+   ladder separates scalars by how often its conditional swap fires, for
+   ordinary keys as well as degenerate ones (alternating bits against long
+   runs, `|t|` 11 to 13), while an idle x86-64 host separates nothing and a
+   Cortex-A76 separates only a low-order peer point. One countermeasure was
+   tried and not kept: `RESULTS.md` records that it halved the statistic at an
+   11% cost without removing it. What that asks for next is a countermeasure
+   whose cost buys a statistic at the threshold — scalar blinding is the
+   candidate, since it makes the swap pattern differ per call rather than per
+   key — and runs of the whole battery on the remaining supported targets.
 7. **Targeted fuzzing.** The 45 targets cover the parsers, the AEAD failure
    path — including, since this campaign, that a refused decryption leaves the
    caller's buffer as it found it — and every public-key surface;
