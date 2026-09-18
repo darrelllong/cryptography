@@ -337,6 +337,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_counter_reuse"
+path = "fuzz_targets/fuzz_counter_reuse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_hpke"
 path = "fuzz_targets/fuzz_hpke.rs"
 test = false

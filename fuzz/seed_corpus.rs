@@ -107,6 +107,18 @@ fn key_pair_input(selector: u8, message: &[u8]) -> Vec<u8> {
     out
 }
 
+
+/// `fuzz_counter_reuse` reads
+/// `[selector][32-byte key][24-byte nonce][4-byte counter][data]`.
+fn counter_reuse_input(selector: u8, counter: u32, data: &[u8]) -> Vec<u8> {
+    let mut out = vec![selector];
+    out.extend_from_slice(&[0x11u8; 32]);
+    out.extend_from_slice(&[0x22u8; 24]);
+    out.extend_from_slice(&counter.to_be_bytes());
+    out.extend_from_slice(data);
+    out
+}
+
 fn main() {
     let mut rng = CtrDrbgAes256::new(&[0x42u8; 48]);
 
@@ -454,4 +466,21 @@ fn main() {
             &key_pair_input(selector, b"a message to sign"),
         );
     }
+
+    // fuzz_counter_reuse: one input per cipher, each long enough to cross
+    // several block boundaries, and one starting near the end of the counter's
+    // range where the remaining-keystream count is what a caller must read.
+    let stream = vec![0x33u8; 300];
+    for (name, selector) in [("chacha20", 0u8), ("xchacha20", 1), ("ctr_aes128", 2)] {
+        write(
+            "fuzz_counter_reuse",
+            name,
+            &counter_reuse_input(selector, 0, &stream),
+        );
+    }
+    write(
+        "fuzz_counter_reuse",
+        "chacha20_near_the_end",
+        &counter_reuse_input(0, u32::MAX - 16, &stream),
+    );
 }

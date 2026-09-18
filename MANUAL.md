@@ -542,6 +542,10 @@ Some stream ciphers also expose:
 - `with_key_bytes(...)` for Salsa20 (16- or 32-byte keys)
 - `without_iv(...)` for Rabbit (RFC 4503 §3.2: never reset under the same key)
 - `keystream_block()` for ChaCha20, XChaCha20, Salsa20 and Rabbit
+- `keystream_remaining()` for ChaCha20 and XChaCha20, whose 32-bit block
+  counter addresses 256 GiB under one `(key, nonce)`: the keystream calls
+  panic at that bound rather than wrap and repeat, so a caller that cannot
+  afford the panic sizes its next request by this or rekeys
 
 Example: ChaCha20
 
@@ -1537,6 +1541,7 @@ Special DES-family constructors:
 - `fill(&mut [u8])`
 - `keystream_block()`
 - `set_counter(u32)`
+- `keystream_remaining()`
 
 ##### `XChaCha20`
 
@@ -1547,6 +1552,7 @@ Special DES-family constructors:
 - `fill(&mut [u8])`
 - `keystream_block()`
 - `set_counter(u32)`
+- `keystream_remaining()`
 
 ##### `Salsa20`
 

@@ -222,7 +222,12 @@ impl ChaCha20 {
     /// Keystream bytes still available before the block counter would wrap:
     /// the unread rest of the current block, plus one block for every counter
     /// value from the next one through `u32::MAX`.
-    fn keystream_remaining(&self) -> u64 {
+    ///
+    /// The keystream calls panic past this point rather than repeat
+    /// themselves, so this is how a caller that cannot afford the panic sizes
+    /// its next request or decides to rekey.
+    #[must_use]
+    pub fn keystream_remaining(&self) -> u64 {
         let buffered =
             u64::try_from(BLOCK_BYTES - self.offset).expect("offset is at most one block");
         let blocks = if self.exhausted {
@@ -425,6 +430,13 @@ impl XChaCha20 {
     /// Seek to a 64-byte block boundary, re-arming an exhausted counter.
     pub fn set_counter(&mut self, counter: u32) {
         self.inner.set_counter(counter);
+    }
+
+    /// Keystream bytes still available before the inner block counter would
+    /// wrap, which is the bound the keystream calls panic at.
+    #[must_use]
+    pub fn keystream_remaining(&self) -> u64 {
+        self.inner.keystream_remaining()
     }
 }
 

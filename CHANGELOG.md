@@ -35,6 +35,15 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- `fuzz_counter_reuse`, which puts a call boundary at every offset the fuzzer
+  can reach and requires the stream to continue rather than restart: chunked
+  encryption equals one call, a counter advanced `m` blocks equals a stream
+  started `m` blocks later, the remaining keystream falls by exactly what was
+  taken, and CTR agrees with itself across a block-aligned split. 3,816,879
+  inputs in five minutes, no crash.
+- `ChaCha20::keystream_remaining` and `XChaCha20::keystream_remaining`, which
+  were private while the keystream calls panic at that bound: a caller told
+  to respect a limit could not read it.
 - `fuzz_key_pair`, which crosses two freshly generated key pairs in Ed25519,
   ECDSA, X25519, ML-KEM and ML-DSA and requires each scheme to fail closed,
   and splices one ML-KEM decapsulation key's secret vector under another's
