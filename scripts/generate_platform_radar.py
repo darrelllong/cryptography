@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Generic three-platform Kiviat (radar) chart generator.
+"""Kiviat (radar) chart generator for any number of platforms.
 
-Reads a CSV with columns:
+Reads a CSV whose first column is the axis label and whose remaining columns
+are one platform each:
 
-    label,wigner,moore,darby
+    label,<platform>,<platform>,…
 
-…and emits an SVG radar plot with three curves on a log-radial axis. Designed
-for the 2026-05-08 wigner/moore/darby sweep, but stays generic enough that any
-3-platform comparison set fits the same script.
+…and emits an SVG radar plot with one curve per platform on a log-radial
+axis. An empty cell is an axis that platform did not measure: the curve skips
+it rather than drawing it at the bottom of the scale.
 
 Usage:
 
-    python3 generate_three_platform_radar.py \
+    python3 generate_platform_radar.py \
         --csv path/to/data.csv --out path/to/out.svg \
         --title "..." --units "MB/s" \
         [--min 1 --max 1024]
@@ -33,9 +34,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "assets"))
 from radar_label_layout import default_offset_y, spread_label_positions  # noqa: E402
 
 
-WIGNER_COLOR = "#0f766e"  # teal — Apple Silicon (M1 Max)
-MOORE_COLOR = "#1d4ed8"   # blue — AMD EPYC
-DARBY_COLOR = "#b91c1c"   # red — RPi5 (ARM SBC)
+# One colour per curve, in the order the CSV lists its platforms. The set is
+# distinguishable in print and to the common forms of colour blindness; a
+# chart with more platforms than colours cycles and is hard to read, which the
+# generator says rather than drawing.
+CURVE_COLORS = [
+    "#0f766e",  # teal
+    "#1d4ed8",  # blue
+    "#b91c1c",  # red
+    "#b45309",  # amber
+    "#6d28d9",  # violet
+    "#155e75",  # cyan
+]
 BG_COLOR = "#fbf8f1"
 GRID_COLOR = "#c9c2b7"
 AXIS_COLOR = "#a79d90"
@@ -103,45 +113,46 @@ def scale_labels(lo: float, hi: float) -> list[float]:
     return out
 
 
-def parse_csv(
-    path: Path,
-) -> tuple[list[str], list[str], list[float], list[float], list[float]]:
-    """Return (platform_names, axis_labels, a, b, c).
+def parse_csv(path: Path) -> tuple[list[str], list[str], list[list[float]]]:
+    """Return (platform_names, axis_labels, per-platform value columns).
 
-    The header must be `label,<p1>,<p2>,<p3>`; the three platform column
-    names are returned so legends can be derived from the CSV itself.
+    The header is ``label`` followed by one column per platform, and the
+    platform names are returned so a legend can come from the CSV itself.
     """
     labels: list[str] = []
-    a: list[float] = []
-    b: list[float] = []
-    c: list[float] = []
+    columns: list[list[float]] = []
     with path.open(newline="") as fh:
         reader = csv.reader(fh)
-        header = next(reader)
-        cols = [h.strip() for h in header[:4]]
-        if len(cols) != 4 or cols[0].lower() != "label":
-            raise SystemExit(f"expected header label,<p1>,<p2>,<p3>; got {header}")
-        platforms = cols[1:]
+        header = [h.strip() for h in next(reader)]
+        if len(header) < 2 or header[0].lower() != "label":
+            raise SystemExit(f"expected header label,<platform>,…; got {header}")
+        platforms = header[1:]
+        columns = [[] for _ in platforms]
         for row in reader:
             if not row or not row[0].strip():
                 continue
             labels.append(row[0].strip())
-            a.append(float(row[1]) if row[1].strip() else float("nan"))
-            b.append(float(row[2]) if row[2].strip() else float("nan"))
-            c.append(float(row[3]) if row[3].strip() else float("nan"))
-    return platforms, labels, a, b, c
+            for index, _ in enumerate(platforms):
+                cell = row[index + 1].strip() if index + 1 < len(row) else ""
+                columns[index].append(float(cell) if cell else float("nan"))
+    return platforms, labels, columns
 
 
 def generate_svg(args) -> str:
-    platforms, labels, wigner_v, moore_v, darby_v = parse_csv(Path(args.csv))
+    platforms, labels, columns = parse_csv(Path(args.csv))
     n = len(labels)
     if n < 3:
         raise SystemExit("need >=3 axes for a radar")
+    if len(platforms) > len(CURVE_COLORS):
+        raise SystemExit(
+            f"{len(platforms)} platforms but {len(CURVE_COLORS)} curve colours: "
+            "a chart this crowded is not readable, so split it"
+        )
 
     if args.min is not None and args.max is not None:
         lo, hi = args.min, args.max
     else:
-        lo, hi = auto_log2_bounds(wigner_v + moore_v + darby_v)
+        lo, hi = auto_log2_bounds([v for column in columns for v in column])
 
     angles = [(-math.pi / 2) + (2 * math.pi * i / n) for i in range(n)]
     rings = scale_labels(lo, hi)
@@ -163,9 +174,7 @@ def generate_svg(args) -> str:
             for v, a in zip(values, angles)
         ]
 
-    wigner_pts = curve(wigner_v)
-    moore_pts = curve(moore_v)
-    darby_pts = curve(darby_v)
+    curves = [curve(column) for column in columns]
 
     # Axis labels.
     label_entries: list[dict[str, float | str]] = []
@@ -221,11 +230,7 @@ def generate_svg(args) -> str:
         )
 
     # Curves: draw fills first, then outlines on top.
-    for pts, color in (
-        (wigner_pts, WIGNER_COLOR),
-        (moore_pts, MOORE_COLOR),
-        (darby_pts, DARBY_COLOR),
-    ):
+    for pts, color in zip(curves, CURVE_COLORS):
         measured = [pt for pt in pts if pt is not None]
         if len(measured) < len(pts):
             print(f"  warning: {len(pts) - len(measured)} unmeasured axes left as gaps", file=sys.stderr)
@@ -245,28 +250,18 @@ def generate_svg(args) -> str:
             f'{xml_escape(str(entry["label"]))}</text>'
         )
 
-    # Legend: --legend "a;b;c" wins, then the historical wigner/moore/darby
-    # descriptions for the 2026-05-08 sweep, then the bare CSV column names.
+    # Legend: --legend overrides, otherwise the CSV's own column names.
     if args.legend:
         legend_texts = [t.strip() for t in args.legend.split(";")]
-        if len(legend_texts) != 3:
-            raise SystemExit("--legend needs three ';'-separated entries")
-    elif [p.lower() for p in platforms] == ["wigner", "moore", "darby"]:
-        legend_texts = [
-            "Wigner (M1 Max, macOS)",
-            "Moore (EPYC 7452, single-core)",
-            "Darby (RPi5, aarch64)",
-        ]
+        if len(legend_texts) != len(platforms):
+            raise SystemExit(
+                f"--legend has {len(legend_texts)} entries for {len(platforms)} platforms"
+            )
     else:
         legend_texts = platforms
 
-    legend_y = HEIGHT - 60
-    swatches = [
-        (legend_texts[0], WIGNER_COLOR),
-        (legend_texts[1], MOORE_COLOR),
-        (legend_texts[2], DARBY_COLOR),
-    ]
-    for i, (text, color) in enumerate(swatches):
+    legend_y = HEIGHT - 60 - 18 * (len(legend_texts) - 3)
+    for i, (text, color) in enumerate(zip(legend_texts, CURVE_COLORS)):
         ly = legend_y + i * 18
         parts.append(
             f'<rect x="40" y="{ly - 10}" width="14" height="14" fill="{color}" '
@@ -291,7 +286,8 @@ def main() -> None:
     p.add_argument(
         "--legend",
         default="",
-        help="three ';'-separated legend entries (default: derived from CSV header)",
+        help="';'-separated legend entries, one per platform "
+        "(default: the CSV's column names)",
     )
     args = p.parse_args()
 

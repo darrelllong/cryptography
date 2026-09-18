@@ -27,6 +27,13 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `scripts/ct_codegen.sh` found this, and now fails the build if it returns.
 
 ### Changed
+- The sweep tooling takes any number of platforms. `merge_three_pilot_tables.py`
+  is `merge_pilot_tables.py` and reads repeated `--input LABEL=PATH`;
+  `generate_three_platform_radar.py` is `generate_platform_radar.py` and draws
+  one curve per CSV column, refusing to draw more curves than it has
+  distinguishable colours; `build_radar_csvs.py` writes a column per platform
+  rather than exactly three. The 2026-09-17 sweep has four hosts, which the
+  old interface could not express.
 - Spec-fixed widths, round counts, table sizes and bounds across the ciphers,
   hashes, curve modules, HMAC, HKDF, RFC 6979, ML-KEM, ML-DSA and the prime
   policy are named for what fixes them, and the ones that follow from another

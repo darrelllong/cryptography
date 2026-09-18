@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Merge three Pilot markdown tables into side-by-side platform tables.
+"""Merge Pilot markdown tables into one side-by-side platform table.
 
 Modes:
 - sym  : 3-column key (cipher, block, key); 3 metric columns (MB/s, ±CI, Runs)
 - hash : 2-column key (hash, out);          3 metric columns (MB/s, ±CI, Runs)
 - pk   : 1-column key (operation);          3 metric columns (ms/op, ±CI, Runs)
 
-Each input file is the raw stdout of bench_all{,_hash,_pk_full}.sh.
+Each input file is the raw stdout of bench_all{,_hash,_pk_full}.sh. Any
+number of platforms may be given, each as ``--input LABEL=PATH``; the column
+order follows the order of those flags, and a row missing from one platform
+reads "n/a" there rather than dropping out of the table.
 """
 
 from __future__ import annotations
@@ -91,25 +94,24 @@ def fmt(v: str | None) -> str:
 
 
 def merge_rows(
-    rows_a: list[list[str]],
-    rows_b: list[list[str]],
-    rows_c: list[list[str]],
+    per_platform: list[list[list[str]]],
     mode: str,
-) -> list[tuple[tuple[str, ...], list[str] | None, list[str] | None, list[str] | None]]:
-    a_map = {row_key(r, mode): r for r in rows_a}
-    b_map = {row_key(r, mode): r for r in rows_b}
-    c_map = {row_key(r, mode): r for r in rows_c}
-    keys = list(a_map.keys())
-    for key in b_map:
-        if key not in a_map:
-            keys.append(key)
-    for key in c_map:
-        if key not in a_map and key not in b_map:
-            keys.append(key)
-    return [
-        (key, a_map.get(key), b_map.get(key), c_map.get(key))
-        for key in keys
-    ]
+) -> list[tuple[tuple[str, ...], list[list[str] | None]]]:
+    """Rows keyed across platforms, in the order the first platform lists them.
+
+    A key the first platform does not have is appended when a later one
+    introduces it, so a platform that measured something the others did not
+    still appears.
+    """
+    maps = [{row_key(r, mode): r for r in rows} for rows in per_platform]
+    keys: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    for table in maps:
+        for key in table:
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+    return [(key, [table.get(key) for table in maps]) for key in keys]
 
 
 def metric_cells(row: list[str] | None, key_len: int) -> tuple[str, str, str]:
@@ -122,24 +124,11 @@ def metric_cells(row: list[str] | None, key_len: int) -> tuple[str, str, str]:
 
 
 def emit_table(
-    sections: Iterable[
-        tuple[
-            str,
-            list[
-                tuple[
-                    tuple[str, ...],
-                    list[str] | None,
-                    list[str] | None,
-                    list[str] | None,
-                ]
-            ],
-        ]
-    ],
-    labels: tuple[str, str, str],
+    sections: Iterable[tuple[str, list[tuple[tuple[str, ...], list[list[str] | None]]]]],
+    labels: list[str],
     mode: str,
     confidence_pct: int,
 ) -> str:
-    a_label, b_label, c_label = labels
     out: list[str] = []
 
     if mode == "sym":
@@ -152,6 +141,10 @@ def emit_table(
         key_cols = ["Operation"]
         unit = "ms/op"
 
+    # Three metric columns per platform: the reading, its interval, and the
+    # rounds pilot-bench needed to reach it.
+    metrics_per_platform = 3
+
     for section, rows in sections:
         out.append(f"### {section}")
         out.append("")
@@ -161,34 +154,42 @@ def emit_table(
             + " | ".join(key_cols)
             + " | "
             + " | ".join(
-                f"{lbl} {col}"
-                for lbl in (a_label, b_label, c_label)
-                for col in (unit, ci_lbl, "Runs")
+                f"{lbl} {col}" for lbl in labels for col in (unit, ci_lbl, "Runs")
             )
             + " |"
         )
         out.append(head)
-        sep = "|" + "|".join(["---"] * (len(key_cols) + 9)) + "|"
-        out.append(sep)
+        columns = len(key_cols) + metrics_per_platform * len(labels)
+        out.append("|" + "|".join(["---"] * columns) + "|")
         key_len = KEY_LEN[mode]
-        for key, ra, rb, rc in rows:
-            am, ac, ar = metric_cells(ra, key_len)
-            bm, bc, br = metric_cells(rb, key_len)
-            cm, cc, cr = metric_cells(rc, key_len)
-            cells = list(key) + [am, ac, ar, bm, bc, br, cm, cc, cr]
+        for key, per_platform in rows:
+            cells = list(key)
+            for row in per_platform:
+                cells.extend(metric_cells(row, key_len))
             out.append("| " + " | ".join(cells) + " |")
         out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 
+def platform(spec: str) -> tuple[str, Path]:
+    """Parse ``LABEL=PATH``. The label heads the platform's columns."""
+    label, separator, path = spec.partition("=")
+    if not separator or not label or not path:
+        raise argparse.ArgumentTypeError(f"expected LABEL=PATH, got {spec!r}")
+    return label, Path(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--a", required=True, type=Path, help="first platform raw bench output")
-    parser.add_argument("--b", required=True, type=Path)
-    parser.add_argument("--c", required=True, type=Path)
-    parser.add_argument("--a-label", required=True)
-    parser.add_argument("--b-label", required=True)
-    parser.add_argument("--c-label", required=True)
+    parser.add_argument(
+        "--input",
+        required=True,
+        action="append",
+        type=platform,
+        metavar="LABEL=PATH",
+        help="a platform's raw bench output and the label its columns carry; "
+        "repeat once per platform, in the column order wanted",
+    )
     parser.add_argument("--mode", choices=["sym", "hash", "pk"], required=True)
     parser.add_argument(
         "--confidence-pct",
@@ -200,47 +201,28 @@ def main() -> None:
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
 
-    a = parse_sections(args.a)
-    b = parse_sections(args.b)
-    c = parse_sections(args.c)
-    confidence_pct = confidence_percent([a, b, c], args.confidence_pct)
-    for table in (a, b, c):
+    labels = [label for label, _ in args.input]
+    if len(set(labels)) != len(labels):
+        raise SystemExit(f"platform labels repeat: {labels}")
+    tables = [parse_sections(path) for _, path in args.input]
+    confidence_pct = confidence_percent(tables, args.confidence_pct)
+    for table in tables:
         table.pop(CI_KEY, None)
 
-    section_names: list[str] = list(a.keys())
-    for src in (b, c):
-        for name in src.keys():
+    section_names: list[str] = []
+    for table in tables:
+        for name in table:
             if name not in section_names:
                 section_names.append(name)
 
-    merged: list[
-        tuple[
-            str,
-            list[
-                tuple[
-                    tuple[str, ...],
-                    list[str] | None,
-                    list[str] | None,
-                    list[str] | None,
-                ]
-            ],
-        ]
-    ] = []
-    for name in section_names:
-        merged.append(
-            (
-                name,
-                merge_rows(a.get(name, []), b.get(name, []), c.get(name, []), args.mode),
-            )
-        )
+    merged = [
+        (name, merge_rows([table.get(name, []) for table in tables], args.mode))
+        for name in section_names
+    ]
 
-    text = emit_table(
-        merged,
-        (args.a_label, args.b_label, args.c_label),
-        args.mode,
-        confidence_pct,
+    args.out.write_text(
+        emit_table(merged, labels, args.mode, confidence_pct), encoding="utf-8"
     )
-    args.out.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

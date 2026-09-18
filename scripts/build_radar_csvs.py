@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Extract per-platform metric CSVs from the 3-platform merged tables.
+"""Extract per-platform metric CSVs from the merged side-by-side tables.
 
-Reads the merged side-by-side tables produced by merge_three_pilot_tables.py
-and emits CSVs in the form:
+Reads what merge_pilot_tables.py produced and emits, for each curated row
+set, a CSV in the form:
 
-    label,wigner,moore,darby
+    label,<column>,<column>,…
     AES-128,356.4,235.7,139.8
-    ...
+    …
 
-…for the row sets we want on the Kiviat charts. Output CSVs feed
-generate_three_platform_radar.py.
+one column per platform, in the order `--columns` gives. The CSVs feed
+generate_platform_radar.py, which draws one curve per column.
 """
 
 from __future__ import annotations
@@ -79,29 +79,29 @@ def write_csv(
     platforms: list[str],
     columns: list[str],
 ) -> Path:
+    """Write one CSV, a column per platform in the order given.
+
+    A platform that appears in no merged-table header is a mis-spelled label
+    rather than a platform with no data, so it stops the run: a silently empty
+    curve would look like a machine that measured nothing.
+    """
     path = csv_dir / f"{name}.csv"
+    for platform in platforms:
+        if not any(platform in vals for _, vals in rows):
+            raise SystemExit(
+                f"platform {platform!r} appears in no merged-table column; "
+                "pass --platforms with the labels the sweep's headers use"
+            )
     with path.open("w", newline="") as fh:
         w = csv.writer(fh)
-        # Column order matches the radar generator's curve order.
         w.writerow(["label"] + columns)
-        for platform in platforms:
-            if not any(platform in vals for _, vals in rows):
-                raise SystemExit(
-                    f"platform {platform!r} appears in no merged-table column; "
-                    "pass --platforms with the labels the sweep's headers use"
-                )
         for label, vals in rows:
-            v_w = vals.get(platforms[0], float("nan"))
-            v_m = vals.get(platforms[1], float("nan"))
-            v_d = vals.get(platforms[2], float("nan"))
-            w.writerow(
-                [
-                    label,
-                    "" if v_w != v_w else f"{v_w:g}",
-                    "" if v_m != v_m else f"{v_m:g}",
-                    "" if v_d != v_d else f"{v_d:g}",
-                ]
-            )
+            cells = [label]
+            for platform in platforms:
+                value = vals.get(platform, float("nan"))
+                # An unmeasured axis is an empty cell, which the radar skips.
+                cells.append("" if value != value else f"{value:g}")
+            w.writerow(cells)
     return path
 
 
@@ -229,12 +229,14 @@ def main() -> None:
     parser.add_argument(
         "--platforms",
         default="Wigner (M1 Max),Moore (EPYC 7452),Darby (RPi5)",
-        help="comma-separated platform labels as they appear in the merged table headers",
+        help="comma-separated platform labels as they appear in the merged "
+        "table headers, in the order the curves should be drawn",
     )
     parser.add_argument(
         "--columns",
         default="wigner,moore,darby",
-        help="comma-separated short column tokens for the CSV header",
+        help="comma-separated short column tokens for the CSV header, one per "
+        "platform",
     )
     args = parser.parse_args()
 
@@ -249,8 +251,10 @@ def main() -> None:
 
     PLATFORMS = [p.strip() for p in args.platforms.split(",")]
     columns = [c.strip() for c in args.columns.split(",")]
-    if len(PLATFORMS) != 3 or len(columns) != 3:
-        raise SystemExit("--platforms and --columns each need exactly three entries")
+    if len(PLATFORMS) != len(columns):
+        raise SystemExit(
+            f"{len(PLATFORMS)} platform labels but {len(columns)} column tokens"
+        )
 
     print("Symmetric rows:", len(sym))
     print("Hash rows:", len(hsh))
