@@ -95,6 +95,18 @@ fn explicit_curve_input(selector: u8, value: &[u8]) -> Vec<u8> {
     out
 }
 
+
+/// `fuzz_key_pair` reads `[selector][48-byte seed][48-byte seed][message]`.
+/// The two seeds must differ in their first 32 bytes, which is all Ed25519
+/// takes of them.
+fn key_pair_input(selector: u8, message: &[u8]) -> Vec<u8> {
+    let mut out = vec![selector];
+    out.extend_from_slice(&[0x5au8; 48]);
+    out.extend_from_slice(&[0xa5u8; 48]);
+    out.extend_from_slice(message);
+    out
+}
+
 fn main() {
     let mut rng = CtrDrbgAes256::new(&[0x42u8; 48]);
 
@@ -424,6 +436,22 @@ fn main() {
             "fuzz_explicit_curve",
             &format!("p256_{field}"),
             &explicit_curve_input(selector, &[0x01]),
+        );
+    }
+
+    // fuzz_key_pair: one seed per scheme the selector reaches, since a key
+    // pair is only crossed after two full DRBG seeds are present.
+    for (scheme, selector) in [
+        ("ed25519", 0u8),
+        ("ecdsa_p256", 1),
+        ("x25519", 2),
+        ("ml_kem_512", 3),
+        ("ml_dsa_44", 4),
+    ] {
+        write(
+            "fuzz_key_pair",
+            scheme,
+            &key_pair_input(selector, b"a message to sign"),
         );
     }
 }

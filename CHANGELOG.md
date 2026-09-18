@@ -35,6 +35,11 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- `fuzz_key_pair`, which crosses two freshly generated key pairs in Ed25519,
+  ECDSA, X25519, ML-KEM and ML-DSA and requires each scheme to fail closed,
+  and splices one ML-KEM decapsulation key's secret vector under another's
+  public part — leaving the modulus check, the hash check and canonical
+  packing intact — so that only FIPS 203 §7.1's pair-wise test can refuse it.
 - `fuzz_explicit_curve`, which drives `CurveParams::from_explicit`, the gate
   an invalid-curve attack has to pass. Random bytes almost never give a field
   size the SEC 1 security-level step admits, so the target replaces one field

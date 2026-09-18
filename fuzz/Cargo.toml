@@ -330,6 +330,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_key_pair"
+path = "fuzz_targets/fuzz_key_pair.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_hpke"
 path = "fuzz_targets/fuzz_hpke.rs"
 test = false

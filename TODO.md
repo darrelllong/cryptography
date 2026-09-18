@@ -83,15 +83,17 @@ Items are marked **owner** when only the repository owner can do them.
    whose cost buys a statistic at the threshold — scalar blinding is the
    candidate, since it makes the swap pattern differ per call rather than per
    key — and runs of the whole battery on the remaining supported targets.
-7. **Targeted fuzzing.** The 47 targets cover the parsers, the AEAD failure
+7. **Targeted fuzzing.** The 48 targets cover the parsers, the AEAD failure
    path — including, since this campaign, that a refused decryption leaves the
    caller's buffer as it found it — and every public-key surface;
    `scripts/fuzz_regressions.sh` replays the inputs behind repaired defects,
    and counter exhaustion is checked by tests, which can reach lengths a
    fuzzer cannot. Explicit domain parameters are now their own target,
    `fuzz_explicit_curve`, which perturbs one field of a named curve at a time
-   so the deep checks are reached. Still to aim at: key-pair consistency as
-   its own target, and nonce reuse across calls. Campaign
+   so the deep checks are reached, and key-pair consistency is
+   `fuzz_key_pair`, which crosses two generated pairs in five schemes and
+   splices an ML-KEM decapsulation key so only FIPS 203's pair-wise test can
+   refuse it. Still to aim at: nonce reuse across calls. Campaign
    records, with corpus, duration, features and revisions, are in
    `fuzz/campaigns/`; the 2026-09-17 campaign ran all 45 targets then defined
    for four hours each at 69d9fa6 with no crash and no regression input
