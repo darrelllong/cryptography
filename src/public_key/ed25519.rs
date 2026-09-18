@@ -38,26 +38,23 @@
 //!
 //! # Side channels
 //!
-//! Despite Ed25519's reputation as a side-channel-hardened scheme, this
-//! implementation is **variable-time**: signing derives `R = r·B` and the key
-//! `A = a·B` through the generic Edwards scalar multiplication in
-//! [`crate::public_key::ec_edwards`], which is not constant-time in the secret
-//! scalar (see that module's note). It lives under [`crate::vt`] for that
-//! reason and is unsuitable where an attacker can observe signing timing or
-//! cache behavior. Verification operates only on public data.
+//! Signing is constant time in its secrets. `R = r·B` and `A = a·B` go
+//! through the fixed-base comb of [`super::ed25519_group`], which runs a fixed
+//! number of operations and reads every table entry under a mask, and
+//! `S = (r + k·a) mod L` through the fixed-width arithmetic of
+//! [`super::sc25519`]. Nothing in signing branches on a secret, indexes memory
+//! with one, or hands one to a variable-width big integer.
 //!
-//! What leaks is worth naming, because for a Schnorr signature it is the
-//! nonce rather than the key that an attacker collects. The fixed-base
-//! multiplication runs one window per 8 bits of `r`, so its loop count
-//! follows `r`'s bit length, and each window indexes a 256-entry table of
-//! precomputed points with 8 bits of `r`, so its memory pattern follows `r`'s
-//! value. `scripts/ct_timing` measures the consequence: one key signing two
-//! messages whose reduced nonces differ in weight — 97 set bits against 157 —
-//! separates on every host measured: `|t|` of 7.2 on an Apple M4 Pro, 7.9 on
-//! an idle Intel host, 35 on a Cortex-X925 and 244 on a Cortex-A76. Partial
-//! knowledge of many nonces recovers the
-//! private key by lattice reduction, so timing that correlates with `r` is
-//! the quantity this scheme can least afford to publish.
+//! That matters most for the nonce. In a Schnorr signature it is `r`, not the
+//! key, that an attacker collects: partial knowledge of many nonces recovers
+//! the private key by lattice reduction. `scripts/ct_timing` measures the
+//! pair that would show it — one key signing two messages whose reduced
+//! nonces differ in weight, 97 set bits against 157. It separated at `|t|` of
+//! 7.2 to 244 across four machines while the generic arithmetic did this
+//! work; it is at the noise floor now.
+//!
+//! Verification is variable-time and stays that way. It reads a signature,
+//! a public key and a message, all of them public.
 
 /// RFC 8032 §5.1: a 32-byte seed, a 32-byte encoded public point, and a
 /// 64-byte signature `R ‖ S`. The seed hash is SHA-512, whose halves are the

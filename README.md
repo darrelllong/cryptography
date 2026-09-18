@@ -31,7 +31,12 @@ Security note:
   that the surface is variable-time) and `cryptography::public_key::ecdsa`
   (the natural module tree). Pick whichever reads better in your code; the
   `vt` name labels the surface, it does not gate it.
-  X25519 / X448 are exceptions and use the constant-time RFC 7748 ladder.
+  X25519 and X448 are exceptions and use the constant-time RFC 7748 ladder,
+  and so is Ed25519 *signing*, whose scalar multiplication and arithmetic
+  modulo `L` are fixed-width and mask-driven: in a Schnorr signature the value
+  that must not leak is the per-signature nonce, since partial knowledge of
+  many nonces recovers the key. Ed25519 verification, and every other
+  public-key operation, remains variable-time.
 - Constant-time symmetric implementations are explicitly suffixed `Ct`
   (e.g. `Aes128Ct`, `Sm4Ct`, `Zuc128Ct`); the bare-named types
   (`Aes128`, `Sm4`, `Zuc128`) are reference table-driven implementations

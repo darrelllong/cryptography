@@ -10,6 +10,23 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Fixed
+- **Ed25519 signing published its nonce.** The fixed-base multiplication ran
+  one window per 8 bits of the scalar and indexed a 256-entry table with 8 bits
+  of it, so both its loop count and its memory pattern followed the secret.
+  `scripts/ct_timing` measured one key signing two messages whose reduced
+  nonces differ in weight: they separated at `|t|` of 7.2, 7.9, 35 and 244 on
+  four machines. Partial knowledge of many nonces recovers the private key by
+  lattice reduction, which makes the nonce the worst thing a signature scheme
+  can leak.
+
+  Signing and key generation now use a fixed-base comb over a fixed-width
+  field with masked table reads (`ed25519_group`, on the `fe25519` field
+  X25519 already used) and fixed-width arithmetic modulo `L` (`sc25519`).
+  Neither branches on a secret, indexes memory with one, or hands one to a
+  variable-width big integer. The measured pair is at the noise floor. On an
+  Apple M4 Pro the same change made key generation 16.7× faster and signing
+  19.3×; verification, which reads only public data, is unchanged in both
+  time and kind.
 - `SPECIFICATIONS.md` claimed three things the tree does not hold. It named
   PKCS #1 v1.5 and RFC 8017 §8.2 among the RSA padding schemes, and there is
   no v1.5 anywhere in the crate; it listed DSA parameter *generation* among
@@ -36,6 +53,10 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `scripts/ct_codegen.sh` found this, and now fails the build if it returns.
 
 ### Changed
+- `Ed25519Signature::nonce_point` and `::response` return owned values rather
+  than references: a signature now holds `R` and `S` as RFC 8032 encodes them,
+  with the decoded point as a cache that parsing fills. Signing builds no big
+  integer at all.
 - The sweep tooling takes any number of platforms. `merge_three_pilot_tables.py`
   is `merge_pilot_tables.py` and reads repeated `--input LABEL=PATH`;
   `generate_three_platform_radar.py` is `generate_platform_radar.py` and draws
