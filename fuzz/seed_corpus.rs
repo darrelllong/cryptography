@@ -79,6 +79,22 @@ fn hpke_input(selector: u8, fields: &[&[u8]]) -> Vec<u8> {
     out
 }
 
+
+/// `fuzz_explicit_curve` reads `[selector][u16 len][value]`. A selector whose
+/// `which` field is 7 replaces nothing, so the named curve the low bits pick
+/// must pass its own validation; those are the seeds that reach the deep
+/// checks, which random bytes do not.
+fn explicit_curve_input(selector: u8, value: &[u8]) -> Vec<u8> {
+    let mut out = vec![selector];
+    out.extend_from_slice(
+        &u16::try_from(value.len())
+            .expect("a value under 64 KiB")
+            .to_be_bytes(),
+    );
+    out.extend_from_slice(value);
+    out
+}
+
 fn main() {
     let mut rng = CtrDrbgAes256::new(&[0x42u8; 48]);
 
@@ -373,4 +389,41 @@ fn main() {
     write("fuzz_hpke", "chacha20poly1305_psk", &hpke_input(5, &hpke_fields));
     write("fuzz_hpke", "aes256gcm_auth", &hpke_input(7, &hpke_fields));
     write("fuzz_hpke", "aes128gcm_authpsk", &hpke_input(9, &hpke_fields));
+
+    // fuzz_explicit_curve: one selector byte carries both fields the target
+    // reads — `(selector >> 3) % 8` picks which parameter is replaced, and
+    // `selector % 6` picks the curve — so each seed's byte is the value that
+    // satisfies both. A `which` of 7 replaces nothing, which is the case that
+    // requires a named curve to pass its own validation.
+    for (name, selector) in [
+        ("p256", 56u8),
+        ("p384", 57),
+        ("p521", 58),
+        ("secp256k1", 59),
+        ("p192", 60),
+        ("p224", 61),
+    ] {
+        write(
+            "fuzz_explicit_curve",
+            &format!("named_{name}"),
+            &explicit_curve_input(selector, &[]),
+        );
+    }
+    // The same, one per replaceable field of P-256, so a mutation starts from
+    // a curve that is valid up to the field it changes.
+    for (field, selector) in [
+        ("p", 2u8),
+        ("a", 14),
+        ("b", 20),
+        ("n", 26),
+        ("gx", 32),
+        ("gy", 44),
+        ("h", 50),
+    ] {
+        write(
+            "fuzz_explicit_curve",
+            &format!("p256_{field}"),
+            &explicit_curve_input(selector, &[0x01]),
+        );
+    }
 }

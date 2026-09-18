@@ -35,6 +35,12 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- `fuzz_explicit_curve`, which drives `CurveParams::from_explicit`, the gate
+  an invalid-curve attack has to pass. Random bytes almost never give a field
+  size the SEC 1 security-level step admits, so the target replaces one field
+  of a named curve at a time and its seeds carry the unperturbed curves; an
+  accepted curve must hold its base point on the curve, in the prime-order
+  subgroup, and annihilated by the order.
 - `fuzz_hpke`, which drives HPKE's four modes and three AEADs from the
   fuzzer's bytes: the round trip must return the message, a tampered tag must
   be refused without moving the sequence number, a foreign encapsulation must
