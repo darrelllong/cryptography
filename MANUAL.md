@@ -1246,6 +1246,77 @@ the iterated vectors at 1, 1000, and 1 000 000 iterations. The 1 M-iteration
 tests are gated `#[ignore]`; run them with
 `cargo test --release -- --ignored rfc7748_section5_2_iter_1m`.
 
+#### HPKE: message encryption (RFC 9180)
+
+`Hpke` is the crate's message-encryption interface, and the only public-key
+API here that encrypts a message rather than a group element or a fixed-width
+block. The suite is `DHKEM(X25519, HKDF-SHA256)` with `HKDF-SHA256` and one of
+three AEADs, in any of RFC 9180's four modes.
+
+Choices:
+
+- `HpkeAead::{Aes128Gcm, Aes256Gcm, ChaCha20Poly1305}`
+- `HpkeMode::{Base, Psk, Auth, AuthPsk}` — base needs the recipient's public
+  key alone, PSK adds a pre-shared key and its identifier, auth adds the
+  sender's private key, auth-PSK both. The mode is chosen by which setup
+  function is called; a mismatched set of inputs returns `None` rather than a
+  context that would derive different keys on the two sides.
+
+Single-shot (base mode):
+
+- `Hpke::seal(aead, &recipient_public, info, aad, plaintext, rng) -> Option<([u8; 32], Vec<u8>)>`
+- `Hpke::open(aead, enc, &recipient_private, info, aad, ciphertext) -> Option<Vec<u8>>`
+
+Multi-message contexts, one call per mode:
+
+- `Hpke::setup_sender{,_psk,_auth,_auth_psk}(...) -> Option<([u8; 32], HpkeContext)>`
+- `Hpke::setup_receiver{,_psk,_auth,_auth_psk}(...) -> Option<HpkeContext>`
+- `HpkeContext::seal(aad, plaintext)` / `HpkeContext::open(aad, ciphertext)`
+- `HpkeContext::export(exporter_context, len)` — secrets for a protocol
+  outside the AEAD, from the same handshake
+- `HpkeContext::sequence()`
+
+Key derivation from a seed:
+
+- `Hpke::derive_key_pair(ikm) -> Option<(X25519PrivateKey, X25519PublicKey)>`
+
+A context is directional and ordered: the sequence number is XORed into the
+base nonce, so the two sides must seal and open in the same order, and a
+refused `open` does not advance it. A context that has sealed `2^64 - 1`
+messages seals no more. `info` binds the application's context into the key
+schedule, so sender and receiver must pass the same value; `aad` is per
+message. Opening returns `None` if any of them, or the encapsulation, was
+altered.
+
+Example:
+
+```rust
+use cryptography::CtrDrbgAes256;
+use cryptography::vt::{Hpke, HpkeAead, X25519};
+
+let mut rng = CtrDrbgAes256::new(&[0x33u8; 48]);
+let (recipient_public, recipient_private) = X25519::generate(&mut rng);
+let info = b"example app v1";
+
+let (enc, mut sender) =
+    Hpke::setup_sender(HpkeAead::ChaCha20Poly1305, &recipient_public, info, &mut rng)
+        .expect("sender context");
+let first = sender.seal(b"header", b"the first message").expect("seal");
+let second = sender.seal(b"header", b"the second").expect("seal");
+
+let mut receiver =
+    Hpke::setup_receiver(HpkeAead::ChaCha20Poly1305, &enc, &recipient_private, info)
+        .expect("receiver context");
+assert_eq!(receiver.open(b"header", &first).unwrap(), b"the first message");
+assert_eq!(receiver.open(b"header", &second).unwrap(), b"the second");
+assert_eq!(sender.export(b"label", 32), receiver.export(b"label", 32));
+```
+
+Validation: the whole of RFC 9180's Appendix A.1 and A.2 — both AEADs, all
+four modes, `DeriveKeyPair`, the encapsulated shared secret, the key
+schedule's intermediate values, the first two records and the three exported
+values — in `tests/vectors/hpke_rfc9180.txt`.
+
 #### Edwards Diffie-Hellman
 
 Generation and agreement:
@@ -2316,6 +2387,37 @@ equal ciphertexts), documented as such on each type.
   (`None` when `ctx` exceeds 255 bytes, FIPS 204 Algorithm 3's error
   indication; `Some(false)` for an invalid signature or a parameter-set
   mismatch)
+
+#### HPKE types
+
+##### `Hpke`
+
+- `derive_key_pair(&[u8]) -> Option<(X25519PrivateKey, X25519PublicKey)>`
+- `setup_sender(aead, &X25519PublicKey, info, rng) -> Option<([u8; 32], HpkeContext)>`
+- `setup_receiver(aead, enc, &X25519PrivateKey, info) -> Option<HpkeContext>`
+- `setup_sender_psk(aead, &X25519PublicKey, info, psk, psk_id, rng)`
+- `setup_receiver_psk(aead, enc, &X25519PrivateKey, info, psk, psk_id)`
+- `setup_sender_auth(aead, &X25519PublicKey, info, &X25519PrivateKey, rng)`
+- `setup_receiver_auth(aead, enc, &X25519PrivateKey, info, &X25519PublicKey)`
+- `setup_sender_auth_psk(aead, &X25519PublicKey, info, psk, psk_id, &X25519PrivateKey, rng)`
+- `setup_receiver_auth_psk(aead, enc, &X25519PrivateKey, info, psk, psk_id, &X25519PublicKey)`
+- `seal(aead, &X25519PublicKey, info, aad, plaintext, rng) -> Option<([u8; 32], Vec<u8>)>`
+- `open(aead, enc, &X25519PrivateKey, info, aad, ciphertext) -> Option<Vec<u8>>`
+
+##### `HpkeContext`
+
+- `seal(aad, plaintext) -> Option<Vec<u8>>`
+- `open(aad, ciphertext) -> Option<Vec<u8>>`
+- `export(exporter_context, len) -> Option<Vec<u8>>`
+- `sequence() -> u64`
+
+##### `HpkeAead`
+
+- `Aes128Gcm`, `Aes256Gcm`, `ChaCha20Poly1305`
+
+##### `HpkeMode`
+
+- `Base`, `Psk`, `Auth`, `AuthPsk`
 
 #### RFC 7748 constant-time ECDH types
 

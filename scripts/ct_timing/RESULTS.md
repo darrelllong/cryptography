@@ -23,26 +23,29 @@ experiment, at this sample size, on this machine, found no difference.
 
 ## 2026-09-17
 
-| Experiment | Classes | dmz (Intel Xeon, idle) | dyson (Apple M4 Pro) | darby (Cortex-A76) |
-|---|---|---|---|---|
-| control: early-exit compare | differs at byte 0 / byte 31 | 1707 **flagged** | 49 **flagged** | 662 **flagged** |
-| control: identical classes | differs at byte 31, both | 2.2 | 1.4 | 1.7 |
-| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 1.8 | 1.1 | 2.6 |
-| `Hmac::<Sha256>::verify` | differs at byte 15 / byte 31 | 2.1 | 2.1 | 3.3 |
-| `Aes128Ct::encrypt_block` | all-zero / dense key and block | 2.1 | 2.0 | 1.2 |
-| `X25519::scalar_mult` | all-zero / dense scalar | 1.3 | 46 **flagged** | 2.1 |
-| `X25519::scalar_mult` | two ordinary fixed scalars | 1.6 | 2.2 | 2.2 |
-| `X25519::scalar_mult` | alternating bits / long runs | 1.3 | 11–13 **flagged** | not run |
-| `X25519::scalar_mult` | low-order point / base point | 1.0 | 1.8 | 28 **flagged** |
-| `MlKem::decaps` | well-formed / tampered ciphertext | 1.6 | 1.3 | 1.7 |
+| Experiment | Classes | dmz (Intel Xeon, idle) | dyson (Apple M4 Pro) | darby (Cortex-A76) | baase (Cortex-X925) |
+|---|---|---|---|---|---|
+| control: early-exit compare | differs at byte 0 / byte 31 | 1707 **flagged** | 49 **flagged** | 662 **flagged** | 247 **flagged** |
+| control: identical classes | differs at byte 31, both | 2.2 | 1.4 | 1.7 | 1.6 |
+| `Hmac::<Sha256>::verify` | differs at byte 0 / byte 31 | 1.8 | 1.1 | 2.6 | 1.9 |
+| `Hmac::<Sha256>::verify` | differs at byte 15 / byte 31 | 2.1 | 2.1 | 3.3 | 0.8 |
+| `Aes128Ct::encrypt_block` | all-zero / dense key and block | 2.1 | 2.0 | 1.2 | 1.3 |
+| `X25519::scalar_mult` | all-zero / dense scalar | 1.3 | 46 **flagged** | 2.1 | 1.8 |
+| `X25519::scalar_mult` | two ordinary fixed scalars | 1.6 | 2.2 | 2.2 | 2.5 |
+| `X25519::scalar_mult` | alternating bits / long runs | 1.3 | 11–13 **flagged** | not run | 2.8 |
+| `X25519::scalar_mult` | low-order point / base point | 1.0 | 1.8 | 28 **flagged** | 1.3 |
+| `MlKem::decaps` | well-formed / tampered ciphertext | 1.6 | 1.3 | 1.7 | 0.5 |
 
-Each column is one run under rustc 1.93.1: dmz is an idle Intel machine with the
-run pinned to four cores, dyson an Apple M4 Pro under macOS 27.0, darby a
-Raspberry Pi 5 under Linux 6.18. The dyson scalar figure reproduced at 44, 46,
+Each column is one run: dmz is an idle Intel machine with the run pinned to four
+cores, dyson an Apple M4 Pro under macOS 27.0, darby a Raspberry Pi 5 under
+Linux 6.18, all three under rustc 1.93.1; baase is an idle heterogeneous ARM
+machine under Linux 7.0 and rustc 1.95.0, with the run pinned to five Cortex-X925
+cores of one cluster so it cannot migrate to the Cortex-A725 cores beside them,
+which run at a different frequency. The dyson scalar figure reproduced at 44, 46,
 47, 51 and 52 across five runs; the darby point figure is from its one run with
 this harness.
 
-## Degenerate inputs, and only on the ARM hosts
+## Degenerate inputs, and only on two hosts
 
 Two pairs are flagged, each on one host and each contrasting a degenerate input
 with an ordinary one:
@@ -54,8 +57,9 @@ with an ordinary one:
   field elements small and structured where an ordinary point makes them look
   random.
 
-Neither host flags the other's pair, the idle Intel host flags neither, and no
-host separates two ordinary scalars of similar swap count — the section below
+Neither host flags the other's pair, neither the idle Intel host nor the
+Cortex-X925 flags either, and no host separates two ordinary scalars of similar
+swap count — the section below
 takes up the pair that does. The machine-code evidence in
 `scripts/ct_budgets/` shows no branch and no secret-dependent index anywhere in
 the ladder, and `fe_cswap` touches every limb whatever the mask says, so this is
@@ -68,8 +72,8 @@ The experiment the all-zero scalar asked for has now been run: two *ordinary*
 scalars, one of alternating bits (the swap fires on almost every round) and one
 of long runs (about a sixth of them). On the Apple host they separate at `|t|`
 of 11.0 and 13.2 over two runs, each growing from a quarter statistic near 4;
-on the idle Intel host the same pair gives 1.3. Two ordinary scalars whose swap
-counts are alike stay quiet on every host.
+on the idle Intel host the same pair gives 1.3 and on the Cortex-X925 2.8. Two
+ordinary scalars whose swap counts are alike stay quiet on every host.
 
 So what that processor resolves is not a degenerate input but how often the
 ladder's conditional swap fires, which is a property of the secret scalar: the
@@ -98,4 +102,7 @@ What the measurement is worth knowing for:
   tells an attacker only what they already know.
 - The machine code holds no branch and no secret-dependent index, on either
   architecture, which `scripts/ct_budgets/` records. What remains is what a
-  processor does with the data, and the answer differs between processors.
+  processor does with the data, and the answer differs between processors:
+  four hosts, two of them ARM, and each flagged pair belongs to exactly one of
+  them. A newer ARM core than the Pi's, the Cortex-X925, separates none of the
+  pairs at all.
