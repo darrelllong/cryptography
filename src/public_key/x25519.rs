@@ -16,14 +16,17 @@
 //! digits of the public exponent `p − 2`. None takes the scalar or `u` as
 //! input.
 //!
-//! Measurement is the other half. `scripts/ct_timing` runs the interleaved
-//! two-class experiment over this ladder, and its `RESULTS.md` records what
-//! three hosts found: no host separates two ordinary scalars, while one
-//! separates an all-zero scalar — which clamping turns into `2^254`, so the
-//! swap fires once and then never again — and another separates `u = 1` as
-//! the peer's point, which keeps the field elements small. No branch or index
-//! accounts for either, and an idle x86-64 host separates neither; what a
-//! processor does with degenerate data is not something this code decides.
+//! Measurement is the other half, and it found something the machine code
+//! does not explain. `scripts/ct_timing` runs the interleaved two-class
+//! experiment over this ladder; its `RESULTS.md` records that one host, an
+//! Apple M4 Pro, separates scalars by how often the conditional swap fires —
+//! an all-zero scalar from a dense one, and alternating bits from long runs —
+//! while an idle x86-64 host separates neither and no host separates two
+//! scalars whose swap counts are alike. The swap count is a property of the
+//! secret: the number of positions where consecutive bits differ, aggregated
+//! over the whole scalar. A countermeasure that made every limb's store change
+//! its value halved the statistic at an 11% cost without removing it, and was
+//! not kept; `RESULTS.md` has the numbers.
 //!
 //! Unlike the rest of `crate::vt`, X25519 here is intended to be
 //! constant-time. It is exposed under `crate::vt` because the surrounding

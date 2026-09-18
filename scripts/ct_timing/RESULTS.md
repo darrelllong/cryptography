@@ -55,7 +55,8 @@ with an ordinary one:
   random.
 
 Neither host flags the other's pair, the idle Intel host flags neither, and no
-host separates two ordinary scalars. The machine-code evidence in
+host separates two ordinary scalars of similar swap count — the section below
+takes up the pair that does. The machine-code evidence in
 `scripts/ct_budgets/` shows no branch and no secret-dependent index anywhere in
 the ladder, and `fe_cswap` touches every limb whatever the mask says, so this is
 not the code taking a different path for one class. It is the same instructions
