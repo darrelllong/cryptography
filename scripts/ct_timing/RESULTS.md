@@ -32,6 +32,7 @@ experiment, at this sample size, on this machine, found no difference.
 | `Aes128Ct::encrypt_block` | all-zero / dense key and block | 2.1 | 2.0 | 1.2 |
 | `X25519::scalar_mult` | all-zero / dense scalar | 1.3 | 46 **flagged** | 2.1 |
 | `X25519::scalar_mult` | two ordinary fixed scalars | 1.6 | 2.2 | 2.2 |
+| `X25519::scalar_mult` | alternating bits / long runs | 1.3 | 11–13 **flagged** | not run |
 | `X25519::scalar_mult` | low-order point / base point | 1.0 | 1.8 | 28 **flagged** |
 | `MlKem::decaps` | well-formed / tampered ciphertext | 1.6 | 1.3 | 1.7 |
 
@@ -60,15 +61,40 @@ the ladder, and `fe_cswap` touches every limb whatever the mask says, so this is
 not the code taking a different path for one class. It is the same instructions
 over different data, finishing at different speeds on those processors.
 
-What that is worth knowing for:
+## The swap count is what the Apple host sees
 
-- The comparison that bears on key recovery is two ordinary scalars, and no host
-  separates them.
-- An all-zero scalar is not a key, but the *reason* it separates — how often the
-  swap fires — is a property of the secret scalar. This experiment compared the
-  extreme (one swap) against a typical scalar (about 127); it did not ask
-  whether two ordinary scalars whose swap counts differ by a few are
-  distinguishable, and that is the experiment to run next.
+The experiment the all-zero scalar asked for has now been run: two *ordinary*
+scalars, one of alternating bits (the swap fires on almost every round) and one
+of long runs (about a sixth of them). On the Apple host they separate at `|t|`
+of 11.0 and 13.2 over two runs, each growing from a quarter statistic near 4;
+on the idle Intel host the same pair gives 1.3. Two ordinary scalars whose swap
+counts are alike stay quiet on every host.
+
+So what that processor resolves is not a degenerate input but how often the
+ladder's conditional swap fires, which is a property of the secret scalar: the
+number of positions where consecutive bits differ. It is an aggregate over the
+whole scalar, the same for every call with that key, so what it can give an
+attacker who times many agreements is a few bits about the key, not the key.
+
+**A countermeasure was tried and not kept.** `fe_cswap` writes each limb twice,
+and with `swap == 0` the plain form stores the value the limb already holds. An
+alternative that XORs a nonzero constant in and out — so no store is ever a
+no-op, with a compiler fence between the passes to keep them apart — halved the
+statistic (46 to 10 for the degenerate pair, 11–13 to 7.5 for the ordinary one)
+without removing it, at a measured cost of 11% on the ladder (20.8 s against
+18.7 s for a million scalar multiplications). A store that leaves the value
+unchanged is therefore part of what is observable, but not all of it, and an
+11% cost for a distinguisher that remains is not a trade worth making. The
+emitted code was checked: the two passes survived, the constant appears sixty
+times in the ladder.
+
+What the measurement is worth knowing for:
+
+- The comparison that bears on key recovery is two ordinary scalars of similar
+  swap count, and no host separates them.
 - A low-order peer point is chosen by whoever sends it, and the agreement
   refuses the all-zero shared secret it produces, so a timing difference there
   tells an attacker only what they already know.
+- The machine code holds no branch and no secret-dependent index, on either
+  architecture, which `scripts/ct_budgets/` records. What remains is what a
+  processor does with the data, and the answer differs between processors.
