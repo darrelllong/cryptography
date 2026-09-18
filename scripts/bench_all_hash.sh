@@ -10,6 +10,13 @@ PILOT_PRESET="${PILOT_PRESET:-quick}"
 PILOT_HASH_BYTES="${PILOT_HASH_BYTES:-262144}"
 PILOT_HASH_XOF_OUT="${PILOT_HASH_XOF_OUT:-32}"
 PILOT_CONFIDENCE_LEVEL="${PILOT_CONFIDENCE_LEVEL:-}"
+# A case whose confidence interval will not converge — public-key key
+# generation searches for primes, so its timing has a long tail — would
+# otherwise run until someone notices. Each case gets a session limit; a case
+# that reaches it is reported with the estimate it had and a mark, not dropped
+# and not left running.
+PILOT_SESSION_LIMIT="${PILOT_SESSION_LIMIT:-600}"
+
 export PILOT_HASH_BYTES PILOT_HASH_XOF_OUT
 
 # Displayed confidence percent: pilot-bench defaults to 95% unless the env
@@ -26,19 +33,31 @@ measure() {
     if [[ -n "${PILOT_CONFIDENCE_LEVEL}" ]]; then
         extra+=(--confidence-level "${PILOT_CONFIDENCE_LEVEL}")
     fi
+    extra+=(--session-limit "${PILOT_SESSION_LIMIT}")
+    local status=0
     out=$("$BENCH" run_program --preset "$PILOT_PRESET" "${extra[@]}" \
           --pi "${name},MB/s,0,1,1" \
-          -- "$HASH" "$name" 2>&1)
+          -- "$HASH" "$name" 2>&1) || status=$?
     mean=$(echo  "$out" | awk '/Reading mean/{print $5}')
     ci=$(echo    "$out" | awk '/Reading CI/{print $5}')
     rounds=$(echo "$out" | awk '/^Rounds:/{print $2}')
+    local mark=""
+    if [[ "$status" -eq 13 ]]; then
+        # Pilot's session-limit code: the numbers are what it had when time ran
+        # out, so they are reported with a mark rather than as a converged CI.
+        mark=" (limit)"
+    elif [[ "$status" -ne 0 ]]; then
+        echo "pilot-bench failed for $name with status $status:" >&2
+        echo "$out" >&2
+        exit 1
+    fi
     if [[ -z "$mean" || -z "$ci" || -z "$rounds" ]]; then
         echo "pilot-bench output for $name carried no mean, CI or round count:" >&2
         echo "$out" >&2
         exit 1
     fi
-    printf "| %-12s | %5s | %8s | %8s | %5s |\n" \
-           "$name" "$outbits" "$mean" "±$ci" "$rounds"
+    printf "| %-12s | %5s | %8s | %8s | %5s%s |\n" \
+           "$name" "$outbits" "$mean" "±$ci" "$rounds" "$mark"
 }
 
 sep() { echo "|--------------|-------|----------|----------|-------|"; }
