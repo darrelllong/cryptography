@@ -97,6 +97,13 @@ const FIXED_KEY: [u8; 32] = *b"ct_timing fixed class key bytes.";
 const FIXED_BLOCK: [u8; 16] = *b"fixed block 0123";
 const OTHER_KEY: [u8; 32] = *b"ct_timing other fixed class key.";
 
+/// Two scalars that differ in how often the ladder's conditional swap fires,
+/// which is what separated an all-zero scalar from a dense one on one host.
+/// Both are ordinary-looking keys: after clamping, the alternating one swaps
+/// on almost every round, the run-length one on about a sixth of them.
+const ALTERNATING_SCALAR: [u8; 32] = [0x55; 32];
+const LONG_RUN_SCALAR: [u8; 32] = [0xf0; 32];
+
 /// A point of small order on Curve25519: `u = 1`, whose ladder output is the
 /// all-zero shared secret RFC 7748 §6.1 names.
 const LOW_ORDER_POINT: [u8; 32] = {
@@ -437,6 +444,30 @@ fn main() {
     );
     if two_fixed > THRESHOLD {
         failures.push("X25519::scalar_mult separated two fixed scalars");
+    }
+
+    // Two ordinary scalars whose swap counts differ: about 250 rounds against
+    // about 40. If a host separates these, the swap pattern is observable for
+    // keys a caller would actually use, not only for a degenerate one.
+    let (swaps, _) = experiment(
+        "X25519::scalar_mult (swap count)",
+        ["alternating bits", "long runs"],
+        &mut coin,
+        |class| {
+            let mut scalar = [0u8; 32];
+            scalar.copy_from_slice(if class == 0 {
+                &ALTERNATING_SCALAR
+            } else {
+                &LONG_RUN_SCALAR
+            });
+            scalar
+        },
+        |scalar| {
+            black_box(X25519::scalar_mult(scalar, &base));
+        },
+    );
+    if swaps > THRESHOLD {
+        failures.push("X25519::scalar_mult separated two scalars by their swap counts");
     }
 
     // The peer's point rather than the scalar: a low-order point, whose ladder
