@@ -76,7 +76,6 @@ use std::hint::black_box;
 use std::time::Instant;
 
 use cryptography::public_key::ed25519::Ed25519;
-use cryptography::hash::Digest;
 use cryptography::vt::BigUint;
 use cryptography::{Aes128Ct, ChaCha20, ChaCha20Poly1305, CtrDrbgAes256, Hmac, Sha256, Sha512};
 use cryptography::vt::{MlKem, MlKemCiphertext, MlKemParameterSet, X25519};
