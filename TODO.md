@@ -28,25 +28,23 @@ Items are marked **owner** when only the repository owner can do them.
 
 ## Documentation that is known stale
 
-4. **Performance tables.** `ASYMMETRIC.md`, `SYMMETRIC.md` and `POSTQUANTUM.md`
-   carry "Stale figures (2026-09-10)" notes. The instruments are corrected
-   (MB = 10⁶ bytes, page-touch warm-up, fresh ML-DSA seeds, one agreement per
-   timed span); re-sweep on quiet benchmark hosts, moving the tree to them by
-   git, and regenerate the tables and radar plots with their units.
+4. **Performance tables (done, with one gap).** `SYMMETRIC.md`,
+   `ASYMMETRIC.md` and `POSTQUANTUM.md` carry the 2026-09-17 sweep: four
+   columns — Intel i5-8259U (`dmz`), Apple M1 (`tolkien`), Cortex-X925
+   (`baase`) and Cortex-A76 (`darby`) — merged, with every radar redrawn and
+   every ratio in the surrounding prose recomputed. The staleness notes are
+   gone where the numbers are now current, and narrowed where they are not:
+   `SYMMETRIC.md`'s go-fast comparison sections remain older single-host
+   snapshots whose GHASH baseline is the comparator the SP 800-38D multiply
+   replaced.
 
-   State on 2026-09-17: pilot-bench's installed binaries no longer loaded —
-   `libboost_log` 1.74 on darby, 1.83 on twilight, a program-options symbol
-   against Boost 1.92 on dyson — so it was rebuilt from source on dyson, darby
-   and twilight (gcc needs `-Wno-error=unknown-pragmas` for the clang pragmas
-   in `libpilot.cc`); baase's 2026-09-10 build and dennard's of 2026-09-05
-   run as they are.
+   The gap is the x86-64 column: it is a mobile part, because both EPYC hosts
+   carried other users' work throughout. `twilight`'s attempt was discarded
+   when another user's job took it to load 118 partway through. An EPYC column
+   would be worth adding when one of those machines is genuinely free.
 
-   Swept so far, at `d51efc3` with `PILOT_PRESET=normal` and a 90% CI: baase
-   (Cortex-X925, idle) and darby (Raspberry Pi 5, idle) — symmetric and hash
-   complete, public key running. Twilight's run was discarded when another
-   user's job took the machine to load 118 partway through, and dyson is not
-   quiet either. What is left is an x86-64 column on a quiet EPYC and the
-   Apple-silicon column, then the merge, the radars and the table updates.
+   The three sweep scripts took exactly three platforms until this round;
+   they take any number now, which is what let a fourth host in.
 
 ## Security contracts and evidence
 
