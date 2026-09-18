@@ -323,6 +323,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "fuzz_hpke"
+path = "fuzz_targets/fuzz_hpke.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fuzz_mac"
 path = "fuzz_targets/fuzz_mac.rs"
 test = false

@@ -35,6 +35,12 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- `fuzz_hpke`, which drives HPKE's four modes and three AEADs from the
+  fuzzer's bytes: the round trip must return the message, a tampered tag must
+  be refused without moving the sequence number, a foreign encapsulation must
+  not open the message, and both sides must export the same secret. Its seeds
+  carry one input per mode, since a PSK mode needs a key and an identifier
+  together before a setup succeeds.
 - RFC 9180 HPKE over `DHKEM(X25519, HKDF-SHA256)` with `HKDF-SHA256` and the
   AES-128-GCM, AES-256-GCM and ChaCha20Poly1305 AEADs, in all four modes:
   base, PSK, auth and auth-PSK, with context `seal`/`open`/`export`, the

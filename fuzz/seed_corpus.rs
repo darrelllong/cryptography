@@ -66,6 +66,19 @@ fn length_prefixed(blob: &[u8], rest: &[u8]) -> Vec<u8> {
     out
 }
 
+
+/// `fuzz_hpke` reads each field as a length byte followed by that many bytes.
+/// The first byte selects the AEAD and the mode: `selector % 3` the AEAD,
+/// `(selector / 3) % 4` the mode.
+fn hpke_input(selector: u8, fields: &[&[u8]]) -> Vec<u8> {
+    let mut out = vec![selector];
+    for field in fields {
+        out.push(u8::try_from(field.len()).expect("a field under 256 bytes"));
+        out.extend_from_slice(field);
+    }
+    out
+}
+
 fn main() {
     let mut rng = CtrDrbgAes256::new(&[0x42u8; 48]);
 
@@ -343,4 +356,21 @@ fn main() {
         "47_ed25519_sk_blob",
         &with_selector16(47, &ed_sk.to_key_blob()),
     );
+
+    // fuzz_hpke: the mode's fields must all be present before a setup succeeds,
+    // which mutation reaches for the base mode and not for the PSK ones.
+    let hpke_fields: [&[u8]; 8] = [
+        b"recipient seed",
+        b"sender seed",
+        b"pre-shared key",
+        b"pre-shared key identifier",
+        b"info string",
+        b"associated data",
+        b"the sealed message",
+        b"",
+    ];
+    write("fuzz_hpke", "aes128gcm_base", &hpke_input(0, &hpke_fields));
+    write("fuzz_hpke", "chacha20poly1305_psk", &hpke_input(5, &hpke_fields));
+    write("fuzz_hpke", "aes256gcm_auth", &hpke_input(7, &hpke_fields));
+    write("fuzz_hpke", "aes128gcm_authpsk", &hpke_input(9, &hpke_fields));
 }

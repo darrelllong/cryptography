@@ -83,7 +83,7 @@ Items are marked **owner** when only the repository owner can do them.
    whose cost buys a statistic at the threshold — scalar blinding is the
    candidate, since it makes the swap pattern differ per call rather than per
    key — and runs of the whole battery on the remaining supported targets.
-7. **Targeted fuzzing.** The 45 targets cover the parsers, the AEAD failure
+7. **Targeted fuzzing.** The 46 targets cover the parsers, the AEAD failure
    path — including, since this campaign, that a refused decryption leaves the
    caller's buffer as it found it — and every public-key surface;
    `scripts/fuzz_regressions.sh` replays the inputs behind repaired defects,
@@ -91,8 +91,10 @@ Items are marked **owner** when only the repository owner can do them.
    fuzzer cannot. Still to aim at: explicit domain parameters, key-pair
    consistency as its own target, and nonce reuse across calls. Campaign
    records, with corpus, duration, features and revisions, are in
-   `fuzz/campaigns/`; the 2026-09-17 campaign ran all 45 targets for four
-   hours each at 69d9fa6 with no crash and no regression input broken.
+   `fuzz/campaigns/`; the 2026-09-17 campaign ran all 45 targets then defined
+   for four hours each at 69d9fa6 with no crash and no regression input
+   broken. The HPKE target arrived after it and has had one five-minute
+   session, 339,902 runs, no crash; it belongs in the next campaign.
 
 8. **Named constants across the tree.** Every block cipher, stream cipher,
    hash, the DRBGs, the modes, the curve modules, HMAC, HKDF, RFC 6979,
