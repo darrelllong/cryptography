@@ -569,9 +569,9 @@ its reference definition does, so its limit is 49.
 | Public key (bytes) | 1 184 | 1 952 | 930 | 936 |
 | Private key (bytes) | 2 400 | 4 000 | 1 234 | 1 072 |
 | Payload (bytes) | 1 088 CT + 32 SS | 3 309 sig | 930 CT + 32 SS | 931 CT (≤ 101 B msg) |
-| Keygen Tolkien (ms/op) | 0.02318 | 0.09676 | 1.128 | 1.126 |
-| Primary op Tolkien (ms/op) | 0.01126 encaps | 0.2387 sign | 0.08611 encaps | 0.174 encrypt |
-| Secondary op Tolkien (ms/op) | 0.012 decaps | 0.02192 verify | 0.09966 decaps | 0.267 decrypt |
+| Keygen, Apple M1 (ms/op) | 0.14 | 0.1159 | 1.227 | 0.7067 |
+| Primary op, Apple M1 (ms/op) | 0.02455 encaps | 0.2902 sign | 0.08563 encaps | 0.1475 encrypt |
+| Secondary op, Apple M1 (ms/op) | 0.03113 decaps | 0.02918 verify | 0.09114 decaps | 0.2684 decrypt |
 
 90% CI half-widths for each entry are in the per-scheme benchmark tables
 below. The four schemes are not interchangeable — KEM, signature, and
@@ -579,18 +579,17 @@ public-key encryption serve different functional roles — but several
 qualitative observations are visible directly in the table at this
 security tier:
 
-- ML-DSA signing is ~10× slower than ML-KEM encapsulation due to the
-  rejection-sampling loop; ML-DSA verification comes in slightly below ML-KEM
-  decapsulation on Tolkien (0.031 ms vs 0.037 ms). Rejection-sampling variance
-  also shows up as *non-monotone* absolute sign timing across ML-DSA parameter
-  sets — see the "Benchmark Discussion" notes below.
+- ML-DSA signing is 11.8× ML-KEM encapsulation at this tier, because of the
+  rejection-sampling loop; ML-DSA verification lands just below ML-KEM
+  decapsulation on the M1 (0.029 ms against 0.031 ms), as it did in the
+  previous sweep.
 - The two NTRU-family schemes carry the smallest public keys at this tier
-  (≈930 bytes), but pay an order of magnitude more per keygen than ML-KEM
-  (≈1.1 ms vs 0.035 ms) because the polynomial inversion in $R_q$ does not
-  benefit from an NTT.
-- NTRUEncrypt encrypt/decrypt at this tier are roughly 2× the cost of
-  NTRU-HPS-677 encaps/decaps; the SVES-3 re-encryption check inside
-  `decrypt` accounts for the bulk of the gap.
+  (≈930 bytes), and pay for it at key generation: 1.227 ms and 0.707 ms
+  against ML-KEM's 0.140 ms, because the polynomial inversion in $R_q$ does
+  not benefit from an NTT.
+- NTRUEncrypt at this tier costs 1.7× NTRU-HPS-677 encapsulation to encrypt
+  and 2.9× its decapsulation to decrypt; the SVES-3 re-encryption check
+  inside `decrypt` accounts for the bulk of that second gap.
 
 ## Benchmarks
 
