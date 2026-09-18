@@ -10,6 +10,15 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 ## [Unreleased]
 
 ### Fixed
+- `SPECIFICATIONS.md` claimed three things the tree does not hold. It named
+  PKCS #1 v1.5 and RFC 8017 §8.2 among the RSA padding schemes, and there is
+  no v1.5 anywhere in the crate; it listed DSA parameter *generation* among
+  the operations its known answers cover, while the CAVP file has no PQGGen
+  vectors and the tests validate given parameters instead; and it called the
+  X25519/X448 million-iteration cases release-only when they are
+  `#[ignore]`-gated. Each row now says what is there. Edwards ElGamal key
+  generation, which the table covered and no test did, has
+  `generated_pairs_are_consistent`.
 - ML-KEM's implicit rejection selected the shared secret with a mask, which
   the compiler rewrote into a conditional move between two stack addresses
   followed by a load: the address read then depended on whether the ciphertext
@@ -42,6 +51,9 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `FL` stages, Serpent's 33 round keys from 32 rounds plus output whitening.
 
 ### Added
+- `SPECIFICATIONS.md` gains a table naming the test behind each public-key
+  operation, so a reader after the signature-verification case goes straight
+  to it rather than opening the file and searching.
 - `fuzz_counter_reuse`, which puts a call boundary at every offset the fuzzer
   can reach and requires the stream to continue rather than restart: chunked
   encryption equals one call, a counter advanced `m` blocks equals a stream

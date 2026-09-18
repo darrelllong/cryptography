@@ -118,13 +118,23 @@ Items are marked **owner** when only the repository owner can do them.
 9. **A specification-to-test map.** `SPECIFICATIONS.md` carries it: per
    algorithm, the document and section it is written from, where its known
    answers come from, and the tests that refuse malformed input, with
-   conformance, interoperability and refusal kept apart, and each public-key
-   row names the operations its known answers cover. What it does not yet do
-   is name the individual test behind each of those operations, so a reader
-   who wants the sigVer case specifically still has to open the file.
+   conformance, interoperability and refusal kept apart, each public-key row
+   naming the operations its known answers cover, and a table under it naming
+   the test behind each of those operations — 106 of them, each checked to
+   exist. Building that table found three rows claiming more than the tree
+   holds, which are corrected, and one operation with no test, which now has
+   one.
+
+10. **RSA PKCS #1 v1.5 is not implemented (owner's call).** `SPECIFICATIONS.md`
+   claimed it until the map above was built; the crate has RSAES-OAEP and
+   RSASSA-PSS and nothing for §7.2 or §8.2. Verifying v1.5 signatures is what
+   interoperating with older systems asks for, and the padding's decryption
+   side is the one Bleichenbacher broke. Whether to add verification only, add
+   both behind a name that says what they are, or state the omission as
+   policy, is a decision rather than an oversight to fix.
 
 ## Statistical residuals to decide on
 
-10. **Calibration covers one stream length.** The gap test's pooling depth
+11. **Calibration covers one stream length.** The gap test's pooling depth
    depends on the stream length, so a battery run at any other `--bytes` needs
    its own calibration campaign.

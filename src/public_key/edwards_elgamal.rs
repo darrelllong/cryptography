@@ -605,6 +605,40 @@ mod tests {
         assert_eq!(super::ceil_sqrt_u64(u64::MAX), 1u64 << 32);
     }
 
+    /// The generated pair holds together: the public point is the private
+    /// scalar's multiple of the base point, the scalar is in range, and the
+    /// public key the private one derives is the one generation returned.
+    #[test]
+    fn generated_pairs_are_consistent() {
+        let curve = ed25519();
+        for seed in [0x11u8, 0x5c, 0xd0] {
+            let (public, private) = EdwardsElGamal::generate(curve.clone(), &mut rng(seed));
+            let scalar = private.private_scalar();
+            assert!(!scalar.is_zero(), "a zero scalar is no key");
+            assert!(*scalar < curve.n, "the scalar left the subgroup");
+            assert_eq!(
+                private.to_public_key().public_point(),
+                public.public_point(),
+                "the private key derives a different public key"
+            );
+            assert_eq!(
+                public.public_point(),
+                &curve.scalar_mul_base(scalar),
+                "the public point is not the scalar's multiple of the base point"
+            );
+            assert!(
+                !public.public_point().is_neutral(),
+                "the neutral point is no public key"
+            );
+        }
+
+        // Two generations differ: a fixed key would be a broken generator, and
+        // every ciphertext under it forgeable by anyone who generated once.
+        let (first, _) = EdwardsElGamal::generate(curve.clone(), &mut rng(0x11));
+        let (second, _) = EdwardsElGamal::generate(curve, &mut rng(0x5c));
+        assert_ne!(first.public_point(), second.public_point());
+    }
+
     #[test]
     fn public_serialization_roundtrip() {
         let (public, _) = EdwardsElGamal::generate(ed25519(), &mut rng(0x21));
