@@ -106,6 +106,9 @@ pub struct Ed25519PrivateKey {
     scalar_bytes: [u8; SEED_LEN],
     prefix: [u8; SEED_LEN],
     public: Ed25519PublicKey,
+    /// `A` as RFC 8032 §5.1.6 hashes it, kept so signing needs no encoding
+    /// pass over the generic point type.
+    public_encoded: [u8; SEED_LEN],
 }
 
 impl PartialEq for Ed25519PrivateKey {
@@ -449,16 +452,20 @@ impl Ed25519PrivateKey {
         let mut r = sc25519::reduce_wide(&nonce_digest);
         crate::ct::zeroize_slice(nonce_digest.as_mut_slice());
         let mut r_bytes = r.to_le_bytes();
-        let encoded_r = ed25519_group::compress(&ed25519_group::scalar_mul_base(&r_bytes));
+        let commitment = ed25519_group::scalar_mul_base(&r_bytes);
         crate::ct::zeroize_slice(r_bytes.as_mut_slice());
-        let r_point = curve()
-            .decode_point(&encoded_r)
-            .expect("a multiple of the base point encodes to a decodable point");
 
-        let challenge = challenge_scalar(&r_point, &self.public.point, message);
-        let mut challenge_bytes =
-            biguint_to_fixed_le(&challenge).expect("a scalar below L is 32 bytes");
-        let mut k = sc25519::reduce(&challenge_bytes);
+        // `R` in both forms the rest of signing needs, taken from the one
+        // multiplication: the encoding the challenge hashes, and the affine
+        // coordinates the signature carries. Encoding and decoding again would
+        // put a square root, whose time depends on the point, on a value the
+        // nonce determines.
+        let (r_x, r_y) = ed25519_group::affine(&commitment);
+        let encoded_r = ed25519_group::compress(&commitment);
+        let r_point = EdwardsPoint::new(le_to_biguint(&r_x), le_to_biguint(&r_y));
+
+        let mut challenge_bytes = challenge_digest(&encoded_r, &self.public_encoded, message);
+        let mut k = sc25519::reduce_wide(&challenge_bytes);
         crate::ct::zeroize_slice(challenge_bytes.as_mut_slice());
         let mut a = sc25519::reduce(&self.scalar_bytes);
 
@@ -610,6 +617,7 @@ fn expand_seed(mut seed: [u8; SEED_LEN]) -> Ed25519PrivateKey {
         scalar_bytes,
         prefix,
         public,
+        public_encoded: encoded,
     };
     // The digest holds both the scalar and the prefix; the stack copies of the
     // seed, scalar bytes, and prefix were copied into `key` and are wiped here.
@@ -625,6 +633,27 @@ fn clamp_scalar(bytes: &mut [u8; SEED_LEN]) {
     bytes[0] &= CLAMP_LOW_MASK;
     bytes[SEED_LEN - 1] &= CLAMP_HIGH_MASK;
     bytes[SEED_LEN - 1] |= CLAMP_HIGH_SET;
+}
+
+/// `SHA-512(R ‖ A ‖ M)`, the challenge before reduction, from the two
+/// encodings the caller already holds.
+fn challenge_digest(
+    encoded_r: &[u8; SEED_LEN],
+    encoded_a: &[u8; SEED_LEN],
+    message: &[u8],
+) -> [u8; 64] {
+    let mut transcript = Vec::with_capacity(2 * SEED_LEN + message.len());
+    transcript.extend_from_slice(encoded_r);
+    transcript.extend_from_slice(encoded_a);
+    transcript.extend_from_slice(message);
+    Sha512::digest(&transcript)
+}
+
+/// A 32-byte little-endian coordinate as a big integer.
+fn le_to_biguint(bytes: &[u8; SEED_LEN]) -> BigUint {
+    let mut be = *bytes;
+    be.reverse();
+    BigUint::from_be_bytes(&be)
 }
 
 /// Compute the Ed25519 challenge scalar `k = H(R || A || M) mod n`.
