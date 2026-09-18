@@ -1,8 +1,13 @@
 # Sweep — 2026-09-17
 
-Pilot-driven sweep of the symmetric, hash and public-key surfaces at
-`23bd845`, taken after the audit round that renamed the tree's constants and
-after the timing work in `scripts/ct_timing`.
+Pilot-driven sweep of the symmetric, hash and public-key surfaces, taken
+after the audit round that renamed the tree's constants and after the timing
+work in `scripts/ct_timing`.
+
+`baase` and `darby` ran at `23bd845`, `tolkien` and `dmz` at `c804c50`. The
+only library difference between those commits is the new HPKE module and the
+two lines that register it; no code any of these cases measures changed, so
+the columns compare.
 
 ## Instruments
 
@@ -24,20 +29,44 @@ rounds.
 
 ## Hosts
 
-| Tag | Host | CPU | OS | Cores |
+| Tag | CPU | OS | Cores | Toolchain |
 |---|---|---|---|---|
-| `baase` | `baase` | Arm Cortex-X925 | Linux 7.0 (Ubuntu 24.04) | 20 (single-core slice) |
+| `dmz` | Intel Core i5-8259U | Linux 7.0 (Ubuntu) | 8 (single-core slice) | rustc 1.93.1 |
+| `tolkien` | Apple M1 | macOS 26.5 | 8 (single-core slice) | rustc 1.98.0 |
+| `baase` | Arm Cortex-X925 | Linux 7.0 (Ubuntu 24.04) | 20 (single-core slice) | rustc 1.95.0 |
+| `darby` | Arm Cortex-A76 (Raspberry Pi 5) | Linux 6.18 (Debian) | 4 (single-core slice) | rustc 1.93.1 |
 
-Each host was idle: its own benchmark was the only load.
+The compilers differ with the hosts, which is part of what each column
+measures: a figure here is this crate, on this machine, through that
+compiler.
 
-## What is not here yet
+Each Linux host was idle: its own benchmark was the only load. No Mac is ever
+idle, so `tolkien`'s notes record what its background daemons were using at
+the start and end of its run — 138% and 154% of one core, out of eight — in
+place of a claim it was quiet.
 
-An x86-64 column and an Apple-silicon column. Both EPYC hosts and the Apple
-machine were running other people's work when this sweep ran; `twilight`'s
-first attempt was discarded when another user's job took it to load 118 partway
-through, and a benchmark taken under that is not worth keeping. `darby`
-(Raspberry Pi 5) was still running when this was written.
+## The merge
 
-Until those columns exist, the merged tables and the radar plots in
-`ASYMMETRIC.md`, `SYMMETRIC.md` and `POSTQUANTUM.md` keep their earlier
-figures, and their staleness notes stand.
+```
+python3 scripts/merge_pilot_tables.py --mode {sym,hash,pk} \
+  --input "i5-8259U=<sweep>/dmz/<file>.md" \
+  --input "Apple M1=<sweep>/tolkien/<file>.md" \
+  --input "Cortex-X925=<sweep>/baase/<file>.md" \
+  --input "Cortex-A76=<sweep>/darby/<file>.md" \
+  --out <sweep>/merged/<file>.md
+python3 scripts/build_radar_csvs.py --sweep sweep-2026-09-17 \
+  --platforms "i5-8259U,Apple M1,Cortex-X925,Cortex-A76" \
+  --columns   "i5-8259U,Apple M1,Cortex-X925,Cortex-A76"
+python3 scripts/generate_platform_radar.py --csv <sweep>/csv/<set>.csv \
+  --out assets/sweep-2026-09-17-<set>-radar.svg --title "…" --units "…"
+```
+
+The three scripts took exactly three platforms until this sweep; they take any
+number now, which is why the column order is the order of the `--input` flags.
+
+## What is not here
+
+No EPYC column. Both EPYC hosts were running other users' work throughout;
+`twilight`'s first attempt was discarded when another user's job took it to
+load 118 partway through, and a benchmark taken under that is not worth
+keeping. The x86-64 column here is a mobile part, which is what was idle.
