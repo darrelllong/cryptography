@@ -79,10 +79,14 @@ Items are marked **owner** when only the repository owner can do them.
    runs, `|t|` 11 to 13), while an idle x86-64 host separates nothing and a
    Cortex-A76 separates only a low-order peer point. One countermeasure was
    tried and not kept: `RESULTS.md` records that it halved the statistic at an
-   11% cost without removing it. What that asks for next is a countermeasure
-   whose cost buys a statistic at the threshold — scalar blinding is the
-   candidate, since it makes the swap pattern differ per call rather than per
-   key — and runs of the whole battery on the remaining supported targets.
+   11% cost without removing it. Scalar blinding, the candidate that would make
+   the swap pattern differ per call rather than per key, is priced in
+   `RESULTS.md` and not taken: the modulus that leaves every input unchanged —
+   including the twist points RFC 7748 accepts — is `lcm(8l, 4l') = 8ll'` at
+   508 bits, so the ladder would take 2.24 times as long, and the cheaper
+   1.25-fold blinding by the curve order alone changes the result for twist
+   inputs and is therefore not X25519. What is left is the whole battery on
+   the remaining supported targets; four hosts are in `RESULTS.md`.
 7. **Targeted fuzzing.** The 49 targets cover the parsers, the AEAD failure
    path — including, since this campaign, that a refused decryption leaves the
    caller's buffer as it found it — and every public-key surface;
