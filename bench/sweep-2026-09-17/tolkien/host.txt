@@ -1,0 +1,8 @@
+Darwin 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:26:46 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T8103 arm64
+Apple M1
+rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)
+8
+26.5.2
+c804c50 fuzz: key-pair consistency across five schemes
+background CPU at start: 138% of one core
+background CPU at end: 154% of one core
