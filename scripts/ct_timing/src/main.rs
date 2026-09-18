@@ -75,7 +75,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use cryptography::{Aes128Ct, ChaCha20, CtrDrbgAes256, Hmac, Sha256};
+use cryptography::public_key::ed25519::Ed25519;
+use cryptography::{Aes128Ct, ChaCha20, ChaCha20Poly1305, CtrDrbgAes256, Hmac, Sha256};
 use cryptography::vt::{MlKem, MlKemCiphertext, MlKemParameterSet, X25519};
 
 /// Timed runs per experiment, before cropping. The statistic is computed on
@@ -238,14 +239,14 @@ fn experiment<T>(
     classes: [&str; 2],
     coin: &mut Coin,
     mut prepare: impl FnMut(usize) -> T,
-    mut run: impl FnMut(&T),
+    mut run: impl FnMut(&mut T),
 ) -> (f64, u32) {
     let mut samples = Samples::new();
     for i in 0..MEASUREMENTS {
         let class = coin.class();
-        let input = prepare(class);
+        let mut input = prepare(class);
         let start = Instant::now();
-        run(black_box(&input));
+        run(black_box(&mut input));
         let elapsed = start.elapsed().as_nanos() as f64;
         if i >= WARMUP {
             samples.class[class].push(elapsed);
@@ -508,6 +509,73 @@ fn main() {
     );
     if middle > THRESHOLD {
         failures.push("Hmac::<Sha256>::verify separated the middle and last tag classes");
+    }
+
+    // A whole AEAD, not a primitive: opening a message whose tag is right
+    // against one whose tag is wrong. The tag comparison is the only step that
+    // differs, so a difference here is an early exit in the failure path — the
+    // one an attacker gets to repeat as often as it likes.
+    let aead_key = FIXED_KEY;
+    let aead_nonce = [0x5au8; 12];
+    let aead_aad = *b"ct_timing associated data";
+    let mut aead_message = vec![0u8; 1024];
+    for (index, byte) in aead_message.iter_mut().enumerate() {
+        *byte = (index % 251) as u8;
+    }
+    let sealed = {
+        let mut buffer = aead_message.clone();
+        let aead = ChaCha20Poly1305::new(&aead_key);
+        let tag = aead.encrypt_in_place(&aead_nonce, &aead_aad, &mut buffer);
+        (buffer, tag)
+    };
+    let mut wrong_tag = sealed.1;
+    wrong_tag[0] ^= 0xff;
+    let aead = ChaCha20Poly1305::new(&aead_key);
+    let (open, _) = experiment(
+        "ChaCha20Poly1305::open",
+        ["tag accepts", "tag rejects"],
+        &mut coin,
+        |class| {
+            let tag = if class == 0 { sealed.1 } else { wrong_tag };
+            (sealed.0.clone(), tag)
+        },
+        |(buffer, tag)| {
+            black_box(aead.decrypt_in_place(&aead_nonce, &aead_aad, buffer, tag));
+        },
+    );
+    if open > THRESHOLD {
+        failures.push("ChaCha20Poly1305::open separated an accepted tag from a rejected one");
+    }
+
+    // A whole signature under two fixed secret keys, one of them a seed of a
+    // single set bit. Signing is deterministic in RFC 8032, so what could
+    // differ between the classes is the fixed-base multiplication by the
+    // scalar each seed derives.
+    let dense_seed = FIXED_KEY;
+    let mut sparse_seed = [0u8; 32];
+    sparse_seed[0] = 1;
+    let (_, dense_key) = Ed25519::from_seed(dense_seed);
+    let (_, sparse_key) = Ed25519::from_seed(sparse_seed);
+    let signed_message = aead_message.clone();
+    let (sign, _) = experiment(
+        "Ed25519::sign_message",
+        ["dense seed", "one-bit seed"],
+        &mut coin,
+        // The key is chosen in the preparation, so what the timed span holds
+        // is one signature and nothing else.
+        |class| {
+            if class == 0 {
+                &dense_key
+            } else {
+                &sparse_key
+            }
+        },
+        |key| {
+            black_box(key.sign_message(&signed_message));
+        },
+    );
+    if sign > THRESHOLD {
+        failures.push("Ed25519::sign_message separated the two secret keys");
     }
 
     // ML-KEM decapsulation of a well-formed ciphertext against a tampered one.
