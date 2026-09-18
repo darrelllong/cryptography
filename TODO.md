@@ -34,14 +34,19 @@ Items are marked **owner** when only the repository owner can do them.
    timed span); re-sweep on quiet benchmark hosts, moving the tree to them by
    git, and regenerate the tables and radar plots with their units.
 
-   State on 2026-09-17: pilot-bench's installed binaries no longer load —
-   `libboost_log` 1.74 on darby, 1.83 on twilight, and a program-options
-   symbol against Boost 1.92 on dyson — so each host needs it rebuilt from
-   source before it can measure. Done on dyson (`~/pilot-bench/build-2026`);
-   dennard's rebuild of 2026-09-05 runs. A sweep also needs the host quiet,
-   which none of dyson, twilight or baase were: the three-platform set is
-   dennard or twilight for x86-64, darby for aarch64 Linux, and dyson for
-   Apple silicon, each taken when it is idle.
+   State on 2026-09-17: pilot-bench's installed binaries no longer loaded —
+   `libboost_log` 1.74 on darby, 1.83 on twilight, a program-options symbol
+   against Boost 1.92 on dyson — so it was rebuilt from source on dyson, darby
+   and twilight (gcc needs `-Wno-error=unknown-pragmas` for the clang pragmas
+   in `libpilot.cc`); baase's 2026-09-10 build and dennard's of 2026-09-05
+   run as they are.
+
+   Swept so far, at `d51efc3` with `PILOT_PRESET=normal` and a 90% CI: baase
+   (Cortex-X925, idle) and darby (Raspberry Pi 5, idle) — symmetric and hash
+   complete, public key running. Twilight's run was discarded when another
+   user's job took the machine to load 118 partway through, and dyson is not
+   quiet either. What is left is an x86-64 column on a quiet EPYC and the
+   Apple-silicon column, then the merge, the radars and the table updates.
 
 ## Security contracts and evidence
 
