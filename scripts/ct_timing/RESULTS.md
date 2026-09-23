@@ -12,11 +12,25 @@ not shown the apparatus can see a leak, and its other results say nothing. The
 negative control is a pair of identical classes and must not be flagged; if it
 is, the apparatus separates equal inputs and the run says nothing either.
 
-Every pair is two *fixed* values, each fixture built once and copied whole. Two
-earlier versions of this program measured themselves instead of the crate: one
-drew random bytes for one class and not the other, and one flipped a tag byte at
-a different offset per class immediately before the comparison read it. Both
-produced flags that went away when the classes were made to do identical work.
+Every pair is two *fixed* values, each fixture built once and copied whole into
+the slot the timed span reads. Four versions of this program have measured
+themselves instead of the crate, and each flag went away when the classes were
+made to differ only in the secret:
+
+- one drew random bytes for one class and not the other;
+- one flipped a tag byte at a different offset per class, immediately before
+  the comparison read it;
+- one let the two classes share two long-lived AEAD ciphers, one of which the
+  previous experiment had just run 800,000 times, so the classes differed in
+  cache state as well as in key: 1589 on one host, 5.1 on another, 1.8 once
+  each class built its own;
+- one handed the timed span a reference to one of two message fixtures rather
+  than copying the chosen one into a single buffer, so the classes differed in
+  where their message sat: 12.2 on an idle Intel host, 1.9 once they shared a
+  slot.
+
+Two fixtures at two addresses is the subtlest of these, and the reason the rule
+is *copy into one slot* rather than *point at one of two*.
 
 A statistic below the threshold is not proof of constant time. It says this
 experiment, at this sample size, on this machine, found no difference.
