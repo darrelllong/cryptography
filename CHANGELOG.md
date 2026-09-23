@@ -30,10 +30,15 @@ breaking change under **Changed**: `Ed25519Signature::nonce_point` and
   field with masked table reads (`ed25519_group`, on the `fe25519` field
   X25519 already used) and fixed-width arithmetic modulo `L` (`sc25519`).
   Neither branches on a secret, indexes memory with one, or hands one to a
-  variable-width big integer. The measured pair is at the noise floor. On an
-  Apple M4 Pro the same change made key generation 16.7× faster and signing
-  19.3×; verification, which reads only public data, is unchanged in both
-  time and kind.
+  variable-width big integer. `scripts/ct_codegen.sh` carries the claim as
+  `ed25519-sign`, following signing four calls deep into the comb, the
+  field, the scalar arithmetic and SHA-512, with every unclassified branch
+  read on all three targets: message lengths, the comb table's one-time
+  initialisation, and SHA-512's padding. The measured pair is at the noise
+  floor on every host in runs the instrument's own artifacts do not spoil.
+  On an Apple M4 Pro the same change made key generation 16.7× faster and
+  signing 19.3×; verification, which reads only public data, is unchanged in
+  both time and kind.
 - `SPECIFICATIONS.md` claimed three things the tree does not hold. It named
   PKCS #1 v1.5 and RFC 8017 §8.2 among the RSA padding schemes, and there is
   no v1.5 anywhere in the crate; it listed DSA parameter *generation* among
@@ -121,6 +126,12 @@ breaking change under **Changed**: `Ed25519Signature::nonce_point` and
   message-encryption interface; the raw schemes remain primitives. Appendix
   A.1 and A.2 are checked in full — the key schedule's intermediate values
   included — from `tests/vectors/hpke_rfc9180.txt`.
+- `scripts/ct_timing` gains a negative control of the operations' own
+  weight — the same message signed under the same key in both classes — since
+  its 32-byte control stayed quiet while heavier rows drifted on unchanged
+  code. `RESULTS.md` records four ways earlier versions of the harness
+  measured themselves, and three repeats per host of every row that ever
+  flagged.
 - `scripts/ct_timing`, the measured counterpart to the machine-code evidence:
   the dudect interleaved input-class experiment (Reparaz, Balasch and
   Verbauwhede, ePrint 2016/1123) with its protocol fixed in the source and a
