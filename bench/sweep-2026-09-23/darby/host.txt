@@ -1,0 +1,4 @@
+Linux 6.18.39+rpt-rpi-2712 #1 SMP PREEMPT Debian 1:6.18.39-1+rpt1 (2026-07-29) aarch64
+rustc 1.93.1 (01f6ddf75 2026-02-11)
+4
+7bbcab2 ct_timing: the two-key classes clone into one slot as well
