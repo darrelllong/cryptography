@@ -1,6 +1,6 @@
 [package]
 name = "cryptography-rs"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 # Matches the siblings rust-mp and rng-entropy; the floor is inherited from
 # rust-mp (u64/usize::is_multiple_of, stable 1.87) and verified with

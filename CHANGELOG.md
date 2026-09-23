@@ -9,6 +9,13 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-23
+
+The manifest read 0.7.0 from 2026-06-09 to this release and that version was
+never published, so everything since 0.6.2 is here. The minor bump is for the
+breaking change under **Changed**: `Ed25519Signature::nonce_point` and
+`::response` return owned values.
+
 ### Fixed
 - **Ed25519 signing published its nonce.** The fixed-base multiplication ran
   one window per 8 bits of the scalar and indexed a 256-entry table with 8 bits
