@@ -77,7 +77,21 @@ Items are marked **owner** when only the repository owner can do them.
    runs, `|t|` 11 to 13), while an idle x86-64 host separates nothing and a
    Cortex-A76 separates only a low-order peer point. One countermeasure was
    tried and not kept: `RESULTS.md` records that it halved the statistic at an
-   11% cost without removing it. Scalar blinding, the candidate that would make
+   11% cost without removing it.
+
+   Ed25519 signing, which the same instrument then caught publishing its
+   nonce at `|t|` of 7 to 244, is rewritten on a fixed-width field with a
+   masked-read comb: constant time by construction, read by
+   `scripts/ct_codegen.sh` on all three targets, and at the noise floor on
+   every host in the runs that survive the instrument's own artifacts.
+   `RESULTS.md` records four of those artifacts now, and its repeats show the
+   Intel host reading 0.9 in one process and 60 in the next on the same
+   binary, which is placement rather than a path. The instrument gained a
+   negative control of the operations' own weight for that reason; what it
+   still lacks is repeats built in, so that a flag is a distribution rather
+   than one process's luck.
+
+   Scalar blinding for X25519, the candidate that would make
    the swap pattern differ per call rather than per key, is priced in
    `RESULTS.md` and not taken: the modulus that leaves every input unchanged —
    including the twist points RFC 7748 accepts — is `lcm(8l, 4l') = 8ll'` at
