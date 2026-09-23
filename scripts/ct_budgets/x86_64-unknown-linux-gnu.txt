@@ -5,6 +5,14 @@
 # the tag comparison, for instance, which brings its padding decision on the
 # message length — a public value — into the claim.
 #
+# ml-kem-decaps went from 35 to 65 under rustc 1.95.0 when the crate gained
+# its edwards25519 modules: the build is one codegen unit, so more code
+# elsewhere changes what is inlined here. All 65 were read: the coefficient
+# loops at 512 and 2048, the parameter-set selection at k of 1, 2 and 3, the
+# byte-length guards at 12 and 384, the NTT's zeta index bounds, memcpy's
+# chunking of a public length, and SHA3-512's 72-byte rate. None reads a
+# secret polynomial or the implicit-rejection selection.
+#
 # `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
 tag-comparison 3
 aes128-ct 0
@@ -22,7 +30,7 @@ x25519-ladder 1
 x448-ladder 3
 x25519-agree 1
 ed25519-sign 9
-ml-kem-decaps 35
+ml-kem-decaps 65
 ntru-hps509-decaps 19
 chacha20-keystream 17
 poly1305-mac 2
