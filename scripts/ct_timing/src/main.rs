@@ -619,26 +619,28 @@ fn main() {
     let (_, sparse_key) = Ed25519::from_seed(sparse_seed);
     let signed_message = aead_message.clone();
     let (sign, _) = experiment(
-        "Ed25519::sign_message",
+        "Ed25519::from_seed + sign",
         ["dense seed", "one-bit seed"],
         &mut coin,
-        // The class's key is cloned into the slot the timed span reads, for
-        // the reason the message fixtures are copied: two long-lived keys are
-        // two addresses, and the classes would differ in where their key sits
-        // as well as in what it holds.
+        // The class's seed is copied into one slot and the key derived from
+        // it inside the timed span. A key is heap objects, so two long-lived
+        // keys are two addresses and a cloned key is wherever the allocator's
+        // state puts it; both flagged. Deriving it here puts the same
+        // allocations, in the same order, on both classes' path — and key
+        // generation runs the same constant-time comb as signing, so the span
+        // holds two operations the claim covers and nothing else.
         |class| {
-            if class == 0 {
-                dense_key.clone()
-            } else {
-                sparse_key.clone()
-            }
+            let mut seed = [0u8; 32];
+            seed.copy_from_slice(if class == 0 { &dense_seed } else { &sparse_seed });
+            seed
         },
-        |key| {
+        |seed| {
+            let (_, key) = Ed25519::from_seed(*seed);
             black_box(key.sign_message(&signed_message));
         },
     );
     if sign > THRESHOLD {
-        failures.push("Ed25519::sign_message separated the two secret keys");
+        failures.push("Ed25519::from_seed + sign separated the two seeds");
     }
 
     // The quantity a signature can least afford to leak is its nonce: in a

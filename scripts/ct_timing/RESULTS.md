@@ -177,10 +177,13 @@ heap object rather than in bytes copied into one slot: the two-key
 experiment clones a key, with its big-integer scalar and public point, and
 the accepting-path AEAD experiment cloned its body onto the heap. A clone's
 address is the allocator's answer, and the allocator's state is what the
-class's source left it in. The AEAD experiment now copies into a fixed-size
-stack buffer; the key experiment cannot, since a key is heap objects by
-construction, and the row should be read with that in mind until the harness
-can hold two keys without cloning either.
+class's source left it in. With the AEAD body copied into a fixed-size stack
+buffer instead, the same host read that row at 1.4 on the next run, with
+every other row where it was — and the key row at 17.6. The key experiment
+now copies the class's *seed* into one slot and derives the key inside the
+timed span, so both classes make the same allocations in the same order;
+key generation runs the same constant-time comb as signing, so the span
+holds two covered operations and nothing else.
 
 ## Ed25519 signing publishes its nonce
 
