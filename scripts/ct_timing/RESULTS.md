@@ -155,6 +155,33 @@ the same weight as the operations it judges, and it needs repeats: one run
 reads one process's placement, and the readings above are what a single run
 would have reported as fact.
 
+## A quiet EPYC, with a control of the operations' own weight
+
+`twilight`, an AMD EPYC 7452 at load 0.00, ran the battery once after the
+harness gained its identical-signature control:
+
+| Experiment | twilight (EPYC 7452) |
+|---|---|
+| control: early-exit compare | 472 **flagged** |
+| control: identical classes | 1.4 |
+| control: identical signatures | 1.7 |
+| `Ed25519::sign_message`, one key, nonce of 97 / 157 set bits | 2.5 |
+| `Ed25519::sign_message`, dense seed / one-bit seed | 8.4 **flagged** |
+| `ChaCha20Poly1305::open`, two keys, both accept | 56 **flagged** |
+| every other row | 1.1 to 2.5 |
+
+The heavy control is quiet, so the machine held still for operations of a
+signature's weight, and the nonce pair — the one the rewrite was for — is
+quiet with it. The two rows that flag are the two whose classes differ in a
+heap object rather than in bytes copied into one slot: the two-key
+experiment clones a key, with its big-integer scalar and public point, and
+the accepting-path AEAD experiment cloned its body onto the heap. A clone's
+address is the allocator's answer, and the allocator's state is what the
+class's source left it in. The AEAD experiment now copies into a fixed-size
+stack buffer; the key experiment cannot, since a key is heap objects by
+construction, and the row should be read with that in mind until the harness
+can hold two keys without cloning either.
+
 ## Ed25519 signing publishes its nonce
 
 Signing separates two secret keys on every host — 66, 19, 426 and 5.3 — which

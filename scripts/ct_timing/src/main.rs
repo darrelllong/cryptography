@@ -117,6 +117,10 @@ const ED25519_ORDER: [u8; 32] = [
 const MESSAGE_SEARCH_COUNT: usize = 20_000;
 const MESSAGE_SEARCH_BYTES: usize = 32;
 
+/// The AEAD experiments' message length: sixteen ChaCha20 blocks, long
+/// enough that the keystream and the MAC outweigh the fixed cost of a call.
+const AEAD_MESSAGE_BYTES: usize = 1024;
+
 /// A point of small order on Curve25519: `u = 1`, whose ladder output is the
 /// all-zero shared secret RFC 7748 §6.1 names.
 const LOW_ORDER_POINT: [u8; 32] = {
@@ -533,7 +537,7 @@ fn main() {
     let aead_key = FIXED_KEY;
     let aead_nonce = [0x5au8; 12];
     let aead_aad = *b"ct_timing associated data";
-    let mut aead_message = vec![0u8; 1024];
+    let mut aead_message = vec![0u8; AEAD_MESSAGE_BYTES];
     for (index, byte) in aead_message.iter_mut().enumerate() {
         *byte = (index % 251) as u8;
     }
@@ -583,19 +587,17 @@ fn main() {
         "ChaCha20Poly1305::open (accept)",
         ["one fixed key", "another fixed key"],
         &mut coin,
+        // The body is copied into a fixed-size buffer on the stack, not
+        // cloned onto the heap: a heap clone's address comes from the
+        // allocator's state, which the class's source buffer can bias.
         |class| {
+            let mut body = [0u8; AEAD_MESSAGE_BYTES];
             if class == 0 {
-                (
-                    sealed_body.clone(),
-                    good_tag,
-                    ChaCha20Poly1305::new(&aead_key),
-                )
+                body.copy_from_slice(&sealed_body);
+                (body, good_tag, ChaCha20Poly1305::new(&aead_key))
             } else {
-                (
-                    other_body.clone(),
-                    other_tag,
-                    ChaCha20Poly1305::new(&other_aead_key),
-                )
+                body.copy_from_slice(&other_body);
+                (body, other_tag, ChaCha20Poly1305::new(&other_aead_key))
             }
         },
         |(buffer, tag, cipher)| {
