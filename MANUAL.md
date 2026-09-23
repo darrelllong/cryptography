@@ -1126,6 +1126,15 @@ Low-level arithmetic:
 
 #### Ed25519
 
+Signing and key generation are constant time in their secrets: the
+fixed-base multiplication is a comb that reads every table entry under a
+mask, and the arithmetic modulo `L` is fixed-width. In a Schnorr signature
+the value that must not leak is the per-signature nonce, since partial
+knowledge of many nonces recovers the key; `scripts/ct_codegen.sh` reads the
+emitted branches of `sign_message` on every supported target and
+`scripts/ct_timing` measures it. Verification reads only public data and is
+variable-time.
+
 Public keys and a signature's R are decoded exactly as RFC 8032 §5.1.3
 specifies, and verification checks §5.1.7's cofactored equation
 [8][S]B = [8]R + [8][k]A'. Small-order and mixed-order public keys are
@@ -2188,8 +2197,8 @@ equal ciphertexts), documented as such on each type.
 
 ##### `Ed25519Signature`
 
-- `nonce_point()`
-- `response()`
+- `nonce_point() -> EdwardsPoint`
+- `response() -> BigUint`
 - `to_key_blob()`, `from_key_blob(...)`
 
 ##### `Ed25519`
@@ -2227,8 +2236,8 @@ equal ciphertexts), documented as such on each type.
 
 ##### `EdDsaSignature`
 
-- `nonce_point()`
-- `response()`
+- `nonce_point() -> EdwardsPoint`
+- `response() -> BigUint`
 - `to_key_blob()`
 - `from_key_blob(blob, curve)`
 
