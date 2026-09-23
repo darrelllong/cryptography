@@ -709,6 +709,23 @@ fn main() {
         failures.push("Ed25519::sign_message separated two nonces by their weight");
     }
 
+    // A negative control of the operations' own weight. The 32-byte control
+    // above cannot see the drift a signature sees, so this signs the same
+    // message under the same key in both classes; a separation here is the
+    // machine, not the code, and says the run's heavy rows are not to be read.
+    let (heavy_null, _) = experiment(
+        "control: identical signatures",
+        ["dense seed, both", "dense seed, both"],
+        &mut coin,
+        |_| dense_key.clone(),
+        |key| {
+            black_box(key.sign_message(&signed_message));
+        },
+    );
+    if heavy_null > THRESHOLD {
+        failures.push("the identical-signature control was flagged: the heavy rows of this run say nothing");
+    }
+
     // ML-KEM decapsulation of a well-formed ciphertext against a tampered one.
     // FIPS 203 §7.3 decapsulates both and selects the shared secret under a
     // mask, so the two must take the same time; the fallback is what implicit
