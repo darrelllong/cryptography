@@ -620,13 +620,15 @@ fn main() {
         "Ed25519::sign_message",
         ["dense seed", "one-bit seed"],
         &mut coin,
-        // The key is chosen in the preparation, so what the timed span holds
-        // is one signature and nothing else.
+        // The class's key is cloned into the slot the timed span reads, for
+        // the reason the message fixtures are copied: two long-lived keys are
+        // two addresses, and the classes would differ in where their key sits
+        // as well as in what it holds.
         |class| {
             if class == 0 {
-                &dense_key
+                dense_key.clone()
             } else {
-                &sparse_key
+                sparse_key.clone()
             }
         },
         |key| {
