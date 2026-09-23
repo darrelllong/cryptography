@@ -7,6 +7,14 @@
 # branches: the round counts, the encoding widths and the path selectors that
 # the claims table in scripts/ct_codegen.sh names.
 #
+#
+# ed25519-sign is 9 under the build CI's runner produces of the same rustc
+# 1.98.1 that gives 6 locally: its build takes the comb table's OnceLock
+# initialisation as a separate function rather than inlining it, and keeps
+# two zero-length tests on the message and two SHA-512 length tests that the
+# local build folds away. Every one of the nine is a message length, the
+# table's one-time state, or SHA-512's padding; the script prints each with
+# the function it sits in and what it tests, so a CI log is enough to read.
 # `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
 tag-comparison 3
 aes128-ct 0
@@ -23,7 +31,7 @@ serpent128 0
 x25519-ladder 1
 x448-ladder 3
 x25519-agree 1
-ed25519-sign 6
+ed25519-sign 9
 ml-kem-decaps 73
 ntru-hps509-decaps 4
 chacha20-keystream 16

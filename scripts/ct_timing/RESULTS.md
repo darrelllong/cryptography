@@ -183,7 +183,11 @@ every other row where it was — and the key row at 17.6. The key experiment
 now copies the class's *seed* into one slot and derives the key inside the
 timed span, so both classes make the same allocations in the same order;
 key generation runs the same constant-time comb as signing, so the span
-holds two covered operations and nothing else.
+holds two covered operations and nothing else. On the same host that row
+then read 1.9, with the nonce pair at 2.4 and the heavy control at 1.5. The
+accept-path AEAD row read 5.8 on that run after 1.4 on the one before, on
+identical code: a 1024-byte open under two keys sits at this instrument's
+floor, and one run of it decides nothing either way.
 
 ## Ed25519 signing publishes its nonce
 

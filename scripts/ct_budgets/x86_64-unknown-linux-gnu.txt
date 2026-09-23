@@ -13,6 +13,11 @@
 # chunking of a public length, and SHA3-512's 72-byte rate. None reads a
 # secret polynomial or the implicit-rejection selection.
 #
+#
+# ed25519-sign is 10 under the build CI's runner produces of rustc 1.98.1,
+# against 9 locally and on moore with the same compiler: the tenth is the
+# comb table's OnceLock initialisation, emitted as a function of its own and
+# testing the table's state once. The other nine are unchanged in kind.
 # `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
 tag-comparison 3
 aes128-ct 0
@@ -29,7 +34,7 @@ serpent128 0
 x25519-ladder 1
 x448-ladder 3
 x25519-agree 1
-ed25519-sign 9
+ed25519-sign 10
 ml-kem-decaps 65
 ntru-hps509-decaps 19
 chacha20-keystream 17
