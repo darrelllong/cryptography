@@ -24,6 +24,12 @@
 # output against write-keystream. No comparison in any claim reads a key, a
 # nonce, a scalar or a keystream word.
 #
+# ed25519-sign's eight are the same kinds as on the other two targets: two
+# capacity checks and two zero-length tests on the message, the comb table's
+# one-time initialisation, and three SHA-512 length and padding tests. The
+# comb's position and entry loops are back-edges; nothing reads the nonce,
+# the scalar or a table entry.
+#
 # `scripts/ct_codegen.sh --accept` rewrites this file; the header stays.
 tag-comparison 2
 aes128-ct 0
@@ -40,6 +46,7 @@ serpent128 0
 x25519-ladder 1
 x448-ladder 3
 x25519-agree 1
+ed25519-sign 8
 ml-kem-decaps 28
 ntru-hps509-decaps 2
 chacha20-keystream 19
