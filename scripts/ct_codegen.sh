@@ -101,6 +101,9 @@ classify() {
         NR == FNR { branch[$1]; next }
         { line[FNR] = $0; lines = FNR }
         /^[._A-Za-z0-9$]+:/ { label[substr($0, 1, index($0, ":") - 1)] = FNR }
+        # A function label, as against a local one: the symbol a body
+        # was extracted for, or a callee appended after it.
+        /^_/ { owner_name = substr($0, 1, index($0, ":") - 1); sub(/17h[0-9a-f]+E$/, "", owner_name); within[FNR] = owner_name }
         END {
             for (i = 1; i <= lines; i++) {
                 if (!(i in branch)) continue
@@ -119,6 +122,20 @@ classify() {
                 sub(/^[ \t]+/, "", text)
                 gsub(/[ \t]+/, " ", text)
                 listing = listing sprintf("    %6d  %-28s %s\n", i, text, kind)
+                # An unclassified branch is read by a person, from the log
+                # when the build that emitted it is not at hand: name the
+                # function it sits in and show what it tests.
+                if (kind == "unclassified") {
+                    owner = ""
+                    for (j = i; j >= 1; j--) if (j in within) { owner = within[j]; break }
+                    listing = listing sprintf("            in %s\n", owner)
+                    for (j = (i > 3 ? i - 3 : 1); j < i; j++) {
+                        ctx = line[j]
+                        sub(/^[ \t]+/, "", ctx)
+                        gsub(/[ \t]+/, " ", ctx)
+                        listing = listing sprintf("            %s\n", ctx)
+                    }
+                }
             }
             summary = ""
             split("loop back-edge,failure guard,unclassified", kinds, ",")
