@@ -685,15 +685,22 @@ fn main() {
         "Ed25519::sign_message (nonce)",
         ["few set bits in r", "many set bits in r"],
         &mut coin,
+        // The class's message is copied into one buffer rather than handed
+        // over as one of two addresses. Two fixtures at two addresses differ
+        // in where they sit as well as in what they hold, and the timed span
+        // would read one or the other; the AEAD experiment above was flagged
+        // by exactly that before its classes were made to share a slot.
         |class| {
-            if class == 0 {
+            let mut message = [0u8; MESSAGE_SEARCH_BYTES];
+            message.copy_from_slice(if class == 0 {
                 &few_bits_message
             } else {
                 &many_bits_message
-            }
+            });
+            message
         },
         |message| {
-            black_box(dense_key.sign_message(*message));
+            black_box(dense_key.sign_message(message));
         },
     );
     if nonce_weight > THRESHOLD {
