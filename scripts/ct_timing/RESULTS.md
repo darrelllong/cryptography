@@ -120,6 +120,41 @@ unchanged is therefore part of what is observable, but not all of it, and an
 emitted code was checked: the two passes survived, the constant appears sixty
 times in the ladder.
 
+## What repeats of one run say about the instrument
+
+After the signing rewrite, each host's battery was run three more times on
+identical code. The rows that had ever flagged, as three readings each:
+
+| Experiment | dmz (i5-8259U) | darby (Cortex-A76) |
+|---|---|---|
+| `Ed25519::sign_message`, one key, nonce of 97 / 157 set bits | 6.7, 0.9, **60.3** | 1.6, 1.6, 1.2 |
+| `Ed25519::sign_message`, dense seed / one-bit seed | **90.2**, 5.9, 9.1 | 2.3, 6.0, 1.9 |
+| `X25519::scalar_mult`, two ordinary fixed scalars | 1.3, 1.3, 1.7 | **10.7**, 2.5, 4.0 |
+| `X25519::scalar_mult`, alternating bits / long runs | 1.0, 1.2, 0.9 | 4.5, **7.4**, **10.1** |
+| `ChaCha20Poly1305::open`, two keys, both accept | 3.1, 4.0, 3.4 | **14.5**, 3.6, 2.1 |
+| control: identical classes | 1.5, 1.6, 2.0 | 1.0, 2.1, 1.4 |
+
+Two things follow. The nonce pair is quiet on the Raspberry Pi three times
+running, and quiet on the M4 Pro and the Cortex-X925, while on the Intel host
+it reads 0.9 in one process and 60.3 in the next on the same binary and the
+same inputs. That is not a data-dependent path — a path would separate every
+time — and the step-level pricing in `ed25519_group::tests` and
+`sc25519::tests` finds the comb, the encoding, the reduction and the
+multiply-add flat on that host to a tenth of a percent. What varies between
+processes is placement: where the allocator puts the harness's buffers
+relative to the comb table's 160 KB, which the Intel part's 32 KB L1 cannot
+hold, so a class whose fixture shares cache sets with the entries the
+signature reads pays for it and the other does not.
+
+The second is that the Raspberry Pi's ladder rows, which were quiet across
+every earlier run, now separate in two of three, on code that did not change.
+The negative control stays quiet throughout. A control that compares 32 bytes
+cannot see the drift a 256-round ladder sees, so its silence certifies less
+than the file's opening paragraph implies. The apparatus needs a control of
+the same weight as the operations it judges, and it needs repeats: one run
+reads one process's placement, and the readings above are what a single run
+would have reported as fact.
+
 ## Ed25519 signing publishes its nonce
 
 Signing separates two secret keys on every host — 66, 19, 426 and 5.3 — which
