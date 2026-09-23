@@ -23,6 +23,7 @@ serpent128 0
 x25519-ladder 1
 x448-ladder 3
 x25519-agree 1
+ed25519-sign 6
 ml-kem-decaps 73
 ntru-hps509-decaps 4
 chacha20-keystream 16

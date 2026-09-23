@@ -152,6 +152,10 @@ echo "compiler: $(rustc -vV | sed -n 's/^release: /rustc /p')"
 #   X25519, X448         the ladder's loop over the scalar's bits
 #   X25519 agreement     RFC 7748 §6.1's all-zero shared-secret test, which is
 #                        the value the function returns
+#   Ed25519 signing      the message length through SHA-512's block loop and
+#                        padding, the comb's fixed position and entry counts,
+#                        and the fixed limb loops of the field and of the
+#                        arithmetic modulo L
 #   AEAD open            the §2.8 length bound, two zero-size tests before the
 #                        MAC input is freed, and the authentication result
 #
@@ -172,6 +176,7 @@ claims=(
     "x25519-ladder:X255196scalar|X25519.*scalar_mult"
     "x448-ladder:X4486scalar|X448.*scalar_mult"
     "x25519-agree:x25519_agree|X25519PrivateKey.*agree:d0"
+    "ed25519-sign:ed25519_sign|Ed25519PrivateKey.*sign_message:d4"
     "ml-kem-decaps:ml_kem_decaps|ml_kem_decaps_internal:d1"
     "ntru-hps509-decaps:ntru_hps509_decaps|NtruHps509.*decaps:d0"
     "chacha20-keystream:chacha20_keystream|ChaCha2015apply_keystream"

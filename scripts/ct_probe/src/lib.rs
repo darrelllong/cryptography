@@ -8,8 +8,9 @@
 use cryptography::modes::chacha20_poly1305::ChaCha20Poly1305;
 use cryptography::ChaCha20;
 use cryptography::vt::{
-    MlKem, MlKemCiphertext, MlKemPrivateKey, MlKemSharedSecret, NtruHps509, NtruHps509Ciphertext,
-    NtruHps509PrivateKey, NtruHps509SharedSecret, X25519, X25519PrivateKey, X25519PublicKey, X448,
+    Ed25519PrivateKey, Ed25519Signature, MlKem, MlKemCiphertext, MlKemPrivateKey,
+    MlKemSharedSecret, NtruHps509, NtruHps509Ciphertext, NtruHps509PrivateKey,
+    NtruHps509SharedSecret, X25519, X25519PrivateKey, X25519PublicKey, X448,
 };
 use cryptography::{
     Aes128Ct, Camellia128Ct, Cast128Ct, DesCt, GrasshopperCt, Hmac, MagmaCt, Present80Ct, SeedCt,
@@ -70,6 +71,16 @@ pub extern "Rust" fn x25519_agree(
     peer: &X25519PublicKey,
 ) -> Option<[u8; 32]> {
     secret.agree(peer)
+}
+
+/// An Ed25519 signature: the nonce derivation, the fixed-base comb over the
+/// secret nonce, and the response modulo `L`. The claim is that no branch and
+/// no memory index depends on the nonce or the private scalar; the message
+/// length, which the hashes take, is public.
+#[inline(never)]
+#[no_mangle]
+pub extern "Rust" fn ed25519_sign(key: &Ed25519PrivateKey, message: &[u8]) -> Ed25519Signature {
+    key.sign_message(message)
 }
 
 // The block ciphers' constant-time types, each claiming a round function and
