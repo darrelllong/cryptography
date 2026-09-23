@@ -1,0 +1,7 @@
+Linux 6.2.0-39-generic #40~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Nov 16 10:53:04 UTC 2 x86_64
+rustc 1.95.0 (59807616e 2026-04-14)
+128
+model name	: AMD EPYC 7452 32-Core Processor
+ad7655c ct_budgets: ML-KEM decapsulation on x86-64 re-read at 65
+ 09:48:30 up 12 days, 23:52,  1 user,  load average: 0.41, 0.09, 0.43
+ 10:17:03 up 13 days, 21 min,  1 user,  load average: 1.03, 1.02, 0.97
