@@ -27,7 +27,7 @@ BENCH_DIR = Path(__file__).resolve().parent.parent / "bench"
 def parse_merged(path: Path) -> dict[str, dict[str, float]]:
     """Return {row_key: {platform: value}} where row_key is the first cell text.
 
-    Each metric column triplet (mean, ±CI, Runs) is collapsed to the mean only.
+    Each metric column triplet (mean, CI width, Runs) is collapsed to the mean only.
     Platform labels are inferred from the heading row.
     """
     text = path.read_text(encoding="utf-8")

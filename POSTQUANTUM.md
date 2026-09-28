@@ -492,10 +492,10 @@ The other eight parameter sets (`NtruEes401Ep1`, `NtruEes449Ep1`,
 | ML-KEM-1024 | NIST 5 | 1 568 | 3 168 | 1 568 | 32 |
 
 **Throughput across parameter sets and platforms** — each axis is an operation
-(keygen / encaps / decaps) for one parameter set; outer ring = faster. ±90%
-CI half-widths are in the benchmark tables below.
+(keygen / encaps / decaps) for one parameter set; outer ring = faster. 90%
+confidence-interval widths are in the benchmark tables below.
 
-![ML-KEM ops/sec radar (EPYC 7452 / i5-8259U / Cortex-A76)](assets/sweep-2026-09-23-mlkem-radar.svg)
+![ML-KEM ops/sec radar (EPYC 7452 / i5-8259U / Cortex-A76 / Cortex-X925)](assets/sweep-2026-09-28-mlkem-radar.svg)
 
 ### ML-DSA: Security vs. Cost
 
@@ -508,10 +508,10 @@ CI half-widths are in the benchmark tables below.
 | ML-DSA-87 | NIST 5 | 2 592 | 4 896 | 4 627 |
 
 **Throughput across parameter sets and platforms** — each axis is an operation
-(keygen / sign / verify) for one parameter set; outer ring = faster. ±90%
-CI half-widths are in the benchmark tables below.
+(keygen / sign / verify) for one parameter set; outer ring = faster. 90%
+confidence-interval widths are in the benchmark tables below.
 
-![ML-DSA ops/sec radar (EPYC 7452 / i5-8259U / Cortex-A76)](assets/sweep-2026-09-23-mldsa-radar.svg)
+![ML-DSA ops/sec radar (EPYC 7452 / i5-8259U / Cortex-A76 / Cortex-X925)](assets/sweep-2026-09-28-mldsa-radar.svg)
 
 ### NTRU: Security vs. Cost
 
@@ -525,10 +525,10 @@ CI half-widths are in the benchmark tables below.
 | NtruHps821  | NIST 5 | 1 230 | 1 590 | 1 230 | 32 |
 
 **Throughput across parameter sets and platforms** — each axis is an operation
-(keygen / encaps / decaps) for one parameter set; outer ring = faster. ±90%
-CI half-widths are in the benchmark tables below.
+(keygen / encaps / decaps) for one parameter set; outer ring = faster. 90%
+confidence-interval widths are in the benchmark tables below.
 
-![NTRU ops/sec radar (EPYC 7452 / i5-8259U / Cortex-A76)](assets/sweep-2026-09-23-ntru-radar.svg)
+![NTRU ops/sec radar (EPYC 7452 / i5-8259U / Cortex-A76 / Cortex-X925)](assets/sweep-2026-09-28-ntru-radar.svg)
 
 ### NTRUEncrypt (IEEE 1363.1): Security vs. Cost
 
@@ -573,8 +573,9 @@ its reference definition does, so its limit is 49.
 | Primary op, EPYC 7452 (ms/op) | 0.04839 encaps | 0.6872 sign | 0.1252 encaps | 0.2453 encrypt |
 | Secondary op, EPYC 7452 (ms/op) | 0.06271 decaps | 0.06727 verify | 0.1401 decaps | 0.4989 decrypt |
 
-90% CI half-widths for each entry are in the per-scheme benchmark tables
-below. The four schemes are not interchangeable — KEM, signature, and
+The EPYC 7452 figures are from the 2026-09-23 sweep, measured with Pilot
+before `f01eec4`; the widths of their 90% confidence intervals are in the
+per-scheme benchmark tables below. The four schemes are not interchangeable — KEM, signature, and
 public-key encryption serve different functional roles — but several
 qualitative observations are visible directly in the table at this
 security tier:
@@ -594,7 +595,8 @@ security tier:
 ## Benchmarks
 
 > **These are the clean-room implementations.** The tables below are the
-> 2026-09-23 sweep, the first to post-date the rewrites and conformance
+> 2026-09-23 sweep with the Cortex-X925 column of 2026-09-28, the first to
+> post-date the rewrites and conformance
 > changes of this year's audit round, so they measure what the crate ships
 > rather than what preceded it. On the development machine those rewrites cost
 > ML-KEM-768 keygen, encaps and decaps 1.38×, 1.65× and 1.73×; ML-DSA-65
@@ -607,114 +609,125 @@ Measured with [pilot-bench](https://github.com/darrelllong/pilot-bench) via:
 bash scripts/bench_all_pk_full.sh
 ```
 
-Numbers below are `ms/op`, with **90%** CI half-width and rounds run. The
-2026-09-23 sweep, taken for 0.8.0, was driven with `PILOT_PRESET=normal
-PILOT_CONFIDENCE_LEVEL=0.90 PILOT_SESSION_LIMIT=300` (10% CI half-width target,
+Numbers below are mean `ms/op`, the full width of the **90%** confidence
+interval (the interval is the mean plus or minus half of it), and rounds run.
+They were driven with `PILOT_PRESET=normal PILOT_CONFIDENCE_LEVEL=0.90
+PILOT_SESSION_LIMIT=300` (interval width at most 10% of the mean,
 autocorrelation tolerance 0.2, ≥ 50 rounds minimum sample size); the exact
 invocations are recorded in
-[`bench/sweep-2026-09-23/README.md`](bench/sweep-2026-09-23/README.md), which
-is the canonical record of what each host actually ran. Note that
+[`bench/sweep-2026-09-23/README.md`](bench/sweep-2026-09-23/README.md) and
+[`bench/sweep-2026-09-28/README.md`](bench/sweep-2026-09-28/README.md), which
+are the canonical record of what each host actually ran. Note that
 `scripts/bench_all_pk_full.sh` defaults `PILOT_PRESET=quick`, so a re-run
 without overriding the env var would not reproduce these numbers. Each host
 ran one case at a time:
 
-- AMD EPYC 7452 (`twilight`, Linux, idle)
-- Intel Core i5-8259U (`dmz`, Linux, idle)
-- Arm Cortex-A76 (`darby`, Raspberry Pi 5, Linux, idle)
+- AMD EPYC 7452 (`twilight`, Linux, idle), 2026-09-23, Pilot before `f01eec4`
+- Intel Core i5-8259U (`dmz`, Linux, idle), 2026-09-23, Pilot before `f01eec4`
+- Arm Cortex-A76 (`darby`, Raspberry Pi 5, Linux, idle), 2026-09-23, Pilot
+  before `f01eec4`
+- Arm Cortex-X925 (`baase`, NVIDIA GB10, Ubuntu 24.04, idle, pinned to one
+  X925 core), 2026-09-28, Pilot `f01eec4`
+
+Tables before 2026-09-28 printed the interval as `±CI` and called it a
+half-width; it was the full width then as well.
 
 ### ML-KEM (FIPS 203)
 
-| Operation | EPYC 7452 ms/op | EPYC 7452 ±CI (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U ±CI (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
-|---|---|---|---|---|---|---|---|---|---|
-| mlkem512_keygen | 0.1508 | ±0.0008338 | 170 | 0.1903 | ±0.0007349 | 50 | 0.2696 | ±0.0001931 | 56 |
-| mlkem512_encaps | 0.03544 | ±0.0002962 | 55 | 0.04297 | ±0.0002806 | 80 | 0.06037 | ±0.0001224 | 53 |
-| mlkem512_decaps | 0.04574 | ±0.0003122 | 50 | 0.06612 | ±0.0002058 | 50 | 0.07534 | ±0.0001802 | 50 |
-| mlkem768_keygen | 0.2391 | ±0.00149 | 620 | 0.3038 | ±0.003182 | 320 | 0.4284 | ±0.0002585 | 80 |
-| mlkem768_encaps | 0.04839 | ±0.0004886 | 50 | 0.0585 | ±0.0001924 | 50 | 0.08017 | ±0.0002799 | 140 |
-| mlkem768_decaps | 0.06271 | ±0.0006106 | 50 | 0.07493 | ±0.0001875 | 50 | 0.1003 | ±0.0002737 | 50 |
-| mlkem1024_keygen | 0.3602 | ±0.003643 | 50 | 0.4611 | ±0.002136 | 50 | 0.6472 | ±0.0005389 | 50 |
-| mlkem1024_encaps | 0.06511 | ±0.0007155 | 80 | 0.08018 | ±0.0003766 | 50 | 0.1401 | ±0.0002869 | 650 |
-| mlkem1024_decaps | 0.08341 | ±0.0007845 | 80 | 0.103 | ±0.0005815 | 80 | 0.1742 | ±0.0002492 | 350 |
+| Operation | EPYC 7452 ms/op | EPYC 7452 CI width (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U CI width (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 CI width (90%) | Cortex-A76 Runs | Cortex-X925 ms/op | Cortex-X925 CI width (90%) | Cortex-X925 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| mlkem512_keygen | 0.1508 | 0.0008338 | 170 | 0.1903 | 0.0007349 | 50 | 0.2696 | 0.0001931 | 56 | 0.06786 | 0.0001039 | 114 |
+| mlkem512_encaps | 0.03544 | 0.0002962 | 55 | 0.04297 | 0.0002806 | 80 | 0.06037 | 0.0001224 | 53 | 0.01423 | 9.526e-05 | 153 |
+| mlkem512_decaps | 0.04574 | 0.0003122 | 50 | 0.06612 | 0.0002058 | 50 | 0.07534 | 0.0001802 | 50 | 0.01802 | 9.198e-05 | 112 |
+| mlkem768_keygen | 0.2391 | 0.00149 | 620 | 0.3038 | 0.003182 | 320 | 0.4284 | 0.0002585 | 80 | 0.1105 | 0.0001421 | 300 |
+| mlkem768_encaps | 0.04839 | 0.0004886 | 50 | 0.0585 | 0.0001924 | 50 | 0.08017 | 0.0002799 | 140 | 0.01878 | 0.0003286 | 50 |
+| mlkem768_decaps | 0.06271 | 0.0006106 | 50 | 0.07493 | 0.0001875 | 50 | 0.1003 | 0.0002737 | 50 | 0.02401 | 0.0001108 | 200 |
+| mlkem1024_keygen | 0.3602 | 0.003643 | 50 | 0.4611 | 0.002136 | 50 | 0.6472 | 0.0005389 | 50 | 0.1698 | 0.0004589 | 50 |
+| mlkem1024_encaps | 0.06511 | 0.0007155 | 80 | 0.08018 | 0.0003766 | 50 | 0.1401 | 0.0002869 | 650 | 0.02443 | 0.0002848 | 50 |
+| mlkem1024_decaps | 0.08341 | 0.0007845 | 80 | 0.103 | 0.0005815 | 80 | 0.1742 | 0.0002492 | 350 | 0.03145 | 0.0002304 | 104 |
 
 ### ML-DSA (FIPS 204)
 
-| Operation | EPYC 7452 ms/op | EPYC 7452 ±CI (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U ±CI (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
-|---|---|---|---|---|---|---|---|---|---|
-| mldsa44_keygen | 0.1071 | ±0.0005769 | 80 | 0.1497 | ±0.0001907 | 80 | 0.2159 | ±0.0003011 | 170 |
-| mldsa44_sign | 0.4339 | ±0.01272 | 50 | 0.4678 | ±0.01832 | 50 | 0.7351 | ±0.0262 | 80 |
-| mldsa44_verify | 0.04699 | ±0.0004004 | 50 | 0.05404 | ±0.001635 | 50 | 0.07612 | ±0.0001944 | 80 |
-| mldsa65_keygen | 0.1929 | ±0.00109 | 50 | 0.2592 | ±0.001798 | 50 | 0.3832 | ±0.0005827 | 80 |
-| mldsa65_sign | 0.6872 | ±0.03078 | 50 | 0.7417 | ±0.03812 | 50 | 1.137 | ±0.05826 | 50 |
-| mldsa65_verify | 0.06727 | ±0.0007744 | 58 | 0.07565 | ±0.0007925 | 50 | 0.1057 | ±0.0002935 | 170 |
-| mldsa87_keygen | 0.2899 | ±0.003198 | 50 | 0.4043 | ±0.002247 | 82 | 0.6105 | ±0.001038 | 50 |
-| mldsa87_sign | 0.6963 | ±0.03306 | 87 | 0.7784 | ±0.04432 | 50 | 1.205 | ±0.07201 | 140 |
-| mldsa87_verify | 0.09643 | ±0.0008147 | 80 | 0.1105 | ±0.0008294 | 170 | 0.1548 | ±0.0004587 | 50 |
+| Operation | EPYC 7452 ms/op | EPYC 7452 CI width (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U CI width (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 CI width (90%) | Cortex-A76 Runs | Cortex-X925 ms/op | Cortex-X925 CI width (90%) | Cortex-X925 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| mldsa44_keygen | 0.1071 | 0.0005769 | 80 | 0.1497 | 0.0001907 | 80 | 0.2159 | 0.0003011 | 170 | 0.04427 | 0.000571 | 50 |
+| mldsa44_sign | 0.4339 | 0.01272 | 50 | 0.4678 | 0.01832 | 50 | 0.7351 | 0.0262 | 80 | 0.1597 | 0.005201 | 59 |
+| mldsa44_verify | 0.04699 | 0.0004004 | 50 | 0.05404 | 0.001635 | 50 | 0.07612 | 0.0001944 | 80 | 0.01771 | 0.0002895 | 55 |
+| mldsa65_keygen | 0.1929 | 0.00109 | 50 | 0.2592 | 0.001798 | 50 | 0.3832 | 0.0005827 | 80 | 0.0816 | 0.0007189 | 50 |
+| mldsa65_sign | 0.6872 | 0.03078 | 50 | 0.7417 | 0.03812 | 50 | 1.137 | 0.05826 | 50 | 0.2481 | 0.01077 | 50 |
+| mldsa65_verify | 0.06727 | 0.0007744 | 58 | 0.07565 | 0.0007925 | 50 | 0.1057 | 0.0002935 | 170 | 0.02487 | 0.0001621 | 200 |
+| mldsa87_keygen | 0.2899 | 0.003198 | 50 | 0.4043 | 0.002247 | 82 | 0.6105 | 0.001038 | 50 | 0.1184 | 0.0004809 | 188 |
+| mldsa87_sign | 0.6963 | 0.03306 | 87 | 0.7784 | 0.04432 | 50 | 1.205 | 0.07201 | 140 | 0.2628 | 0.0129 | 50 |
+| mldsa87_verify | 0.09643 | 0.0008147 | 80 | 0.1105 | 0.0008294 | 170 | 0.1548 | 0.0004587 | 50 | 0.03545 | 0.0002655 | 113 |
 
 ### NTRU (NIST PQC round 3)
 
-| Operation | EPYC 7452 ms/op | EPYC 7452 ±CI (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U ±CI (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
-|---|---|---|---|---|---|---|---|---|---|
-| ntruhps509_keygen | 1.938 | ±0.007551 | 50 | 1.985 | ±0.007794 | 54 | 3.687 | ±0.01718 | 51 |
-| ntruhps509_encaps | 0.08845 | ±0.0005963 | 110 | 0.09892 | ±0.001453 | 50 | 0.1435 | ±0.0004002 | 111 |
-| ntruhps509_decaps | 0.1328 | ±0.0008157 | 80 | 0.1476 | ±0.001305 | 50 | 0.2581 | ±0.0008863 | 50 |
-| ntruhps677_keygen | 1.877 | ±0.01138 | 50 | 2.106 | ±0.01404 | 170 | 3.333 | ±0.0007429 | 50 |
-| ntruhps677_encaps | 0.1252 | ±0.001254 | 142 | 0.1428 | ±0.0004527 | 290 | 0.1918 | ±0.0003838 | 51 |
-| ntruhps677_decaps | 0.1401 | ±0.0008394 | 112 | 0.1725 | ±0.0004538 | 384 | 0.2592 | ±0.0003085 | 50 |
-| ntruhps821_keygen | 3.292 | ±0.02593 | 50 | 3.534 | ±0.01639 | 140 | 5.996 | ±0.04383 | 88 |
-| ntruhps821_encaps | 0.1639 | ±0.001484 | 50 | 0.1828 | ±0.001508 | 50 | 0.2559 | ±0.0003846 | 88 |
-| ntruhps821_decaps | 0.2359 | ±0.002482 | 50 | 0.2654 | ±0.001688 | 320 | 0.4356 | ±0.001669 | 80 |
-| ntruhrss701_keygen | 2.305 | ±0.03568 | 50 | 2.463 | ±0.0361 | 50 | 4.039 | ±0.004182 | 50 |
-| ntruhrss701_encaps | 0.07613 | ±0.001293 | 50 | 0.0848 | ±0.0002346 | 170 | 0.1249 | ±0.0002793 | 140 |
-| ntruhrss701_decaps | 0.1692 | ±0.002406 | 80 | 0.1888 | ±0.001923 | 80 | 0.3001 | ±0.000266 | 140 |
+| Operation | EPYC 7452 ms/op | EPYC 7452 CI width (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U CI width (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 CI width (90%) | Cortex-A76 Runs | Cortex-X925 ms/op | Cortex-X925 CI width (90%) | Cortex-X925 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ntruhps509_keygen | 1.938 | 0.007551 | 50 | 1.985 | 0.007794 | 54 | 3.687 | 0.01718 | 51 | 1.17 | 0.001243 | 99 |
+| ntruhps509_encaps | 0.08845 | 0.0005963 | 110 | 0.09892 | 0.001453 | 50 | 0.1435 | 0.0004002 | 111 | 0.04635 | 0.0001688 | 153 |
+| ntruhps509_decaps | 0.1328 | 0.0008157 | 80 | 0.1476 | 0.001305 | 50 | 0.2581 | 0.0008863 | 50 | 0.07976 | 0.000347 | 50 |
+| ntruhps677_keygen | 1.877 | 0.01138 | 50 | 2.106 | 0.01404 | 170 | 3.333 | 0.0007429 | 50 | 1.047 | 0.0008753 | 50 |
+| ntruhps677_encaps | 0.1252 | 0.001254 | 142 | 0.1428 | 0.0004527 | 290 | 0.1918 | 0.0003838 | 51 | 0.05942 | 0.0002014 | 102 |
+| ntruhps677_decaps | 0.1401 | 0.0008394 | 112 | 0.1725 | 0.0004538 | 384 | 0.2592 | 0.0003085 | 50 | 0.07825 | 0.0003062 | 101 |
+| ntruhps821_keygen | 3.292 | 0.02593 | 50 | 3.534 | 0.01639 | 140 | 5.996 | 0.04383 | 88 | 1.837 | 0.001581 | 50 |
+| ntruhps821_encaps | 0.1639 | 0.001484 | 50 | 0.1828 | 0.001508 | 50 | 0.2559 | 0.0003846 | 88 | 0.0802 | 0.0007672 | 50 |
+| ntruhps821_decaps | 0.2359 | 0.002482 | 50 | 0.2654 | 0.001688 | 320 | 0.4356 | 0.001669 | 80 | 0.1302 | 0.0002514 | 550 |
+| ntruhrss701_keygen | 2.305 | 0.03568 | 50 | 2.463 | 0.0361 | 50 | 4.039 | 0.004182 | 50 | 1.266 | 0.0009615 | 56 |
+| ntruhrss701_encaps | 0.07613 | 0.001293 | 50 | 0.0848 | 0.0002346 | 170 | 0.1249 | 0.0002793 | 140 | 0.0406 | 0.0002594 | 100 |
+| ntruhrss701_decaps | 0.1692 | 0.002406 | 80 | 0.1888 | 0.001923 | 80 | 0.3001 | 0.000266 | 140 | 0.09065 | 0.0005155 | 50 |
 
 ### NTRUEncrypt (IEEE Std 1363.1-2008)
 
-| Operation | EPYC 7452 ms/op | EPYC 7452 ±CI (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U ±CI (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 ±CI (90%) | Cortex-A76 Runs |
-|---|---|---|---|---|---|---|---|---|---|
-| ntruees401ep1_keygen | 0.6301 | ±0.002993 | 112 | 0.6862 | ±0.009507 | 50 | 0.8422 | ±0.001308 | 84 |
-| ntruees401ep1_encrypt | 0.1399 | ±0.003794 | 110 | 0.123 | ±0.003807 | 50 | 0.1721 | ±0.004166 | 110 |
-| ntruees401ep1_decrypt | 0.2184 | ±0.003044 | 116 | 0.2627 | ±0.002082 | 50 | 0.2877 | ±0.0007025 | 80 |
-| ntruees443ep1_keygen | 0.6179 | ±0.003917 | 80 | 0.6431 | ±0.005997 | 140 | 0.8698 | ±0.001288 | 50 |
-| ntruees443ep1_encrypt | 0.03429 | ±0.0003261 | 50 | 0.0371 | ±0.001287 | 50 | 0.04818 | ±0.0003522 | 50 |
-| ntruees443ep1_decrypt | 0.05331 | ±0.000565 | 110 | 0.06381 | ±0.0007183 | 50 | 0.07583 | ±0.0004121 | 110 |
-| ntruees449ep1_keygen | 0.7635 | ±0.008173 | 52 | 0.8039 | ±0.009526 | 170 | 1.049 | ±0.001323 | 80 |
-| ntruees449ep1_encrypt | 0.179 | ±0.01109 | 50 | 0.1749 | ±0.0108 | 50 | 0.3283 | ±0.01846 | 110 |
-| ntruees449ep1_decrypt | 0.2823 | ±0.002958 | 87 | 0.2982 | ±0.002646 | 170 | 0.4834 | ±0.004274 | 50 |
-| ntruees541ep1_keygen | 0.6995 | ±0.003305 | 89 | 0.6848 | ±0.003055 | 110 | 0.9682 | ±0.001963 | 50 |
-| ntruees541ep1_encrypt | 0.07183 | ±0.0008767 | 230 | 0.08018 | ±0.0003181 | 261 | 0.1372 | ±0.0005541 | 1190 |
-| ntruees541ep1_decrypt | 0.1245 | ±0.001059 | 59 | 0.1767 | ±0.001055 | 50 | 0.1773 | ±0.0009429 | 140 |
-| ntruees677ep1_keygen | 1.045 | ±0.004152 | 86 | 1.16 | ±0.01764 | 80 | 1.436 | ±0.002582 | 50 |
-| ntruees677ep1_encrypt | 0.2453 | ±0.001862 | 80 | 0.2966 | ±0.0008333 | 147 | 0.3516 | ±0.0007137 | 170 |
-| ntruees677ep1_decrypt | 0.4989 | ±0.004675 | 50 | 0.5778 | ±0.003554 | 170 | 0.6386 | ±0.002021 | 54 |
-| ntruees1087ep1_keygen | 1.664 | ±0.007338 | 140 | 1.601 | ±0.01037 | 55 | 1.806 | ±0.002265 | 50 |
-| ntruees1087ep1_encrypt | 0.1633 | ±0.001675 | 50 | 0.1937 | ±0.001784 | 50 | 0.2243 | ±0.001729 | 50 |
-| ntruees1087ep1_decrypt | 0.3166 | ±0.002017 | 110 | 0.4014 | ±0.00271 | 50 | 0.4262 | ±0.001189 | 50 |
-| ntruees1087ep2_keygen | 1.755 | ±0.007532 | 50 | 1.706 | ±0.009348 | 57 | 1.898 | ±0.002775 | 50 |
-| ntruees1087ep2_encrypt | 0.2938 | ±0.002415 | 50 | 0.3466 | ±0.003217 | 50 | 0.3984 | ±0.002388 | 53 |
-| ntruees1087ep2_decrypt | 0.5907 | ±0.008194 | 50 | 0.7216 | ±0.004442 | 50 | 0.7852 | ±0.001884 | 54 |
-| ntruees1171ep1_keygen | 1.855 | ±0.01017 | 50 | 1.88 | ±0.009146 | 260 | 2.262 | ±0.003696 | 80 |
-| ntruees1171ep1_encrypt | 0.2959 | ±0.002808 | 200 | 0.3326 | ±0.00613 | 233 | 0.5076 | ±0.00466 | 209 |
-| ntruees1171ep1_decrypt | 0.5391 | ±0.004929 | 111 | 0.6731 | ±0.007716 | 51 | 0.746 | ±0.003099 | 110 |
-| ntruees1499ep1_keygen | 2.756 | ±0.02302 | 110 | 2.946 | ±0.01247 | 81 | 4.252 | ±0.004143 | 50 |
-| ntruees1499ep1_encrypt | 0.2701 | ±0.002626 | 50 | 0.3224 | ±0.006454 | 50 | 0.3812 | ±0.003605 | 50 |
-| ntruees1499ep1_decrypt | 0.5349 | ±0.004997 | 50 | 0.5404 | ±0.003417 | 50 | 0.6977 | ±0.002565 | 110 |
+| Operation | EPYC 7452 ms/op | EPYC 7452 CI width (90%) | EPYC 7452 Runs | i5-8259U ms/op | i5-8259U CI width (90%) | i5-8259U Runs | Cortex-A76 ms/op | Cortex-A76 CI width (90%) | Cortex-A76 Runs | Cortex-X925 ms/op | Cortex-X925 CI width (90%) | Cortex-X925 Runs |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ntruees401ep1_keygen | 0.6301 | 0.002993 | 112 | 0.6862 | 0.009507 | 50 | 0.8422 | 0.001308 | 84 | 0.346 | 0.0009441 | 135 |
+| ntruees401ep1_encrypt | 0.1399 | 0.003794 | 110 | 0.123 | 0.003807 | 50 | 0.1721 | 0.004166 | 110 | 0.05405 | 0.002078 | 50 |
+| ntruees401ep1_decrypt | 0.2184 | 0.003044 | 116 | 0.2627 | 0.002082 | 50 | 0.2877 | 0.0007025 | 80 | 0.09399 | 0.001045 | 50 |
+| ntruees443ep1_keygen | 0.6179 | 0.003917 | 80 | 0.6431 | 0.005997 | 140 | 0.8698 | 0.001288 | 50 | 0.3344 | 0.0004089 | 200 |
+| ntruees443ep1_encrypt | 0.03429 | 0.0003261 | 50 | 0.0371 | 0.001287 | 50 | 0.04818 | 0.0003522 | 50 | 0.01696 | 0.0003055 | 50 |
+| ntruees443ep1_decrypt | 0.05331 | 0.000565 | 110 | 0.06381 | 0.0007183 | 50 | 0.07583 | 0.0004121 | 110 | 0.02552 | 0.0002071 | 206 |
+| ntruees449ep1_keygen | 0.7635 | 0.008173 | 52 | 0.8039 | 0.009526 | 170 | 1.049 | 0.001323 | 80 | 0.4243 | 0.001088 | 100 |
+| ntruees449ep1_encrypt | 0.179 | 0.01109 | 50 | 0.1749 | 0.0108 | 50 | 0.3283 | 0.01846 | 110 | 0.08182 | 0.004662 | 61 |
+| ntruees449ep1_decrypt | 0.2823 | 0.002958 | 87 | 0.2982 | 0.002646 | 170 | 0.4834 | 0.004274 | 50 | 0.1206 | 0.0003739 | 174 |
+| ntruees541ep1_keygen | 0.6995 | 0.003305 | 89 | 0.6848 | 0.003055 | 110 | 0.9682 | 0.001963 | 50 | 0.3837 | 0.002833 | 50 |
+| ntruees541ep1_encrypt | 0.07183 | 0.0008767 | 230 | 0.08018 | 0.0003181 | 261 | 0.1372 | 0.0005541 | 1190 | 0.03368 | 0.002135 | 50 |
+| ntruees541ep1_decrypt | 0.1245 | 0.001059 | 59 | 0.1767 | 0.001055 | 50 | 0.1773 | 0.0009429 | 140 | 0.05524 | 0.001616 | 50 |
+| ntruees677ep1_keygen | 1.045 | 0.004152 | 86 | 1.16 | 0.01764 | 80 | 1.436 | 0.002582 | 50 | 0.5839 | 0.009665 | 50 |
+| ntruees677ep1_encrypt | 0.2453 | 0.001862 | 80 | 0.2966 | 0.0008333 | 147 | 0.3516 | 0.0007137 | 170 | 0.1102 | 0.002587 | 50 |
+| ntruees677ep1_decrypt | 0.4989 | 0.004675 | 50 | 0.5778 | 0.003554 | 170 | 0.6386 | 0.002021 | 54 | 0.2004 | 0.00125 | 50 |
+| ntruees1087ep1_keygen | 1.664 | 0.007338 | 140 | 1.601 | 0.01037 | 55 | 1.806 | 0.002265 | 50 | 0.896 | 0.001722 | 66 |
+| ntruees1087ep1_encrypt | 0.1633 | 0.001675 | 50 | 0.1937 | 0.001784 | 50 | 0.2243 | 0.001729 | 50 | 0.07344 | 0.0003585 | 74 |
+| ntruees1087ep1_decrypt | 0.3166 | 0.002017 | 110 | 0.4014 | 0.00271 | 50 | 0.4262 | 0.001189 | 50 | 0.1328 | 0.0004771 | 110 |
+| ntruees1087ep2_keygen | 1.755 | 0.007532 | 50 | 1.706 | 0.009348 | 57 | 1.898 | 0.002775 | 50 | 0.9426 | 0.002917 | 50 |
+| ntruees1087ep2_encrypt | 0.2938 | 0.002415 | 50 | 0.3466 | 0.003217 | 50 | 0.3984 | 0.002388 | 53 | 0.1315 | 0.001394 | 50 |
+| ntruees1087ep2_decrypt | 0.5907 | 0.008194 | 50 | 0.7216 | 0.004442 | 50 | 0.7852 | 0.001884 | 54 | 0.2431 | 0.001265 | 57 |
+| ntruees1171ep1_keygen | 1.855 | 0.01017 | 50 | 1.88 | 0.009146 | 260 | 2.262 | 0.003696 | 80 | 1.002 | 0.004369 | 50 |
+| ntruees1171ep1_encrypt | 0.2959 | 0.002808 | 200 | 0.3326 | 0.00613 | 233 | 0.5076 | 0.00466 | 209 | 0.1253 | 0.001764 | 50 |
+| ntruees1171ep1_decrypt | 0.5391 | 0.004929 | 111 | 0.6731 | 0.007716 | 51 | 0.746 | 0.003099 | 110 | 0.2256 | 0.0009203 | 110 |
+| ntruees1499ep1_keygen | 2.756 | 0.02302 | 110 | 2.946 | 0.01247 | 81 | 4.252 | 0.004143 | 50 | 1.53 | 0.002403 | 144 |
+| ntruees1499ep1_encrypt | 0.2701 | 0.002626 | 50 | 0.3224 | 0.006454 | 50 | 0.3812 | 0.003605 | 50 | 0.1209 | 0.0008745 | 63 |
+| ntruees1499ep1_decrypt | 0.5349 | 0.004997 | 50 | 0.5404 | 0.003417 | 50 | 0.6977 | 0.002565 | 110 | 0.2315 | 0.0008874 | 120 |
 
 ## Benchmark Discussion
 
 - `ML-KEM` scales roughly with parameter size and is stable across runs. The
-  intervals are tight everywhere in this sweep: ML-KEM-768 encapsulation is
-  0.04839 ms ±1.0% on the EPYC and 0.08017 ms ±0.35% on the Raspberry Pi.
+  intervals are tight everywhere in these tables: ML-KEM-768 encapsulation is
+  0.04839 ms on the EPYC and 0.08017 ms on the Raspberry Pi, with intervals
+  1.0% and 0.35% of the mean wide, and 0.01878 ms on the Cortex-X925, with an
+  interval 1.7% of the mean wide.
 - `ML-DSA` verify is consistently cheaper than sign at each level, as expected:
   by 8.7× at ML-DSA-44 on the i5, and by 7.2× at ML-DSA-87 on the EPYC.
 - `ML-DSA` signing variance is driven by rejection behavior in the signer loop.
   The 2026-08-11 sweep showed it as *non-monotone absolute timings across
   parameter sets* — `mldsa65_sign` above `mldsa87_sign` on that host — which
   raised the question of whether a slow-tail draw had landed on the smaller
-  sample. This sweep is monotone on all four hosts: sign costs rise with the
-  parameter set everywhere, and the gap between ML-DSA-65 and ML-DSA-87 is
+  sample. These tables are monotone on all four hosts: sign costs rise with
+  the parameter set everywhere, and the gap between ML-DSA-65 and ML-DSA-87 is
   narrow (0.6872 against 0.6963 ms on the EPYC, 0.7417 against 0.7784 on the
-  i5, 1.137 against 1.205 on the Cortex-A76). A narrow, monotone gap across
-  three machines, seven counting the previous sweep, is what the
+  i5, 1.137 against 1.205 on the Cortex-A76, 0.2481 against 0.2628 on the
+  Cortex-X925). A narrow, monotone gap on four machines, and on the four of
+  the 2026-09-17 sweep, is what the
   rejection-loop explanation predicts, and the earlier inversion is best read
   as the draw it looked like.
 - `NTRU` keygen costs are dominated by the polynomial inversion in $R_q$

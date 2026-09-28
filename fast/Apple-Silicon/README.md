@@ -52,6 +52,11 @@ Current M4 Pro baseline snapshot:
 
 - [BASELINE_M4_2026-03-09.md](BASELINE_M4_2026-03-09.md)
 
+It and the Pilot tables under `results/` were produced with Pilot before
+`f01eec4` on an Apple M4 Pro, which was not available when the published
+tables were taken again; their `±CI` columns are full interval widths, not
+half-widths, and their MB/s means are arithmetic means of rates.
+
 ## Workflow
 
 1. Pick one task from [TASKS.md](TASKS.md).

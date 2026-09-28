@@ -9,6 +9,21 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
 
 ## [Unreleased]
 
+### Changed
+- The Cortex-X925 column of the published benchmark tables was taken again on
+  2026-09-28 with Pilot `f01eec4` (public key) and `475063f` (symmetric and
+  hash), and added to the tables beside the EPYC 7452, i5-8259U and Cortex-A76
+  columns of 2026-09-23, which were produced with Pilot before `f01eec4`. All
+  three prime-searching key-generation cases now converge on it. See
+  `bench/sweep-2026-09-28/README.md`.
+- The Pilot scripts declare a time per operation (`ms/op`) as performance-index
+  type 0, not type 1, which is for rates.
+
+### Fixed
+- The benchmark tables and documentation called Pilot's interval a half-width
+  and printed it as `±CI`; Pilot prints the full width. The column is now
+  `CI width`.
+
 ## [0.8.0] — 2026-09-23
 
 The manifest read 0.7.0 from 2026-06-09 to this release and that version was

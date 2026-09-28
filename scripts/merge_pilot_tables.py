@@ -2,9 +2,14 @@
 """Merge Pilot markdown tables into one side-by-side platform table.
 
 Modes:
-- sym  : 3-column key (cipher, block, key); 3 metric columns (MB/s, ±CI, Runs)
-- hash : 2-column key (hash, out);          3 metric columns (MB/s, ±CI, Runs)
-- pk   : 1-column key (operation);          3 metric columns (ms/op, ±CI, Runs)
+- sym  : 3-column key (cipher, block, key); 3 metric columns (MB/s, CI width, Runs)
+- hash : 2-column key (hash, out);          3 metric columns (MB/s, CI width, Runs)
+- pk   : 1-column key (operation);          3 metric columns (ms/op, CI width, Runs)
+
+The CI column is the full width of the confidence interval, which is what
+pilot-bench prints. Tables written before 2026-09-28 label the same number
+"±CI" and prefix it with "±"; both forms are read, and the merged table
+carries the number without the sign under "CI width".
 
 Each input file is the raw stdout of bench_all{,_hash,_pk_full}.sh. Any
 number of platforms may be given, each as ``--input LABEL=PATH``; the column
@@ -21,8 +26,9 @@ from pathlib import Path
 from typing import Iterable
 
 
-# The confidence percent printed in an input table header, e.g. "±CI (95%)".
-CI_HEADER = re.compile(r"±CI \((\d+)%\)")
+# The confidence percent printed in an input table header, e.g. "CI width (95%)"
+# or, in tables written before 2026-09-28, "±CI (95%)".
+CI_HEADER = re.compile(r"(?:±CI|CI width) \((\d+)%\)")
 # Pseudo-section under which parse_sections records the percents it saw.
 CI_KEY = "__ci_percent__"
 
@@ -120,7 +126,7 @@ def metric_cells(row: list[str] | None, key_len: int) -> tuple[str, str, str]:
     base = row[key_len:]
     while len(base) < 3:
         base = base + ["n/a"]
-    return (base[0], base[1], base[2])
+    return (base[0], base[1].lstrip("±"), base[2])
 
 
 def emit_table(
@@ -148,7 +154,7 @@ def emit_table(
     for section, rows in sections:
         out.append(f"### {section}")
         out.append("")
-        ci_lbl = f"±CI ({confidence_pct}%)"
+        ci_lbl = f"CI width ({confidence_pct}%)"
         head = (
             "| "
             + " | ".join(key_cols)

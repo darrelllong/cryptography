@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run the full publication-facing public-key suite through pilot-bench and emit
 # Markdown tables for CI-backed numbers in ASYMMETRIC.md.
+# The CI column is the full width of the confidence interval, as pilot-bench
+# prints it after "Reading CI"; the interval is the mean plus or minus half of it.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,7 +37,7 @@ measure() {
     extra+=(--session-limit "${PILOT_SESSION_LIMIT}")
     local status=0
     out=$("$BENCH" run_program --preset "$PILOT_PRESET" "${extra[@]}" \
-          --pi "${name},ms/op,0,1,1" \
+          --pi "${name},ms/op,0,0,1" \
           -- "$PK" "$name" 2>&1) || status=$?
     mean=$(echo "$out" | awk '/Reading mean/{print $5}')
     ci=$(echo "$out" | awk '/Reading CI/{print $5}')
@@ -56,7 +58,7 @@ measure() {
         exit 1
     fi
     printf "| %-32s | %10s | %10s | %5s%s |\n" \
-           "$name" "$mean" "±$ci" "$rounds" "$mark"
+           "$name" "$mean" "$ci" "$rounds" "$mark"
 }
 
 sep() { echo "|----------------------------------|------------|------------|-------|"; }
@@ -65,7 +67,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Operation                        |   ms/op    | ±CI (${CI_PCT}%)  | Runs  |"
+    echo "| Operation                        |   ms/op    | CI width (${CI_PCT}%)  | Runs  |"
     sep
 }
 

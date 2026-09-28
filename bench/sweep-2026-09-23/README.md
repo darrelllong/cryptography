@@ -1,5 +1,11 @@
 # Sweep — 2026-09-23
 
+> Produced with Pilot before `f01eec4`. Its `±CI` column is the full width of
+> the confidence interval, not a half-width, and its MB/s means are arithmetic
+> means of rates, which Pilot before `475063f` used for every performance
+> index. The tables now published are described in
+> [sweep-2026-09-28](../sweep-2026-09-28/README.md).
+
 Pilot-driven sweep of the symmetric, hash and public-key surfaces for 0.8.0,
 taken after Ed25519 signing and key generation moved onto the constant-time
 fixed-base comb. `dmz` and `darby` ran at `7bbcab2`, `twilight` at

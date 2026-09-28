@@ -45,11 +45,15 @@ Tune run behavior without editing scripts via:
 
 A key-generation row is the one to read carefully. Generating a modulus or a
 domain parameter set searches for primes, so its timing has a long tail and its
-confidence interval may never reach the preset's target: the case then stops at
-`PILOT_SESSION_LIMIT` and the table marks it `(limit)`, which means the mean is
-the mean of what was measured and the interval is as wide as the tail made it,
-not that the measurement failed. `elgamal_keygen_1024` on a Cortex-X925, for
-instance, reported 30.3 ms with a ±9.3 interval after 4,245 rounds.
+confidence interval can take many rounds to reach the preset's target. If it
+does not reach it within `PILOT_SESSION_LIMIT`, the case stops and the table
+marks it `(limit)`, which means the mean is the mean of what was measured and
+the interval is as wide as the tail made it, not that the measurement failed.
+With Pilot before `f01eec4` the three prime-searching cases always stopped
+there: `elgamal_keygen_1024` on a Cortex-X925 reported 30.32 ms with an
+interval 9.278 ms wide after 4,245 rounds. With Pilot `f01eec4` on the same
+machine it converged, at 33.43 ms with an interval 2.802 ms wide after 590
+rounds; see [bench/sweep-2026-09-28](bench/sweep-2026-09-28/README.md).
 
 For Apple Silicon optimization loops (no assembly, in-repo code only), use:
 
@@ -97,10 +101,18 @@ bash scripts/bench_all_pk_full.sh  # full PK suite (finite-field + EC + Edwards 
 ```
 
 Each script emits Markdown tables ready to paste into the docs.
-The `± CI` column is the confidence-interval half-width reported by
-pilot-bench. By default it is **95%**; export `PILOT_CONFIDENCE_LEVEL=0.90`
-(or any value in `(0,1)`) before invoking the script to request a
-different level.
+The `CI width` column is the full width of the confidence interval that
+pilot-bench prints (the interval is the mean plus or minus half of it); tables
+before 2026-09-28 printed the same number as `±CI` and called it a half-width,
+which it was not. By default the level is **95%**; export
+`PILOT_CONFIDENCE_LEVEL=0.90` (or any value in `(0,1)`) before invoking the
+script to request a different level.
+
+The performance index of `pilot_cipher` and `pilot_hash` is a rate (MB/s),
+declared as Pilot type 1, so that Pilot averages it as a rate; that of
+`pilot_pk` is a time (ms/op), declared as type 0. On Linux, pin the whole
+script to one core, as the 2026-09-28 run was (`taskset -c 9 bash
+scripts/bench_all.sh`).
 
 ---
 
@@ -161,7 +173,7 @@ different level.
 
 ```bash
 ~/pilot-bench/build/cli/bench run_program --preset quick \
-    --pi "ecdsa_sign,ms/op,0,1,1" \
+    --pi "ecdsa_sign,ms/op,0,0,1" \
     -- ./target/release/pilot_pk ecdsa_sign
 
 ~/pilot-bench/build/cli/bench run_program --preset quick \
@@ -169,8 +181,9 @@ different level.
     -- ./target/release/pilot_cipher aes256
 ```
 
-`--preset quick` targets 20 % CI.  Use `--preset normal` for 10 % or
-`--preset strict` for tighter bounds.
+`--preset quick` stops when the interval is at most 20% of the mean wide;
+`--preset normal` and `--preset strict` at 10%, with stricter autocorrelation
+and sample-size requirements.
 
 For Pilot-driven timing baselines of the pq-crystals Kyber reference C, run the
 script below. `scripts/fetch_mlkem_refs.sh` downloads that code into the ignored

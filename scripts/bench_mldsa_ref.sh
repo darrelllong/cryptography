@@ -123,7 +123,7 @@ measure() {
   local bin="$1" op="$2" rounds="$3" set_name="$4" op_name="$5"
   local out mean ci reps
   out=$("$BENCH" run_program --preset "$PILOT_PRESET" \
-        --pi "${set_name}_${op_name},ms/op,0,1,1" \
+        --pi "${set_name}_${op_name},ms/op,0,0,1" \
         -- "$bin" "$op" "$rounds" 2>&1)
   mean=$(echo "$out" | awk '/Reading mean/{print $5}')
   ci=$(echo "$out" | awk '/Reading CI/{print $5}')
@@ -133,10 +133,10 @@ measure() {
     echo "$out" >&2
     exit 1
   fi
-  printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "$set_name" "${op_name}_ref" "$mean" "±$ci" "$reps"
+  printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "$set_name" "${op_name}_ref" "$mean" "$ci" "$reps"
 }
 
-printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "Parameter Set" "Operation" "ms/op" "±CI (95%)" "Runs"
+printf "| %-16s | %-14s | %12s | %12s | %5s |\n" "Parameter Set" "Operation" "ms/op" "CI width (95%)" "Runs"
 printf "|------------------|----------------|-------------:|------------:|------:|\n"
 
 for mode in 2 3 5; do

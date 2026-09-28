@@ -750,7 +750,7 @@ To run one public-key operation directly under Pilot:
 
 ```text
 ~/pilot-bench/build/cli/bench run_program --preset quick \
-  --pi "rsa_sign_2048,ms/op,0,1,1" \
+  --pi "rsa_sign_2048,ms/op,0,0,1" \
   -- ./target/release/pilot_pk rsa_sign_2048
 ```
 

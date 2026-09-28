@@ -1,0 +1,22 @@
+Linux baase 7.0.0-1019-nvidia #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Sun Sep  6 18:35:11 UTC 2 aarch64 aarch64 aarch64 GNU/Linux
+rustc 1.95.0 (59807616e 2026-04-14)
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+20
+Model name:                              Cortex-X925
+CPU(s) scaling MHz:                      100%
+CPU max MHz:                             3900.0000
+CPU min MHz:                             1378.0000
+Model name:                              Cortex-A725
+CPU(s) scaling MHz:                      100%
+CPU max MHz:                             2808.0000
+CPU min MHz:                             338.0000
+performance
+3900000
+Ubuntu 24.04.5 LTS
+pilot-bench: see below
+cryptography a2b6ddf (scripts/bench_all*.sh with the CI-width relabel)
+rump 686cfcd
+pinning: taskset -c 9
+resident at start: a root vLLM/Ray inference service, idle (GPU 0%, system CPU 99.4% idle)
+pilot-bench 475063f for symmetric.md and hash.md (run-rates.sh, 2026-09-28 14:25-14:27 PDT)
+pilot-bench f01eec4 for pk.md (run-pk.sh, 2026-09-28 13:26-13:34 PDT)

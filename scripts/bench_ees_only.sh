@@ -39,7 +39,7 @@ measure() {
         extra+=(--confidence-level "${PILOT_CONFIDENCE_LEVEL}")
     fi
     out=$("$BENCH" run_program --preset "$PILOT_PRESET" "${extra[@]}" \
-          --pi "${name},ms/op,0,1,1" \
+          --pi "${name},ms/op,0,0,1" \
           -- "$PK" "$name" 2>&1)
     mean=$(echo  "$out" | awk '/Reading mean/{print $5}')
     ci=$(echo    "$out" | awk '/Reading CI/{print $5}')
@@ -50,7 +50,7 @@ measure() {
         exit 1
     fi
     printf "| %-32s | %10s | %10s | %5s |\n" \
-           "$name" "$mean" "±$ci" "$rounds"
+           "$name" "$mean" "$ci" "$rounds"
 }
 
 LABEL="EES$(echo "$SET" | tr '[:lower:]' '[:upper:]')"
@@ -58,7 +58,7 @@ LABEL="EES$(echo "$SET" | tr '[:lower:]' '[:upper:]')"
 echo ""
 echo "### NTRUEncrypt $LABEL"
 echo ""
-echo "| Operation                        |   ms/op    | ±CI (${CI_PCT}%)  | Runs  |"
+echo "| Operation                        |   ms/op    | CI width (${CI_PCT}%)  | Runs  |"
 echo "|----------------------------------|------------|------------|-------|"
 measure "ntruees${SET}_keygen"
 measure "ntruees${SET}_encrypt"

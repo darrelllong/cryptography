@@ -1,5 +1,11 @@
 # Three-platform Pilot sweep — 2026-05-08
 
+> Produced with Pilot before `f01eec4`. Its `±CI` column is the full width of
+> the confidence interval, not a half-width, and its MB/s means are arithmetic
+> means of rates, which Pilot before `475063f` used for every performance
+> index. The tables now published are described in
+> [sweep-2026-09-28](../sweep-2026-09-28/README.md).
+
 Pilot-bench sweep across three platforms covering the full symmetric, hash,
 and public-key (incl. post-quantum) surface of the cryptography crate.
 

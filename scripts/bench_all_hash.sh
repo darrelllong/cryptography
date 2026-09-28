@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run every hash function / XOF through pilot-bench and emit a Markdown table.
-# Columns: hash, output bits, MB/s mean, ±CI, runs-to-CI.
+# Columns: hash, output bits, MB/s mean, CI width, runs-to-CI.
+# The CI column is the full width of the confidence interval, as pilot-bench
+# prints it after "Reading CI"; the interval is the mean plus or minus half of it.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -57,7 +59,7 @@ measure() {
         exit 1
     fi
     printf "| %-12s | %5s | %8s | %8s | %5s%s |\n" \
-           "$name" "$outbits" "$mean" "±$ci" "$rounds" "$mark"
+           "$name" "$outbits" "$mean" "$ci" "$rounds" "$mark"
 }
 
 sep() { echo "|--------------|-------|----------|----------|-------|"; }
@@ -66,7 +68,7 @@ hdr() {
     echo ""
     echo "### $1"
     echo ""
-    echo "| Hash         |  Out  |   MB/s   | ±CI (${CI_PCT}%) | Runs  |"
+    echo "| Hash         |  Out  |   MB/s   | CI width (${CI_PCT}%) | Runs  |"
     sep
 }
 

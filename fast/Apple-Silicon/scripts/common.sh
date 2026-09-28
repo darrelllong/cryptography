@@ -83,7 +83,7 @@ measure_pk() {
     local op=$1
     local out mean ci rounds
     out=$("$BENCH" run_program --preset "$PRESET" \
-          --pi "${op},ms/op,0,1,1" \
+          --pi "${op},ms/op,0,0,1" \
           -- "$PK_BIN" "$op" 2>&1)
     mean=$(echo "$out" | awk '/Reading mean/{print $5; exit}')
     ci=$(echo "$out" | awk '/Reading CI/{print $5; exit}')

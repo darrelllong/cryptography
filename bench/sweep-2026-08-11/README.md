@@ -1,5 +1,9 @@
 # Public-key Pilot sweep — 2026-08-11
 
+> Produced with Pilot before `f01eec4`. Its `±CI` column is the full width of
+> the confidence interval, not a half-width. The tables now published are
+> described in [sweep-2026-09-28](../sweep-2026-09-28/README.md).
+
 Pilot-bench sweep of the full public-key surface (finite-field, elliptic-curve,
 and post-quantum) on the current tree, taken after two changes that move
 public-key timing:
