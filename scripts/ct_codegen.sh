@@ -62,7 +62,15 @@ RUSTFLAGS="--emit asm -C codegen-units=1" cargo build --release \
     --manifest-path "$probe/Cargo.toml" --target "$target" -q \
     --target-dir "$out/target"
 
-asm=$(find "$out/target/$target/release" -name '*.s')
+# The probe's assembly first, then the library's, each in a fixed order. A
+# claim's pattern may match a symbol in both: the probe's wrapper, which is
+# followed to the code it hands the work to, and a function of the library.
+# `find` lists files in no fixed order, so which one a claim was read from
+# changed from run to run: ml-kem-decaps was read from the probe (the 65
+# unclassified branches the budget accounts for) or from the library's
+# ml_kem_decaps_internal (72), by chance.
+release=$out/target/$target/release
+asm=$( { find "$release" -name 'ct_probe-*.s' | sort; find "$release" -name '*.s' -not -name 'ct_probe-*.s' | sort; } )
 [ -n "$asm" ] || { echo "no assembly emitted for $target" >&2; exit 1; }
 
 # A wrapper's whole body is the register shuffling around one call, which is
