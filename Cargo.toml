@@ -49,4 +49,4 @@ arm-sha3 = []
 # takes over once rust-mp is published. rump keeps limb wiping opt-in because
 # it is general-purpose and wiping costs speed; cryptographic code turns it on,
 # so every `BigUint` here wipes its limbs on drop.
-rust-mp = { version = "0.3.0", path = "../rump", features = ["wipe"] }
+rust-mp = { version = "0.4.0", path = "../rump", features = ["wipe"] }

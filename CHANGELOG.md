@@ -18,6 +18,10 @@ under Cargo's 0.x convention (a 0.x minor bump signals a breaking change;
   `bench/sweep-2026-09-28/README.md`.
 - The Pilot scripts declare a time per operation (`ms/op`) as performance-index
   type 0, not type 1, which is for rates.
+- `rust-mp` is required at 0.4.0, the version rump's `main` now carries.
+  Rump's breaking change is in its `gf2` Wiedemann solver, which this crate
+  does not use, and the types `vt` re-exports are as they were; a consumer
+  that names `rust-mp` itself names 0.4 with this.
 
 ### Fixed
 - The benchmark tables and documentation called Pilot's interval a half-width
