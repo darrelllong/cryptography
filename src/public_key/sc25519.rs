@@ -107,11 +107,11 @@ fn add(a: &Scalar, b: &Scalar) -> Scalar {
 fn montgomery_mul(a: &Scalar, b: &Scalar) -> Scalar {
     // One limb wider than the operands, for the accumulator's top carry.
     let mut acc = [0u64; LIMBS + 1];
-    for i in 0..LIMBS {
-        // acc += a * b[i]
+    for &multiplier in &b.0 {
+        // acc += a * multiplier
         let mut carry = 0u128;
         for (slot, limb) in acc[..LIMBS].iter_mut().zip(a.0.iter()) {
-            let wide = u128::from(*slot) + u128::from(*limb) * u128::from(b.0[i]) + carry;
+            let wide = u128::from(*slot) + u128::from(*limb) * u128::from(multiplier) + carry;
             *slot = wide as u64;
             carry = wide >> 64;
         }

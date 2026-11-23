@@ -552,8 +552,8 @@ impl Grasshopper {
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let mut s = *block;
-        for i in 0..9 {
-            xor_block(&mut s, &self.rk[i]);
+        for round_key in &self.rk[..9] {
+            xor_block(&mut s, round_key);
             // Fused S then L: one round in 16 u128 lookups instead of 256.
             s = fused_round(&LS_ENC, &s).to_be_bytes();
         }
@@ -621,8 +621,8 @@ impl GrasshopperCt {
     #[must_use]
     pub fn encrypt_block(&self, block: &[u8; BLOCK_BYTES]) -> [u8; BLOCK_BYTES] {
         let mut s = *block;
-        for i in 0..9 {
-            xor_block(&mut s, &self.rk[i]);
+        for round_key in &self.rk[..9] {
+            xor_block(&mut s, round_key);
             apply_s_ct(&mut s);
             apply_l_ct(&mut s);
         }
