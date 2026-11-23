@@ -1222,12 +1222,16 @@ pub(crate) mod encrypt_only {
     define_aes256_encryptor!(
         /// Forward-only AES-256 on the T-table path (variable-time, like
         /// [`super::Aes256`]).
-        Aes256Encryptor, sub_word, aes_encrypt
+        Aes256Encryptor,
+        sub_word,
+        aes_encrypt
     );
     define_aes256_encryptor!(
         /// Forward-only AES-256 on the Boyar-Peralta path (constant-time, like
         /// [`super::Aes256Ct`]).
-        Aes256CtEncryptor, sub_word_bool, aes_encrypt_ct
+        Aes256CtEncryptor,
+        sub_word_bool,
+        aes_encrypt_ct
     );
 }
 
